@@ -12,6 +12,7 @@ struct AirPlayPicker: UIViewRepresentable {
 struct RadioView: View {
     let model: AppModel
     @State private var query = ""
+    @FocusState private var searchFocused: Bool
     @State private var country = "All places"
     private var countries: [String] { ["All places"] + Set(model.radio.channels.compactMap(\.country)).sorted() }
     private var filtered: [RadioChannel] {
@@ -26,7 +27,9 @@ struct RadioView: View {
                 SectionBand(title: "Khajistan Receiver / Radio")
                 HStack {
                     Image(systemName: "magnifyingglass")
-                    TextField("Find a station or language", text: $query).autocorrectionDisabled().accessibilityIdentifier("stationSearch")
+                    TextField("Find a station or language", text: $query, prompt: Text("Find a station or language").foregroundStyle(Brand.green))
+                        .autocorrectionDisabled().accessibilityIdentifier("stationSearch").focused($searchFocused)
+                        .submitLabel(.search).onSubmit { searchFocused = false }
                     Menu {
                         Picker("Place", selection: $country) { ForEach(countries, id: \.self) { Text($0).tag($0) } }
                     } label: { Image(systemName: "line.3.horizontal.decrease").frame(width: 44, height: 44) }
@@ -43,7 +46,7 @@ struct RadioView: View {
                 } else {
                     List {
                         ForEach(filtered) { channel in
-                            Button { model.radio.play(channel) } label: {
+                            Button { searchFocused = false; model.radio.play(channel) } label: {
                                 HStack(spacing: 14) {
                                     Image(systemName: model.radio.selected?.id == channel.id && model.radio.isPlaying ? "waveform" : "play.circle")
                                         .font(.title2).foregroundStyle(Brand.green).frame(width: 28)

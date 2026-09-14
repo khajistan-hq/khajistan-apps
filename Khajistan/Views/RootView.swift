@@ -39,7 +39,7 @@ struct ExploreView: View {
                     }.padding(20)
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
-                        TextField("Search the archive", text: $query).submitLabel(.search)
+                        TextField("Search the archive", text: $query, prompt: Text("Search the archive").foregroundStyle(Brand.green)).submitLabel(.search)
                             .onSubmit(search).accessibilityIdentifier("archiveSearch")
                         Button(action: search) { Image(systemName: "arrow.right").frame(width: 44, height: 44) }
                             .accessibilityLabel("Search archive").disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

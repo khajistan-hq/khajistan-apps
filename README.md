@@ -32,7 +32,7 @@ The **iOS app** GitHub Actions workflow builds and runs simulator tests, then sa
 1. Install full Xcode and its iOS Simulator runtime; open Xcode once to finish installation.
 2. Open `Khajistan.xcodeproj`, choose the **Khajistan** scheme and an iPhone simulator.
 3. Run with **⌘R**. The simulator does not need a paid signing team.
-4. Run the included UI smoke test with **⌘U**. It checks native navigation, the reader webview mount, Library and Passport. It does not prove reader content, checkout, entitlement enforcement or playback.
+4. Run the included UI smoke test with **⌘U**. The tests check native navigation, a rendered archive password gate or Reading Room, Library, Passport, bookmark persistence and native radio playing/pause state. They do not prove paid-reader access, checkout or physical-device audio behavior.
 
 For a physical device, select your Apple development team under **Signing & Capabilities**, use an available bundle identifier, connect the phone and choose it as the run destination. No signing identity is stored in this project.
 
@@ -72,7 +72,7 @@ The committed Xcode project can be reproduced after adding/removing Swift source
 
 ## Device acceptance still required
 
-This source was created on a Mac with Apple Command Line Tools and **no full Xcode / iOS SDK / Simulator**. Core Swift compilation, behavioral tests, syntax parsing and live network integration have run. The complete iOS target has **not** been SDK type-checked or launched; there is no signed IPA, TestFlight upload or App Store submission.
+This source was created on a Mac with Apple Command Line Tools and **no full Xcode / iOS SDK / Simulator**. Core Swift compilation, behavioral tests, syntax parsing and live network integration have run. The complete iOS target has now compiled and run through GitHub’s Xcode 16.4/iPhone 16 Pro simulator (see VALIDATION.md). Local Xcode setup and physical-device testing remain pending. There is no signed IPA, TestFlight upload or App Store submission.
 
 Before distribution, run these on an actual iPhone and iPad:
 

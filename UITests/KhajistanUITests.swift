@@ -8,7 +8,7 @@ final class KhajistanUITests: XCTestCase {
         add(attachment)
     }
 
-    func testNativeNavigationAndBrowserPresentation() {
+    func testNativeNavigationAndArchiveGate() {
         let app = XCUIApplication()
         app.launch()
         XCTAssertTrue(app.textFields["archiveSearch"].waitForExistence(timeout: 10))
@@ -16,10 +16,16 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["destination-reading"].tap()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["closeBrowser"].exists)
-        screenshot("02-Archive-browser", app: app)
+        let web = app.webViews.firstMatch
+        let gate = web.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Enter the archive")).firstMatch
+        let reading = web.staticTexts["Reading Room"].firstMatch
+        let loaded = NSPredicate { _, _ in gate.exists || reading.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: loaded, object: nil)], timeout: 45), .completed,
+                       "The website must render its password gate or Reading Room, not merely mount WebKit")
+        screenshot(gate.exists ? "02-Archive-password-gate" : "02-Reading-Room", app: app)
         app.buttons["closeBrowser"].tap()
         app.tabBars.buttons["Library"].tap()
-        XCTAssertTrue(app.staticTexts["Keep a page"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.segmentedControls.buttons["Saved"].waitForExistence(timeout: 5))
         screenshot("03-Library", app: app)
         app.tabBars.buttons["Passport"].tap()
         XCTAssertTrue(app.buttons["Open Passport"].waitForExistence(timeout: 5))
@@ -43,4 +49,26 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["Pause radio"].tap()
         XCTAssertTrue(app.staticTexts["Paused"].waitForExistence(timeout: 5))
     }
+
+    func testSavedPageSurvivesRelaunch() {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["destination-receiver"].tap()
+        let save = app.buttons["Save page"]
+        let remove = app.buttons["Remove saved page"]
+        let canSave = NSPredicate { _, _ in save.exists || remove.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: canSave, object: nil)], timeout: 30), .completed)
+        if remove.exists { remove.tap() }
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        app.buttons["closeBrowser"].tap()
+        app.terminate()
+        app.launch()
+        app.tabBars.buttons["Library"].tap()
+        let saved = app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "open-frequencies")).firstMatch
+        XCTAssertTrue(saved.waitForExistence(timeout: 10), "Saved page must survive app relaunch")
+        screenshot("07-Saved-page", app: app)
+    }
+
 }

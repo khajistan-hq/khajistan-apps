@@ -16,6 +16,8 @@ Apple Developer membership, the correct team and an App Store Connect app record
 
 The Xcode scheme supports device archives, the bundle has an opaque 1024px icon, and automatic signing is configured. Camera/microphone/photo descriptions are present for explicit web contributions; audio background mode is declared for the native receiver. The GitHub workflow creates **unsigned simulator builds only** and cannot publish anything to Apple.
 
+Use **Xcode 26 or later with the iOS 26 SDK or later** for the device archive. Apple requires this for App Store Connect uploads since April 28, 2026 ([SDK requirement](https://developer.apple.com/news/upcoming-requirements/?id=04282026a)). The earlier Xcode 16.4 simulator evidence is a compatibility check, not an upload-ready build. CI explicitly selects Xcode 26.3 for current checks.
+
 Once signed in to the enrolled Apple team in Xcode:
 
 1. Select the actual team in Khajistan → Signing & Capabilities. Confirm `com.khajistan.archive` belongs to that team; change the identifier if necessary before creating the app record.

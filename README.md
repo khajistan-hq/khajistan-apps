@@ -1,6 +1,6 @@
 # Khajistan for iOS
 
-Native SwiftUI application for https://khajistan-archive.pages.dev, targeting iPhone and iPad on iOS 17+. Open **Khajistan.xcodeproj** in Xcode 16 or newer. No CocoaPods, npm packages, XcodeGen installation, API keys, or new backend services are required.
+Native SwiftUI application for https://khajistan-archive.pages.dev, targeting iPhone and iPad on iOS 17+. Open **Khajistan.xcodeproj** in Xcode 26 or newer (required for current TestFlight uploads). No CocoaPods, npm packages, XcodeGen installation, API keys, or new backend services are required.
 
 ## What is implemented
 

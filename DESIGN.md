@@ -75,9 +75,12 @@ way the website marks the brand link.
   draws it — fills from the data (`#050505` → mapTint, `#006F00` → mapDeep), the people's
   regions hatched (9pt stripes at 45°, black at 32%), regions with no channels at 48%, the
   extensions in mapTint at 50%, labels in yellow with a black halo, the native name beneath,
-  the live count under that. Every region with channels has a focus point at its centroid;
-  the focused region gains a 3.5pt yellow outline and its label sits on a yellow plate with
-  black text. Select opens the region.
+  the live count under that. The map is a picture, not a control: under it runs a strip of
+  every region with channels, name and live count, west to east by centroid, so right on the
+  remote moves east. The region focused in the strip gains a 3.5pt yellow outline on the map
+  and its label sits on a yellow plate with black text. Select opens the region. (Until
+  2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
+  on the owner's TV focus stuck on one region.)
 - **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
   faint), the region's figures, the medium switch (TELEVISION 39 · RADIO 40 · CAMERAS 19 as
   focusable kickers, the current one underlined), then the channel grid: four columns, each card

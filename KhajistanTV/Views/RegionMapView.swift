@@ -4,54 +4,24 @@ import UIKit
 /// The receiver's map, drawn as the website draws it at /open-frequencies: the shapes from the
 /// shape files in the two house greens, the people's regions hatched, regions with no channels
 /// dimmed, labels in yellow with a black halo, and the focused region outlined with its label on
-/// a yellow plate. One Canvas draws all of it; a clear button over each label is what the remote
-/// can focus, and the layout that places the labels also places the buttons.
+/// a yellow plate. One Canvas draws all of it. The map is a picture, not a control: the remote
+/// walks the strip of regions under it (ReceiverView), because tvOS moves focus only to a target
+/// lying straight along the press, and from most labels on a map there is none. On the owner's
+/// Apple TV focus stuck on one region (2026-10-05).
 struct RegionMapView: View {
     let map: ComposedMap
-    let focused: FocusState<String?>.Binding
-    let onSelect: (MapRegion) -> Void
+    /// The region the strip under the map has focus on: outlined, with its label on a plate.
+    let highlighted: String?
     @Environment(\.palette) private var palette
 
-    init(map: ComposedMap, focused: FocusState<String?>.Binding, onSelect: @escaping (MapRegion) -> Void) {
-        self.map = map
-        self.focused = focused
-        self.onSelect = onSelect
-    }
-
     var body: some View {
-        // Read in the body, not in the Canvas or the reader's closure, so a move of focus makes
-        // SwiftUI evaluate this view again and the map is redrawn with the new outline and plate.
-        let focusedID = focused.wrappedValue
         GeometryReader { proxy in
             let layout = RegionMapLayout(map: map, size: proxy.size)
-            ZStack(alignment: .topLeading) {
-                Canvas { context, _ in
-                    RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: focusedID).paint(&context)
-                }
-                .accessibilityHidden(true)
-                ForEach(layout.labels.filter { $0.region.opensChannels }) { label in
-                    target(for: label)
-                }
+            Canvas { context, _ in
+                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted).paint(&context)
             }
         }
-    }
-
-    /// A clear button over a label, at least 60 x 44 points. It draws nothing: the Canvas shows
-    /// focus by outlining the region and putting its label on a plate.
-    private func target(for label: RegionMapLabel) -> some View {
-        let size = CGSize(width: max(label.box.width, 60), height: max(label.box.height, 44))
-        return Button {
-            onSelect(label.region)
-        } label: {
-            Color.clear
-        }
-        .buttonStyle(SurfaceButtonStyle())
-        .focusEffectDisabled()
-        .frame(width: size.width, height: size.height)
-        .position(x: label.center.x, y: label.center.y)
-        .focused(focused, equals: label.region.id)
-        .accessibilityIdentifier("region-\(label.region.id)")
-        .accessibilityLabel(label.region.live.map { "\(label.region.label), \($0) live" } ?? label.region.label)
+        .accessibilityHidden(true)
     }
 }
 

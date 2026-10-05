@@ -87,13 +87,49 @@ struct ReceiverView: View {
             if let mapError {
                 failure(mapError)
             } else if let composed {
-                RegionMapView(map: composed, focused: $focusedRegion, onSelect: open)
+                VStack(alignment: .leading, spacing: 24) {
+                    RegionMapView(map: composed, highlighted: focusedRegion)
+                    regionStrip(composed)
+                }
             } else {
                 TuningLoader("Loading the receiver\u{2026}")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .focusSection()
+    }
+
+    /// Every region that opens channels, west to east by where it sits on the map, so a press
+    /// right on the remote moves east across the map. Focus here is what the map highlights.
+    private func regionStrip(_ map: ComposedMap) -> some View {
+        let regions = map.regions
+            .filter(\.opensChannels)
+            .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 4) {
+                ForEach(regions) { region in
+                    Button {
+                        open(region)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(region.label).kjKicker()
+                            if let live = region.live {
+                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
+                            }
+                        }
+                    }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+                    .focused($focusedRegion, equals: region.id)
+                    .accessibilityIdentifier("region-\(region.id)")
+                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                }
+            }
+            // The plates' padding is pulled back so the first label sits on the map's margin.
+            .padding(.horizontal, -22)
+            .padding(.vertical, 12)
+        }
+        .scrollClipDisabled()
+        .frame(height: 96)
     }
 
     private func failure(_ message: String) -> some View {
@@ -112,7 +148,7 @@ struct ReceiverView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Opens a region from the map. The region is the index's own line for it; a map shape the
+    /// Opens a region from the strip. The region is the index's own line for it; a map shape the
     /// index has no line for is still opened, as what the map says it is.
     private func open(_ mapRegion: MapRegion) {
         guard let index = model.receiver.index else { return }

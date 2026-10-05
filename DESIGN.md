@@ -8,8 +8,12 @@ this file is stale. Rules it inherits: `.claude/rules/frontend.md` §1–§4 and
 
 ## Tokens, per skin
 
-The skin follows the hour exactly as before (`Skin.current`). Every colour in the app comes
-from this table and nowhere else.
+The skin follows the hour (`Skin.current`: day 08:00–17:00, smut 05:00–08:00 and
+17:00–20:00, grove otherwise) unless the viewer holds one in Account. The choice is
+**Automatic · Day · Grove · Smut**: the three names are the website switch's own
+(`archive/scripts/kj-theme.js`, `LABEL`), and Automatic, the default, names what the site
+does without a click. It is kept on the device (`kj.skin`) and applies at once. Every colour
+in the app comes from this table and nowhere else.
 
 | token | role | day | grove | smut |
 |---|---|---|---|---|
@@ -25,7 +29,10 @@ from this table and nowhere else.
 
 Never white, never grey, never a third hue. No shadows. No borders, frames or boxes; spacing
 separates things. One exception: a text field keeps a 2pt ink rule along its bottom, because a
-viewer must see where to aim.
+viewer must see where to aim. tvOS draws its own text field as a pill that turns white under
+focus, so the system field is kept at 2% opacity under a cover in the plate's colour and the
+app draws the entry (bullets for a password). Sign-in opens full screen on the ground, never as
+a sheet, which tvOS draws as a rounded, shadowed card.
 
 Inside a focused or pressed control the palette re-skins itself: the ground becomes the band (or
 the lift), and ink and accent become onBand. On the day skin the accent and the band are the same
@@ -95,16 +102,22 @@ way the website marks the brand link.
 ## Khajistan Transmission
 
 - **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · two scheduled channels · Pakistan
-  time (UTC+5)*, then one card per channel: CHANNEL 1 kicker, the channel's own line from the
-  schedule, and what is on now (show, programme, hours) or when it returns. Select tunes it.
-  The preview-password and sign-in steps live on this page.
+  time (UTC+5)*, then one card per channel, as the website's channel card: CHANNEL 1 · ● ON AIR,
+  the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
+  next three strips, time then show, the first set large. Off air the headline is *Off air*,
+  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. Show names only:
+  programme titles are file names (owner, 2026-09-06). The cards redraw on the minute. Select
+  tunes. The preview-password and sign-in steps live on this page.
 - **Player**: opens on the ground with the channel's name, and the pigeon flies off it as the
   programme, joined where the clock has reached, arrives; that is the sign-on. Up and down
   switch channel as under Motion. The
-  status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 · 18:00–18:15 PKT · MEHFIL ON TAPE with
-  UP NEXT 18:15 VINYL RIPS trailing; the panel carries the slot kicker, the title, the show's
-  line, KIND and ORIGIN, and the custodian and transfer credits. Off air is OFF AIR in display
-  type with the return time.
+  status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 with ● ON AIR trailing. The panel's
+  left column carries NOW 18:00–18:15 PKT, the show as the headline, the show's line, KIND and
+  ORIGIN, and the custodian and transfer credits; its right column is UP NEXT, the next three
+  strips. Nothing is said twice. In the last minute of a slot, with the overlay hidden, a band
+  plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
+  When the slot ends the channel hands over to the next strip, as the website's tuneToNow
+  does once a minute. Off air is OFF AIR in display type with the return time.
 
 ## Motion
 

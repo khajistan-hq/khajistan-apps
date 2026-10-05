@@ -7,8 +7,8 @@ struct TransmissionView: View {
     @Environment(AppModel.self) private var model
     @State private var password = ""
     @State private var showSignIn = false
-    /// The channel the viewer chose while signed out, and the one to open once the sign-in sheet
-    /// has closed. A cover cannot open over a sheet that is still on its way down.
+    /// The channel the viewer chose while signed out, and the one to open once the sign-in screen
+    /// has closed. A cover cannot open over one that is still on its way down.
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
     @State private var playing: ChannelChoice?
@@ -43,7 +43,8 @@ struct TransmissionView: View {
                 if store.schedule == .ready { await store.loadSchedule() }
             }
         }
-        .sheet(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+        // Full screen on the ground, as in Account: a sheet is a shadowed card.
+        .fullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
         .fullScreenCover(item: $playing) { choice in
@@ -91,7 +92,7 @@ struct TransmissionView: View {
                 if let message {
                     Text(message).kjBody()
                 }
-                HouseInputField("Password") {
+                HouseInputField("Password", text: password, secure: true) {
                     SecureField("", text: $password)
                 }
                 Button("Continue") {
@@ -171,7 +172,7 @@ struct TransmissionView: View {
     // MARK: - Choosing
 
     /// A signed-in viewer opens the channel. A signed-out one signs in first, and the channel
-    /// opens when the sheet has closed.
+    /// opens when the sign-in screen has closed.
     private func choose(_ number: Int) {
         if model.auth.isSignedIn || store.isScheduleFile {
             playing = ChannelChoice(number: number)
@@ -214,7 +215,8 @@ private struct ChannelCardLabel: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 20) {
                 Kicker("Channel \(number)")
-                Kicker(onAir == nil ? "Off air" : "\u{25CF} On air")
+                // Off air is the card's headline, so it is not said here as well.
+                if onAir != nil { Kicker("\u{25CF} On air") }
             }
             if let line, !line.isEmpty {
                 Text(line).kjSmall(faint: true).lineLimit(3)
@@ -233,7 +235,7 @@ private struct ChannelCardLabel: View {
                     .padding(.top, 10)
                 if let back = upcoming.first {
                     Text(backLine(back)).kjBody()
-                    UpNextList(title: "Later", strips: Array(upcoming.dropFirst()))
+                    UpNextList(title: "Later", strips: Array(upcoming.dropFirst()), emphasizesFirst: false)
                         .padding(.top, 18)
                 }
             }

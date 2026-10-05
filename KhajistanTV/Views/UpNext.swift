@@ -2,18 +2,19 @@ import SwiftUI
 
 /// The strips after now on one channel, as the website's console bar and channel cards write
 /// them: the start in Pakistan time, then the show. The first is the one up next and reads
-/// larger; the rest are what follows it. A strip whose show the schedule has lost keeps its
+/// larger, unless the list is what follows a strip named elsewhere. A strip whose show the schedule has lost keeps its
 /// time, as on the site.
 struct UpNextList: View {
     let title: String
     let strips: [ScheduleStrip]
+    var emphasizesFirst = true
 
     var body: some View {
         if !strips.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Kicker(title)
                 ForEach(Array(strips.enumerated()), id: \.offset) { item in
-                    row(item.element, first: item.offset == 0)
+                    row(item.element, first: emphasizesFirst && item.offset == 0)
                 }
             }
             .accessibilityElement(children: .combine)

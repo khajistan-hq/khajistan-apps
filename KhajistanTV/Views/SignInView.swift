@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Email and password, for Khajistan Transmission. `onSignedIn` runs after the session is stored
-/// and before the sheet closes.
+/// and before the screen closes. Menu goes back without signing in.
 struct SignInView: View {
     let onSignedIn: () async -> Void
 
@@ -25,7 +25,7 @@ struct SignInView: View {
                     .kjDisplay(KJType.headline, tracking: -0.055)
                 Text("The email and password you use on the website.")
                     .kjBody()
-                HouseInputField("Email") {
+                HouseInputField("Email", text: email) {
                     // username + password is the pair AutoFill looks for: an iPhone offering
                     // the Apple TV keyboard can then fill the saved Khajistan login.
                     TextField("", text: $email)
@@ -34,7 +34,7 @@ struct SignInView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
-                HouseInputField("Password") {
+                HouseInputField("Password", text: password, secure: true) {
                     SecureField("", text: $password)
                         .textContentType(.password)
                 }
@@ -54,7 +54,8 @@ struct SignInView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .foregroundStyle(palette.ink)
-        // The colour scheme steers what tvOS draws itself: the keyboard this sheet brings up.
+        .onExitCommand { dismiss() }
+        // The colour scheme steers what tvOS draws itself: the keyboard this screen brings up.
         .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 
@@ -89,14 +90,17 @@ struct SignInView: View {
 /// viewer must see where to aim. Focus is the band plate, as on a button.
 struct HouseInputField<Entry: View>: View {
     let label: String
+    private let shown: String
     private let entry: Entry
     @Environment(\.palette) private var palette
     @FocusState private var isFocused: Bool
 
     /// `entry` is the TextField or SecureField itself, with its own title left empty: the kicker is
-    /// the label, and a title would print as a second one inside the field.
-    init(_ label: String, @ViewBuilder entry: () -> Entry) {
+    /// the label, and a title would print as a second one inside the field. `text` is what it
+    /// holds, drawn by this view; `secure` draws it as bullets.
+    init(_ label: String, text: String, secure: Bool = false, @ViewBuilder entry: () -> Entry) {
         self.label = label
+        self.shown = secure ? String(repeating: "\u{2022}", count: text.count) : text
         self.entry = entry()
     }
 
@@ -105,13 +109,29 @@ struct HouseInputField<Entry: View>: View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(label, color: isFocused ? palette.onBand : nil)
                 .accessibilityHidden(true)
+            // tvOS draws the field as a pill that turns white under focus, and neither the focus
+            // effect nor UITextField's appearance takes it away. So the field is kept, focusable
+            // and selectable, nearly transparent (UIKit stops focusing a view below 0.01) and
+            // covered, and its text is drawn over it in the house ink.
             entry
                 .textFieldStyle(.plain)
+                .focusEffectDisabled()
                 .kjBody()
-                .foregroundStyle(ink)
-                .padding(.vertical, 12)
+                .opacity(0.02)
                 .focused($isFocused)
                 .accessibilityLabel(label)
+                .overlay(alignment: .leading) {
+                    // Opaque, in the colour under it, so what is left of the pill does not show.
+                    Text(shown)
+                        .kjBody()
+                        .foregroundStyle(ink)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .background(isFocused ? palette.band : palette.ground)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+                .padding(.vertical, 12)
             Rectangle()
                 .fill(ink)
                 .frame(height: 2)

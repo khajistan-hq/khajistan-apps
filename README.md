@@ -4,22 +4,22 @@ Native SwiftUI application for https://khajistan-archive.pages.dev, targeting iP
 
 ## What is implemented
 
-| Surface | Implementation |
-|---|---|
-| Explore | Native house palette, pigeon mark, section directory, archive search entry |
-| Archive content | Live Reading Room, Publications, Screening Room, Canvas, Bazaar, Madrassa, Human Desk and Chat in WKWebView |
-| Passport | Existing website email/password sign-in, account and download pages; persistent WebKit website storage |
-| Radio | Native searchable/filterable receiver catalogue, AVPlayer, background audio configuration, lock-screen commands, AirPlay, interruption/headphone handling, reconnection |
-| Library | Device-local bookmarks, bounded recent history, filtering, swipe removal and clear-history confirmation |
-| Files | Website-initiated WKDownload transfers, collision-safe file storage, Quick Look, native share/export, deletion |
-| Navigation | Browser back/forward, interactive back gesture, reload, pull-to-refresh, loading/error states, page sharing, URL deep links |
-| Accessibility | Native labels, Dynamic Type, real buttons and native list/navigation controls; web pages retain their own accessibility |
+Redesigned 2026-10-05 after the owner opened the app: *"its UX/UI needs work make it work smoothly and have all that's on website on the app the bottom 'radio' 'explore' are in generic design everything needs to be in khajistan house style"*. The house style is the Apple TV app's (`tvos/DESIGN.md` on `app/tvos-pigeon`), measured from the website, set for a phone in `Khajistan/Views/Theme.swift`.
 
-Readers, films, commerce and account pages remain the live website. This is a hybrid implementation with native navigation/library/audio; it does not reimplement the website's readers as native views. The site's authentication, rights restrictions and entitlements remain authoritative. No database queries, privileged credentials, archive visibility changes, or production deployments were made.
+| Door | Native or web | What it carries |
+|---|---|---|
+| HOME | native menu, web rooms | the website's own menu door by door (kj-chrome.js SITEMAP/DOORS), the site's search, and Reading Room All Access (the site's checkout, `?join=monthly` / `annual`, no price in the app) |
+| RECEIVER | native | LIVE: the region map from `region-shapes.json` (tap a region, or its name in the strip), the "Beyond the atlas" switch, the region's television, radio and cameras with a filter; TRANSMISSION: Khajistan TV's two channels on the station clock, now and up next, sign-in and the preview password; KHAJISTAN RADIO: the 22 mixes of `data/radio/mixtapes.json` |
+| PICS/VIDS | native | the Born Digital stream as `/browse-archive.html` reads it, the site's adult notice, kind and region filters, a two-column stream at each object's own shape, a full-screen viewer |
+| ACCOUNT | native, web links | the skin control, All Access, the account Transmission plays under, saved pages, recent pages and downloaded files on this device, links to Your Khajistan and Your downloads on the website |
 
-The native radio client reads the same public receiver, denylist, off-air and health feeds as the website. It fetches current controls again before resolving every station and stops a station removed on directory refresh. It does not continuously poll for withdrawal while listening. Native audio requires an HTTPS carrier. A failing/insecure carrier has an error state and the full web receiver remains reachable.
+Every other room (Reading Room, Publications, Screening Room, Bazaar, Chat, Wall, About, Map...) is the live website in the house browser: a bar with back, the page's name under its door, share, save and close; the load as an accent rule; the page's alerts as house panels. The web view is created at launch and kept, so it opens warm, and a new page shows the ground until it commits rather than flashing the previous one.
 
-Bookmarks store links, not offline books. Only files the website explicitly delivers as downloads are stored for offline use. Subscription page images are not cached into a new offline reader, and no new offline license is created.
+Players (receiver channel, Transmission, mix, Pics/Vids video) are full screen with the status band and a panel that hides 2.6 s into playback. A swipe up or down changes channel behind the website's wing-wipe pigeon (`Resources/Media/wipe-in.mov`, `wipe-out.mov`, from the TV app): the old sound fades out, the wing covers the screen, the new channel tunes behind it, the new sound fades in. Reduce Motion keeps the fades and leaves the bird out. Radio keeps playing with the screen locked; the lock screen's play and pause reach whichever player started last.
+
+**Skins** follow the website exactly (`Core/Sky.swift`, a port of KJSky in `kj-theme-boot.js`): Day with the sun above +6°, Smut between ±6°, Grove below, read from the device's time zone and tzdata's coordinate for it, hour bands where the zone is not in the table. Automatic, Day, Grove or Smut is chosen on the ACCOUNT page and stored under the site's own keys (`kj:theme`, `kj:theme:band`); a pick holds until the sky moves to another band. The same keys are written into every in-app web page before the site's scripts run, so the website opens in the app's skin. `-kjskin grove` on the command line forces a skin for screenshots and is never stored.
+
+No system tab bar, navigation bar, alert or grey panel is drawn by the app. What iOS still draws itself: the status bar (black glyphs on Day, white on Grove and Smut, as iOS offers only those two), the keyboard, the share sheet and Quick Look.
 
 ## Source repository and build previews
 
@@ -32,7 +32,7 @@ The **iOS app** GitHub Actions workflow builds and runs simulator tests, then sa
 1. Install full Xcode and its iOS Simulator runtime; open Xcode once to finish installation.
 2. Open `Khajistan.xcodeproj`, choose the **Khajistan** scheme and an iPhone simulator.
 3. Run with **⌘R**. The simulator does not need a paid signing team.
-4. Run the included UI smoke test with **⌘U**. The tests check native navigation, a rendered archive password gate or Reading Room, Library, Passport, bookmark persistence and native radio playing/pause state. They do not prove paid-reader access, checkout or physical-device audio behavior.
+4. Run the UI tests with **⌘U**. They walk every door in each of the three skins (`-kjskin`), tap the map, play a channel and swipe to the next, play a mix, open and swipe the Pics/Vids viewer, pick and clear a skin, and keep a saved page across a relaunch, attaching a screenshot of each screen. They do not prove paid-reader access, checkout or physical-device audio behavior.
 
 For a physical device, select your Apple development team under **Signing & Capabilities**, use an available bundle identifier, connect the phone and choose it as the run destination. No signing identity is stored in this project.
 
@@ -53,20 +53,7 @@ The app uses `com.khajistan.archive` as its default bundle identifier. Change it
 swift build
 ```
 
-The first command compiles and executes eight Foundation-only behavior tests: exact origins/deep links, Urdu search encoding, sensitive URL exclusion, bookmarks/history, disk persistence/corruption, download paths/Unicode length, radio withdrawals and stream identifier encoding. It deliberately requires no XCTest or Swift Testing runtime, which are absent from this machine's command-line installation.
-
-An optional live network integration check uses the **same RadioService compiled into the app**:
-
-From the `ios/` directory:
-
-```sh
-mkdir -p .build
-swiftc -swift-version 5 Khajistan/Core/*.swift Khajistan/Radio/RadioService.swift \
-  scripts/VerifyLiveReceiver.swift -o .build/verify-live-receiver
-.build/verify-live-receiver
-```
-
-The live check retrieves all four public feeds, resolves three Pakistani stations, and reads a small range of each signal. It does not authenticate, publish, buy anything, request captions or perform OCR. Station availability changes over time.
+The script builds two Foundation-only executables. `verify-core` runs the iPhone's own tests: origins and deep links, search encoding, private pages kept out of history, bookmarks and their file, download names, the skin against the website's own KJSky on 6,992 zone-and-instant cases (`Tests/Fixtures/sky-fixture.json`, regenerated with `node scripts/sky-fixture.mjs`) plus a check that the comparison can fail, the pick-lapses-with-the-band rule with its negative cases, the script written into web pages, and the join and native-room URLs. `ported-core` runs the Apple TV app's 72 core tests over the same ported files (station clock and Pics/Vids URLs against the site's JS, receiver eligibility, the map, auth, transmission routes, mixes); its "Real ..." tests read the archive's data files from `KJ_ARCHIVE` (default: the filmart `archive/` checkout) and skip when it is absent.
 
 The committed Xcode project can be reproduced after adding/removing Swift sources with `python3 scripts/generate-project.py`. Reproduce the typographic app icon with `swift scripts/make-icon.swift Khajistan/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`.
 

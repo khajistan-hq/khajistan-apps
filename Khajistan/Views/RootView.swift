@@ -76,7 +76,7 @@ struct HouseTabBar: View {
                     Button {
                         select(tab)
                     } label: {
-                        Text(tab.title).kjKicker().lineLimit(1).minimumScaleFactor(0.7)
+                        Text(tab.title).kjKicker().lineLimit(1)
                     }
                     .buttonStyle(HouseTabStyle(isCurrent: tab == current, padding: EdgeInsets(top: 14, leading: 6, bottom: 14, trailing: 6)))
                     .frame(maxWidth: .infinity)
@@ -86,6 +86,9 @@ struct HouseTabBar: View {
                 }
             }
             .padding(.horizontal, 6)
+            // The bar holds its size, as the system's own does; a long press shows the name large.
+            .dynamicTypeSize(...DynamicTypeSize.large)
+            .accessibilityShowsLargeContentViewer()
         }
         .background(palette.ground.ignoresSafeArea(edges: .bottom))
     }

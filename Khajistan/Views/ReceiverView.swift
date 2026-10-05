@@ -44,11 +44,17 @@ struct ReceiverView: View {
     private var figures: some View {
         let totals = model.receiver.index?.totals
         func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2014}" }
-        return HStack(alignment: .top, spacing: 12) {
-            Figure(label: "Live now", value: value(totals?.live))
-            Figure(label: "Television", value: value(totals?.byMedium["tv"]))
-            Figure(label: "Radio", value: value(totals?.byMedium["radio"]))
-            Figure(label: "Cameras", value: value(totals?.byMedium["camera"]))
+        let items = [("Live now", value(totals?.live)), ("Television", value(totals?.byMedium["tv"])),
+                     ("Radio", value(totals?.byMedium["radio"])), ("Cameras", value(totals?.byMedium["camera"]))]
+        // One row while the four fit; two rows of two at large type.
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(items, id: \.0) { Figure(label: $0.0, value: $0.1).fixedSize() }
+            }
+            Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
+                GridRow { Figure(label: items[0].0, value: items[0].1); Figure(label: items[1].0, value: items[1].1) }
+                GridRow { Figure(label: items[2].0, value: items[2].1); Figure(label: items[3].0, value: items[3].1) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(.kj, value: totals?.live)

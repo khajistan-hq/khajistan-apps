@@ -282,6 +282,8 @@ private struct HousePlate<Face: View>: View {
         let look = inner
         label
             .multilineTextAlignment(.leading)
+            // A tab's name never breaks; rows of tabs scroll sideways instead.
+            .fixedSize(horizontal: tab != nil, vertical: false)
             .overlay(alignment: .bottom) {
                 if tab == true && !pressed {
                     Rectangle().fill(look.accent).frame(height: 3).offset(y: 7)

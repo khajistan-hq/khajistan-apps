@@ -65,7 +65,7 @@ struct ReceiverPlayerView: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Kicker(stateText).accessibilityIdentifier("playerState")
+            Kicker(stateText).accessibilityIdentifier("playerState").accessibilityValue(current.id)
             if !(current.mediaType == "radio" && controller.state == .playing) {
                 Text(current.name).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
             }

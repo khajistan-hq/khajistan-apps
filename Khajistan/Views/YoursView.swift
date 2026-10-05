@@ -48,9 +48,11 @@ struct YoursView: View {
         VStack(alignment: .leading, spacing: 6) {
             HouseRule()
             Kicker("Skin").padding(.top, 10)
-            HStack(spacing: 0) {
-                skinTab("Automatic", pick: nil)
-                ForEach(Skin.allCases, id: \.self) { skin in skinTab(skin.label, pick: skin) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    skinTab("Automatic", pick: nil)
+                    ForEach(Skin.allCases, id: \.self) { skin in skinTab(skin.label, pick: skin) }
+                }
             }
             .padding(.horizontal, -12)
             Text(model.skinPick == nil
@@ -145,10 +147,13 @@ struct YoursView: View {
             HouseRule()
             Kicker("On this device").padding(.top, 10)
             HStack(spacing: 0) {
-                shelfTab("Saved", 0)
-                shelfTab("Recent", 1)
-                shelfTab("Files", 2)
-                Spacer()
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        shelfTab("Saved", 0)
+                        shelfTab("Recent", 1)
+                        shelfTab("Files", 2)
+                    }
+                }
                 if shelf == 1 && !model.library.history.isEmpty {
                     Button(kicker: "Clear") { withAnimation(.kj) { confirmClear = true } }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 12, bottom: 10, trailing: 0)))

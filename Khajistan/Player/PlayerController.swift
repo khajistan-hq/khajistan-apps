@@ -27,6 +27,7 @@ final class PlayerController {
 
     /// The controller that last started a signal: the one the lock screen's buttons reach.
     private static weak var active: PlayerController?
+    private static let audioQueue = DispatchQueue(label: "com.khajistan.audio-session", qos: .userInitiated)
 
     /// The lock screen and headphone buttons, wired once for the life of the app.
     private static let remoteCommands: Void = {
@@ -101,9 +102,13 @@ final class PlayerController {
             }
         }
 
-        // Sound carries on with the screen locked, as radio should (UIBackgroundModes audio).
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // Sound carries on with the screen locked, as radio should (UIBackgroundModes audio). The
+        // session calls can block, so they run off the main thread.
+        Self.audioQueue.async {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .moviePlayback)
+            try? session.setActive(true)
+        }
         Self.active = self
 
         fadeTask?.cancel()

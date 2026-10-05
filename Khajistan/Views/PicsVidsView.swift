@@ -63,10 +63,12 @@ struct PicsVidsView: View {
 
     private var filters: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                tab("Everything", current: store.kind == nil, id: "pnvkind-all") { await store.select(kind: nil) }
-                ForEach(PnvKind.allCases, id: \.self) { kind in
-                    tab(kind.label, current: store.kind == kind, id: "pnvkind-\(kind.rawValue)") { await store.select(kind: kind) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    tab("Everything", current: store.kind == nil, id: "pnvkind-all") { await store.select(kind: nil) }
+                    ForEach(PnvKind.allCases, id: \.self) { kind in
+                        tab(kind.label, current: store.kind == kind, id: "pnvkind-\(kind.rawValue)") { await store.select(kind: kind) }
+                    }
                 }
             }
             if !store.regions.isEmpty {

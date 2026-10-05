@@ -29,7 +29,6 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - **The rainbow TV bug.** It is not used on the live site and has no ruling for a new surface.
 - **A Top Shelf extension.** The brand assets carry the two static top shelf images only.
 - **Open Sans.** The system font is used.
-- **House colours on one system control.** The television/radio switch is drawn by tvOS, which paints the focused item as a white pill. The house allows no white; restyling it needs UIKit appearance work checked on a simulator, and v1 leaves it as tvOS draws it. The root screens are not a system tab bar: `TopBar` is the app's own, with the house focus plate.
 - **Magic-link sign-in.** The Supabase magic-link email template carries no `{{ .Token }}` code, so a television cannot complete it. Adding that token to the template is a one-line change that would enable "email me a code".
 
 ## Source and publish doors

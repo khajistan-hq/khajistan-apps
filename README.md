@@ -19,6 +19,8 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
 
+**The dancer.** The website's dancer, ported from `kj-scope.js`, dances full screen over the ground to receiver radio and to Khajistan Transmission's sound-only programmes, all of channel 2 included, when what is playing carries a beat. He reads the real signal and is never shown on a recitation channel, over a picture, on an HLS carrier or with Reduce Motion on. A live radio mount is played by the app itself so its samples can be read. The rules are in [`DESIGN.md`](DESIGN.md) under The dancer.
+
 **Assets.** The pigeon master GIF is a byte-identical copy of the website's. The channel change uses one pigeon, flying, over the skin's own colour: two HEVC-with-alpha flights rendered by `scripts/make-pigeon-flight.py` from the Higgsfield masters. The old sound fades out and the new one in. The pigeon is used only where the owner's ruling of 2026-10-04 allows it: waiting states and changeovers.
 
 ## What it does not carry

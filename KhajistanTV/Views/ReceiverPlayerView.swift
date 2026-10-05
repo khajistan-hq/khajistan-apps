@@ -8,6 +8,7 @@ struct ReceiverPlayerView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var controller = PlayerController()
     @State private var current: Channel
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
@@ -164,13 +165,22 @@ struct ReceiverPlayerView: View {
                     title: target.name,
                     subtitle: target.place.isEmpty ? nil : target.place,
                     // Radio only: television and cameras carry a picture (owner, 2026-07-21).
-                    listen: target.mediaType == "radio" && !target.isReverent
+                    listen: dancerMayListen(target),
+                    // A live mount the app plays itself, so its samples can be read; HLS stays
+                    // on AVPlayer and has no dancer.
+                    live: target.activeStream?.format != "hls" && !url.path.lowercased().hasSuffix(".m3u8")
                 )
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// The dancer: radio, not reverent, and not for a viewer who has asked for less motion (who
+    /// then gets AVPlayer, as before).
+    private func dancerMayListen(_ channel: Channel) -> Bool {
+        channel.mediaType == "radio" && !channel.isReverent && !reduceMotion
     }
 
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the

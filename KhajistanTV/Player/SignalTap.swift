@@ -13,11 +13,13 @@ import os
 /// the RMS of the same 1024 samples. Each spectrum is stamped with the item time of its last
 /// sample, so the main actor can read them in step with what is being heard.
 ///
-/// WHICH CARRIERS CAN SHOW HIM. A tap needs an audio track on the asset. AVFoundation exposes one
-/// for a progressive file or stream — a Khajistan Transmission programme on Supabase storage or
-/// a Dropbox temporary link, a broadcaster's Icecast/Shoutcast MP3 or AAC mount — and none for
-/// HLS, so an HLS carrier (Cloudflare Stream, a broadcaster's .m3u8) gets no tap and no dancer.
-/// `PlayerController` asks the asset for its audio tracks and installs this only when there is one.
+/// WHICH CARRIERS CAN SHOW HIM. A tap needs an audio track on the asset, and AVFoundation exposes
+/// one only for a finite progressive file: a Khajistan Transmission programme on Supabase storage
+/// or a Dropbox temporary link. `PlayerController` asks the asset for its audio tracks and
+/// installs the tap only when there is one. A live Icecast or Shoutcast mount exposes no track
+/// (measured 2026-10-05), so LiveRadio plays those itself and feeds this the buffers it
+/// schedules. HLS (Cloudflare Stream, a broadcaster's .m3u8) exposes nothing to either: no
+/// samples, no dancer.
 final class SignalTap: @unchecked Sendable {
     struct Frame {
         let time: Double       // ms of item time, at the window's last sample
@@ -27,7 +29,10 @@ final class SignalTap: @unchecked Sendable {
 
     static let fftSize = 1024
     static let bins = fftSize / 2
-    private static let slots = 64
+    /// Ten seconds of spectra. LiveRadio stamps them as it schedules, up to three seconds ahead of
+    /// the speaker plus the length of one decoded chunk; a ring shorter than that overwrote the
+    /// spectra about to be heard (measured: 51 a second falling to 34).
+    private static let slots = 600
     private static let smoothing: Float = 0.72
     private static let minDB: Float = -85, maxDB: Float = -25
 
@@ -116,8 +121,8 @@ final class SignalTap: @unchecked Sendable {
             var cursor = max(start, written - SignalTap.slots)   // fell behind: drop the oldest
             while cursor < written {
                 let slot = cursor % SignalTap.slots
-                // A stamp more than a second ahead of the clock is not in step with it; read on.
-                if let time, outTime[slot].isFinite, outTime[slot] > time, outTime[slot] < time + 1000 { break }
+                // A stamp more than ten seconds ahead of the clock is not on it; read on.
+                if let time, outTime[slot].isFinite, outTime[slot] > time, outTime[slot] < time + 10000 { break }
                 let base = slot * SignalTap.bins
                 out.append(Frame(time: outTime[slot], rms: outRMS[slot], spectrum: Array(outBytes[base..<base + SignalTap.bins])))
                 cursor += 1
@@ -126,6 +131,18 @@ final class SignalTap: @unchecked Sendable {
         }
         seq = next
         return out
+    }
+
+    // MARK: - Fed by LiveRadio, on its queue
+
+    func prepare(for format: AVAudioFormat) {
+        prepare(format.streamDescription.pointee)
+    }
+
+    /// A decoded buffer that will be heard at `ms` on the player's clock.
+    func consume(_ buffer: AVAudioPCMBuffer, atMS ms: Double) {
+        consume(buffer.mutableAudioBufferList, count: Int(buffer.frameLength),
+                start: CMTime(seconds: ms / 1000, preferredTimescale: 1_000_000))
     }
 
     // MARK: - The tap's thread

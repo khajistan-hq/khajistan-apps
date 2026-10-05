@@ -124,9 +124,9 @@ final class DancerUITests: XCTestCase {
         return id
     }
 
-    /// A Pakistani FM station on a progressive MP3 mount: the tap must be made, and the dancer
-    /// comes on when what is playing carries a beat. Live radio may be talking at that minute,
-    /// so the beat is recorded rather than required; the tap is required.
+    /// A Pakistani FM station on a live MP3 mount, played through LiveRadio: the signal must be
+    /// readable, and the dancer comes on when what is playing carries a beat. Live radio may be
+    /// talking at that minute, so the beat is recorded rather than required; the signal is required.
     func testRadioDancer() {
         let app = XCUIApplication()
         let id = openRadio(["pbc-fm-101-lahore", "radio-in-punjab-rocks-radio", "radio-pk-cityfm89"], skin: "day", app)
@@ -134,7 +134,7 @@ final class DancerUITests: XCTestCase {
         XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
-        XCTAssertFalse(status(app).hasPrefix("stage=absent"), "a progressive radio stream must be tapped (\(status(app)))")
+        XCTAssertFalse(status(app).hasPrefix("stage=absent"), "a live radio mount must be readable (\(status(app)))")
         let first = waitForDancing(app, timeout: 40)
         print("DANCER radio \(id ?? "-") first: \(first)")
         _ = photograph("radio-\(id ?? "none")", app)
@@ -148,6 +148,10 @@ final class DancerUITests: XCTestCase {
         XCTAssertEqual(id, "pbc-saut-ul-quran", "the recitation channel must open")
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30))
+        // The negative case means something only while the recitation is actually playing.
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
+        XCTAssertEqual(state.label, "Playing", "the recitation channel must be playing for the check to count")
         var seen = Set<String>()
         for i in 0..<20 {
             Thread.sleep(forTimeInterval: 1)

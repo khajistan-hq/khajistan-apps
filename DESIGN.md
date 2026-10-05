@@ -104,6 +104,11 @@ way the website marks the brand link.
   arrives. Radio shows its name as display type on the ground. A channel change is
   described under Motion.
 
+- **Letterbox**: a picture that does not fill the screen sits on **black**, in every skin
+  (owner, 2026-10-05: "background should always remain black and not house skin colors").
+  It is the one black in the app, and only around a moving picture; radio, the overlay, the
+  tuning ground and every other screen keep the skin.
+
 ## Khajistan Transmission
 
 - **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · two scheduled channels · Pakistan

@@ -111,6 +111,8 @@ struct TransmissionPlayerView: View {
             if air.programme?.audio_only == true {
                 soundOnly(air)
             } else {
+                // A picture that does not fill the screen sits on black (owner, 2026-10-05).
+                Color.black.ignoresSafeArea()
                 PlayerLayerView(player: store.player.player)
                     .ignoresSafeArea()
             }

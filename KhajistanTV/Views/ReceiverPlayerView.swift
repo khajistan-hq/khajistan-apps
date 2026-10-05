@@ -28,7 +28,9 @@ struct ReceiverPlayerView: View {
         // the full-screen cover, which is a hosting controller of its own.
         let palette = Palette(model.skin)
         ZStack {
-            palette.ground.ignoresSafeArea()
+            // A picture that does not fill the screen sits on black, whatever the skin (owner,
+            // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
+            (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
             if current.mediaType == "radio" && controller.state == .playing {
@@ -139,6 +141,11 @@ struct ReceiverPlayerView: View {
         case .paused: return "Paused"
         case .failed(let message): return message
         }
+    }
+
+    /// The signal on screen has a picture: television or a camera, playing or paused.
+    private var showsPicture: Bool {
+        current.mediaType != "radio" && (controller.state == .playing || controller.state == .paused)
     }
 
     // MARK: - Tuning

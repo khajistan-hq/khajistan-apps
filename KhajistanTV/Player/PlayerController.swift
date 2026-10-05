@@ -31,8 +31,9 @@ final class PlayerController {
     }
 
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
-    /// joined part-way through; a live stream passes nil.
-    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?) {
+    /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
+    /// card says; a recording (a mix, a clip) passes false.
+    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true) {
         generation += 1
         let gen = generation
         state = .tuning
@@ -88,7 +89,7 @@ final class PlayerController {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
             MPMediaItemPropertyTitle: title,
             MPMediaItemPropertyArtist: subtitle ?? "Khajistan",
-            MPNowPlayingInfoPropertyIsLiveStream: true
+            MPNowPlayingInfoPropertyIsLiveStream: isLive
         ]
     }
 

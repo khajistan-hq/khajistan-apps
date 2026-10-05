@@ -6,7 +6,7 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 
 ## What v1 carries
 
-**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION and ACCOUNT beside them. There is no system tab bar.
+**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, PICS/VIDS and ACCOUNT beside them. There is no system tab bar.
 
 **The Receiver.** The front is the region map, drawn from the website's own geometry and colour rules, with the four live figures and the "Beyond the atlas" switch beside it. A strip of the regions with channels runs under the map, west to east, and the remote walks it; the focused region is outlined on the map and carries its plate with the native name and live count. The switch adds the Islamicate extensions, including the two Indian doors the website keeps behind it. A region opens on its figures and a grid of television, radio and cameras. The lists come from the public files the website's receiver reads: the receiver index, the per-region shards, the denylist, and the off-air and health feeds. Each stream is resolved through `/api/frequency` at tune time and played by AVPlayer, under the status band (KHAJISTAN RECEIVER, BROADCASTING FROM …). The grooming pigeon stands in for CONNECTING… while a signal tunes, and the wing wipe plays at a channel change.
 
@@ -19,10 +19,13 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
 
+**Pics/Vids.** The website's PICS/VIDS door (`/browse-archive.html`, Born Digital Media). It reads the same Supabase view and function the page reads, with the anon key: `pnv_accounts` for the roster of vetted accounts, `pnv_media` for rows of those accounts only (ordered `feed_rank`, then `corpus`, 60 to a page), and `rpc('pnv_facets')` for the summary line. The filters are the page's Everything / Pictures / Videos and its regions, which the page reaches through the atlas map. Rows become URLs by `kj-media.js`'s rules (Supabase storage, R2, and Khajistan TV's poster bucket and `tv-play`), tested against that file. The entry notice is the site's, in its words, with its three states. Khajistan TV rows show their poster to anyone; their video needs the same account `tv-play` asks for on the Transmission page, and the viewer opens the sign-in sheet in place.
+
 **Assets.** The pigeon master GIF, the grooming loop, the sign-on ident and the two wing wipes are byte-identical copies of the website's files in `archive/assets`. The pigeon clips are used only where the owner's ruling of 2026-10-04 allows them: waiting states and changeovers.
 
 ## What it does not carry
 
+- **Pics/Vids search, the account and hashtag lists, Shuffle and the makers.** Search needs a keyboard, and the lists run to 81 accounts and 300 hashtags. Make a GIF, Make an emoji, Make a sticker and Save to the Wall are browser tools with nowhere to go on a television.
 - **The Screening Room.** Its films are paid and gated by entitlement. Apple's in-app-purchase rules for it are the open question in INTENT §6.
 - **Subtitles.** `subtitle_url` is not loaded.
 - **Interstitials, and every ident but the sign-on.** The station-id audio and the ads stay on the website.
@@ -68,6 +71,7 @@ sh tvos/scripts/test-core.sh
 The script compiles the Foundation-only core and runs its checks:
 
 - The Swift station clock agrees with the website's `kj-station-clock.js` on roughly 500 instants, taken from a fixture that Node generates (`tvos/scripts/station-clock-fixture.mjs`).
+- The Pics/Vids URL builders agree with the site's `kj-media.js` on 44 rows, 36 of them real rows of the view, taken from a fixture that Node generates (`tvos/scripts/pnv-media-fixture.mjs`).
 - The models decode the real feed files.
 - The carrier and auth requests have the expected shapes.
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The top bar over one of the three root screens. There is no TabView: tvOS paints a focused tab
+/// The top bar over one of the root screens. There is no TabView: tvOS paints a focused tab
 /// as a white pill, and the house allows no white.
 struct RootView: View {
     @Environment(AppModel.self) private var model
@@ -26,6 +26,7 @@ struct RootView: View {
         switch model.section {
         case .receiver: ReceiverView()
         case .transmission: TransmissionView()
+        case .picsvids: PicsVidsView()
         case .account: AccountView()
         }
     }

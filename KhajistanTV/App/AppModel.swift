@@ -4,6 +4,7 @@ import Observation
 private enum DefaultsKey {
     static let extendedAtlas = "kj.extendedAtlas"
     static let startTab = "kjtab"
+    static let skin = "kjskin"
 }
 
 @MainActor @Observable
@@ -36,14 +37,16 @@ final class AppModel {
         self.auth = auth
         self.receiver = ReceiverStore()
         self.transmission = TransmissionStore(auth: auth)
-        self.skin = Skin.current(at: Date(), calendar: .current)
+        // `-kjskin grove` holds one skin for a UI test, which otherwise sees only the hour's.
+        let pinned = UserDefaults.standard.string(forKey: DefaultsKey.skin).flatMap(Skin.init(rawValue:))
+        self.skin = pinned ?? Skin.current(at: Date(), calendar: .current)
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
         case "account": self.section = .account
         default: self.section = .receiver
         }
-        watchTheSky()
+        if pinned == nil { watchTheSky() }
     }
 
     /// Looks at the clock once a minute and changes the skin when the hour crosses a band.

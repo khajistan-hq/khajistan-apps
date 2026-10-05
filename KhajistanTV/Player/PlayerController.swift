@@ -13,6 +13,9 @@ final class PlayerController {
 
     let player = AVPlayer()
     var state: State = .idle
+    /// The samples of the signal now playing, when it was asked to listen and its carrier can be
+    /// read (a progressive file or stream; never HLS). The dancer reads this; nil means no dancer.
+    private(set) var signal: SignalTap?
     @ObservationIgnored var onEnded: (() -> Void)?
 
     @ObservationIgnored private var generation = 0
@@ -34,11 +37,14 @@ final class PlayerController {
     }
 
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
-    /// joined part-way through; a live stream passes nil.
-    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?) {
+    /// joined part-way through; a live stream passes nil. `listen` taps the audio for the
+    /// dancer; the caller passes it only for sound with no picture on a channel that is not
+    /// reverent (DancerView.swift).
+    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, listen: Bool = false) {
         generation += 1
         let gen = generation
         state = .tuning
+        signal = nil
         timeoutTask?.cancel()
         removeItemObservers()
 
@@ -78,6 +84,8 @@ final class PlayerController {
                 self.state = .failed(message)
             }
         }
+
+        if listen { installTap(on: item, asset: asset, generation: gen) }
 
         fadeTask?.cancel()
         player.volume = 0
@@ -163,6 +171,31 @@ final class PlayerController {
         removeItemObservers()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         state = .idle
+        signal = nil
+    }
+
+    /// Where the audio has got to, in ms of item time, for reading the tap in step with it.
+    var playTimeMS: Double? {
+        let time = player.currentTime()
+        return time.isNumeric ? time.seconds * 1000 : nil
+    }
+
+    /// Whether anything can be heard: the site's `!paused && !muted && volume > 0`.
+    var audible: Bool {
+        player.timeControlStatus == .playing && !player.isMuted && player.volume > 0
+    }
+
+    /// Taps the item's audio once its tracks are known. An HLS asset has no audio track to tap,
+    /// and then nothing is installed: no signal, no dancer.
+    private func installTap(on item: AVPlayerItem, asset: AVURLAsset, generation gen: Int) {
+        Task { [weak self] in
+            guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
+            guard let self, gen == self.generation else { return }
+            let tap = SignalTap()
+            guard let mix = tap.audioMix(for: track) else { return }
+            item.audioMix = mix
+            self.signal = tap
+        }
     }
 
     /// Seeks a ready item to where the transmission has got to, then plays. An item with no

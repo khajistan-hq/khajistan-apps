@@ -177,17 +177,18 @@ struct BeatTracker {
         let z = e.map { $0 - mean }
         let energy = z.reduce(0) { $0 + $1 * $1 }
         guard energy > 1e-6 else { return 0 }
-        var cache = [Int: Double]()
-        func ac(_ lag: Int) -> Double {
-            if let hit = cache[lag] { return hit }
-            var c = 0.0
-            if lag < n { for k in lag..<n { c += z[k] * z[k - lag] } }
-            cache[lag] = c / energy
-            return c / energy
+        // Every lag from 15 to 100 bins once: 15–50 and their doubles.
+        var r = [Double](repeating: 0, count: 101)
+        z.withUnsafeBufferPointer { z in
+            for lag in 15...100 where lag < n {
+                var c = 0.0
+                for k in lag..<n { c += z[k] * z[k - lag] }
+                r[lag] = c / energy
+            }
         }
         var best = 0.0
         for lag in 15...50 {
-            let v = (ac(lag) + ac(2 * lag)) / 2
+            let v = (r[lag] + r[2 * lag]) / 2
             if v > best { best = v }
         }
         return best

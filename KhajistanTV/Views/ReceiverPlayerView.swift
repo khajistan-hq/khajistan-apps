@@ -31,12 +31,15 @@ struct ReceiverPlayerView: View {
             palette.ground.ignoresSafeArea()
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
-            if current.mediaType == "radio" && controller.state == .playing {
-                // The band says live radio; the centre carries the name alone.
-                Text(current.name)
-                    .kjDisplay()
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, KJLayout.inset)
+            // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
+            // front of the channel's name. The band says live radio; the centre carries the name.
+            DancerLayer(controller: controller) {
+                if current.mediaType == "radio" && controller.state == .playing {
+                    Text(current.name)
+                        .kjDisplay()
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, KJLayout.inset)
+                }
             }
             overlay(palette)
             // The focus target. It draws nothing; its job is to hold focus so the remote's
@@ -159,7 +162,9 @@ struct ReceiverPlayerView: View {
                     url: url,
                     seekTo: nil,
                     title: target.name,
-                    subtitle: target.place.isEmpty ? nil : target.place
+                    subtitle: target.place.isEmpty ? nil : target.place,
+                    // Radio only: television and cameras carry a picture (owner, 2026-07-21).
+                    listen: target.mediaType == "radio" && !target.isReverent
                 )
             } catch {
                 if Task.isCancelled { return }

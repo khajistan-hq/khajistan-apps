@@ -248,7 +248,7 @@ final class LiveRadio: @unchecked Sendable {
 
     // MARK: - Scheduling (queue)
 
-    private func nodeNow(_ rate: Double) -> AVAudioFramePosition {
+    private func nodeNow() -> AVAudioFramePosition {
         guard let render = node.lastRenderTime, let time = node.playerTime(forNodeTime: render) else { return 0 }
         return time.sampleTime
     }
@@ -276,7 +276,7 @@ final class LiveRadio: @unchecked Sendable {
             onEvent(.started)
         }
         while !waiting.isEmpty {
-            let now = nodeNow(rate)
+            let now = nodeNow()
             if Double(nextAt - now) / rate > LiveRadio.lead { return }
             let buffer = waiting.removeFirst()
             waitingSeconds -= Double(buffer.frameLength) / rate
@@ -299,8 +299,8 @@ final class LiveRadio: @unchecked Sendable {
 
     /// The mount closed: whatever is buffered plays out, and then the carrier is dead.
     private func drain() {
-        guard ended, started, waiting.isEmpty, let output = outFormat else { return }
-        if nodeNow(output.sampleRate) >= nextAt { dead("The signal stopped.") }
+        guard ended, started, waiting.isEmpty else { return }
+        if nodeNow() >= nextAt { dead("The signal stopped.") }
     }
 
     private func dead(_ message: String) {

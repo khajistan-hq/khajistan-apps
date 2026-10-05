@@ -161,7 +161,11 @@ final class SignalTap: @unchecked Sendable {
     private func consume(_ list: UnsafeMutablePointer<AudioBufferList>, count: Int, start: CMTime) {
         // Anything but 32-bit float PCM is left alone: no spectra, so no dancer, never a guess.
         guard floatFormat, count > 0 else { return }
-        let buffers = UnsafeMutableAudioBufferListPointer(list)
+        // The list's buffers, laid out after its count (the C variable-length array).
+        let first = UnsafeMutableRawPointer(list)
+            .advanced(by: MemoryLayout<AudioBufferList>.offset(of: \AudioBufferList.mBuffers)!)
+            .assumingMemoryBound(to: AudioBuffer.self)
+        let buffers = UnsafeMutableBufferPointer(start: first, count: Int(list.pointee.mNumberBuffers))
         // Item time when AVFoundation gives it; otherwise the spectra carry no stamp (NaN) and the
         // dancer reads them as they arrive. The first buffers of a seeked file come unstamped.
         let origin = start.isNumeric ? start.seconds : .nan

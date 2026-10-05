@@ -539,11 +539,12 @@ struct TuningLoader: View {
 
 // MARK: - Sections and the top bar
 
-/// The three root screens. This name shadows SwiftUI's `Section` inside this module; a list
+/// The root screens. This name shadows SwiftUI's `Section` inside this module; a list
 /// section is written `SwiftUI.Section`.
 enum Section: String, CaseIterable, Identifiable {
     case receiver
     case transmission
+    case picsvids
     case account
 
     var id: String { rawValue }
@@ -552,12 +553,14 @@ enum Section: String, CaseIterable, Identifiable {
         switch self {
         case .receiver: return "Receiver"
         case .transmission: return "Transmission"
+        // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
+        case .picsvids: return "Pics/Vids"
         case .account: return "Account"
         }
     }
 }
 
-/// On every root screen: the pigeon and the name at left, the three sections at right. There is
+/// On every root screen: the pigeon and the name at left, the sections at right. There is
 /// no system tab bar, because tvOS paints its focused tab as a white pill.
 struct TopBar: View {
     let current: Section

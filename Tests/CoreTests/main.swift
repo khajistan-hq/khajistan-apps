@@ -1815,6 +1815,333 @@ func realMapWithoutRegionFilesOpensNothing() throws {
     try expect((indus.live ?? 0) > 0, "indus lost its live count with the shard list")
 }
 
+// MARK: - Pics/Vids
+
+struct PnvFixtureCase: Decodable {
+    let row: PnvRow
+    let thumb: String?
+    let medium: String?
+    let poster: String?
+    let full: String?
+    let tile: String?
+    let candidates: [String]
+}
+
+struct PnvFixture: Decodable {
+    let cases: [PnvFixtureCase]
+}
+
+func pnvFixture() throws -> PnvFixture {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("pnv-media-fixture.json")
+    return try JSONDecoder().decode(PnvFixture.self, from: try Data(contentsOf: url))
+}
+
+func pnvRow(_ json: String) throws -> PnvRow { try decode(PnvRow.self, json) }
+
+func pnvMismatches(_ c: PnvFixtureCase) -> [String] {
+    var wrong: [String] = []
+    func check(_ name: String, _ got: URL?, _ want: String?) {
+        if got?.absoluteString != want { wrong.append("\(c.row.media_key) \(name): got \(got?.absoluteString ?? "nil"), want \(want ?? "nil")") }
+    }
+    check("thumb", PnvMedia.thumb(c.row), c.thumb)
+    check("medium", PnvMedia.medium(c.row), c.medium)
+    check("poster", PnvMedia.poster(c.row), c.poster)
+    check("full", PnvMedia.full(c.row), c.full)
+    check("tile", PnvMedia.tile(c.row), c.tile)
+    let candidates = PnvMedia.pictureCandidates(c.row).map(\.absoluteString)
+    // The site lists [full, medium, thumb] with blanks dropped; the app also drops repeats.
+    var seen = Set<String>()
+    let expected = c.candidates.filter { seen.insert($0).inserted }
+    if candidates != expected { wrong.append("\(c.row.media_key) candidates: got \(candidates), want \(expected)") }
+    return wrong
+}
+
+func pnvMediaMatchesTheSitesJS() throws {
+    let fx = try pnvFixture()
+    var wrong: [String] = []
+    for c in fx.cases { wrong += pnvMismatches(c) }
+    try expect(wrong.isEmpty, wrong.prefix(5).joined(separator: "; "))
+    // The sample has to cover what the site serves: every host, both kinds, rows with no size.
+    let combos = Set(fx.cases.map { "\($0.row.media_host ?? "none")/\($0.row.kind)" })
+    for want in ["r2/image", "r2/video", "supabase/image", "supabase/video", "ktv/video"] {
+        try expect(combos.contains(want), "no \(want) row in the fixture")
+    }
+    try expect(fx.cases.contains { $0.row.width == nil }, "no row without a size")
+    try expect(fx.cases.count >= 40, "only \(fx.cases.count) cases")
+    // Rows with no endpoint produce no URL at all, in every form.
+    for key in ["edge-empty", "edge-null"] {
+        let c = try require(fx.cases.first { $0.row.media_key == key }, key)
+        try expect([PnvMedia.thumb(c.row), PnvMedia.medium(c.row), PnvMedia.poster(c.row), PnvMedia.full(c.row), PnvMedia.tile(c.row)].allSatisfy { $0 == nil }, key)
+        try expect(PnvMedia.pictureCandidates(c.row).isEmpty, key)
+    }
+}
+
+func pnvComparatorCanFail() throws {
+    let fx = try pnvFixture()
+    // The same row filed on another host must disagree with the site's answer for it.
+    let r2 = try require(fx.cases.first { $0.row.media_host == "r2" && $0.row.kind == "image" })
+    let moved = PnvFixtureCase(
+        row: try pnvRow(#"{"media_key":"m","kind":"image","resource_type":"image","media_host":"supabase","resource_endpoint":"\#(r2.row.resource_endpoint ?? "")"}"#),
+        thumb: r2.thumb, medium: r2.medium, poster: r2.poster, full: r2.full, tile: r2.tile, candidates: r2.candidates)
+    try expect(!pnvMismatches(moved).isEmpty, "a row on the wrong host still matched")
+}
+
+func pnvKtvVideosGoThroughTvPlay() throws {
+    let ktv = try pnvRow(#"{"media_key":"ktv-a","kind":"video","resource_type":"video","media_host":"ktv","resource_endpoint":"tv-afghanmusic-2022-mp4"}"#)
+    let full = try require(PnvMedia.full(ktv))
+    try expectEqual(full.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=tv-afghanmusic-2022-mp4")
+    // The same route the Transmission player resolves, with the id kept.
+    let route = try require(Transmission.route(for: full.absoluteString))
+    try expectEqual(route, PlayRoute.tvPlay(full))
+    let request = try require(Transmission.request(for: route, accessToken: "T"))
+    try expectEqual(request.url, full)
+    try expectEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer T")
+    try expectEqual(try Transmission.carrier(from: Data(#"{"url":"https://cdn.example/x.m3u8"}"#.utf8), route: route).absoluteString, "https://cdn.example/x.m3u8")
+    // Negative: a row that is not ktv is a plain file and needs no session.
+    let r2 = try pnvRow(#"{"media_key":"r","kind":"video","resource_type":"video","media_host":"r2","resource_endpoint":"a/media/b/b"}"#)
+    let plain = try require(Transmission.route(for: try require(PnvMedia.full(r2)).absoluteString))
+    guard case .direct = plain else { throw Failure(description: "an r2 video must be a direct file, got \(plain)") }
+    try expectEqual(Transmission.request(for: plain, accessToken: "T"), nil)
+}
+
+func pnvRowsDecode() throws {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("pnv-rows-sample.json")
+    let rows = try JSONDecoder().decode([PnvRow].self, from: try Data(contentsOf: url))
+    try expect(rows.count >= 30, "\(rows.count) rows")
+    try expect(rows.contains { $0.aspect == nil } && rows.contains { $0.aspect != nil })
+    try expectClose(try require(try pnvRow(#"{"media_key":"a","kind":"image","width":1170,"height":2080}"#).aspect), 1170.0 / 2080.0)
+    // A zero or missing size is no shape at all, not a division by zero.
+    try expectEqual(try pnvRow(#"{"media_key":"a","kind":"image","width":0,"height":5}"#).aspect, nil)
+    try expectEqual(try pnvRow(#"{"media_key":"a","kind":"image","width":null,"height":null}"#).aspect, nil)
+    try expectThrowsAny { _ = try pnvRow(#"{"kind":"image"}"#) }
+}
+
+func expectThrowsAny(line: Int = #line, _ body: () throws -> Void) throws {
+    do { try body() } catch { return }
+    throw Failure(description: "line \(line): nothing thrown")
+}
+
+func pnvRequests() throws {
+    let page = PnvAPI.pageRequest(keys: ["a", "b-c", "d_e"], kind: .video, offset: 120, wantCount: true)
+    try expectEqual(page.url?.absoluteString,
+        "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/pnv_media?select=\(PnvAPI.columns)&account_key=in.(a,b-c,d_e)&kind=eq.video&order=feed_rank.asc,corpus.asc&limit=60&offset=120")
+    try expectEqual(page.value(forHTTPHeaderField: "Prefer"), "count=exact")
+    try expectEqual(page.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(page.value(forHTTPHeaderField: "Authorization"), "Bearer \(KJConfig.anonKey)")
+    // The same columns the site selects.
+    try expectEqual(PnvAPI.columns, "media_key,account,account_key,shortcode,child_index,kind,resource_type,media_host,resource_endpoint,width,height,tags,taken_at,corpus,feed_rank,da_id")
+    // Negative: no kind, no count asked for, a key that is not plain gets quoted.
+    let later = PnvAPI.pageRequest(keys: ["a b", "q\"z"], kind: nil, offset: 60, wantCount: false)
+    let text = later.url?.absoluteString ?? ""
+    try expect(!text.contains("kind="), text)
+    try expectEqual(later.value(forHTTPHeaderField: "Prefer"), nil)
+    try expect(text.contains("account_key=in.(%22a%20b%22,%22q%5C%22z%22)"), text)
+    let accounts = PnvAPI.accountsRequest()
+    try expectEqual(accounts.url?.absoluteString,
+        "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/pnv_accounts?select=slug,handle,url,platform,region,region_token,country,corpus,account_key")
+    try expectEqual(accounts.httpMethod ?? "GET", "GET")
+    let facets = PnvAPI.facetsRequest()
+    try expectEqual(facets.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/rpc/pnv_facets")
+    try expectEqual(facets.httpMethod, "POST")
+    try expectEqual(String(data: facets.httpBody ?? Data(), encoding: .utf8), "{}")
+}
+
+func pnvContentRange() throws {
+    try expectEqual(PnvAPI.total(fromContentRange: "0-59/99474"), 99474)
+    try expectEqual(PnvAPI.total(fromContentRange: "*/0"), 0)
+    try expectEqual(PnvAPI.total(fromContentRange: "0-59/*"), nil)
+    try expectEqual(PnvAPI.total(fromContentRange: nil), nil)
+    try expectEqual(PnvAPI.total(fromContentRange: "garbage"), nil)
+}
+
+func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
+    let t = token.map { "\"\($0)\"" } ?? "null"
+    return try decode(PnvAccount.self, #"{"slug":"\#(key)","account_key":"\#(key)","region_token":\#(t)}"#)
+}
+
+func pnvAccountKeysFollowTheRosterAndTheFold() throws {
+    let roster = [try pnvAccount("a1", "arabia"), try pnvAccount("a2", "egypt-nile"), try pnvAccount("m1", "egypt"),
+                  try pnvAccount("i1", "indus"), try pnvAccount("n1", nil)]
+    try expectEqual(PnvAPI.accountKeys(roster: roster, region: nil), ["a1", "a2", "m1", "i1", "n1"])
+    // Egypt-the-country folds into Mashriq; the token `egypt` is the Maghreb and does not.
+    try expectEqual(PnvAPI.accountKeys(roster: roster, region: "arabia"), ["a1", "a2"])
+    try expectEqual(PnvAPI.accountKeys(roster: roster, region: "egypt"), ["m1"])
+    // Nothing on the roster, or a region nobody is filed under: nothing to ask for.
+    try expectEqual(PnvAPI.accountKeys(roster: [], region: nil), nil)
+    try expectEqual(PnvAPI.accountKeys(roster: roster, region: "persia"), nil)
+    try expectEqual(PnvRegions.accountKeysByRegion(roster).keys.sorted(), ["arabia", "egypt", "indus"])
+    try expectEqual(PnvRegions.ordered(["indus", "arabia", "egypt", "zz", "persia"]), ["egypt", "arabia", "persia", "indus", "zz"])
+    try expectEqual(["egypt", "arabia", "persia", "khorasan", "indus", "anatolia", "mystery"].map(PnvRegions.label),
+                    ["Maghreb", "Mashriq", "Persia", "Khorasan", "Indus", "Anatolia", "mystery"])
+}
+
+func pnvSummaryLine() throws {
+    let roster = [try pnvAccount("a1", "arabia"), try pnvAccount("a2", "indus"), try pnvAccount("a3", "indus")]
+    let facets = try decode(PnvFacets.self, #"{"totals":{"media":99474},"accounts":[{"slug":"a1","media":5},{"slug":"a2","media":0}]}"#)
+    // a2 has no media; a3 is not in the counts at all and stays.
+    try expectEqual(PnvAPI.summary(roster: roster, facets: facets), "99,474 pictures and videos \u{00B7} 2 accounts \u{00B7} 2 regions")
+    try expectEqual(PnvAPI.summary(roster: roster, facets: nil), "3 accounts")
+    try expectEqual(PnvAPI.summary(roster: roster, facets: try decode(PnvFacets.self, #"{"accounts":[]}"#)), "3 accounts")
+}
+
+func pnvCaptions() throws {
+    let dba = try pnvRow(#"{"media_key":"k","kind":"image","corpus":"dba","shortcode":"AbC_1","da_id":null}"#)
+    try expectEqual(PnvAPI.captionRequest(for: dba)?.url?.absoluteString,
+                    "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/dba_posts?select=shortcode,caption&shortcode=in.(AbC_1)")
+    let da = try pnvRow(#"{"media_key":"da-9","kind":"image","corpus":"digital_archive","da_id":9}"#)
+    try expectEqual(PnvAPI.captionRequest(for: da)?.url?.absoluteString,
+                    "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/digital_archive?select=id,description&id=in.(9)")
+    // Khajistan TV rows have neither.
+    let ktv = try pnvRow(#"{"media_key":"ktv-a","kind":"video","corpus":"khajistan-tv","media_host":"ktv"}"#)
+    try expectEqual(PnvAPI.captionRequest(for: ktv), nil)
+    try expectEqual(PnvAPI.caption(from: Data(#"[{"shortcode":"x","caption":"Lahore, 1990 https://t.co/abc #lahore  #old\n\nbazaar"}]"#.utf8)), "Lahore, 1990 bazaar")
+    try expectEqual(PnvAPI.caption(from: Data(#"[{"id":9,"description":"A shrine."}]"#.utf8)), "A shrine.")
+    // Nothing left after the strip, no rows, and not JSON at all are all no caption.
+    try expectEqual(PnvAPI.caption(from: Data(##"[{"caption":"#a #b https://x.y"}]"##.utf8)), nil)
+    try expectEqual(PnvAPI.caption(from: Data("[]".utf8)), nil)
+    try expectEqual(PnvAPI.caption(from: Data("nope".utf8)), nil)
+}
+
+func pnvMetaLine() throws {
+    let row = try pnvRow(#"{"media_key":"k","kind":"video","width":1170,"height":2080,"taken_at":"2026-08-27T04:29:06+00:00"}"#)
+    try expectEqual(PnvAPI.metaLine(for: row, regionToken: "arabia", date: { _ in "Aug 27, 2026" }), "Video \u{00B7} Mashriq \u{00B7} Aug 27, 2026 \u{00B7} 1170\u{00D7}2080")
+    let bare = try pnvRow(#"{"media_key":"k","kind":"image"}"#)
+    try expectEqual(PnvAPI.metaLine(for: bare, regionToken: nil, date: { _ in "x" }), "Picture")
+}
+
+func pnvLayoutPlacesEachRowInTheShortestColumn() throws {
+    func r(_ key: String, _ w: Int?, _ h: Int?) throws -> PnvRow {
+        let size = (w != nil && h != nil) ? #","width":\#(w!),"height":\#(h!)"# : ""
+        return try pnvRow(#"{"media_key":"\#(key)","kind":"image"\#(size)}"#)
+    }
+    // Heights (h/w + .03): tall 2.03, square 1.03, wide .53, unknown 1.03.
+    let rows = [try r("tall", 1, 2), try r("sq", 1, 1), try r("wide", 2, 1), try r("unk", nil, nil), try r("wide2", 2, 1)]
+    let cols = PnvLayout.columns(rows, count: 3).map { $0.map(\.media_key) }
+    // tall -> 0, sq -> 1, wide -> 2 (0 is 2.03, 1 is 1.03, 2 is 0), unk -> 2 (.53 < 1.03), wide2 -> 2 (1.56 vs 1.03: goes to 1).
+    try expectEqual(cols, [["tall"], ["sq", "wide2"], ["wide", "unk"]])
+    // Appending never moves a tile already placed.
+    let longer = rows + [try r("more", 1, 1), try r("more2", 3, 4)]
+    let before = PnvLayout.columns(rows, count: 3)
+    let after = PnvLayout.columns(longer, count: 3)
+    for k in 0..<3 { try expect(Array(after[k].prefix(before[k].count)) == before[k], "column \(k) moved") }
+    try expectEqual(PnvLayout.columns(rows, count: 0).count, 0)
+    try expectEqual(PnvLayout.columns([], count: 4).map(\.count), [0, 0, 0, 0])
+    try expectEqual(PnvLayout.columns(rows, count: 1).first?.count, 5)
+}
+
+func adultNoticeSuppressionRule() throws {
+    // The site's three states, plus a confirmed account.
+    try expectEqual(AdultNotice.shouldShow(stored: nil, session: nil, confirmed18: false), true)
+    try expectEqual(AdultNotice.shouldShow(stored: "dismissed", session: nil, confirmed18: false), false)
+    try expectEqual(AdultNotice.shouldShow(stored: nil, session: "ok", confirmed18: false), false)
+    try expectEqual(AdultNotice.shouldShow(stored: nil, session: nil, confirmed18: true), false)
+    // Negative: any other stored value is not a dismissal.
+    try expectEqual(AdultNotice.shouldShow(stored: "ok", session: "dismissed", confirmed18: false), true)
+    try expectEqual(AdultNotice.shouldShow(stored: "", session: "", confirmed18: false), true)
+    try expectEqual(AdultNotice.key, "kj_adult_notice")
+}
+
+func adultNoticeProfileRequest() throws {
+    let id = "0b9d1c5e-6f2a-4c53-9a7e-1d2c3b4a5f60"
+    let request = try require(PnvAPI.profileRequest(userId: id, accessToken: "TOKEN"))
+    try expectEqual(request.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/profiles?select=nsfw_age_confirmed&id=eq.\(id)")
+    // It is the viewer's own token, with the anon key beside it.
+    try expectEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer TOKEN")
+    try expectEqual(request.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    // Negative: an id that is not an id adds no filter and sends nothing.
+    for bad in ["", "x&select=*", "a b", "1) or (1=1", "ABCDEF"] {
+        try expectEqual(PnvAPI.profileRequest(userId: bad, accessToken: "T"), nil, bad)
+    }
+}
+
+func adultNoticeWordingIsTheSitesOwn() throws {
+    let js = String(decoding: try realFile("scripts/kj-adult-notice.js"), as: UTF8.self)
+    let start = try require(js.range(of: "<strong>"), "no <strong> in the notice")
+    let end = try require(js.range(of: "</p>' +", range: start.upperBound..<js.endIndex), "no </p> in the notice")
+    // The copy is JS string fragments joined with +; join them back.
+    var text = String(js[start.upperBound..<end.lowerBound])
+    text = text.replacingOccurrences(of: "</strong>", with: "|")
+    text = text.replacingOccurrences(of: #"'\s*\+\s*'"#, with: "", options: .regularExpression)
+    let parts = text.split(separator: "|").map(String.init)
+    try expectEqual(parts.count, 2, text)
+    try expectEqual(parts[0], AdultNotice.heading)
+    try expectEqual(parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "' ")), AdultNotice.body)
+    try expect(js.contains("Don\u{2019}t ask again</label>") || js.contains("Don’t ask again"), "checkbox label changed")
+    try expect(js.contains("'localStorage'") && js.contains("'dismissed'") && js.contains("var KEY = 'kj_adult_notice'"))
+}
+
+// MARK: - Khajistan Radio mixes
+
+func realMixRegister() throws -> MixRegister {
+    try JSONDecoder().decode(MixRegister.self, from: try realFile("data/radio/mixtapes.json"))
+}
+
+func realMixesDecodeAndAllPlay() throws {
+    let data = try realFile("data/radio/mixtapes.json")
+    let register = try JSONDecoder().decode(MixRegister.self, from: data)
+    let raw = try require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    try expectEqual(register.mixes.count, raw["mix_count"] as? Int, "the register's own count")
+    let playable = Mixes.playable(register.mixes)
+    try expectEqual(playable.count, register.mixes.count, "every mix in the register plays")
+    try expectEqual(playable.map(\.id), register.mixes.map(\.id), "the register's order is kept")
+    for mix in playable {
+        let url = try require(Mixes.playURL(mix), mix.id)
+        try expectEqual(url.scheme, "https")
+        try expect(url.pathExtension == "mp3", mix.id)
+    }
+    // Where the record says a place, the label says it; where it says none, there is none.
+    let byID = Dictionary(uniqueKeysWithValues: register.mixes.map { ($0.id, $0) })
+    try expectEqual(byID["mix_psychedelistan"]?.place, "Kurdistan")
+    try expectEqual(byID["mix_pia"]?.place, "Pakistan")
+    try expectEqual(byID["mix_mashriq_maghreb"]?.place, nil)
+    try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
+}
+
+func mixPresentationRules() throws {
+    let both = try decode(Mix.self, #"{"id":"a","title":"  ","play_url":"https://x.example/a.mp3","country":"Pakistan","territory":"Punjab","mixed_by":" DJ Z "}"#)
+    try expectEqual(both.name, "Khajistan Radio mix")
+    try expectEqual(both.place, "Punjab, Pakistan")
+    try expectEqual(both.attribution, "A Khajistan Radio mix, mixed by DJ Z and carried by Khajistan.")
+    let same = try decode(Mix.self, #"{"id":"a","title":"T","play_url":"https://x.example/a.mp3","country":"Cyprus","territory":"Cyprus"}"#)
+    try expectEqual(same.place, "Cyprus")
+    try expectEqual(same.name, "T")
+    try expectEqual(same.attribution, "A Khajistan Radio mix, made and carried by Khajistan.")
+    // Negative: blank strings are no place and no maker.
+    let blank = try decode(Mix.self, #"{"id":"a","play_url":"https://x.example/a.mp3","country":" ","territory":"","mixed_by":""}"#)
+    try expectEqual(blank.place, nil)
+    try expectEqual(blank.attribution, "A Khajistan Radio mix, made and carried by Khajistan.")
+}
+
+func mixesRefuseWhatMustNotPlay() throws {
+    func mix(_ extra: String) throws -> Mix { try decode(Mix.self, #"{"id":"m",\#(extra)}"#) }
+    let good = try mix(#""play_url":"https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/public/audio/a.mp3""#)
+    let hidden = try mix(#""play_url":"https://x.example/a.mp3","hidden":true"#)
+    let notHidden = try mix(#""play_url":"https://x.example/a.mp3","hidden":false"#)
+    try expectEqual(Mixes.playable([good, hidden, notHidden]).count, 2)
+    for bad in ["http://x.example/a.mp3", "https://localhost/a.mp3", "https://printer.local/a.mp3", "https://10.0.0.5/a.mp3",
+                "https://192.168.1.9/a.mp3", "https://172.20.0.1/a.mp3", "https://127.0.0.1/a.mp3", "https://169.254.1.1/a.mp3",
+                "https://0.0.0.0/a.mp3", "https://[::1]/a.mp3", "file:///etc/passwd", "not a url", ""] {
+        try expectEqual(Mixes.playable([try mix(#""play_url":"\#(bad)""#)]).count, 0, bad)
+    }
+    // Negative: the public neighbours of the private ranges are fine.
+    for ok in ["https://172.32.0.1/a.mp3", "https://172.15.0.1/a.mp3", "https://11.0.0.1/a.mp3", "https://193.168.0.1/a.mp3"] {
+        try expectEqual(Mixes.playable([try mix(#""play_url":"\#(ok)""#)]).count, 1, ok)
+    }
+    try expectEqual(Mixes.registerURL.absoluteString, "https://khajistan-archive.pages.dev/data/radio/mixtapes.json")
+}
+
+func mixClockFormat() throws {
+    try expectEqual(Mixes.clock(0), "0:00")
+    try expectEqual(Mixes.clock(9.9), "0:09")
+    try expectEqual(Mixes.clock(75), "1:15")
+    try expectEqual(Mixes.clock(3599), "59:59")
+    try expectEqual(Mixes.clock(3600), "1:00:00")
+    try expectEqual(Mixes.clock(5053), "1:24:13")
+    try expectEqual(Mixes.clock(-1), "\u{2014}:\u{2014}")
+    try expectEqual(Mixes.clock(.nan), "\u{2014}:\u{2014}")
+    try expectEqual(Mixes.clock(.infinity), "\u{2014}:\u{2014}")
+}
+
 // MARK: - Runner
 
 let tests: [(String, () throws -> Void)] = [
@@ -1873,6 +2200,24 @@ let tests: [(String, () throws -> Void)] = [
     ("Real map with the extensions composes, doors in place", realRegionMapWithExtensions),
     ("Real map with no regionFiles opens nothing", realMapWithoutRegionFilesOpensNothing),
     ("Real map shows the receiver's region names", realMapUsesReceiverNames),
+    ("Pics/Vids: URLs match the site's KJMedia (differential)", pnvMediaMatchesTheSitesJS),
+    ("Pics/Vids: the differential comparator can fail", pnvComparatorCanFail),
+    ("Pics/Vids: Khajistan TV videos go through tv-play", pnvKtvVideosGoThroughTvPlay),
+    ("Pics/Vids: rows decode, with and without a size", pnvRowsDecode),
+    ("Pics/Vids: the page's requests", pnvRequests),
+    ("Pics/Vids: Content-Range totals", pnvContentRange),
+    ("Pics/Vids: account keys follow the roster and the fold", pnvAccountKeysFollowTheRosterAndTheFold),
+    ("Pics/Vids: the summary line", pnvSummaryLine),
+    ("Pics/Vids: captions", pnvCaptions),
+    ("Pics/Vids: the viewer's meta line", pnvMetaLine),
+    ("Pics/Vids: the shortest column takes the next tile", pnvLayoutPlacesEachRowInTheShortestColumn),
+    ("Adult notice: the suppression rule", adultNoticeSuppressionRule),
+    ("Adult notice: the profile request", adultNoticeProfileRequest),
+    ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
+    ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
+    ("Mix presentation rules", mixPresentationRules),
+    ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
+    ("Mix clock format", mixClockFormat),
 ]
 
 var passed = 0, failed = 0, skipped = 0

@@ -14,6 +14,8 @@ final class AppModel {
     let auth: AuthStore
     let receiver: ReceiverStore
     let transmission: TransmissionStore
+    let pnv: PicsVidsStore
+    let mixes = MixesStore()
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
 
@@ -36,10 +38,12 @@ final class AppModel {
         self.auth = auth
         self.receiver = ReceiverStore()
         self.transmission = TransmissionStore(auth: auth)
+        self.pnv = PicsVidsStore(auth: auth)
         self.skin = Skin.current(at: Date(), calendar: .current)
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
+        case "picsvids": self.section = .picsvids
         case "account": self.section = .account
         default: self.section = .receiver
         }

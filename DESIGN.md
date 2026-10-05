@@ -60,7 +60,7 @@ way the website marks the brand link.
 
 - **Top bar**, on every root screen: the animated pigeon (72pt) and **KHAJISTAN** (40pt black,
   −0.03 em) with *Media of the Middle World* (small, faint) at left; RECEIVER · TRANSMISSION ·
-  ACCOUNT as kickers at right. Select moves between sections. No system tab bar: tvOS paints
+  PICS/VIDS · ACCOUNT as kickers at right (PICS/VIDS is the website's own nav label). Select moves between sections. No system tab bar: tvOS paints
   its focused tab as a white pill.
 - **Status band**: a full-width `band` strip, kickers in `onBand`, leading text and trailing
   text. It heads every player, as the website's console bar does.
@@ -81,6 +81,18 @@ way the website marks the brand link.
   and its label sits on a yellow plate with black text. Select opens the region. (Until
   2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
   on the owner's TV focus stuck on one region.)
+- **Khajistan Radio** is the last row of the map area, under the strip: *KHAJISTAN RADIO · 22 mixes*,
+  as wide as the map so that a press down from any region lands on it. It appears once the public
+  register (`/data/radio/mixtapes.json`) has loaded with a mix that plays. Select opens the mixes:
+  crumb RECEIVER → KHAJISTAN RADIO, the name (display), *22 mixes*, then four columns of cards in the
+  register's own order, each the mix's title, the programme block it aired in as a kicker, and
+  *place · language* in small type. A mix is a finished recording Khajistan made, not a live signal,
+  so its player has no LIVE: the band reads KHAJISTAN RECEIVER · the block, and *Khajistan Radio mix*
+  at right. The name is display type on the ground, as radio's is; under it the state, the register's
+  line for the mix, *place · language · decade*, the position (*12:04 / 1:24:13*) and the attribution
+  (*A Khajistan Radio mix, made and carried by Khajistan.*, or *mixed by X and carried by Khajistan.*).
+  A recording has a position: left and right move thirty seconds, up and down move to the
+  neighbouring mix, and a mix that ends rolls on to the next, stopping at the last.
 - **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
   faint), the region's figures, the medium switch (TELEVISION 39 · RADIO 40 · CAMERAS 19 as
   focusable kickers, the current one underlined), then the channel grid: four columns, each card
@@ -105,6 +117,28 @@ way the website marks the brand link.
   UP NEXT 18:15 VINYL RIPS trailing; the panel carries the slot kicker, the title, the show's
   line, KIND and ORIGIN, and the custodian and transfer credits. Off air is OFF AIR in display
   type with the return time.
+
+## Pics/Vids
+
+The website's PICS/VIDS door, `/browse-archive.html` ("Born Digital Media"), read on 2026-10-05
+off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
+
+- **Page**: BORN DIGITAL MEDIA (headline), the site's summary line (*99,474 pictures and videos ·
+  81 accounts · 6 regions*), then two rows of tabs: Everything / Pictures / Videos, and All plus the
+  regions the roster carries, west to east (Maghreb, Mashriq, Anatolia, Persia, Khorasan, Indus).
+  The current tab is underlined; focus is the band plate. Under them the exact count of what the
+  filters leave, then the stream.
+- **Stream**: four columns, the shortest column taking the next tile (the site's `place()`), each
+  tile the object's own shape inside a house-lift plate, never cropped. A video's tile carries
+  *▶ Video*, every tile the account as `@name` in small type. Select opens the viewer; the next page
+  of 60 loads as the end comes into view; the last line is the site's *N objects · that is all of it*.
+- **Notice**: first thing on the page for anyone who has not dismissed it, in the policy file's
+  words, with OK and a *Don't ask again* switch. It blocks nothing; the stream loads under it.
+- **Viewer**: the picture fitted whole on the ground, or the video in AVPlayer. Over it, while waking,
+  the status band (KHAJISTAN PICS/VIDS · @account · PICTURE or VIDEO) and a ground panel with the
+  site's meta line (kind · region · date · size) and the caption. Left and right move through the
+  stream; a clip loops; a Khajistan TV row opens on its poster and says *Sign in to watch Khajistan
+  Transmission.*, and Select opens the sign-in sheet.
 
 ## Motion
 

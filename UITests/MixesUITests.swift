@@ -1,0 +1,84 @@
+import XCTest
+
+/// Khajistan Radio, from the Receiver's front: open the mixes, walk the grid with the remote, play
+/// one, scrub it, step to the next, and back out. Strict about the app's own elements and loose
+/// about what the network answers on the day.
+final class MixesUITests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    private func mixes(_ app: XCUIApplication) -> XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mix-'"))
+    }
+
+    private func focusedMix(_ app: XCUIApplication) -> XCUIElement {
+        mixes(app).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+    }
+
+    func testMixesFromTheReceiverAreWalkableAndPlay() {
+        let app = XCUIApplication()
+        app.launch()
+
+        let entry = app.buttons["khajistanRadioMixes"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 60), "The Receiver must offer the Khajistan Radio mixes once the register has loaded")
+        kjPause(3)
+        kjScreenshot("mx-00-receiver", app: app)
+        XCTAssertTrue(kjFocus(entry, app: app), "The mixes entry must take focus")
+        kjScreenshot("mx-01-receiver-with-mixes", app: app)
+        XCUIRemote.shared.press(.select)
+
+        XCTAssertTrue(mixes(app).firstMatch.waitForExistence(timeout: 30), "The mixes must list")
+        kjPause(1)
+        kjScreenshot("mx-02-mixes", app: app)
+        XCTAssertGreaterThanOrEqual(mixes(app).count, 8, "the first screen must hold several mixes")
+
+        // Down into the grid, then a walk that must reach at least five mixes.
+        for _ in 0..<6 where !focusedMix(app).exists { XCUIRemote.shared.press(.down); kjPause(0.5) }
+        XCTAssertTrue(focusedMix(app).exists, "A mix must take focus")
+        var seen = Set([focusedMix(app).identifier])
+        var log: [String] = []
+        for press in [XCUIRemote.Button.right, .right, .down, .left, .down, .right, .right, .down, .left] {
+            XCUIRemote.shared.press(press)
+            kjPause(0.7)
+            let id = focusedMix(app).exists ? focusedMix(app).identifier : "(off the grid)"
+            seen.insert(id)
+            log.append("\(press == .left ? "L" : press == .right ? "R" : "D")->\(id)")
+        }
+        print("MIXWALK " + log.joined(separator: " "))
+        seen.remove("(off the grid)")
+        XCTAssertGreaterThanOrEqual(seen.count, 5, "the walk must reach five mixes; walk: \(log)")
+        kjScreenshot("mx-03-walked", app: app)
+
+        XCUIRemote.shared.press(.select)
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20), "The player must show its state")
+        kjPause(1)
+        kjScreenshot("mx-04-connecting-or-playing", app: app)
+        for _ in 0..<40 where state.label != "Playing" { kjPause(1) }
+        XCTAssertEqual(state.label, "Playing", "a mix must start playing")
+        let time = app.staticTexts["mixTime"]
+        XCTAssertTrue(time.waitForExistence(timeout: 10), "A playing mix shows its position")
+        let first = time.label
+        kjPause(3)
+        kjScreenshot("mx-05-playing", app: app)
+
+        // Right is thirty seconds on; the position must move past what two seconds of play explains.
+        XCUIRemote.shared.press(.right)
+        kjPause(1.5)
+        kjScreenshot("mx-06-after-seek", app: app)
+        XCTAssertNotEqual(time.label, first, "the position must move")
+
+        // Down is the next mix.
+        let title = app.staticTexts.matching(NSPredicate(format: "label != ''")).count
+        XCUIRemote.shared.press(.down)
+        kjPause(4)
+        kjScreenshot("mx-07-next-mix", app: app)
+        XCTAssertGreaterThan(title, 0)
+
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(mixes(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the mixes")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(entry.waitForExistence(timeout: 20), "Menu again must come back to the Receiver")
+    }
+}

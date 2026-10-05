@@ -357,7 +357,7 @@ final class TransmissionStore {
 }
 
 /// Turns down every redirect, so the 3xx itself comes back as the answer and is not used.
-private final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
+final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,

@@ -14,6 +14,8 @@ final class AppModel {
     let auth: AuthStore
     let receiver: ReceiverStore
     let transmission: TransmissionStore
+    /// Where a Top Shelf link asked to go. The screen it names reads it and clears it.
+    var link: DeepLink?
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
 
@@ -44,6 +46,16 @@ final class AppModel {
         default: self.section = .receiver
         }
         watchTheSky()
+    }
+
+    /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.
+    func open(_ url: URL) {
+        guard let link = DeepLink(url: url) else { return }
+        switch link {
+        case .receiver, .region: section = .receiver
+        case .transmission, .channel: section = .transmission
+        }
+        self.link = link
     }
 
     /// Looks at the clock once a minute and changes the skin when the hour crosses a band.

@@ -127,6 +127,57 @@ func skinColours() throws {
     try expectEqual(try JSONDecoder().decode([Skin].self, from: encoded), [.grove])
 }
 
+// MARK: - Deep links
+
+func deepLinksParse() throws {
+    let cases: [(String, DeepLink)] = [
+        ("khajistan://receiver", .receiver),
+        ("khajistan://receiver/", .receiver),
+        ("KHAJISTAN://Receiver", .receiver),
+        ("khajistan://receiver/indus", .region("indus")),
+        ("khajistan://receiver/egypt-nile", .region("egypt-nile")),
+        ("khajistan://receiver/indus/", .region("indus")),
+        ("khajistan://transmission", .transmission),
+        ("khajistan://transmission/1", .channel(1)),
+        ("khajistan://transmission/2", .channel(2)),
+    ]
+    for (text, link) in cases {
+        try expectEqual(DeepLink(url: try require(URL(string: text))), link, text)
+    }
+    // Every link the extension builds reads back as itself.
+    for link in [DeepLink.receiver, .region("indus"), .region("central-asia"), .transmission, .channel(1), .channel(2)] {
+        try expectEqual(DeepLink(url: link.url), link, link.url.absoluteString)
+    }
+    // A region id that is not one does not become a link to it.
+    try expectEqual(DeepLink.region("../x").url, DeepLink.receiver.url)
+}
+
+func deepLinksRefuse() throws {
+    let refused = [
+        "https://receiver/indus",                 // another scheme
+        "khajistan://",                           // no host
+        "khajistan://library",                    // a screen the app does not have
+        "khajistan://receiver/indus/extra",       // too deep
+        "khajistan://receiver//indus",
+        "khajistan://receiver/Indus",             // ids are lower case
+        "khajistan://receiver/-indus",
+        "khajistan://receiver/in--dus",
+        "khajistan://receiver/in%20dus",
+        "khajistan://transmission/3",             // two channels
+        "khajistan://transmission/0",
+        "khajistan://transmission/01",
+        "khajistan://transmission/+1",
+        "khajistan://transmission/one",
+        "khajistan://receiver?region=indus",      // no query
+        "khajistan://receiver#indus",             // no fragment
+        "khajistan://user@receiver",              // no user
+        "khajistan://receiver:80",                // no port
+    ]
+    for text in refused {
+        try expectEqual(DeepLink(url: try require(URL(string: text), text)), nil, text)
+    }
+}
+
 // MARK: - Receiver index
 
 let indexJSON = #"""
@@ -1835,6 +1886,8 @@ let tests: [(String, () throws -> Void)] = [
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
+    ("Deep links parse", deepLinksParse),
+    ("Deep links refuse what is not one", deepLinksRefuse),
     ("Transmission routes the three shapes", transmissionRoutesTheThreeShapes),
     ("Transmission never sends the token to another host", transmissionNeverSendsTheTokenToAnotherHost),
     ("Transmission rejects", transmissionRejects),

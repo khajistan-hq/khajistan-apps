@@ -23,6 +23,29 @@ struct ReceiverView: View {
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
+        // Read again when the index lands: a link that opened the app arrives before it.
+        .task(id: PendingLink(link: model.link, indexReady: model.receiver.index != nil)) { follow(model.link) }
+    }
+
+    private struct PendingLink: Hashable {
+        let link: DeepLink?
+        let indexReady: Bool
+    }
+
+    /// A Top Shelf link: the receiver's front, or one region's page over it. A region link waits
+    /// for the index; one the index does not list opens the front.
+    private func follow(_ link: DeepLink?) {
+        switch link {
+        case .receiver:
+            path = []
+            model.link = nil
+        case .region(let id):
+            guard let index = model.receiver.index else { return }
+            path = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
+            model.link = nil
+        default:
+            break
+        }
     }
 
     @ViewBuilder

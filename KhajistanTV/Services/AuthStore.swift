@@ -1,5 +1,8 @@
 import Foundation
 import Observation
+#if canImport(TVServices)
+import TVServices
+#endif
 
 enum AuthStoreError: LocalizedError {
     case unavailable
@@ -36,6 +39,8 @@ final class AuthStore {
         if let data = Keychain.read(Account.preview),
            let text = String(data: data, encoding: .utf8), !text.isEmpty {
             previewPassword = text
+            // Stored before the Top Shelf could read it: moved into the shared group.
+            _ = try? Keychain.write(data, account: Account.preview, shared: true)
         }
     }
 
@@ -87,12 +92,21 @@ final class AuthStore {
             return
         }
         previewPassword = password
-        _ = try? Keychain.write(Data(password.utf8), account: Account.preview)
+        _ = try? Keychain.write(Data(password.utf8), account: Account.preview, shared: true)
+        Self.topShelfChanged()
     }
 
     func clearPreviewPassword() {
         previewPassword = nil
         Keychain.delete(Account.preview)
+        Self.topShelfChanged()
+    }
+
+    /// The Top Shelf's transmission slides read the preview password, so they are drawn again.
+    private static func topShelfChanged() {
+        #if canImport(TVServices)
+        TVTopShelfContentProvider.topShelfContentDidChange()
+        #endif
     }
 
     private func persist(_ fresh: Session) {

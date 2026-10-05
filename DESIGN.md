@@ -123,6 +123,47 @@ the new picture (0.9 s), whose sound fades in once it is actually playing (0.9 s
 Motion keeps the fades and leaves the wipe out.
 Overlays hide 2.6 seconds into playback.
 
+## Top Shelf
+
+The banner tvOS draws above the app row while the Khajistan icon has focus, before the app is
+opened. Owner, 2026-10-05: *"make beautiful apple tv like banner when app is hovered on but not
+clicked yet you can use higgsfield but it has to be very khajistan in house style"*.
+
+- **Static images**, shown when the extension has nothing: `Top Shelf Image Wide` (2320×720) and
+  `Top Shelf Image` (1920×720), each with a 2x. The masthead on the day ground: the pigeon master,
+  KHAJISTAN in black type at −0.03 em, and *Media of the Middle World* as a kicker in the accent.
+  tvOS shows the wide image 784 points high across the screen's 1920, so about 280 points of each
+  side are cut off; the group sits inside that. Drawn by `scripts/make-top-shelf.sh` with the
+  extension's own drawing code, never by hand.
+- **The carousel**, `TopShelf/`, a `TVTopShelfContentProvider` in the carousel style `.actions`.
+  Carousel, not sectioned: each slide is a full-screen picture the extension draws, so the banner
+  is in the house style edge to edge; sectioned rows are system posters under system titles. In
+  `.actions` tvOS adds only its own controls (Play, More Info, the arrows, the page dots and
+  "Swipe up for full screen"), drawn in its own white. The slides follow the skin of the hour:
+  - **Receiver**: KHAJISTAN RECEIVER, the live count (`totals.live` in the public
+    `receiver-index.json`), LIVE NOW, the website's sentence, and the core map from
+    `region-shapes.json` drawn as the app draws it, without labels. More Info opens the receiver.
+  - **Channel 1, Channel 2**: what the station clock has on each now (show, programme, hours in
+    PKT, the show's line, up next), or OFF AIR and when it returns; the pigeon at right. Play
+    tunes the channel, More Info opens the station page. The schedule is asked for without a
+    password first, then with the preview password, which the app keeps in the keychain group
+    `$(AppIdentifierPrefix)com.khajistan.tv.shared` that it shares with the extension. Keychain
+    sharing needs only the team prefix, so a free Apple ID's signing carries it.
+  - **Transmission**, in place of the two channels when no schedule can be read: the website's
+    own description of the station, and the pigeon.
+  - A slide that cannot be fetched is left out. With nothing at all, tvOS shows the static image.
+  - Everything sits above 740 points (the app row covers the slide from 784, and the opened
+    carousel puts its buttons at the bottom centre) and between 200 and 1720 (its arrows).
+- **Links**: `khajistan://receiver`, `khajistan://receiver/<region id>`,
+  `khajistan://transmission`, `khajistan://transmission/<1 or 2>` (`Core/DeepLink.swift`).
+  Anything else is ignored.
+- **Higgsfield** was offered for this banner by the owner in chat on 2026-10-05, which widens the
+  2026-10-04 pigeon ruling (loading states and transitions) to the Top Shelf, for the house pigeon
+  only and never presented as an archive holding. It is not used: the pigeon master is the
+  brand's own mark and reads better on a still banner than a frame of the photoreal bird. Nothing
+  was spent.
+- Pics/Vids has no section on this branch and no slide.
+
 ## Assets
 
 `khajistan-pigeon.gif` is bundled from `archive/assets` unmodified (the 1080px master; owner:

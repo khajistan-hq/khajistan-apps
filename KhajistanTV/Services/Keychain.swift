@@ -30,12 +30,27 @@ enum Keychain {
         return found as? Data
     }
 
-    /// Replaces whatever is stored under the account: delete first, then add.
-    static func write(_ data: Data, account: String) throws {
+    /// The access group the app shares with its Top Shelf extension, from Info.plist
+    /// (`$(AppIdentifierPrefix)com.khajistan.tv.shared`). Nil when the build left it unexpanded.
+    static var sharedGroup: String? {
+        guard let group = Bundle.main.object(forInfoDictionaryKey: "KJKeychainGroup") as? String,
+              !group.isEmpty, !group.contains("$(") else { return nil }
+        return group
+    }
+
+    /// Replaces whatever is stored under the account: delete first, then add. `shared` puts the
+    /// item in the group the Top Shelf extension can read; a build signed without that
+    /// entitlement (the simulator under CODE_SIGNING_ALLOWED=NO) keeps it in the app's own.
+    static func write(_ data: Data, account: String, shared: Bool = false) throws {
         delete(account)
         var item = identity(account)
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        if shared, let group = sharedGroup {
+            var grouped = item
+            grouped[kSecAttrAccessGroup as String] = group
+            if SecItemAdd(grouped as CFDictionary, nil) == errSecSuccess { return }
+        }
         let status = SecItemAdd(item as CFDictionary, nil)
         guard status == errSecSuccess else { throw Failure(status: status) }
     }

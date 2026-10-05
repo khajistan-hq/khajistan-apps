@@ -118,6 +118,22 @@ way the website marks the brand link.
   line, KIND and ORIGIN, and the custodian and transfer credits. Off air is OFF AIR in display
   type with the return time.
 
+## The Screening Room
+
+- **Shelf**: crumb RECEIVER → THE SCREENING ROOM, the name (display), *On Demand · 32 films in the
+  Screening Room*, then five columns of poster cards in vod.json's order: the poster whole at its own
+  ratio (a lift plate holds a 2:3 space until it arrives), the title in name type at 28pt, the offer
+  line as a kicker, and runtime · languages · country in small type. A region's **On Demand** tab
+  shows the same cards for the films it files.
+- **Player**: the preview full screen, on black where it does not fill the screen. The band reads
+  KHAJISTAN RECEIVER · ON DEMAND with FILM (or THE FULL FILM) at right; the panel carries the state,
+  the title as headline, the record's line, what is showing (*60-second preview · the full film plays
+  here*), the offer line, *A film Khajistan owns and distributes.* and *Watch the full film*. A refusal
+  adds the site's sentence under the button and, for a sign-in or a purchase, the film page's QR code
+  (ink modules on the ground) with its address. The panel stays while that answer is on screen.
+  A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
+  seconds in the full film.
+
 ## Pics/Vids
 
 The website's PICS/VIDS door, `/browse-archive.html` ("Born Digital Media"), read on 2026-10-05

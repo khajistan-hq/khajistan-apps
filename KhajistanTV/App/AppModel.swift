@@ -12,7 +12,9 @@ private enum DefaultsKey {
 @MainActor @Observable
 final class AppModel {
     /// The skin on screen. It follows `skinChoice`, and the hour when the choice is Automatic.
-    private(set) var skin: Skin
+    private(set) var skin: Skin {
+        didSet { clips.skin = skin }
+    }
     /// The root screen on show. The launch argument `-kjtab <name>` picks the one a UI test starts on.
     var section: Section
     let auth: AuthStore
@@ -75,6 +77,7 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
+        clips.skin = skin
         watchTheSky()
     }
 

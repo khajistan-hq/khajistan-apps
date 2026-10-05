@@ -5,50 +5,48 @@ import UIKit
 
 /// The house pigeon, crossing the screen when a channel changes.
 ///
-/// Five flights, generated for the apps and lifted off their backdrop so the app paints the
-/// skin's ground behind the bird (tvos/scripts/flights/, FLIGHTS.json). Owner, 2026-10-05: "4-5
-/// is good of varying lengths but our mascot needs to be consistent in look"; "the pigeon do
-/// flamboyant swirling and twirling to cross ... when the transition needs to be long".
+/// Seven flights, generated for the apps, lifted off their backdrop and laid on each skin's
+/// ground (tvos/scripts/flights/, FLIGHTS.json). Owner, 2026-10-05: "our mascot needs to be
+/// consistent in look"; "5-7 transitions ... lean more in to the flamboyance"; "real pigeon
+/// movements like twirling in air and pigeon showmanship".
 ///
 /// - A **change** flight carries every channel change, in rotation, so no two changes in a row
-///   look the same: Across (the website's wing wipe, remade), Approach, Swoop.
+///   look the same: Across (the website's wing wipe, remade), Approach (into us), Rise (away
+///   from us, wings clapped over the back). Swoop was removed (owner, 2026-10-05: "looks like
+///   it's swimming and seems 2D").
 /// - A **wait** flight crosses the held ground when the next signal is still tuning after the
-///   change flight has gone, Twirl and Spiral in turn, until the picture is ready; the picture
+///   change flight has gone — Twirl, Roller (a roller pigeon's backward somersaults), Spiral,
+///   Display (wing-clapping display flight) in turn — until the picture is ready; the picture
 ///   then cuts in.
 ///
-/// Each flight is HEVC with alpha in up to three sizes; the device plays the largest it can play
-/// smoothly (see `Tier`). Two players, one per role, each prerolled before it is needed, both
-/// layers always in the view tree.
+/// Each flight is ordinary opaque video, one file per skin, so every device decodes it in
+/// hardware: HEVC with alpha dropped frames by the third on the Apple TV HD (2026-10-05). The
+/// skin's ground also sits under the players, so the hand-off at either end is the same
+/// colour. Two players, one per role, each prerolled before it is needed, both layers always
+/// in the view tree.
 @MainActor @Observable
 final class StationClips {
     enum Flight: String, CaseIterable {
-        case across, approach, swoop, twirl, spiral
-        static let change: [Flight] = [.across, .approach, .swoop]
-        static let wait: [Flight] = [.twirl, .spiral]
+        case across, approach, rise, twirl, roller, spiral, display
+        static let change: [Flight] = [.across, .approach, .rise]
+        static let wait: [Flight] = [.twirl, .roller, .spiral, .display]
     }
 
-    /// Which size of each flight this device plays. Measured on the owner's Apple TV HD (A8),
-    /// 2026-10-05: 1080p HEVC with alpha decodes at 24-32 fps against the clips' 24, 720p at
-    /// 44-48. A 4K-capable box on a 4K screen plays 2160 where a flight has it.
+    /// Which size of each flight this device plays: H.264 at 1080, or HEVC at 2160 on a 4K
+    /// box driving a 4K screen, where the flight has a 4K source. The Apple TV HD (AppleTV5)
+    /// has no hardware HEVC decoder and always plays 1080.
     enum Tier: String {
-        case p720 = "720", p1080 = "1080", p2160 = "2160"
+        case p1080 = "1080", p2160 = "2160"
 
         static let device: Tier = {
             var info = utsname()
             uname(&info)
             let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
-            // AppleTV5,3 is the Apple TV HD: no hardware for HEVC with alpha at 1080p.
-            if machine.hasPrefix("AppleTV5") { return .p720 }
+            if machine.hasPrefix("AppleTV5") { return .p1080 }
             return UIScreen.main.nativeBounds.width >= 3800 ? .p2160 : .p1080
         }()
 
-        var fallbacks: [Tier] {
-            switch self {
-            case .p2160: return [.p2160, .p1080, .p720]
-            case .p1080: return [.p1080, .p720]
-            case .p720: return [.p720]
-            }
-        }
+        var fallbacks: [Tier] { self == .p2160 ? [.p2160, .p1080] : [.p1080] }
     }
 
     enum Role { case change, wait }
@@ -63,6 +61,19 @@ final class StationClips {
     private(set) var caption: String?
     /// Set after the sign-on, and kept for the life of the app.
     var signOnPlayed = false
+    /// The skin whose ground the flights are drawn on. A change re-arms both roles with the
+    /// same flights in the new colour.
+    var skin: Skin = .day {
+        didSet {
+            guard skin != oldValue else { return }
+            // A role whose flight is on screen re-arms in the new colour when it lands.
+            let change = armedChange, wait = armedWait
+            Task {
+                if !visible.contains(.change) { await arm(.change, again: change) }
+                if !visible.contains(.wait) { await arm(.wait, again: wait) }
+            }
+        }
+    }
 
     let changePlayer = AVPlayer()
     let waitPlayer = AVPlayer()
@@ -91,9 +102,9 @@ final class StationClips {
 
     func player(_ role: Role) -> AVPlayer { role == .change ? changePlayer : waitPlayer }
 
-    static func url(_ flight: Flight) -> URL? {
+    static func url(_ flight: Flight, skin: Skin) -> URL? {
         for tier in Tier.device.fallbacks {
-            if let url = Bundle.main.url(forResource: "flight-\(flight.rawValue)-\(tier.rawValue)", withExtension: "mov") {
+            if let url = Bundle.main.url(forResource: "flight-\(flight.rawValue)-\(skin.rawValue)-\(tier.rawValue)", withExtension: "mp4") {
                 return url
             }
         }
@@ -224,10 +235,18 @@ final class StationClips {
             do { try await Task.sleep(for: .seconds(length + 1)) } catch { return }
             latch.open()
         }
-        // The first frame may already carry part of the bird: it comes in over a tenth of a second.
-        withAnimation(.easeIn(duration: 0.1)) { _ = visible.insert(role) }
+        // The flight is opaque. A change flight comes up over the picture with the ground, so
+        // the old picture goes the way the ground takes it; a wait flight is already on ground.
+        withAnimation(.easeIn(duration: role == .change ? 0.35 : 0.1)) { _ = visible.insert(role) }
         player.play()
+        #if DEBUG
+        let probe = FrameProbe(item: item); let began = ContinuousClock.now
+        #endif
         await latch.wait()
+        #if DEBUG
+        let dropped = item.accessLog()?.events.map(\.numberOfDroppedVideoFrames).reduce(0, +) ?? -1
+        print("KJFLIGHT \(flight.rawValue) tier=\(Tier.device.rawValue) len=\(String(format: "%.2f", length)) wall=\(ContinuousClock.now - began) dropped=\(dropped) \(probe.finish())")
+        #endif
         timeout.cancel()
         NotificationCenter.default.removeObserver(ended)
         NotificationCenter.default.removeObserver(failed)
@@ -237,13 +256,19 @@ final class StationClips {
         Task { await arm(role) }
     }
 
-    /// Loads the role's next flight in rotation at its first frame, paused, decoder warmed.
-    private func arm(_ role: Role) async {
-        let list = role == .change ? Flight.change : Flight.wait
-        let index = role == .change ? nextChange : nextWait
-        let flight = list[index % list.count]
-        if role == .change { nextChange += 1 } else { nextWait += 1 }
-        guard let url = Self.url(flight) else { return }
+    /// Loads the role's next flight in rotation (or `again`, in the current skin) at its first
+    /// frame, paused, decoder warmed.
+    private func arm(_ role: Role, again: Flight? = nil) async {
+        let flight: Flight
+        if let again {
+            flight = again
+        } else {
+            let list = role == .change ? Flight.change : Flight.wait
+            flight = list[(role == .change ? nextChange : nextWait) % list.count]
+            if role == .change { nextChange += 1 } else { nextWait += 1 }
+        }
+        if role == .change { armedChange = nil } else { armedWait = nil }
+        guard let url = Self.url(flight, skin: skin) else { return }
         let player = player(role)
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
@@ -251,9 +276,86 @@ final class StationClips {
         guard item.status == .readyToPlay else { return }
         _ = await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         _ = await player.preroll(atRate: 1)
+        // A later arm (a skin change) has replaced this one.
+        guard player.currentItem === item else { return }
         if role == .change { armedChange = flight } else { armedWait = flight }
     }
 }
+
+#if DEBUG
+/// For on-device measurement: which video frames of a flight were ready on time, sampled on a
+/// display link of its own thread so a busy main thread cannot hide or fake a skip, and how
+/// late the main thread ran. Counts are by the quarter second of the flight.
+@MainActor
+final class FrameProbe: NSObject {
+    private let video: VideoProbe
+    private var link: CADisplayLink?
+    private var start: CFTimeInterval = 0, last: CFTimeInterval = 0
+    private var ui = 0, uiLate: [Int: Int] = [:]
+    init(item: AVPlayerItem) {
+        video = VideoProbe(item: item)
+        super.init()
+        link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        link?.add(to: .main, forMode: .common)
+    }
+    @objc private func tick(_ l: CADisplayLink) {
+        if start == 0 { start = l.timestamp }
+        if last > 0 {
+            ui += 1
+            if l.timestamp - last > 1.5 / 60 { uiLate[Int((l.timestamp - start) * 4), default: 0] += 1 }
+        }
+        last = l.timestamp
+    }
+    func finish() -> String {
+        link?.invalidate()
+        return "ui=\(ui) ui_late[\(Self.fmt(uiLate))] \(video.finish())"
+    }
+    nonisolated static func fmt(_ d: [Int: Int]) -> String { d.keys.sorted().map { "\(Double($0) / 4)s:\(d[$0]!)" }.joined(separator: ",") }
+}
+
+final class VideoProbe: NSObject, @unchecked Sendable {
+    private let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+    private let item: AVPlayerItem
+    private let lock = NSLock()
+    private var link: CADisplayLink?
+    private var thread: Thread?
+    private var start: CFTimeInterval = 0, lastPTS = -1.0, frames = 0, ticks = 0, gaps: [Int: Int] = [:]
+    init(item: AVPlayerItem) {
+        self.item = item
+        super.init()
+        item.add(output)
+        let thread = Thread { [weak self] in
+            guard let self else { return }
+            let link = CADisplayLink(target: self, selector: #selector(self.tick(_:)))
+            self.lock.withLock { self.link = link }
+            link.add(to: .current, forMode: .default)
+            while !Thread.current.isCancelled { RunLoop.current.run(until: Date().addingTimeInterval(0.1)) }
+        }
+        thread.qualityOfService = .userInteractive
+        self.thread = thread
+        thread.start()
+    }
+    @objc private func tick(_ l: CADisplayLink) {
+        lock.lock(); defer { lock.unlock() }
+        if start == 0 { start = l.timestamp }
+        ticks += 1
+        let t = output.itemTime(forHostTime: l.targetTimestamp)
+        guard output.hasNewPixelBuffer(forItemTime: t), output.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) != nil else { return }
+        let pts = t.seconds
+        if lastPTS >= 0, pts - lastPTS > 1.5 / 24 {
+            gaps[Int((l.timestamp - start) * 4), default: 0] += Int(((pts - lastPTS) * 24).rounded()) - 1
+        }
+        frames += 1
+        lastPTS = pts
+    }
+    func finish() -> String {
+        lock.lock(); link?.invalidate(); let r = "ticks=\(ticks) video=\(frames) video_skipped[\(FrameProbe.fmt(gaps))]"; lock.unlock()
+        thread?.cancel()
+        item.remove(output)
+        return r
+    }
+}
+#endif
 
 /// A one-shot latch: `wait()` returns once `open()` has been called, however many times and
 /// whichever came first. One waiter.

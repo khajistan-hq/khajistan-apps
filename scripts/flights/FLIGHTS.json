@@ -1,5 +1,5 @@
 {
-  "_what": "The five channel-change flights of the house pigeon, generated in Higgsfield on 2026-10-05 at the owner's instruction (\"use higgsfield to make a 4k better pigeon flying transition\"; \"4-5 is good of varying lengths but our mascot needs to be consistent in look\"). Masters, start frames and the empty end frame are owner-local under output/Higgsfield Assets/Khajistan Flights 2026-10-05/. Every start frame was made with gpt_image_2_5 (4K, quality high) from the house reference Pigeon-Reference-4K.jpg on a flat grey (RGB 140) backdrop; every flight ends on the empty grey frame so the bird must leave the shot.",
+  "_what": "The seven channel-change flights of the house pigeon, generated in Higgsfield on 2026-10-05 at the owner's instruction (\"use higgsfield to make a 4k better pigeon flying transition\"; \"4-5 is good of varying lengths but our mascot needs to be consistent in look\"; \"you can have 5-7 transitions ... lean more in to the flamboyance\"; \"real pigeon movements like twirling in air and pigeon showmanship\"). Masters, start frames and the empty end frame are owner-local under output/Higgsfield Assets/Khajistan Flights 2026-10-05/. Every start frame was made with gpt_image_2_5 (4K, quality high) from the house reference Pigeon-Reference-4K.jpg on a flat grey (RGB 140) backdrop; every flight ends on the empty grey frame so the bird must leave the shot.",
   "reference_media": "0043a45a-0e03-4df0-a3ad-b729d20a69a0",
   "end_frame_media": "82d3cdfb-e889-4f06-9ffa-39165a1f9c25",
   "flights": {
@@ -19,13 +19,13 @@
       "source": "3840x2160 24fps 5.0s",
       "note": "straight at the camera, passes over it"
     },
-    "swoop": {
+    "rise": {
       "role": "change",
-      "model": "seedance_2_5 omni_reference 1080p high bitrate",
-      "job": "2ff122ef-24fe-480c-9f1e-3ea488c49208",
-      "start_frame_job": "6dee172b-0f64-4b19-9192-5b19a8b466cd",
-      "source": "1920x1080 24fps 4.0s",
-      "colour_matched": true
+      "model": "kling3_0 mode 4k",
+      "job": "a05c03b6-0e0a-4a43-8538-20fa2ea5cb9c",
+      "start_frame_media": "e7937e0b-803f-4a7a-b098-231cb5863bd6",
+      "source": "3840x2160 24fps 5.0s",
+      "note": "climbs away from the camera, wings clapped over the back in a raised V: a pigeon's display climb"
     },
     "twirl": {
       "role": "wait",
@@ -36,6 +36,14 @@
       "colour_matched": true,
       "note": "the owner's flamboyant swirling crossing, for a long tune"
     },
+    "roller": {
+      "role": "wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "6146c9d3-4509-4abb-86ef-d36dba580362",
+      "source": "1920x1080 24fps 8.0s",
+      "colour_matched": true,
+      "note": "a Birmingham roller's backward somersaults, wings raised, tumbling like a spinning ball, then away"
+    },
     "spiral": {
       "role": "wait",
       "model": "seedance_2_5 omni_reference 1080p high bitrate",
@@ -43,12 +51,36 @@
       "start_frame_job": "f40c7f6d-7d2b-4a38-949f-bc7897521ea0",
       "source": "1920x1080 24fps 6.0s",
       "colour_matched": true
+    },
+    "display": {
+      "role": "wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "ba529ee5-325d-4933-98cd-73d9ff16e7f6",
+      "start_frame_media": "e0e858fb-e6b4-40eb-b037-43f890ddb80d",
+      "source": "1920x1080 24fps 6.0s",
+      "colour_matched": true,
+      "note": "display flight: slow exaggerated wing-claps over the back, a hover with the tail fanned, then across"
     }
   },
   "refused": {
     "kling3_0 4k twirl fd6cc694, swoop 5ae403aa, spiral 18dddd7f": "smoke-like smears behind the wings, a bird frozen in place for 1.5 s, and a body twisted into an S (spiral). Kling 3.0 renders straight flight well and acrobatics badly.",
-    "kling3_0 4k across af0ec211, approach 65ecd863": "wings held still through most of the shot; the kept takes beat."
+    "kling3_0 4k across af0ec211, approach 65ecd863": "wings held still through most of the shot; the kept takes beat.",
+    "kling3_0 4k roller 62dc5723-1e07-4795-8622-93352c480634": "frozen for its first four frames, then the 'roll' is a smear of the wings on a bird that keeps its side-on pose.",
+    "kling3_0 4k display be25ae06-e810-450f-8966-fa87e0d5c3d8": "ghosted, doubled wings in its third and fourth seconds.",
+    "seedance_2_5 roller 536c8539-3d87-4be9-ad4d-f93193ae6677": "a sound roll but the second take (kept) tumbles in place, as a roller does; this one is not refused for a defect and is the spare.",
+    "kling3_0 4k approach 17459310-82fa-4034-b7bd-b6c2a242863c, 468d722e-1ce8-4236-83c8-c62f400312cb": "asked for a sharp close pass over the lens; both hover and fly up and away, never coming nearer than 10% of the frame."
   },
-  "credits": "491.75, measured: the Higgsfield balance read 1821.5 before the first generation and 1329.75 after the last (2026-10-05). An earlier estimate of ~330 in this file undercounted.",
-  "pipeline": "render_flight.py: per-pixel backdrop plate (whichever of end-frames median and flight median is closer to neutral grey), alpha = (C-B).(F-B)/|F-B|^2 with F spread from the solid bird, colourless shadows dropped, colour premultiplied, Seedance plumage Lab-matched to the Kling bird (colour.json, gain capped 1.5), empty tail trimmed, a still-on-edge ending faded over 6 frames; HEVC with alpha at 2160 / 1080 / 720 (no 2160 from a 1080 source)."
+  "credits": "938.25 in all, measured off the Higgsfield balance: 1821.5 before the first generation, 1329.75 after the first five flights, 883.25 after the second round (2026-10-05: two start frames, six takes, two Approach retakes).",
+  "pipeline": "render_flight.py: per-pixel backdrop plate (whichever of end-frames median and flight median is closer to neutral grey), alpha = (C-B).(F-B)/|F-B|^2 with F spread from the solid bird, colourless shadows dropped, colour premultiplied, Seedance plumage Lab-matched to the Kling bird (colour.json, gain capped 1.5); the generator's slow opening retimed to half the clip's median pace (at most 3x) and a close pass over the lens (bird over 60% of the frame, out of focus) at 3x; tail cut where the bird stops moving, a still-on-edge ending faded over 6 frames. Laid on each skin's ground and encoded opaque: H.264 1080 for every flight, HEVC 2160 from a 4K source. HEVC with alpha was dropped 2026-10-05: the Apple TV HD decodes it in software and lost frames while a channel tuned.",
+  "removed": {
+    "swoop": {
+      "role": "change",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "2ff122ef-24fe-480c-9f1e-3ea488c49208",
+      "start_frame_job": "6dee172b-0f64-4b19-9192-5b19a8b466cd",
+      "source": "1920x1080 24fps 4.0s",
+      "colour_matched": true,
+      "why": "owner, 2026-10-05: \"looks like it's swimming and seems 2d\""
+    }
+  }
 }

@@ -78,7 +78,19 @@ struct ReceiverPlayerView: View {
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
-        .task { await open() }
+        .task {
+            await open()
+            #if DEBUG
+            // `-kjautochange 6` steps to the next channel that many times, ten seconds apart, so
+            // the flights can be measured on a device with no one at the remote.
+            let n = UserDefaults.standard.integer(forKey: "kjautochange")
+            for _ in 0..<n {
+                try? await Task.sleep(for: .seconds(10))
+                if Task.isCancelled { return }
+                step(by: 1)
+            }
+            #endif
+        }
         .onDisappear { stopEverything() }
     }
 

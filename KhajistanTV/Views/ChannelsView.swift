@@ -188,6 +188,11 @@ struct ChannelsView: View {
     /// region opens. Safe to run again: each step skips what it already has.
     private func start() async {
         await loadMain()
+        #if DEBUG
+        // With `-kjautochange`, a region link opens straight onto its first channel (see
+        // ReceiverPlayerView), for measuring the flights on a device.
+        if UserDefaults.standard.integer(forKey: "kjautochange") > 0, playing == nil { playing = shown.first }
+        #endif
         if mainLoaded && medium == "camera" && !camerasLoaded && errorText == nil {
             await loadCameras()
         }

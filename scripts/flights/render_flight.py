@@ -1,11 +1,23 @@
 #!/usr/bin/env python3
-"""Render a generated pigeon flight (grey backdrop, ends empty) as HEVC-with-alpha in three
-sizes. Usage: render_flight.py <src.mp4> <out_dir> <name>"""
+"""Render a generated pigeon flight (grey backdrop, ends empty) onto each skin's ground, as
+ordinary opaque video: H.264 at 1080 and, from a 4K source, HEVC at 2160. Usage:
+render_flight.py <src.mp4> <out_dir> <name>  ->  flight-<name>-<skin>-<tier>.mp4
+
+Opaque, not HEVC with alpha (2026-10-05): the Apple TV HD has no hardware for HEVC with
+alpha, decodes it in software, and measured on the owner's box delivered 37-99 of 90-116
+frames per flight while a channel tuned, the bird a 720p file stretched to 1080. Both
+H.264 1080 and HEVC 2160 decode in hardware where they are played."""
 import os, subprocess, sys, numpy as np, cv2
 sys.path.insert(0, os.path.dirname(__file__))
 from greykey import frames, probe, key
 
-TIERS = {"2160": (3840, 2160), "1080": (1920, 1080), "720": (1280, 720)}
+TIERS = {"2160": (3840, 2160), "1080": (1920, 1080)}
+# Kept in step with Skin.groundHex in KhajistanTV/Core/Sky.swift.
+SKINS = {"day": (0xF3, 0xFB, 0x04), "grove": (0x18, 0x64, 0x09), "smut": (0xC1, 0x1B, 0x6B)}
+CODEC = {
+    "1080": ["-c:v", "libx264", "-preset", "slow", "-crf", "12", "-profile:v", "high", "-level", "4.2"],
+    "2160": ["-c:v", "libx265", "-preset", "medium", "-crf", "14", "-tag:v", "hvc1", "-x265-params", "log-level=error"],
+}
 # A 1080p source gets no 2160 file: an enlargement adds no detail, and the app falls back to
 # the largest size a flight has.
 
@@ -38,6 +50,33 @@ def main(src, out_dir, name):
     bs = np.median(np.stack(small[-4:]), axis=0)
     present = [i for i, f in enumerate(small) if (np.linalg.norm(f - bs, axis=2) > 25).sum() > 3]
     last = min(len(small), present[-1] + 3) if present else len(small)
+    # A generated clip eases in from its start frame: the bird glides nearly still, or sits
+    # frozen, before it flies (measured 2026-10-05: Approach crawled for two seconds, Rise held
+    # one pose for 16 frames). Where the bird is on screen at frame 0, the opening is retimed
+    # by dropping frames until it moves at half its median pace, at most three times faster;
+    # from there every frame plays. At the other end the clip stops where a bird already off
+    # the screen stops moving, rather than leaving a speck at the edge.
+    d = [float(np.abs(small[i] - small[i - 1]).mean()) for i in range(1, last)]
+    pace = float(np.median(d)) if d else 0
+    keep = list(range(last))
+    if d and (np.linalg.norm(small[0] - bs, axis=2) > 25).mean() > 0.02:
+        keep, acc, i = [0], 0.0, 1
+        while i < last and d[i - 1] < 0.5 * pace:
+            acc += d[i - 1]
+            if acc >= 0.5 * pace or i - keep[-1] >= 3: keep.append(i); acc = 0.0
+            i += 1
+        keep += range(i, last)
+    # Close to the lens the generator loses focus (Approach, 2026-10-05: sharpness fell forty-
+    # fold with the bird over 60% of the frame, for 1.3 s). A real pigeon crosses a lens in a
+    # fifth of a second, so the close pass plays at three times speed.
+    cover = [float((np.linalg.norm(f - bs, axis=2) > 25).mean()) for f in small[:last]]
+    run, close = 0, []
+    for k in keep:
+        run = run + 1 if cover[k] > 0.6 else 0
+        if run == 0 or run % 3 == 1: close.append(k)
+    keep = close
+    moving = [k for k, x in enumerate(d) if x >= 0.12 * pace]
+    if moving: keep = [k for k in keep if k <= moving[-1] + 2]
     total = len(small); del small
     # The plate. Two candidates, each wrong somewhere: the last frames (wrong where a flight
     # has not left by its end) and each pixel's median over the flight (wrong where the bird
@@ -56,27 +95,37 @@ def main(src, out_dir, name):
     encs = {}
     tiers = {t: s for t, s in TIERS.items() if s[0] <= w}
     for tier, (tw, th) in tiers.items():
-        path = os.path.join(out_dir, f"{name}-{tier}.mov")
-        encs[tier] = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
-            "-s", f"{tw}x{th}", "-r", "24", "-i", "-", "-c:v", "hevc_videotoolbox", "-alpha_quality", "0.9",
-            "-q:v", "75", "-tag:v", "hvc1", "-pix_fmt", "bgra", "-an", path], stdin=subprocess.PIPE)
+        for skin in SKINS:
+            path = os.path.join(out_dir, f"flight-{name}-{skin}-{tier}.mp4")
+            encs[tier, skin] = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                "-s", f"{tw}x{th}", "-r", "24", "-i", "-", *CODEC[tier], "-pix_fmt", "yuv420p",
+                "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+                "-movflags", "+faststart", "-an", path], stdin=subprocess.PIPE)
+    grounds = {k: np.array(v, np.float32) for k, v in SKINS.items()}
+    order = {k: n for n, k in enumerate(keep)}
     for i, C in enumerate(frames(src, w, h)):
-        if i >= last: break
+        if i > keep[-1]: break
+        if i not in order: continue
         P, a = key(C, B)
         if match is not None: P = match(P, a)
         if i % 20 == 0: print(f"  {name}: {i}/{last}", flush=True)
         # A flight that is still on the edge at its last frame fades over its last 6 frames.
-        tail = last - 1 - i
+        tail = len(keep) - 1 - order[i]
         if tail < 6 and (a > 0.02).sum() > 50:
             fade = (tail + 1) / 7.0
             P, a = P * fade, a * fade
-        rgba = np.dstack([P, a * 255])
         for tier, (tw, th) in tiers.items():
-            img = rgba if (tw, th) == (w, h) else cv2.resize(rgba, (tw, th), interpolation=cv2.INTER_AREA)
-            encs[tier].stdin.write(np.clip(img, 0, 255).astype(np.uint8).tobytes())
+            if (tw, th) == (w, h): Pt, at = P, a
+            else:
+                Pt = cv2.resize(P.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
+                at = cv2.resize(a.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
+            for skin, g in grounds.items():
+                # P is premultiplied: the ground shows through by what the bird leaves uncovered.
+                img = Pt + g * (1 - at[..., None])
+                encs[tier, skin].stdin.write(np.clip(img + 0.5, 0, 255).astype(np.uint8).tobytes())
     for e in encs.values():
         e.stdin.close(); e.wait()
-    print(f"{name}: {last} frames ({total} in source, empty tail trimmed), {w}x{h} -> {', '.join(tiers)}", flush=True)
+    print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {keep[-1] + 1 - len(keep)} dropped to quicken the opening and any close pass), {w}x{h} -> {', '.join(tiers)}", flush=True)
 
 if __name__ == "__main__":
     main(*sys.argv[1:4])

@@ -43,6 +43,10 @@ final class TransmissionStore {
     /// belongs to a tuning the viewer has already left, and is dropped.
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var offAirWatch: Task<Void, Never>?
+    /// Waits for the slot on air to end, then hands over to the next strip, as the website's
+    /// once-a-minute tuneToNow does. Without it a file that runs past its slot kept the old
+    /// show on screen, and the old "now" in the overlay, until the file ended.
+    @ObservationIgnored private var slotWatch: Task<Void, Never>?
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -71,6 +75,16 @@ final class TransmissionStore {
         programming?._meta.channels.first(where: { $0.number == number })?.line
     }
 
+    /// True only in a DEBUG build handed a schedule file by a UI test: the player opens without
+    /// an account and draws its overlay over no picture.
+    var isScheduleFile: Bool {
+        #if DEBUG
+        return UserDefaults.standard.string(forKey: "kjschedulefile") != nil
+        #else
+        return false
+        #endif
+    }
+
     var programmeCount: Int? {
         programming?.programme_order.count
     }
@@ -79,6 +93,12 @@ final class TransmissionStore {
     func nowOn(channel: Int, at date: Date) -> OnAir? {
         guard let p = programming else { return nil }
         return StationClock.onAir(p, channel: channel, at: date)
+    }
+
+    /// The strips after `date` on a channel, soonest first: what is up next, and after it.
+    func upcoming(channel: Int, at date: Date, count: Int = 3) -> [ScheduleStrip] {
+        guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return [] }
+        return StationClock.upcoming(p, channelId: id, at: date, count: count)
     }
 
     /// When the channel is next on air, for the moment nothing is.
@@ -115,6 +135,15 @@ final class TransmissionStore {
     private func fetchSchedule(month monthKey: String, generation gen: Int) async {
         let url = Transmission.scheduleURL(month: monthKey)
         var reply: Reply
+        #if DEBUG
+        // UI tests hand the app a schedule file on disk, so the station page and the player's
+        // now and next can be photographed without the preview password or an account.
+        if let path = UserDefaults.standard.string(forKey: "kjschedulefile"),
+           let data = FileManager.default.contents(atPath: path) {
+            await apply(Reply(data: data, status: 200), month: monthKey, generation: gen)
+            return
+        }
+        #endif
         do {
             // Without the preview password first: after the launch switch the schedule is
             // public, and a stored password that no longer matches must not stand in the way.
@@ -134,6 +163,10 @@ final class TransmissionStore {
             return
         }
         guard gen == scheduleGeneration else { return }
+        await apply(reply, month: monthKey, generation: gen)
+    }
+
+    private func apply(_ reply: Reply, month monthKey: String, generation gen: Int) async {
         switch reply.status {
         case 200:
             break
@@ -219,6 +252,14 @@ final class TransmissionStore {
     }
 
     private func play(_ air: OnAir, generation gen: Int) async {
+        #if DEBUG
+        // With a schedule file there is no account: the overlay is drawn over no picture.
+        if isScheduleFile {
+            phase = .onAir(air)
+            watchSlotEnd(air, generation: gen)
+            return
+        }
+        #endif
         guard let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else {
             phase = .failed("This programme has no playable source.")
             return
@@ -232,6 +273,7 @@ final class TransmissionStore {
         }
         player.attach(url: url, seekTo: air.seekTo, title: nowPlayingTitle(air), subtitle: air.show?.name)
         phase = .onAir(air)
+        watchSlotEnd(air, generation: gen)
     }
 
     /// The file ended: the next programme of the same channel starts at its own beginning,
@@ -249,6 +291,22 @@ final class TransmissionStore {
             await play(next, generation: gen)
         } else {
             goOffAir(p, channelId: current.channelId, at: now, generation: gen)
+        }
+    }
+
+    /// Sleeps until the slot `air` belongs to has ended, then hands over. A handover, a tune or
+    /// a stop in the meantime replaces this watch.
+    private func watchSlotEnd(_ air: OnAir, generation gen: Int) {
+        slotWatch?.cancel()
+        guard let left = StationClock.secondsLeft(in: air, at: Date()) else { return }
+        slotWatch = Task { [weak self] in
+            // A second past the end, so the clock has the next strip by the time it is asked.
+            try? await Task.sleep(for: .seconds(left + 1))
+            guard let self, !Task.isCancelled, gen == self.generation,
+                  case .onAir(let current) = self.phase, current.slot == air.slot, current.date == air.date else { return }
+            // A task of its own: the handover replaces this watch, and a cancelled task cannot
+            // finish the network calls tuning makes.
+            Task { await self.handover() }
         }
     }
 
@@ -293,6 +351,8 @@ final class TransmissionStore {
         generation += 1
         offAirWatch?.cancel()
         offAirWatch = nil
+        slotWatch?.cancel()
+        slotWatch = nil
         return generation
     }
 

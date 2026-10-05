@@ -150,10 +150,6 @@ struct TransmissionPlayerView: View {
         VStack(spacing: 0) {
             StatusBand(leading: bandLeading(air), trailing: bandTrailing(air))
             ZStack {
-                if store.player.state == .tuning {
-                    // The panel's state line already says Connecting…; the pigeon stands alone here.
-                    TuningLoader(nil)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             panel(air)
@@ -272,7 +268,7 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Up and down switch channel behind the wing. While a clip is on screen they skip it.
+    /// Up and down switch channel behind the pigeon. While a flight is on screen they skip it.
     private func move(_ direction: MoveCommandDirection) {
         wake()
         guard direction == .up || direction == .down else { return }
@@ -283,9 +279,13 @@ struct TransmissionPlayerView: View {
         guard holdsFocus, !switching else { return }
         switching = true
         Task {
-            await model.clips.play(.wingIn, holdLastFrame: true)
+            let next = store.channelNumber == 1 ? 2 : 1
+            async let quiet: Void = store.player.fadeOut()
+            await model.clips.flyIn(caption: store.channelName(next))
+            await quiet
             if !left { await store.switchChannel() }
-            if !left { await model.clips.play(.wingOut) }
+            if !left { await store.player.settled() }
+            if !left { await model.clips.flyOut() }
             switching = false
         }
     }
@@ -305,16 +305,14 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Coming and going
 
-    /// The sign-on once per launch, then the channel. Every step after the first checks that the
-    /// viewer is still here: a clip must not start after the screen has gone.
+    /// The screen opens on the ground with the channel's name, and the pigeon flies off it as
+    /// the first picture arrives: that is the sign-on. Every step checks that the viewer is
+    /// still here: a flight must not start after the screen has gone.
     private func start() async {
-        if !model.clips.signOnPlayed {
-            model.clips.signOnPlayed = true
-            await model.clips.play(.wingIn, holdLastFrame: true)
-            if !gone { await model.clips.play(.ident) }
-            if !gone { await model.clips.play(.wingOut) }
-        }
+        model.clips.cover(caption: store.channelName(channel), animated: false)
         if !gone { await store.tune(channel: channel) }
+        if !gone { await store.player.settled() }
+        if !gone { await model.clips.flyOut() }
     }
 
     private var gone: Bool {

@@ -520,22 +520,19 @@ struct PigeonMark: View {
     }
 }
 
-/// What the website's receiver shows while it tunes: the grooming pigeon over CONNECTING.
+/// What a screen says while it waits. The grooming pigeon that stood here was retired in the
+/// apps on 2026-10-05 (owner: one pigeon, the flying one, which carries the channel change).
 struct TuningLoader: View {
     let label: String?
 
-    /// nil draws the pigeon alone, for a screen that already says what it is waiting for.
+    /// nil draws nothing, for a screen that already says what it is waiting for.
     init(_ label: String? = "Connecting\u{2026}") {
         self.label = label
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            AnimatedImage(resource: "grooming", withExtension: "webp")
-                .frame(width: 320, height: 320 * 276 / 300)
-            if let label, !label.isEmpty {
-                Kicker(label)
-            }
+        if let label, !label.isEmpty {
+            Kicker(label)
         }
     }
 }

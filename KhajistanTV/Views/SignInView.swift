@@ -26,12 +26,17 @@ struct SignInView: View {
                 Text("The email and password you use on the website.")
                     .kjBody()
                 HouseInputField("Email") {
+                    // username + password is the pair AutoFill looks for: an iPhone offering
+                    // the Apple TV keyboard can then fill the saved Khajistan login.
                     TextField("", text: $email)
-                        .textContentType(.emailAddress)
+                        .textContentType(.username)
+                        .keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
                 HouseInputField("Password") {
                     SecureField("", text: $password)
+                        .textContentType(.password)
                 }
                 Button("Sign in") {
                     Task { await submit() }

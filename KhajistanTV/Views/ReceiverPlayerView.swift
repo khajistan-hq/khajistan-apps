@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A receiver channel, full screen. Up and down tune the neighbouring channel in the list the
-/// viewer came from, through the wing wipe; play/pause pauses, and pressing it again tunes the
+/// viewer came from, behind the pigeon (StationClips); play/pause pauses, and pressing it again tunes the
 /// channel afresh, because a live signal paused for a minute is not the live signal any more.
 struct ReceiverPlayerView: View {
     let list: [Channel]
@@ -38,9 +38,6 @@ struct ReceiverPlayerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, KJLayout.inset)
             }
-            if controller.state == .tuning {
-                TuningLoader(nil)
-            }
             overlay(palette)
             // The focus target. It draws nothing; its job is to hold focus so the remote's
             // presses reach the handlers below, and a click on it wakes the overlay.
@@ -75,7 +72,7 @@ struct ReceiverPlayerView: View {
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
-        .task { tune(current) }
+        .task { await open() }
         .onDisappear { stopEverything() }
     }
 
@@ -171,8 +168,8 @@ struct ReceiverPlayerView: View {
         }
     }
 
-    /// The neighbour of the channel last asked for, wrapping at either end, reached through the
-    /// wing wipe. A press while a clip is on screen ends that clip and takes over from it.
+    /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
+    /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
         let from = destination ?? current
         guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
@@ -183,14 +180,30 @@ struct ReceiverPlayerView: View {
         changeTask = Task { await change(to: target) }
     }
 
-    /// The wing crosses and holds, the new channel is tuned behind it, the wing leaves.
+    /// The screen opens on the ground with the channel's name; the pigeon flies off it as the
+    /// picture arrives.
+    private func open() async {
+        model.clips.cover(caption: current.name, animated: false)
+        tune(current)
+        await controller.settled()
+        guard !Task.isCancelled else { return }
+        await model.clips.flyOut()
+    }
+
+    /// The old sound fades as the ground comes up behind the pigeon, the new channel tunes under
+    /// the held ground, and the ground lifts as the pigeon flies off the new picture, whose
+    /// sound fades in once it plays.
     private func change(to target: Channel) async {
-        await model.clips.play(.wingIn, holdLastFrame: true)
-        // A newer press, or leaving, cancelled this one while the wing was crossing.
+        async let quiet: Void = controller.fadeOut()
+        await model.clips.flyIn(caption: target.name)
+        await quiet
+        // A newer press, or leaving, cancelled this one while the pigeon was flying.
         guard !Task.isCancelled else { return }
         tune(target)
         destination = nil
-        await model.clips.play(.wingOut)
+        await controller.settled()
+        guard !Task.isCancelled else { return }
+        await model.clips.flyOut()
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.

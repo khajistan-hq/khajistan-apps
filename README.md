@@ -19,13 +19,13 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
 
-**Assets.** The pigeon master GIF, the grooming loop, the sign-on ident and the two wing wipes are byte-identical copies of the website's files in `archive/assets`. The pigeon clips are used only where the owner's ruling of 2026-10-04 allows them: waiting states and changeovers.
+**Assets.** The pigeon master GIF is a byte-identical copy of the website's. The channel change uses one pigeon, flying, over the skin's own colour: two HEVC-with-alpha flights rendered by `scripts/make-pigeon-flight.py` from the Higgsfield masters. The old sound fades out and the new one in. The pigeon is used only where the owner's ruling of 2026-10-04 allows it: waiting states and changeovers.
 
 ## What it does not carry
 
 - **The Screening Room.** Its films are paid and gated by entitlement. Apple's in-app-purchase rules for it are the open question in INTENT §6.
 - **Subtitles.** `subtitle_url` is not loaded.
-- **Interstitials, and every ident but the sign-on.** The station-id audio and the ads stay on the website.
+- **Interstitials and idents.** The station-id audio, the ads and the sign-on ident stay on the website.
 - **The rainbow TV bug.** It is not used on the live site and has no ruling for a new surface.
 - **A Top Shelf extension.** The brand assets carry the two static top shelf images only.
 - **Open Sans.** The system font is used.

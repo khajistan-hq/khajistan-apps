@@ -87,9 +87,10 @@ way the website marks the brand link.
   the name, the place as a kicker, the broadcaster in small type when it differs.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
-  (state kicker, the name as headline, the place, the attribution line in small type). Tuning
-  and buffering show the grooming pigeon over CONNECTING…, as the website's receiver does.
-  Radio shows its name as display type on the ground. A channel change plays the wing wipe.
+  (state kicker, the name as headline, the place, the attribution line in small type). The
+  screen opens on the ground with TUNING and the channel's name; the pigeon flies up off it as
+  the picture arrives. Radio shows its name as display type on the ground. A channel change is
+  described under Motion.
 
 ## Khajistan Transmission
 
@@ -97,8 +98,9 @@ way the website marks the brand link.
   time (UTC+5)*, then one card per channel: CHANNEL 1 kicker, the channel's own line from the
   schedule, and what is on now (show, programme, hours) or when it returns. Select tunes it.
   The preview-password and sign-in steps live on this page.
-- **Player**: once per launch the sign-on — wing in, the ident, wing out — then the programme
-  joined where the clock has reached. Up and down switch channel through the wing wipe. The
+- **Player**: opens on the ground with the channel's name, and the pigeon flies off it as the
+  programme, joined where the clock has reached, arrives; that is the sign-on. Up and down
+  switch channel as under Motion. The
   status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 · 18:00–18:15 PKT · MEHFIL ON TAPE with
   UP NEXT 18:15 VINYL RIPS trailing; the panel carries the slot kicker, the title, the show's
   line, KIND and ORIGIN, and the custodian and transfer credits. Off air is OFF AIR in display
@@ -106,15 +108,24 @@ way the website marks the brand link.
 
 ## Motion
 
-Only the content moves: the pigeon mark, the grooming loop while waiting, and the wing at a
-changeover (owner ruling 2026-10-04 on the Higgsfield pigeon: loading states and transitions
-only). Reduced Motion stills the mark and the loop and cuts the wipes; the ident still plays and
-is skippable. Overlays hide 2.6 seconds into playback.
+Only the content moves: the pigeon mark, and the flying pigeon at a changeover (owner ruling
+2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One pigeon in the
+apps, the flying one, on the skin's colours** (owner, 2026-10-05: "we have to choose one"); the
+grooming loop and the sign-on ident, which opens on it and is on black, are not in the apps.
+
+A channel change: the old sound fades to nothing (0.45 s, eased); the skin's ground comes up
+over the picture (0.35 s) while the pigeon flies at the viewer; the ground holds with TUNING and
+the incoming channel's name until the signal plays or fails (8 s at most); then the ground
+lifts (0.7 s) as the pigeon flies up and away over the new picture, whose sound fades in once
+it is actually playing (0.9 s). Reduced Motion keeps the fades and leaves the flights out.
+Overlays hide 2.6 seconds into playback.
 
 ## Assets
 
-Bundled from `archive/assets`, unmodified: `khajistan-pigeon.gif` (the 1080px master; owner:
-the master everywhere), the grooming loop (`home-pigeon/grooming.webp`, which ImageIO animates
-as Safari does), `tv/khajistan-signon-ident.mp4`,
-`tv/khajistan-wing-wipe-in.mp4` and `-out.mp4`. The rainbow TV bug is NOT used: it is not on
+`khajistan-pigeon.gif` is bundled from `archive/assets` unmodified (the 1080px master; owner:
+the master everywhere). The two flights, `flight-in.mov` and `flight-out.mov`, are rendered by
+`scripts/make-pigeon-flight.py` from the Higgsfield ProRes 4444 masters (Flight-Across and
+Flight-Upward V10, 1080×1920, 60 fps) as HEVC with alpha, premultiplied, with the black keying
+rim choked out and the side edges feathered; the app draws the ground, so one file serves all
+three skins. They are drawn at screen height, never stretched past their pixels. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

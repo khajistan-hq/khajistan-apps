@@ -21,6 +21,9 @@ final class PlayerController {
     @ObservationIgnored private var endObserver: NSObjectProtocol?
     @ObservationIgnored private var failObserver: NSObjectProtocol?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var fadeTask: Task<Void, Never>?
+    /// A new signal starts silent and its sound comes up once it is actually playing.
+    @ObservationIgnored private var fadeInPending = false
 
     init() {
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -76,6 +79,9 @@ final class PlayerController {
             }
         }
 
+        fadeTask?.cancel()
+        player.volume = 0
+        fadeInPending = true
         player.replaceCurrentItem(with: item)
         if start == nil { player.play() }
 
@@ -98,7 +104,48 @@ final class PlayerController {
     }
 
     func resume() {
+        player.volume = 0
+        fadeInPending = true
         player.play()
+    }
+
+    /// Brings the sound down to nothing over `seconds`, for a channel change: the old channel
+    /// fades out as the ground comes up, and the new one fades in once it plays.
+    func fadeOut(over seconds: Double = 0.45) async {
+        fadeInPending = false
+        await ramp(to: 0, over: seconds)
+    }
+
+    /// Returns once the signal plays or fails, or after `limit`, whichever is first. The ground
+    /// lifts on the first of those: a picture, a reason on screen, or no more waiting.
+    func settled(within limit: Duration = .seconds(8)) async {
+        let deadline = ContinuousClock.now + limit
+        while ContinuousClock.now < deadline, !Task.isCancelled {
+            switch state {
+            case .playing, .failed, .idle, .paused: return
+            case .tuning: try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
+    /// Moves the volume to `target` in steps of a sixtieth of a second. A newer ramp, or a new
+    /// signal, cancels this one where it stands.
+    private func ramp(to target: Float, over seconds: Double) async {
+        fadeTask?.cancel()
+        let from = player.volume
+        let steps = max(1, Int(seconds * 60))
+        let task = Task { @MainActor [weak self] in
+            for step in 1...steps {
+                try? await Task.sleep(for: .seconds(seconds / Double(steps)))
+                guard let self, !Task.isCancelled else { return }
+                let t = Float(step) / Float(steps)
+                // Ease in-out, so neither end of the fade clicks.
+                let eased = t * t * (3 - 2 * t)
+                self.player.volume = from + (target - from) * eased
+            }
+        }
+        fadeTask = task
+        await task.value
     }
 
     func toggle() {
@@ -106,6 +153,8 @@ final class PlayerController {
     }
 
     func stop() {
+        fadeTask?.cancel()
+        fadeInPending = false
         generation += 1
         timeoutTask?.cancel()
         timeoutTask = nil
@@ -135,6 +184,10 @@ final class PlayerController {
         case .playing:
             timeoutTask?.cancel()
             state = .playing
+            if fadeInPending {
+                fadeInPending = false
+                Task { await ramp(to: 1, over: 0.9) }
+            }
         case .waitingToPlayAtSpecifiedRate:
             switch state {
             case .tuning, .playing: state = .tuning

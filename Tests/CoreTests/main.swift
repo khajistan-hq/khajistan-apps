@@ -1815,6 +1815,271 @@ func realMapWithoutRegionFilesOpensNothing() throws {
     try expect((indus.live ?? 0) > 0, "indus lost its live count with the shard list")
 }
 
+
+// MARK: - The dancer: reverence and the beat gate
+
+/// A seeded generator, so a synthetic signal is the same signal on every run.
+struct SplitMix {
+    var state: UInt64
+    mutating func next() -> Double {
+        state &+= 0x9E3779B97F4A7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58476D1CE4E5B9
+        z = (z ^ (z >> 27)) &* 0x94D049BB133111EB
+        z ^= z >> 31
+        return Double(z >> 11) / Double(1 << 53)
+    }
+    mutating func between(_ a: Double, _ b: Double) -> Double { a + (b - a) * next() }
+}
+
+func reverenceFollowsTheSitesRule() throws {
+    func reverent(_ name: String?, native: String? = nil, broadcaster: String? = nil,
+                  reverent flag: Bool? = nil, visualiser: Bool? = nil) -> Bool {
+        Reverence.isReverent(name: name, nativeName: native, broadcaster: broadcaster, reverent: flag, visualiser: visualiser)
+    }
+    // Positive: the channels' own words.
+    for name in ["Saut-ul-Quran", "Quran Radio", "QURAN FM", "Qur'an Kareem", "Holy Koran", "Koranic Studies",
+                 "Recitation 24/7", "Radio Tilawat", "Tilawah Channel", "Nida al-Islam", "NIDA ALISLAM"] {
+        try expect(reverent(name), "\(name) must be reverent")
+    }
+    try expect(reverent("Radio 1", native: "إذاعة القرآن الكريم"), "Arabic native name")
+    try expect(reverent("Radio 1", native: "قُرْآن"), "Arabic with harakat stripped")
+    try expect(reverent("Radio 1", native: "قرـآن"), "Arabic with a tatweel stripped")
+    try expect(reverent("Radio 1", broadcaster: "تلاوة"), "the broadcaster field counts")
+    try expect(reverent("Radio 1", native: "نداء الإسلام"), "Nida al-Islam in Arabic")
+    // A person's ruling on the record beats the name.
+    try expect(reverent("City FM89", reverent: true), "reverent: true")
+    try expect(reverent("City FM89", visualiser: false), "visualiser: false")
+    // Negative: music, news, other faiths' devotional radio, and the switches the other way.
+    // "Nida Al Islam" with a space is a negative on the site too: its pattern reads al-islam or
+    // alislam, and the port keeps the pattern as it is rather than widening it here.
+    for name in ["FM 101 Lahore", "City FM89", "Punjab Rocks Radio", "Live Kirtan from Golden Temple",
+                 "Radio Islam", "Nida Al Islam"] {
+        try expect(!reverent(name), "\(name) must not be reverent")
+    }
+    try expect(!reverent("City FM89", reverent: false, visualiser: true), "explicit false/true change nothing")
+    try expect(!reverent("Radio 1", native: "إذاعة الشرق"), "an Arabic name without the words")
+    try expect(!reverent(nil), "no name")
+    try expect(!reverent("", native: "", broadcaster: ""), "empty fields")
+    // Channel's own fields reach the rule.
+    let channel = try decode(Channel.self, """
+    {"id":"x","name":"Mehfil","nativeName":null,"mediaType":"radio","streams":[],"broadcaster":"Saut ul Quran Network"}
+    """)
+    try expect(channel.isReverent, "Channel.isReverent reads the broadcaster")
+    let ruled = try decode(Channel.self, """
+    {"id":"y","name":"Mehfil","mediaType":"radio","streams":[],"visualiser":false}
+    """)
+    try expect(ruled.isReverent, "Channel.isReverent reads visualiser:false")
+    let plain = try decode(Channel.self, """
+    {"id":"z","name":"Mehfil","mediaType":"radio","streams":[]}
+    """)
+    try expect(!plain.isReverent, "an ordinary channel")
+}
+
+/// 20 ms bins of a drum pattern at `binsPerBeat`: a kick on the beat, a hat on the off-beat,
+/// a little timing slack and a noise floor.
+func drumEnvelope(_ rng: inout SplitMix, bins: Int = 400, binsPerBeat: Int = 25) -> [Double] {
+    var e = (0..<bins).map { _ in rng.next() * 0.06 }
+    var beat = Int(rng.next() * Double(binsPerBeat))
+    while beat < bins {
+        let at = beat + Int(rng.between(-1, 2))
+        for (k, a) in [1.0, 0.5, 0.2].enumerated() where at + k >= 0 && at + k < bins { e[at + k] += a * rng.between(0.8, 1.0) }
+        let hat = at + binsPerBeat / 2
+        if hat < bins { e[hat] += rng.between(0.2, 0.4) }
+        beat += binsPerBeat
+    }
+    return e
+}
+
+/// 20 ms bins of speech: syllables at irregular spacing and loudness, in phrases with pauses.
+func speechEnvelope(_ rng: inout SplitMix, bins: Int = 400) -> [Double] {
+    var e = (0..<bins).map { _ in rng.next() * 0.06 }
+    var at = Int(rng.next() * 10)
+    var left = Int(rng.between(3, 9))
+    while at < bins {
+        let a = rng.between(0.3, 1.0)
+        for (k, shape) in [1.0, 0.7, 0.35].enumerated() where at + k < bins { e[at + k] += a * shape }
+        left -= 1
+        if left == 0 {
+            at += Int(rng.between(15, 46))      // a pause between phrases, 300–900 ms
+            left = Int(rng.between(3, 9))
+        } else {
+            at += Int(rng.between(6, 19))       // the next syllable, 120–360 ms on
+        }
+    }
+    return e
+}
+
+func percentile(_ values: [Double], _ p: Double) -> Double {
+    let sorted = values.sorted()
+    return sorted[min(sorted.count - 1, Int(Double(sorted.count - 1) * p))]
+}
+
+func beatScoreSeparatesADrumFromAVoice() throws {
+    var rng = SplitMix(state: 20261005)
+    // The synthetic 500 ms pulse is the case the site says scores high.
+    var pulse = [Double](repeating: 0, count: 400)
+    for i in stride(from: 3, to: 400, by: 25) { pulse[i] = 1 }
+    try expect(BeatTracker.score(pulse) > 0.5, "a 500 ms pulse scored \(BeatTracker.score(pulse))")
+    // Distributions, not samples: fifty windows of each.
+    var drums: [Double] = [], voices: [Double] = []
+    for _ in 0..<50 {
+        drums.append(BeatTracker.score(drumEnvelope(&rng, binsPerBeat: Int(rng.between(20, 36)))))
+        voices.append(BeatTracker.score(speechEnvelope(&rng)))
+    }
+    let drumMedian = percentile(drums, 0.5), drumLow = percentile(drums, 0.1), voiceP90 = percentile(voices, 0.9)
+    print("    beat score: drum median \(String(format: "%.3f", drumMedian)), p10 \(String(format: "%.3f", drumLow)); voice p90 \(String(format: "%.3f", voiceP90)), max \(String(format: "%.3f", voices.max()!))")
+    // The site's measured line: music .19–.28 and above, dialogue never above .17 at p90.
+    try expect(drumLow > 0.20, "a steady drum must clear the .20 bar (p10 \(drumLow))")
+    try expect(voiceP90 <= 0.17, "a voice must stay under .17 at p90 (got \(voiceP90))")
+    // Nothing moving is no beat.
+    try expectEqual(BeatTracker.score([Double](repeating: 0.4, count: 400)), 0)
+    try expectEqual(BeatTracker.score([]), 0)
+}
+
+/// Feeds the tracker a 512-bin spectrum at 60 frames a second for `seconds`, the way kj-scope.js
+/// reads an AnalyserNode, and returns the times (ms) at which the gate was open.
+func runTracker(_ tracker: inout BeatTracker, seconds: Double, from start: Double = 0,
+                level: (Double) -> Double, band: (Double) -> ClosedRange<Int> = { _ in 0...511 },
+                noise: Double = 4, rng: inout SplitMix) -> [Double] {
+    var open: [Double] = []
+    var t = start
+    var on = false
+    while t < start + seconds * 1000 {
+        let l = level(t), range = band(t)
+        let spectrum: [UInt8] = (0..<512).map { i in
+            let lift = range.contains(i) ? l * 150 : 0
+            return UInt8(max(0, min(255, 40 + lift + rng.next() * noise)))
+        }
+        tracker.feed(spectrum, at: t)
+        on = tracker.grooving(at: t, on: on)
+        if on { open.append(t) }
+        t += 1000.0 / 60
+    }
+    return open
+}
+
+func beatGateOpensOnADrumAndNotOnAVoice() throws {
+    var rng = SplitMix(state: 7)
+    // A drum at 120 BPM: a hit every 500 ms that rings for about 80 ms.
+    var drum = BeatTracker()
+    let kick: (Double) -> Double = { t in exp(-t.truncatingRemainder(dividingBy: 500) / 80) }
+    let drumOpen = runTracker(&drum, seconds: 30, level: kick, rng: &rng)
+    let firstOpen = try require(drumOpen.first, "the gate never opened on a steady drum")
+    print("    drum: gate open at \(String(format: "%.1f", firstOpen / 1000)) s, open \(drumOpen.count) of 1800 frames, period \(String(format: "%.3f", drum.period)) s")
+    // The envelope needs four seconds before it is scored; FM 101 Lahore opened in 6 s on the site.
+    try expect(firstOpen >= 4000 && firstOpen <= 8000, "opened at \(firstOpen) ms")
+    try expect(Double(drumOpen.count) > 0.7 * 1800, "the gate must stay open on the drum")
+    try expect(abs(drum.period - 0.5) < 0.05, "the beat clock locks to 500 ms (\(drum.period))")
+
+    // The same drum ends in digital silence: within the 2.5 s recent-onset rule the gate shuts.
+    let silenceStart = 30000.0
+    let after = runTracker(&drum, seconds: 6, from: silenceStart, level: { _ in 0 }, noise: 0, rng: &rng)
+    try expect(after.allSatisfy { $0 < silenceStart + 2600 }, "a track that ends must not keep the gate open")
+
+    // Speech: syllables at irregular spacing and loudness, each in its own part of the spectrum.
+    var voice = BeatTracker()
+    var syllables: [(at: Double, a: Double, band: ClosedRange<Int>)] = []
+    var at = 0.0, left = 5
+    while at < 60000 {
+        let lo = Int(rng.between(8, 200))
+        syllables.append((at, rng.between(0.3, 1.0), lo...(lo + Int(rng.between(40, 160)))))
+        left -= 1
+        if left == 0 { at += rng.between(300, 900); left = Int(rng.between(3, 9)) } else { at += rng.between(120, 360) }
+    }
+    func syllable(_ t: Double) -> (Double, ClosedRange<Int>) {
+        guard let s = syllables.last(where: { $0.at <= t }) else { return (0, 0...0) }
+        return (s.a * exp(-(t - s.at) / 70), s.band)
+    }
+    let voiceOpen = runTracker(&voice, seconds: 60, level: { syllable($0).0 }, band: { syllable($0).1 }, rng: &rng)
+    print("    voice: gate open \(voiceOpen.count) of 3600 frames, last score \(String(format: "%.3f", voice.beat)), smoothed \(String(format: "%.3f", voice.groove))")
+    try expect(voiceOpen.isEmpty, "a voice opened the gate \(voiceOpen.count) times")
+
+    // A steady noise floor and silence never open it.
+    var hiss = BeatTracker()
+    try expect(runTracker(&hiss, seconds: 20, level: { _ in 0 }, rng: &rng).isEmpty, "hiss opened the gate")
+}
+
+func beatGateHysteresis() throws {
+    // .20 to come on, .14 to stay on, and only with an onset in the last 2.5 s.
+    var rng = SplitMix(state: 11)
+    var tracker = BeatTracker()
+    _ = runTracker(&tracker, seconds: 12, level: { t in exp(-t.truncatingRemainder(dividingBy: 500) / 80) }, rng: &rng)
+    let now = 12000.0
+    try expect(tracker.groove > 0.20, "precondition: the drum scored \(tracker.groove)")
+    try expect(tracker.grooving(at: now, on: false) && tracker.grooving(at: now, on: true))
+    try expect(!tracker.grooving(at: tracker.lastOnset + 2500, on: true), "an onset 2.5 s old is not recent")
+    // A clock that runs backwards is a new signal.
+    tracker.feed([UInt8](repeating: 40, count: 512), at: 100)
+    try expectEqual(tracker.groove, 0)
+}
+
+func dancerStageEntersDancesAndLeaves() throws {
+    var rng = SplitMix(state: 3)
+    var stage = DancerStage(random: { rng.next() })
+    var now = 0.0
+    func run(_ ms: Double, grooving: Bool, beat: Double = 0.3, groove: Double = 0.25) -> [DancerStage.Frame] {
+        var frames: [DancerStage.Frame] = []
+        let end = now + ms
+        while now < end {
+            frames.append(stage.step(now: now, grooving: { _ in grooving }, beat: beat, groove: groove, count: Int(now / 500)))
+            now += 1000.0 / 60
+        }
+        return frames
+    }
+    // A voice: he never comes on.
+    try expect(run(20000, grooving: false).allSatisfy { $0 == .blank }, "a voice brought him on")
+    try expectEqual(stage.name, .off)
+    // An ambiguous beat must hold a full second before the entrance.
+    let early = run(990, grooving: true)
+    try expect(early.allSatisfy { $0 == .blank }, "he came on before the second was up")
+    _ = run(40, grooving: true)
+    try expectEqual(stage.name, .enter)
+    try expect(DancerPieces.enter.contains { $0.0 == stage.kind }, "an entrance from the table")
+    _ = run(2000, grooving: true)
+    try expectEqual(stage.name, .on)
+    let dancing = run(8000, grooving: true)
+    try expect(dancing.allSatisfy { if case .dance = $0 { return true } else { return false } }, "he dances once on")
+    // Lulls under five seconds keep him on; five seconds of no beat send him off by an exit.
+    _ = run(4900, grooving: false)
+    try expectEqual(stage.name, .on)
+    _ = run(200, grooving: false)
+    try expectEqual(stage.name, .leave)
+    try expect(DancerPieces.exit.contains { $0.0 == stage.kind }, "an exit from the table")
+    _ = run(4300, grooving: false)
+    try expectEqual(stage.name, .off)
+
+    // A strong rhythm enters within a quarter second.
+    _ = run(300, grooving: true, beat: 0.6, groove: 0.45)
+    try expectEqual(stage.name, .enter)
+
+    // The channel goes: he leaves by an exit and is seen off with no signal under him.
+    _ = run(3000, grooving: true)
+    try expect(stage.leave(now: now), "a dancer on stage is owed an exit")
+    var frames = 0
+    while stage.stepLeaving(now: now) != .blank { now += 1000.0 / 60; frames += 1 }
+    try expect(frames > 60, "the exit plays out (\(frames) frames)")
+    try expect(!stage.leave(now: now), "nothing is owed when he is off")
+}
+
+func dancerMovesFollowTheSite() throws {
+    try expectEqual(DancerMoves.all.count, 23)
+    try expect(!DancerMoves.list(for: .base).contains("Kawliya"), "Kawliya belongs to the long-haired figure")
+    try expect(DancerMoves.list(for: .hairy).contains("Kawliya"))
+    var rng = SplitMix(state: 99)
+    var counts = [String: Int](), current = 0
+    let list = DancerMoves.list(for: .base)
+    for _ in 0..<22000 {
+        let next = DancerMoves.next(in: list, after: current, random: rng.next())
+        try expect(next != current, "a move repeated back to back")
+        current = next
+        counts[list[next], default: 0] += 1
+    }
+    // Twerk is weighted four to one.
+    let twerk = Double(counts["Twerk"] ?? 0), dabke = Double(counts["Dabke"] ?? 1)
+    try expect(twerk / dabke > 3 && twerk / dabke < 5, "Twerk \(twerk) against Dabke \(dabke)")
+}
+
 // MARK: - Runner
 
 let tests: [(String, () throws -> Void)] = [
@@ -1873,6 +2138,12 @@ let tests: [(String, () throws -> Void)] = [
     ("Real map with the extensions composes, doors in place", realRegionMapWithExtensions),
     ("Real map with no regionFiles opens nothing", realMapWithoutRegionFilesOpensNothing),
     ("Real map shows the receiver's region names", realMapUsesReceiverNames),
+    ("Reverence follows the site's rule, both ways", reverenceFollowsTheSitesRule),
+    ("Beat score separates a drum from a voice", beatScoreSeparatesADrumFromAVoice),
+    ("Beat gate opens on a drum and not on a voice", beatGateOpensOnADrumAndNotOnAVoice),
+    ("Beat gate hysteresis and reset", beatGateHysteresis),
+    ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
+    ("Dancer moves follow the site", dancerMovesFollowTheSite),
 ]
 
 var passed = 0, failed = 0, skipped = 0

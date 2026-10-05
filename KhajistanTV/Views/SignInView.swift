@@ -42,6 +42,7 @@ struct SignInView: View {
                     Task { await submit() }
                 }
                 .buttonStyle(HouseButtonStyle())
+                .padding(.leading, -26)
                 .disabled(!canSubmit)
                 .opacity(canSubmit ? 1 : 0.5)
                 if let line = errorLine {
@@ -118,5 +119,7 @@ struct HouseInputField<Entry: View>: View {
         .padding(EdgeInsets(top: 12, leading: 26, bottom: 12, trailing: 26))
         .frame(maxWidth: 900, alignment: .leading)
         .background(isFocused ? palette.band : Color.clear)
+        // The plate's padding is pulled back so the label and the entry sit on the page margin.
+        .padding(.leading, -26)
     }
 }

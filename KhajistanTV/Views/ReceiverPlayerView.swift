@@ -14,6 +14,7 @@ struct ReceiverPlayerView: View {
     /// press steps on from here, not from the channel still on screen.
     @State private var destination: Channel?
     @State private var overlayVisible = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var changeTask: Task<Void, Never>?
@@ -83,45 +84,49 @@ struct ReceiverPlayerView: View {
     /// The status band across the top and the panel on the ground below. Both go together.
     private func overlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            // The band's text stays inside the safe area; its colour runs up to the screen edge.
-            StatusBand(leading: bandLeading, trailing: ["\u{25CF} \(liveLabel)"])
             Spacer(minLength: 0)
-            panel
-                .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
+            PlayerStrip(
+                // Radio carries its name in display type on the ground; the strip leaves it out.
+                name: current.mediaType == "radio" && controller.state == .playing ? nil : current.name,
+                detail: stripDetail,
+                attribution: current.attributionText,
+                trailing: stripTrailing
+            )
+            .accessibilityElement(children: .combine)
+            .offset(y: stripShown ? 0 : 40)
+            .opacity(stripShown ? 1 : 0)
         }
-        .opacity(overlayVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: overlayVisible)
-    }
-
-    private var panel: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Kicker(stateText)
+        .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
+        .overlay(alignment: .bottomLeading) {
+            // The state, for tests and VoiceOver; the strip shows only a reason, never "Playing".
+            Text(stateText)
+                .font(.system(size: 1))
+                .opacity(0.01)
                 .accessibilityIdentifier("playerState")
-            if !(current.mediaType == "radio" && controller.state == .playing) {
-                Text(current.name)
-                    .kjDisplay(KJType.headline, tracking: -0.055)
-            }
-            if !current.place.isEmpty {
-                Text(current.place)
-                    .kjBody()
-            }
-            if let attribution = current.attributionText, !attribution.isEmpty {
-                Text(attribution)
-                    .kjSmall(faint: true)
-                    .lineLimit(2)
-            }
         }
-        .padding(.horizontal, KJLayout.inset)
-        .padding(.vertical, 40)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var bandLeading: [String] {
-        var items = ["Khajistan Receiver"]
-        if let country = current.country?.trimmingCharacters(in: .whitespacesAndNewlines), !country.isEmpty {
-            items.append("Broadcasting from \(country)")
+    /// While a signal tunes the ground already says so; the strip waits for the picture.
+    private var stripShown: Bool {
+        guard overlayVisible else { return false }
+        switch controller.state {
+        case .playing, .paused, .failed: return true
+        case .idle, .tuning: return false
         }
-        return items
+    }
+
+    /// What follows the name: a failure's reason, Paused, or the place.
+    private var stripDetail: String? {
+        switch controller.state {
+        case .failed(let message): return message
+        case .paused: return "Paused"
+        default: return current.place.isEmpty ? nil : current.place
+        }
+    }
+
+    /// The medium only: the place is already beside the name, and one thing is said once.
+    private var stripTrailing: [String] {
+        ["\u{25CF} \(liveLabel)"]
     }
 
     private var liveLabel: String {
@@ -194,7 +199,7 @@ struct ReceiverPlayerView: View {
         tune(current)
         await controller.settled()
         guard !Task.isCancelled else { return }
-        model.clips.uncover()
+        model.clips.uncover(fade: true)
     }
 
     /// The old sound fades as the pigeon flies in over the skin's ground; the new channel starts

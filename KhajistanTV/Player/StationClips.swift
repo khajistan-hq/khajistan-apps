@@ -5,8 +5,8 @@ import UIKit
 
 /// The channel change: the website's wing-wipe pigeon, on the skin's colour, in one unbroken
 /// flight. The pigeon flies at the viewer as the skin's ground comes up over the picture, a wing
-/// passes over the camera, and it flies on out of the frame; the ground stays, saying which
-/// channel is tuning, until the new picture plays, and then fades off it.
+/// passes over the camera and lifts off the top of the screen; the ground stays, saying which
+/// channel is tuning, until the new picture plays, and then the picture cuts in.
 ///
 /// The bird never stops (owner, 2026-10-05: the wing held while a channel tuned "gets hung").
 /// The two halves are HEVC with alpha (tvos/scripts/make-pigeon-wipe.py, from the same Higgsfield
@@ -23,6 +23,8 @@ final class StationClips {
     var showing: Bool { flying }
     /// How much of the ground covers the picture, 0 to 1. Animated by `cover` and `uncover`.
     private(set) var coverage: Double = 0
+    /// How far the wing has lifted off the top of the screen, 0 to 1 of its height.
+    private(set) var lift: Double = 0
     /// What the ground says while a signal tunes: the channel on its way.
     private(set) var caption: String?
     /// Set after the sign-on, and kept for the life of the app.
@@ -41,6 +43,9 @@ final class StationClips {
 
     /// The longest a flight may hold the screen, so a file that stalls cannot trap the viewer.
     private static let cap: Duration = .seconds(5)
+    /// The out half's length (7 frames at 24 fps) and the lift that carries the wing off.
+    private static let outTime = 7.0 / 24.0
+    private static let liftTime = 0.5
 
     init() {
         assets = ["wipe-in", "wipe-out"].compactMap { name in
@@ -65,9 +70,17 @@ final class StationClips {
         }
     }
 
-    /// Lifts the ground off the picture.
-    func uncover() {
-        withAnimation(.easeInOut(duration: 0.6)) { coverage = 0; caption = nil }
+    /// Takes the ground off the picture. A cut by default: the pigeon is the transition, so the
+    /// new picture arrives like a channel on a television, and only its sound eases in. `fade`
+    /// is for a screen that opens on a signal, where nothing flew.
+    func uncover(fade: Bool = false) {
+        if fade {
+            withAnimation(.easeInOut(duration: 0.4)) { coverage = 0; caption = nil }
+        } else {
+            var cut = Transaction()
+            cut.disablesAnimations = true
+            withTransaction(cut) { coverage = 0; caption = nil }
+        }
     }
 
     /// The pigeon flies through: the ground comes up as it flies in, a wing passes over the
@@ -100,9 +113,19 @@ final class StationClips {
             coveredDone = true
             covered()
         }
+        // At the cover the wing starts lifting off the top of the screen, as the bird passing over
+        // the camera; the clip stops before the source's own jump cut (make-pigeon-wipe.py), and
+        // the queue holds the out half's last frame instead of advancing to nothing.
         let coverToken = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: first, queue: .main
-        ) { _ in Task { @MainActor in coverOnce() } }
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, mine == self.generation else { return }
+                self.player.actionAtItemEnd = .pause
+                withAnimation(.timingCurve(0.45, 0, 0.75, 0.6, duration: Self.liftTime)) { self.lift = 1 }
+                coverOnce()
+            }
+        }
         let last = player.items().last
         let endTokens = [Notification.Name.AVPlayerItemDidPlayToEndTime, .AVPlayerItemFailedToPlayToEndTime].map { name in
             NotificationCenter.default.addObserver(forName: name, object: last, queue: .main) { _ in
@@ -117,20 +140,25 @@ final class StationClips {
         withAnimation(.easeIn(duration: 0.1)) { flying = true }
         player.play()
         await latch.wait()
+        // The lift outlasts the out half's few frames; let it finish before the layer comes off.
+        if mine == generation, lift > 0 {
+            try? await Task.sleep(for: .seconds(Self.liftTime - Self.outTime + 0.02))
+        }
         timeout.cancel()
         NotificationCenter.default.removeObserver(coverToken)
         for token in endTokens { NotificationCenter.default.removeObserver(token) }
         guard mine == generation else { return }
         self.latch = nil
         coverOnce()
-        // The last frame still carries the tip of the tail: it fades rather than vanishing.
-        withAnimation(.easeOut(duration: 0.18)) { flying = false }
-        withAnimation(.easeIn(duration: 0.3)) { self.caption = caption }
-        // Re-queue once the tail has faded, without holding the caller: the ground can lift as
-        // soon as the picture plays.
+        // The wing has lifted clear of the screen, so the layer comes off with nothing showing.
+        flying = false
+        lift = 0
+        withAnimation(.easeIn(duration: 0.25)) { self.caption = caption }
+        // Re-queue in the background, well after the layer is off: re-queuing puts the first
+        // frame of the in half (a wingtip) on the layer, which must never be seen.
         Task {
-            try? await Task.sleep(for: .milliseconds(200))
-            if mine == generation { rearm() }
+            try? await Task.sleep(for: .milliseconds(400))
+            if mine == generation, !flying { rearm() }
         }
     }
 
@@ -144,6 +172,7 @@ final class StationClips {
         _ = begin()
         player.pause()
         flying = false
+        lift = 0
         caption = nil
         coverage = 0
         rearm()
@@ -171,6 +200,7 @@ final class StationClips {
     /// against the clip's 24, warm at 47-50 (measured on the device, 2026-10-05).
     private func arm() async {
         player.pause()
+        player.actionAtItemEnd = .advance
         player.removeAllItems()
         for asset in assets {
             let item = AVPlayerItem(asset: asset)
@@ -226,9 +256,12 @@ struct StationClipLayer: View {
             }
             // Always in the tree, so its first frame is drawn before it is shown. Fill: on a
             // screen that is not exactly 16:9 the wing still reaches every edge.
-            PlayerLayerView(player: clips.player, gravity: .resizeAspectFill)
-                .ignoresSafeArea()
-                .opacity(clips.flying ? 1 : 0)
+            GeometryReader { proxy in
+                PlayerLayerView(player: clips.player, gravity: .resizeAspectFill)
+                    .offset(y: -clips.lift * (proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom))
+            }
+            .ignoresSafeArea()
+            .opacity(clips.flying ? 1 : 0)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)

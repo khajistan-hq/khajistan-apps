@@ -122,8 +122,6 @@ struct TransmissionPlayerView: View {
                 palette.ground.ignoresSafeArea()
             }
             overlay(air)
-                .opacity(overlayVisible ? 1 : 0)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: overlayVisible)
             HandoverNotice(
                 air: air,
                 next: store.upcoming(channel: store.channelNumber, at: Date(), count: 1).first,
@@ -153,83 +151,50 @@ struct TransmissionPlayerView: View {
 
     // MARK: - The overlay
 
+    /// The slim strip, as the Receiver's (owner, 2026-10-05: the bar was "too thick"): the slot
+    /// and the show at left with the show's line under them, the channel and what is up next at
+    /// right. It rises and fades with the overlay; while the signal tunes the ground says so.
     private func overlay(_ air: OnAir) -> some View {
-        VStack(spacing: 0) {
-            StatusBand(leading: bandLeading(air), trailing: bandTrailing(air))
-            ZStack {
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            panel(air)
-        }
-    }
-
-    /// The station and the channel. The slot's hours head the panel and what is up next is the
-    /// panel's right column, so neither is said twice.
-    private func bandLeading(_ air: OnAir) -> [String] {
-        ["Khajistan Transmission", "Channel \(store.channelNumber)"]
-    }
-
-    private func bandTrailing(_ air: OnAir) -> [String] {
-        ["\u{25CF} On air"]
-    }
-
-    private func panel(_ air: OnAir) -> some View {
         let soundOnly = air.programme?.audio_only == true
-        let kind = nonEmpty(air.programme?.work_kind)
-        let origin = nonEmpty(air.programme?.country)
-        return HStack(alignment: .top, spacing: 60) {
-            nowColumn(air, soundOnly: soundOnly, kind: kind, origin: origin)
-            // Redrawn on the minute, so a list read past a handover drops the strip now on air.
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            // Redrawn on the minute, so what is up next moves on at a handover.
             TimelineView(.everyMinute) { context in
-                UpNextList(title: "Up next", strips: store.upcoming(channel: store.channelNumber, at: context.date))
+                let next = store.upcoming(channel: store.channelNumber, at: context.date, count: 1).first
+                PlayerStrip(
+                    // A sound programme carries its name on the ground, with the dancer.
+                    name: soundOnly ? nil : headline(air),
+                    detail: stateText(air),
+                    attribution: credit(air),
+                    trailing: ["\u{25CF} Channel \(store.channelNumber)"],
+                    upNext: next.map { ($0.startLabel, $0.show?.name ?? "") }
+                )
             }
-            .frame(width: 560, alignment: .leading)
+            .offset(y: stripShown ? 0 : 40)
+            .opacity(stripShown ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, KJLayout.inset)
-        .padding(.vertical, 40)
-        .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
-    }
-
-    private func nowColumn(_ air: OnAir, soundOnly: Bool, kind: String?, origin: String?) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Kicker(stateText(air))
+        .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
+        .overlay(alignment: .bottomLeading) {
+            Text(stateText(air))
+                .font(.system(size: 1))
+                .opacity(0.01)
                 .accessibilityIdentifier("playerState")
-            if !soundOnly {
-                Text(headline(air))
-                    .kjDisplay(KJType.headline, tracking: -0.055)
-            }
-            if let line = nonEmpty(air.show?.line) {
-                Text(line)
-                    .kjBody()
-                    .foregroundStyle(palette.faint)
-            }
-            if kind != nil || origin != nil {
-                HStack(alignment: .top, spacing: 56) {
-                    if let kind { pair("Kind", kind) }
-                    if let origin { pair("Origin", origin) }
-                }
-            }
-            if !soundOnly {
-                if let custodian = nonEmpty(air.programme?.custodian) {
-                    Text(custodian).kjSmall(faint: true)
-                }
-                if let transfer = nonEmpty(air.programme?.transfer) {
-                    Text(transfer).kjSmall(faint: true)
-                }
-            }
-            if case .failed = store.player.state {
-                Text("Play/Pause tries again. Up or down switches channel.").kjSmall(faint: true)
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func pair(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Kicker(label)
-            Text(value).kjBody()
+    private var stripShown: Bool {
+        guard overlayVisible else { return false }
+        switch store.player.state {
+        case .playing, .paused, .failed: return true
+        case .idle, .tuning: return false
         }
+    }
+
+    /// One small line under the name: the show's own line, else the custodian and the transfer.
+    private func credit(_ air: OnAir) -> String? {
+        if let line = nonEmpty(air.show?.line) { return line }
+        let parts = [air.programme?.custodian, air.programme?.transfer].compactMap { nonEmpty($0) }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Words
@@ -326,7 +291,9 @@ struct TransmissionPlayerView: View {
     /// name. Either way the ground fades off as the picture arrives. Every step checks that the
     /// viewer is still here: a flight must not start after the screen has gone.
     private func start() async {
-        if !model.clips.signOnPlayed {
+        // After a flight the picture cuts in; on a screen that opens with nothing flying it fades.
+        let flies = !model.clips.signOnPlayed
+        if flies {
             model.clips.signOnPlayed = true
             var tuning: Task<Void, Never>?
             await model.clips.flyThrough(caption: store.channelName(channel)) {
@@ -338,7 +305,7 @@ struct TransmissionPlayerView: View {
             if !gone { await store.tune(channel: channel) }
         }
         if !gone { await store.player.settled() }
-        if !gone { model.clips.uncover() }
+        if !gone { model.clips.uncover(fade: !flies) }
     }
 
     private var gone: Bool {

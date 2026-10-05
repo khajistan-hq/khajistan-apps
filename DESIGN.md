@@ -168,13 +168,24 @@ but with skin color backgrounds"). The grooming loop and the sign-on ident, whic
 and is on black, are not in the apps. Two other flights (Across, Upward) were tried the same
 day and refused: shown at their own 9:16 shape the bird hit the clip's sides on a 16:9 screen.
 
+**The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
+along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
+the attribution or the show's line under them in small type, the medium at the right, and on
+Transmission UP NEXT with its time and show. It rises 40pt and fades in over 0.35 s, and goes
+the same way 2.6 s into playback. It waits while a signal tunes: the ground says so.
+
+**Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
+region back to the map, and the map leaves the app as tvOS does.
+
 A channel change, in one unbroken flight (owner, 2026-10-05: the held wing "gets hung"; "as
 smooth and beautiful and natural as possible"): the old sound fades to nothing (0.45 s, eased)
 while the skin's ground comes up (0.35 s) and the pigeon flies at the viewer; at 1.6 s a wing
-covers the screen and the new channel starts tuning behind it; the bird flies on out of the
-frame (0.9 s), its tail fading for the last 0.18 s; the ground holds with TUNING and the
-channel's name until the picture plays (8 s at most), then fades off it (0.6 s) as the new
-sound fades in (0.9 s). The two halves are queued on one AVQueuePlayer, gapless, prerolled
+covers the screen and the new channel starts tuning behind it; the close wing lifts off the top
+of the screen (0.5 s, eased in) as the bird passing over the camera. The generated source has a
+repeated frame and a jump cut just after this point (read frame by frame, 2026-10-05), which
+showed as a glitch at the end; the clip stops before them and repeated frames are dropped. The
+ground holds with TUNING and the channel's name until the picture plays (8 s at most), and the
+picture then CUTS in: the pigeon is the transition, and only the sound eases up (0.5 s). The two halves are queued on one AVQueuePlayer, gapless, prerolled
 before the press. Measured on the owner's Apple TV HD: decode 47-50 fps against the clip's 24,
 0-1 late refreshes per flight. Reduced Motion keeps the fades and leaves the bird out.
 Overlays hide 2.6 seconds into playback.

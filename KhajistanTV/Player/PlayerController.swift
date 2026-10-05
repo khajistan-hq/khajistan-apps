@@ -187,7 +187,7 @@ final class PlayerController {
             state = .playing
             if fadeInPending {
                 fadeInPending = false
-                Task { await ramp(to: 1, over: 0.9) }
+                Task { await ramp(to: 1, over: 0.5) }
             }
         case .waitingToPlayAtSpecifiedRate:
             switch state {

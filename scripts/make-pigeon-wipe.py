@@ -4,7 +4,8 @@
 acd81a521 cut it), lifted off its black ground so the app paints the skin's colour behind it.
 
   wipe-in   1.0-2.6 s  the pigeon flies at the viewer until a wing fills the screen
-  wipe-out  2.6-3.5 s  the wing sweeps off
+  wipe-out  2.6-2.92 s the close wing, up to the source's jump cut (see CUTS); the app lifts
+                       it off the top of the screen
 
 The matte is BiRefNet (rembg "birefnet-general", already on this machine), raised where the
 pixel is clearly brighter than the black ground: the model is unsure of blurred wingtips and
@@ -28,7 +29,14 @@ CROP_Y, CROP_H = 600, 608
 # encode was the same picture enlarged, and the owner's Apple TV HD (A8) decoded it at 15-21 fps
 # against the clip's 24 (measured on the device, 2026-10-05): it would have stuttered.
 OUT = (1080, CROP_H)
-CUTS = {"wipe-in": (1.0, 2.6), "wipe-out": (2.6, 3.5)}
+CUTS = {"wipe-in": (1.0, 2.6), "wipe-out": (2.6, 2.92)}
+# The out half stops before the source's own jump cut. Read frame by frame (2026-10-05): at 2.917
+# -> 2.958 s the generated clip cuts from the close wing to the bird seen from below (mean frame
+# difference 44.8 against 10-20 either side), and at 2.833 -> 2.875 s it repeats a frame (1.4).
+# Both read as a glitch on screen. The app lifts the close wing off the top of the screen
+# instead, as the bird passing over the camera (StationClips). A frame that repeats the one
+# before it (mean difference under DUPLICATE, 0-255 scale) is dropped wherever it falls.
+DUPLICATE = 3.0
 BATCH = 1   # the model passes 16 GB by its third frame in one process (measured)
 
 def masks(frames, work):
@@ -46,10 +54,22 @@ def masks(frames, work):
 
 def render(src, name, start, end, out_dir, work):
     d = os.path.join(work, name); os.makedirs(d, exist_ok=True)
+    for f in os.listdir(d):
+        if f.endswith(".png") and ".a." not in f:
+            os.remove(os.path.join(d, f))
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(start), "-to", str(end), "-i", src,
                     "-vf", f"crop=1080:{CROP_H}:0:{CROP_Y}", "-pix_fmt", "rgb48le",
                     os.path.join(d, "%04d.png")], check=True)
     frames = sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".png") and ".a." not in f)
+    kept, previous = [], None
+    for f in frames:
+        img = cv2.imread(f, cv2.IMREAD_REDUCED_COLOR_4).astype(np.float32)
+        if previous is not None and float(np.abs(img - previous).mean()) < DUPLICATE:
+            print(f"  {name}: dropped {os.path.basename(f)}, a repeat of the frame before", flush=True)
+            continue
+        kept.append(f)
+        previous = img
+    frames = kept
     masks(frames, work)
     enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
                             "-s", f"{OUT[0]}x{OUT[1]}", "-r", "24", "-i", "-",
@@ -72,6 +92,15 @@ def render(src, name, start, end, out_dir, work):
         unsure = a < 0.95
         a[unsure] *= np.clip((m[unsure] - 2) / 6, 0, 1)
         a = np.maximum(a, np.clip((m - 6) / 50, 0, 1))
+        # On a frame the bird has nearly left, the model invents shapes on the black (a smear and
+        # a blob on the last frame of the out half). Keep only shapes holding real bird: at least
+        # 50 pixels clearly brighter than the ground.
+        n, lab = cv2.connectedComponents((a > 0.04).astype(np.uint8), connectivity=8)
+        if n > 1:
+            bright = np.bincount(lab[m > 30].ravel(), minlength=n)
+            keep = bright >= 50
+            keep[0] = False
+            a = np.where(keep[lab], a, 0)
         c = np.minimum(c, a[..., None] * 255)
         rgba = np.dstack([c, a * 255])
         enc.stdin.write(np.clip(rgba, 0, 255).astype(np.uint8).tobytes())

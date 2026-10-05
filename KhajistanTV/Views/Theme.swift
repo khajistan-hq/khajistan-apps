@@ -362,6 +362,74 @@ struct StatusBand: View {
     }
 }
 
+/// The strip a playing signal wears: one slim band along the bottom in the band colour, the
+/// name and its line in the band's text colour, the attribution under them in small type, and
+/// the medium and the place at the right. It replaced a top band and a ground panel that
+/// covered a third of the picture (owner, 2026-10-05: "too thick and not smooth at all, make
+/// it small and better"). It rises and fades in, and sinks and fades out, together.
+struct PlayerStrip: View {
+    let name: String?
+    let detail: String?
+    let attribution: String?
+    let trailing: [String]
+    /// What comes next on a scheduled channel: its start time and its name.
+    var upNext: (time: String, name: String)? = nil
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 36) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 20) {
+                    if let name, !name.isEmpty {
+                        Text(name)
+                            .font(.system(size: 30, weight: .black))
+                            .tracking(30 * -0.03)
+                            .lineLimit(1)
+                    }
+                    if let detail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 22, weight: .semibold))
+                            .lineLimit(1)
+                            .opacity(0.85)
+                    }
+                }
+                if let attribution, !attribution.isEmpty {
+                    Text(attribution)
+                        .font(.system(size: 17))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .opacity(0.75)
+                }
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 24)
+            ForEach(Array(trailing.enumerated()), id: \.offset) { item in
+                Kicker(item.element, color: palette.onBand)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            if let upNext {
+                VStack(alignment: .trailing, spacing: 6) {
+                    Kicker("Up next \(upNext.time) \(StationClock.tzLabel)", color: palette.onBand)
+                        .lineLimit(1)
+                        .fixedSize()
+                    Text(upNext.name)
+                        .font(.system(size: 22, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: 520, alignment: .trailing)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("upNext")
+            }
+        }
+        .foregroundStyle(palette.onBand)
+        .padding(.horizontal, KJLayout.inset)
+        .padding(.vertical, 18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.band, ignoresSafeAreaEdges: [.horizontal, .bottom])
+    }
+}
+
 /// An on/off control. A button, so it takes focus and the plate like every other one.
 struct HouseSwitch: View {
     let title: String

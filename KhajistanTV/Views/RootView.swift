@@ -19,6 +19,10 @@ struct RootView: View {
         .tint(palette.accent)
         // The colour scheme steers what tvOS draws itself, the text fields and the keyboard.
         .preferredColorScheme(model.skin == .day ? .light : .dark)
+        // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
+        // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
+        // what tvOS does: a region pops back to the map, and the map leaves the app.
+        .modifier(BackToAtlas(active: model.section != .receiver) { model.section = .receiver })
     }
 
     @ViewBuilder
@@ -28,6 +32,19 @@ struct RootView: View {
         case .transmission: TransmissionView()
         case .picsvids: PicsVidsView()
         case .account: AccountView()
+        }
+    }
+}
+
+private struct BackToAtlas: ViewModifier {
+    let active: Bool
+    let back: () -> Void
+
+    func body(content: Content) -> some View {
+        if active {
+            content.onExitCommand(perform: back)
+        } else {
+            content
         }
     }
 }

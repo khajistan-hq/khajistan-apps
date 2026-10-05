@@ -81,8 +81,8 @@ enum AuthAPI {
     }
 
     /// The server's own sentence from an error body. Three shapes exist:
-    /// {"error","error_description"}, {"code","msg"} and {"code","message"}; first non-empty wins in
-    /// that order. Nil when the body is not JSON or carries none of them.
+    /// {"error","error_description"}, {"code","msg"} and {"code","message"}. The first non-empty of
+    /// error_description, message and msg wins, in that order. Nil when the body is not JSON or carries none of them.
     static func errorMessage(from data: Data) -> String? {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
         for key in ["error_description", "message", "msg"] {

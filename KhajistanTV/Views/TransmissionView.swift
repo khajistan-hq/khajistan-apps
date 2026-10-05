@@ -70,7 +70,11 @@ struct TransmissionView: View {
             }
         case .noSchedule:
             statusBlock(marker: "No schedule", line: "The schedule for this month has not been published.") {
-                EmptyView()
+                Button("Try again") {
+                    Task { await model.transmission.load() }
+                }
+                .buttonStyle(PlateButtonStyle(palette: palette))
+                .frame(maxWidth: 500, alignment: .leading)
             }
         case .needsSignIn:
             statusBlock(marker: "Sign in", line: "Sign in to watch Khajistan TV.") {

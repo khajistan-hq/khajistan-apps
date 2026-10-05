@@ -22,6 +22,7 @@ Native SwiftUI application for the Khajistan Receiver and Khajistan TV, targetin
 - **Station idents and interstitials.**
 - **A Top Shelf extension.** The brand assets carry the two static top shelf images only.
 - **Open Sans.** The system font is used.
+- **House colours on two system controls.** The tab bar and the television/radio switch are drawn by tvOS, which paints the focused item as a white pill. The house allows no white; restyling them needs UIKit appearance work checked on a simulator, and v1 leaves them as tvOS draws them.
 - **Magic-link sign-in.** The Supabase magic-link email template carries no `{{ .Token }}` code, so a television cannot complete it. Adding that token to the template is a one-line change that would enable "email me a code".
 
 ## Source and publish doors
@@ -88,7 +89,7 @@ The **tvOS app** workflow (`.github/workflows/tvos.yml`) runs on a GitHub macOS 
 
 The workflow holds no signing secrets and never deploys the website. A simulator app cannot be installed on a physical Apple TV or uploaded to App Store Connect.
 
-This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. The SwiftUI layer is typechecked as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the three tvOS-only remote modifiers; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS; the workflow is the first build.
+This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. The SwiftUI layer is typechecked as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the three tvOS-only remote modifiers; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS. The first build passed on 2026-10-05, in run 37310699348: Xcode 26.6, an Apple TV 4K (3rd generation) simulator on tvOS 26.5, three UI tests, and no compiler warnings from the app's sources. Its screenshots show the region list, the Indus channel grid, ABN Urdu playing with its attribution line, the Khajistan TV preview-password screen and the Account tab.
 
 ## Cost plan (INTENT §6)
 

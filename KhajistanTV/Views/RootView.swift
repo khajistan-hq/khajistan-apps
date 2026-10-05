@@ -9,13 +9,13 @@ struct RootView: View {
         let palette = Palette(model.skin)
         TabView(selection: $selected) {
             ReceiverView()
-                .tabItem { Label("Receiver", systemImage: "antenna.radiowaves.left.and.right") }
+                .tabItem { Text("Receiver") }
                 .tag(Tab.receiver)
             TransmissionView()
-                .tabItem { Label("Khajistan TV", systemImage: "tv") }
+                .tabItem { Text("Khajistan TV") }
                 .tag(Tab.transmission)
             AccountView()
-                .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                .tabItem { Text("Account") }
                 .tag(Tab.account)
         }
         .tint(palette.ink)

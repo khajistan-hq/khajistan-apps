@@ -226,14 +226,15 @@ final class TransmissionStore {
         return generation
     }
 
-    private func send(_ request: URLRequest) async throws -> Reply {
-        let (data, response) = try await urlSession.data(for: request)
+    private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> Reply {
+        let (data, response) = try await urlSession.data(for: request, delegate: refusingRedirects ? RefuseRedirects() : nil)
         return Reply(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 
-    /// The URL to play for a route, or nil once the phase has been set to say why not.
+    /// The URL to play for a route, or nil once the phase has been set to say why not. As in the
+    /// website's resolve(), every route needs a signed-in session, a plain file included, and an
+    /// answer is used only if the same viewer is still signed in when it arrives.
     private func carrier(for route: PlayRoute, generation gen: Int) async -> URL? {
-        if case .direct(let url) = route { return url }
         let token: String
         do {
             token = try await auth.validAccessToken()
@@ -244,13 +245,16 @@ final class TransmissionStore {
             return nil
         }
         guard gen == generation else { return nil }
+        let viewer = auth.session?.userId
+        if case .direct(let url) = route { return url }
         guard let request = Transmission.request(for: route, accessToken: token) else {
             phase = .failed("This programme has no playable source.")
             return nil
         }
         let reply: Reply
         do {
-            reply = try await send(request)
+            // A signer that redirects is refused, as the website's fetch does with redirect: 'error'.
+            reply = try await send(request, refusingRedirects: true)
         } catch {
             if gen == generation, !Task.isCancelled { phase = .failed(error.localizedDescription) }
             return nil
@@ -260,12 +264,18 @@ final class TransmissionStore {
             phase = .needsSignIn
             return nil
         }
+        let url: URL
         do {
-            return try Transmission.carrier(from: reply.data, route: route)
+            url = try Transmission.carrier(from: reply.data, route: route)
         } catch {
             phase = .failed("This transmission is unavailable right now.")
             return nil
         }
+        guard viewer != nil, auth.session?.userId == viewer else {
+            phase = .needsSignIn
+            return nil
+        }
+        return url
     }
 
     /// Five vinyl transfers carry no title; the show name stands in for it.
@@ -273,5 +283,18 @@ final class TransmissionStore {
         let title = air.programme?.title ?? ""
         if !title.isEmpty { return title }
         return air.show?.name ?? "Khajistan TV"
+    }
+}
+
+/// Turns down every redirect, so the 3xx itself comes back as the answer and is not used.
+private final class RefuseRedirects: NSObject, URLSessionTaskDelegate {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }

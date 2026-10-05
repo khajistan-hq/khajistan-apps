@@ -11,7 +11,25 @@ final class ChannelChangeUITests: XCTestCase {
     }
 
     func testChannelChangeSequence() {
-        let app = XCUIApplication()
+        openChannel()
+        XCUIRemote.shared.press(.down)
+        for (index, wait) in [0.2, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5].enumerated() {
+            Thread.sleep(forTimeInterval: wait)
+            shot(String(format: "%02d-change", index + 3), app)
+        }
+    }
+
+    /// The same change with nothing else going on: no screenshots during it, which freeze the
+    /// simulator's screen for a moment. For a screen recording to measure the wipe's frames.
+    func testChannelChangeUndisturbed() {
+        openChannel()
+        XCUIRemote.shared.press(.down)
+        Thread.sleep(forTimeInterval: 8)
+    }
+
+    private let app = XCUIApplication()
+
+    private func openChannel() {
         app.launch()
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
@@ -32,11 +50,5 @@ final class ChannelChangeUITests: XCTestCase {
         shot("01-opening-ground", app)
         Thread.sleep(forTimeInterval: 9)
         shot("02-first-picture", app)
-
-        XCUIRemote.shared.press(.down)
-        for (index, wait) in [0.2, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5].enumerated() {
-            Thread.sleep(forTimeInterval: wait)
-            shot(String(format: "%02d-change", index + 3), app)
-        }
     }
 }

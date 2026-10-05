@@ -190,20 +190,22 @@ struct ReceiverPlayerView: View {
         model.clips.uncover()
     }
 
-    /// The website's wing wipe on the skin's colour: the old sound fades as the pigeon flies in,
-    /// the new channel tunes behind the held wing, and the wing sweeps off the new picture, whose
-    /// sound fades in once it plays.
+    /// The old sound fades as the pigeon flies in over the skin's ground; the new channel starts
+    /// tuning the moment the wing covers the screen, while the bird flies on out; the ground holds
+    /// with the channel's name until the picture plays, and fades off it as its sound fades in.
     private func change(to target: Channel) async {
         async let quiet: Void = controller.fadeOut()
-        await model.clips.wipeIn()
+        await model.clips.flyThrough(caption: target.name) {
+            // A newer press has moved on: that press tunes its own channel.
+            guard destination?.id == target.id else { return }
+            tune(target)
+            destination = nil
+        }
         await quiet
-        // A newer press, or leaving, cancelled this one while the pigeon was flying.
         guard !Task.isCancelled else { return }
-        tune(target)
-        destination = nil
         await controller.settled()
         guard !Task.isCancelled else { return }
-        await model.clips.wipeOut()
+        model.clips.uncover()
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.

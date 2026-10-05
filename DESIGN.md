@@ -150,11 +150,15 @@ but with skin color backgrounds"). The grooming loop and the sign-on ident, whic
 and is on black, are not in the apps. Two other flights (Across, Upward) were tried the same
 day and refused: shown at their own 9:16 shape the bird hit the clip's sides on a 16:9 screen.
 
-A channel change: the old sound fades to nothing (0.45 s, eased) while the skin's ground comes
-up (0.35 s) and the pigeon flies at the viewer until a wing fills the screen (1.6 s); the wing
-holds while the next signal tunes (until it plays or fails, 8 s at most); the wing sweeps off
-the new picture (0.9 s), whose sound fades in once it is actually playing (0.9 s). Reduced
-Motion keeps the fades and leaves the wipe out.
+A channel change, in one unbroken flight (owner, 2026-10-05: the held wing "gets hung"; "as
+smooth and beautiful and natural as possible"): the old sound fades to nothing (0.45 s, eased)
+while the skin's ground comes up (0.35 s) and the pigeon flies at the viewer; at 1.6 s a wing
+covers the screen and the new channel starts tuning behind it; the bird flies on out of the
+frame (0.9 s), its tail fading for the last 0.18 s; the ground holds with TUNING and the
+channel's name until the picture plays (8 s at most), then fades off it (0.6 s) as the new
+sound fades in (0.9 s). The two halves are queued on one AVQueuePlayer, gapless, prerolled
+before the press. Measured on the owner's Apple TV HD: decode 47-50 fps against the clip's 24,
+0-1 late refreshes per flight. Reduced Motion keeps the fades and leaves the bird out.
 Overlays hide 2.6 seconds into playback.
 
 ## Assets
@@ -164,7 +168,7 @@ the master everywhere). The wipe, `wipe-in.mov` and `wipe-out.mov`, is rendered 
 the Higgsfield original of the website's wipe (clip 0ea14f57, 1080×1920, 24 fps), cut exactly
 as `archive/assets/tv/khajistan-wing-wipe-*.mp4` (16:9 at y=600; 1.0–2.6 s and 2.6–3.5 s),
 matted with BiRefNet (a brightness key cannot separate the dark chest from the black ground),
-premultiplied, at 1920×1080, as HEVC with alpha. The app draws the ground, so one file serves
-all three skins. The 16:9 band is 1080 px wide at source, so 1920 is a 1.78× enlargement and
-there is no larger master of this flight. The rainbow TV bug is NOT used: it is not on
+premultiplied, as HEVC with alpha at the band's own 1080×608, scaled to the screen by the GPU
+(a 1920×1080 encode was the same picture enlarged, and decoded at 15-21 fps on the Apple TV HD).
+The app draws the ground, so one file serves all three skins. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

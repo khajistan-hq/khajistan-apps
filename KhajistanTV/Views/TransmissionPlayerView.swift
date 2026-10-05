@@ -249,7 +249,7 @@ struct TransmissionPlayerView: View {
     /// button of the screen's own (Sign in, Try again) is the thing to focus.
     private var focusTarget: some View {
         Button {
-            if model.clips.showing != nil {
+            if model.clips.showing {
                 model.clips.skip()
             } else {
                 wake()
@@ -268,23 +268,27 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Up and down switch channel through the wing wipe. While a clip is on screen they skip it.
+    /// Up and down switch channel behind the pigeon. While it is flying they skip it.
     private func move(_ direction: MoveCommandDirection) {
         wake()
         guard direction == .up || direction == .down else { return }
-        if model.clips.showing != nil {
+        if model.clips.showing {
             model.clips.skip()
             return
         }
         guard holdsFocus, !switching else { return }
         switching = true
         Task {
+            let next = store.channelNumber == 1 ? 2 : 1
             async let quiet: Void = store.player.fadeOut()
-            await model.clips.wipeIn()
+            var retune: Task<Void, Never>?
+            await model.clips.flyThrough(caption: store.channelName(next)) {
+                if !left { retune = Task { await store.switchChannel() } }
+            }
             await quiet
-            if !left { await store.switchChannel() }
+            await retune?.value
             if !left { await store.player.settled() }
-            if !left { await model.clips.wipeOut() }
+            if !left { model.clips.uncover() }
             switching = false
         }
     }
@@ -293,7 +297,7 @@ struct TransmissionPlayerView: View {
     /// transmission is not the transmission any more.
     private func playPause() {
         wake()
-        if model.clips.showing != nil {
+        if model.clips.showing {
             model.clips.skip()
         } else if store.player.state == .playing {
             store.player.pause()
@@ -304,23 +308,24 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Coming and going
 
-    /// The sign-on, once per launch, as the website's: the wing wipe in, the programme tuned
-    /// behind the held wing, the wing off. Later visits open on the ground with the channel's
-    /// name, which fades off as the picture arrives. Every step checks that the viewer is still
-    /// here: a clip must not start after the screen has gone.
+    /// The sign-on, once per launch: the pigeon flies through and the programme (joined where
+    /// the clock has reached) tunes behind it. Later visits open on the ground with the channel's
+    /// name. Either way the ground fades off as the picture arrives. Every step checks that the
+    /// viewer is still here: a flight must not start after the screen has gone.
     private func start() async {
         if !model.clips.signOnPlayed {
             model.clips.signOnPlayed = true
-            await model.clips.wipeIn()
-            if !gone { await store.tune(channel: channel) }
-            if !gone { await store.player.settled() }
-            if !gone { await model.clips.wipeOut() }
+            var tuning: Task<Void, Never>?
+            await model.clips.flyThrough(caption: store.channelName(channel)) {
+                if !gone { tuning = Task { await store.tune(channel: channel) } }
+            }
+            await tuning?.value
         } else {
             model.clips.cover(caption: store.channelName(channel), animated: false)
             if !gone { await store.tune(channel: channel) }
-            if !gone { await store.player.settled() }
-            if !gone { model.clips.uncover() }
         }
+        if !gone { await store.player.settled() }
+        if !gone { model.clips.uncover() }
     }
 
     private var gone: Bool {

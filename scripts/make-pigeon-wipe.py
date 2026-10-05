@@ -11,8 +11,8 @@ pixel is clearly brighter than the black ground: the model is unsure of blurred 
 pale feather edges, and a brightness key alone cannot hold the chest, which is as dark as the
 ground. The ground is pure black, so a source
 pixel is already alpha x colour: the colour is kept as the premultiplied value and clamped to
-the matte. Frames are enlarged from the 1080x608 crop to 1920x1080 (Lanczos, premultiplied),
-the screen the TV draws them on; there is no larger master of this flight. 24 fps, the
+the matte. Frames are not enlarged: they stay at the crop's own 1080x608 and the GPU scales
+them to the screen (see OUT). 24 fps, the
 source's own rate. Output is HEVC with alpha (AVFoundation composites it premultiplied).
 
 The model's memory grows from frame to frame and the machine's mem-guard stops a process over
@@ -23,7 +23,11 @@ Usage: make-pigeon-wipe.py <Pigeon-Flight-Seedance25-Portrait-1080p.mp4> <out-di
 import os, subprocess, sys, tempfile
 import numpy as np, cv2
 
-CROP_Y, CROP_H, OUT = 600, 608, (1920, 1080)
+CROP_Y, CROP_H = 600, 608
+# Encoded at the crop's own 1080x608 and scaled to the screen by the GPU. An earlier 1920x1080
+# encode was the same picture enlarged, and the owner's Apple TV HD (A8) decoded it at 15-21 fps
+# against the clip's 24 (measured on the device, 2026-10-05): it would have stuttered.
+OUT = (1080, CROP_H)
 CUTS = {"wipe-in": (1.0, 2.6), "wipe-out": (2.6, 3.5)}
 BATCH = 1   # the model passes 16 GB by its third frame in one process (measured)
 
@@ -70,7 +74,6 @@ def render(src, name, start, end, out_dir, work):
         a = np.maximum(a, np.clip((m - 6) / 50, 0, 1))
         c = np.minimum(c, a[..., None] * 255)
         rgba = np.dstack([c, a * 255])
-        rgba = cv2.resize(rgba, OUT, interpolation=cv2.INTER_LANCZOS4)
         enc.stdin.write(np.clip(rgba, 0, 255).astype(np.uint8).tobytes())
     enc.stdin.close()
     if enc.wait():

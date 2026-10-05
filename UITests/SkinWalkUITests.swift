@@ -111,6 +111,55 @@ final class SkinWalkUITests: XCTestCase {
         }
     }
 
+    /// The forms, where tvOS draws part of the control itself: the preview-password step (the
+    /// schedule asks for it without a schedule file), the sign-in sheet, and the atlas switch.
+    func testFormsInEverySkin() {
+        for skin in skins {
+            var app = launch(["-kjskin", skin, "-kjtab", "transmission"])
+            let page = app.staticTexts["transmissionState"]
+            XCTAssertTrue(page.waitForExistence(timeout: 30))
+            wait(upTo: 30) { (page.value as? String) != "Loading" }
+            XCUIRemote.shared.press(.down)
+            Thread.sleep(forTimeInterval: 0.5)
+            shot("\(skin)-7-transmission-\((page.value as? String) ?? "unknown")", app)
+            // The field is drawn by the app over a near-invisible system field; typing into it
+            // must still reach the binding, which is what enables Continue.
+            let proceed = app.buttons["Continue"]
+            if skin == "day", (page.value as? String) == "Preview password", proceed.exists {
+                XCTAssertFalse(proceed.isEnabled, "Continue waits for a password")
+                XCUIRemote.shared.press(.select)
+                Thread.sleep(forTimeInterval: 1.5)
+                app.typeText("abc")
+                XCUIRemote.shared.press(.menu)   // closes the keyboard
+                Thread.sleep(forTimeInterval: 1.5)
+                XCTAssertTrue(proceed.isEnabled, "typing reaches the field")
+                shot("day-7b-transmission-typed", app)
+            }
+            app.terminate()
+
+            app = launch(["-kjskin", skin, "-kjtab", "account"])
+            let signIn = app.buttons["Sign in"]
+            XCTAssertTrue(signIn.waitForExistence(timeout: 20))
+            XCTAssertTrue(focus(signIn, by: .down, tries: 3))
+            XCUIRemote.shared.press(.select)
+            Thread.sleep(forTimeInterval: 1.5)
+            shot("\(skin)-8-sign-in", app)
+            app.terminate()
+
+            app = launch(["-kjskin", skin, "-kjtab", "receiver"])
+            let toggle = app.buttons["beyondTheAtlas"]
+            XCTAssertTrue(toggle.waitForExistence(timeout: 60))
+            // Down into the region strip, then left along it and off its west end to the switch.
+            let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+            let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            for _ in 0..<10 where !focusedRegion.exists { XCUIRemote.shared.press(.down) }
+            for _ in 0..<40 where !toggle.hasFocus { XCUIRemote.shared.press(.left) }
+            XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
+            shot("\(skin)-9-atlas-switch-focused", app)
+            app.terminate()
+        }
+    }
+
     /// The notice before a handover comes up over the picture once the overlay has hidden, and
     /// goes when the overlay is woken, so the line is never on screen twice. The lead is stretched
     /// to a day so the slot on air is always inside it.

@@ -33,7 +33,7 @@ final class StationClips {
     enum Tier: String {
         case p720 = "720", p1080 = "1080", p2160 = "2160"
 
-        static let device: Tier = {
+        @MainActor static let device: Tier = {
             var info = utsname()
             uname(&info)
             let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }

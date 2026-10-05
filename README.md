@@ -65,6 +65,14 @@ The script compiles the Foundation-only core and runs its checks:
 - The models decode the real feed files.
 - The carrier and auth requests have the expected shapes.
 
+### Typecheck without Xcode
+
+```sh
+sh tvos/scripts/typecheck-catalyst.sh
+```
+
+The script typechecks the SwiftUI layer as Mac Catalyst against the UIKit and SwiftUI interfaces in the Command Line Tools SDK, which catches most compile errors before a CI run. It does not build for tvOS. An API that exists on iOS but not on tvOS passes it, and the UI tests are not checked. The script's header lists its two stand-ins.
+
 ### Generated files
 
 After adding or removing Swift files, regenerate the Xcode project:
@@ -89,7 +97,7 @@ The **tvOS app** workflow (`.github/workflows/tvos.yml`) runs on a GitHub macOS 
 
 The workflow holds no signing secrets and never deploys the website. A simulator app cannot be installed on a physical Apple TV or uploaded to App Store Connect.
 
-This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. The SwiftUI layer is typechecked as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the three tvOS-only remote modifiers; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS. The first build passed on 2026-10-05, in run 37310699348: Xcode 26.6, an Apple TV 4K (3rd generation) simulator on tvOS 26.5, three UI tests, and no compiler warnings from the app's sources. Its screenshots show the region list, the Indus channel grid, ABN Urdu playing with its attribution line, the Khajistan TV preview-password screen and the Account tab.
+This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. `sh tvos/scripts/typecheck-catalyst.sh` typechecks the SwiftUI layer as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the three tvOS-only remote modifiers; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS. The first build passed on 2026-10-05, in run 37310699348: Xcode 26.6, an Apple TV 4K (3rd generation) simulator on tvOS 26.5, three UI tests, and no compiler warnings from the app's sources. Its screenshots show the region list, the Indus channel grid, ABN Urdu playing with its attribution line, the Khajistan TV preview-password screen and the Account tab.
 
 ## Cost plan (INTENT §6)
 

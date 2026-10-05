@@ -1,0 +1,1344 @@
+import Foundation
+
+// Core tests for Khajistan for Apple TV. Foundation only, no XCTest: this file and
+// KhajistanTV/Core/*.swift compile together with swiftc (see scripts/test-core.sh) and the
+// first argument is the path to Tests/Fixtures/station-clock-fixture.json.
+
+// MARK: - Harness
+
+struct Failure: Error, CustomStringConvertible {
+    let description: String
+}
+
+/// A test that could not run here (a data file is absent). Printed as SKIP, never as PASS.
+struct Skip: Error {
+    let reason: String
+}
+
+func expect(_ condition: @autoclosure () throws -> Bool, _ note: @autoclosure () -> String = "", line: Int = #line) throws {
+    guard try condition() else {
+        let text = note()
+        throw Failure(description: "line \(line): expectation failed" + (text.isEmpty ? "" : " (\(text))"))
+    }
+}
+
+func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ note: @autoclosure () -> String = "", line: Int = #line) throws {
+    guard actual == expected else {
+        let text = note()
+        throw Failure(description: "line \(line): got \(actual), expected \(expected)" + (text.isEmpty ? "" : " (\(text))"))
+    }
+}
+
+func expectClose(_ actual: Double, _ expected: Double, tolerance: Double = 1e-6, line: Int = #line) throws {
+    guard abs(actual - expected) <= tolerance else {
+        throw Failure(description: "line \(line): got \(actual), expected \(expected) within \(tolerance)")
+    }
+}
+
+func require<T>(_ value: T?, _ note: String = "required value was nil", line: Int = #line) throws -> T {
+    guard let value else { throw Failure(description: "line \(line): \(note)") }
+    return value
+}
+
+func expectThrows<E: Error & Equatable>(_ expected: E, line: Int = #line, _ body: () throws -> Void) throws {
+    do {
+        try body()
+    } catch let thrown as E {
+        guard thrown == expected else { throw Failure(description: "line \(line): threw \(thrown), expected \(expected)") }
+        return
+    } catch {
+        throw Failure(description: "line \(line): threw \(error), expected \(expected)")
+    }
+    throw Failure(description: "line \(line): nothing thrown, expected \(expected)")
+}
+
+func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+    try JSONDecoder().decode(type, from: Data(json.utf8))
+}
+
+func jsonObject(_ json: String) throws -> [String: Any] {
+    try require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any], "not a JSON object")
+}
+
+// MARK: - Clocks and paths
+
+guard let karachiZone = TimeZone(identifier: "Asia/Karachi") else {
+    print("FATAL: this system has no Asia/Karachi time zone")
+    exit(2)
+}
+var karachi = Calendar(identifier: .gregorian)
+karachi.timeZone = karachiZone
+
+/// An instant given as a Pakistan wall-clock reading, built by Calendar so it shares no
+/// arithmetic with StationClock.
+func pkt(_ y: Int, _ mo: Int, _ d: Int, _ h: Int = 0, _ mi: Int = 0, _ s: Int = 0) -> Date {
+    karachi.date(from: DateComponents(year: y, month: mo, day: d, hour: h, minute: mi, second: s)) ?? Date(timeIntervalSince1970: 0)
+}
+
+func isoString(_ year: Int, _ month: Int, _ day: Int) -> String {
+    "\(year)-\(month < 10 ? "0" : "")\(month)-\(day < 10 ? "0" : "")\(day)"
+}
+
+guard CommandLine.arguments.count > 1 else {
+    print("usage: core-tests <path to station-clock-fixture.json>")
+    exit(2)
+}
+let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
+/// <root>/tvos/Tests/Fixtures/<file> -> <root>
+let repoRoot = fixtureURL.deletingLastPathComponent().deletingLastPathComponent()
+    .deletingLastPathComponent().deletingLastPathComponent()
+
+func realFile(_ relative: String) throws -> Data {
+    let url = repoRoot.appendingPathComponent(relative)
+    guard FileManager.default.fileExists(atPath: url.path) else { throw Skip(reason: "\(relative) is not in this checkout") }
+    return try Data(contentsOf: url)
+}
+
+// MARK: - Skin
+
+func skinHoursAtBoundaries() throws {
+    let cases: [(hour: Int, minute: Int, skin: Skin)] = [
+        (4, 59, .grove), (5, 0, .smut), (7, 59, .smut), (8, 0, .day),
+        (16, 59, .day), (17, 0, .smut), (19, 59, .smut), (20, 0, .grove),
+    ]
+    for c in cases {
+        try expectEqual(Skin.current(at: pkt(2026, 10, 10, c.hour, c.minute), calendar: karachi), c.skin, "\(c.hour):\(c.minute)")
+    }
+    var tally: [Skin: Int] = [:]
+    for hour in 0..<24 { tally[Skin.current(at: pkt(2026, 10, 10, hour, 30), calendar: karachi), default: 0] += 1 }
+    try expectEqual(tally, [.day: 9, .smut: 6, .grove: 9])
+    // The calendar decides whose hour it is: 08:00 in Karachi is 20:00 the evening before in Los Angeles.
+    var losAngeles = Calendar(identifier: .gregorian)
+    losAngeles.timeZone = try require(TimeZone(identifier: "America/Los_Angeles"))
+    try expectEqual(Skin.current(at: pkt(2026, 10, 10, 8, 0), calendar: karachi), .day)
+    try expectEqual(Skin.current(at: pkt(2026, 10, 10, 8, 0), calendar: losAngeles), .grove)
+}
+
+func skinColours() throws {
+    try expectEqual([Skin.day.groundHex, Skin.day.inkHex, Skin.day.liftHex], [0xF3FB04, 0x000000, 0xFFFFA0])
+    try expectEqual([Skin.grove.groundHex, Skin.grove.inkHex, Skin.grove.liftHex], [0x186409, 0xF3FB04, 0x004A00])
+    try expectEqual([Skin.smut.groundHex, Skin.smut.inkHex, Skin.smut.liftHex], [0xC11B6B, 0xF3FB04, 0x8F1350])
+    try expectEqual(Skin.allCases.map(\.rawValue), ["day", "grove", "smut"])
+    let encoded = try JSONEncoder().encode([Skin.grove])
+    try expectEqual(try JSONDecoder().decode([Skin].self, from: encoded), [.grove])
+}
+
+// MARK: - Receiver index
+
+let indexJSON = #"""
+{"schemaVersion":"2.0.0",
+ "regions":[
+  {"id":"indus","label":"Indus","kind":"state","tier":"heartbeat"},
+  {"id":"kurdistan","label":"Kurdistan","kind":"people","tier":"core","states":["anatolia"]},
+  {"id":"anatolia","label":"Anatolia","kind":"state","tier":"core"},
+  {"id":"nusantara","label":"Nusantara","kind":"state","tier":"islamicate","within":["x"]},
+  {"id":"khorasan","label":"Khorasan","kind":"state","tier":"heartbeat"}],
+ "totals":{"channels":10,"live":9,"byMedium":{"radio":6,"tv":3,"camera":1},"onLoad":8},
+ "regionFiles":{
+  "indus":"/data/open-frequencies/regions/indus.json",
+  "anatolia":"/data/open-frequencies/regions/anatolia.json",
+  "nusantara":"/data/open-frequencies/regions/nusantara.json",
+  "unfiled":"/data/open-frequencies/regions/unfiled.json",
+  "khorasan":"//evil.example/x.json"},
+ "cameraFiles":{"anatolia":"/data/open-frequencies/regions/anatolia-camera.json"},
+ "regionCounts":{
+  "indus":{"channels":3,"live":3,"byMedium":{"tv":1,"radio":2}},
+  "anatolia":{"channels":150,"live":150,"byMedium":{"tv":65,"radio":61,"camera":24}},
+  "nusantara":{"channels":2,"live":2,"byMedium":{"radio":1,"camera":1,"tv":0}},
+  "tvonly":{"channels":1,"live":1,"byMedium":{"tv":1}},
+  "cams":{"channels":2,"live":2,"byMedium":{"camera":2}},
+  "unfiled":{"channels":0,"live":0,"byMedium":{}}},
+ "opening":[{"id":"x"}]}
+"""#
+
+func receiverIndexRegionsAndLines() throws {
+    let index = try decode(ReceiverIndex.self, indexJSON)
+    try expectEqual(index.regions.count, 5)
+    // Index order, and only regions that have a shard file: kurdistan has none.
+    try expectEqual(index.listedRegions.map(\.id), ["indus", "anatolia", "nusantara", "khorasan"])
+    try expectEqual(index.listedRegions.first, ReceiverIndex.Region(id: "indus", label: "Indus", kind: "state", tier: "heartbeat"))
+    try expectEqual(index.totals.channels, 10)
+    try expectEqual(index.totals.byMedium["tv"], 3)
+
+    try expectEqual(index.shardURL(regionId: "indus")?.absoluteString, "https://khajistan-archive.pages.dev/data/open-frequencies/regions/indus.json")
+    try expectEqual(index.shardURL(regionId: "kurdistan"), nil)
+    try expectEqual(index.shardURL(regionId: "nowhere"), nil)
+    // A protocol-relative path would leave the site; it is refused rather than followed.
+    try expectEqual(index.shardURL(regionId: "khorasan"), nil)
+    try expectEqual(index.cameraURL(regionId: "anatolia")?.absoluteString, "https://khajistan-archive.pages.dev/data/open-frequencies/regions/anatolia-camera.json")
+    try expectEqual(index.cameraURL(regionId: "indus"), nil)
+
+    try expectEqual(index.mediumLine(regionId: "anatolia"), "65 television · 61 radio · 24 cameras")
+    try expectEqual(index.mediumLine(regionId: "indus"), "1 television · 2 radio")
+    try expectEqual(index.mediumLine(regionId: "nusantara"), "1 radio · 1 camera")
+    try expectEqual(index.mediumLine(regionId: "tvonly"), "1 television")
+    try expectEqual(index.mediumLine(regionId: "cams"), "2 cameras")
+    try expectEqual(index.mediumLine(regionId: "unfiled"), "")
+    try expectEqual(index.mediumLine(regionId: "kurdistan"), "")
+}
+
+func receiverIndexWithoutCameraFiles() throws {
+    let object = try jsonObject(indexJSON)
+    var trimmed = object
+    trimmed.removeValue(forKey: "cameraFiles")
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: try JSONSerialization.data(withJSONObject: trimmed))
+    try expectEqual(index.cameraFiles, nil)
+    try expectEqual(index.cameraURL(regionId: "anatolia"), nil)
+    try expectEqual(index.shardURL(regionId: "indus") != nil, true)
+}
+
+// MARK: - Channels
+
+let channelJSON = #"""
+{"id":"pk-radio-1","slug":"pk-radio-1","legacyIds":["a"],"name":"Radio One","nativeName":"ریڈیو","mediaType":"radio",
+ "primaryLanguage":"Urdu","regionIds":["indus"],"country":"Pakistan","territory":"Punjab","broadcaster":"Radio Pakistan",
+ "officialWebsite":null,"streams":[{"id":"pk-radio-1-primary","format":"hls","cors":null},{"id":"pk-radio-1-backup","format":"hls","cors":true}],
+ "activeStreamId":"pk-radio-1-backup","attributionText":"Radio Pakistan","publicationStatus":"published","healthStatus":"online",
+ "manualDisabled":false,"description":"d","genres":["news"]}
+"""#
+
+/// The channel above with some keys replaced (NSNull() makes a key null) and some removed.
+func channelWith(_ overrides: [String: Any] = [:], removing keys: [String] = []) throws -> Channel {
+    var object = try jsonObject(channelJSON)
+    for (key, value) in overrides { object[key] = value }
+    for key in keys { object.removeValue(forKey: key) }
+    return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+}
+
+func channelDecodesAndFindsItsActiveStream() throws {
+    let channel = try channelWith()
+    try expectEqual(channel.id, "pk-radio-1")
+    try expectEqual(channel.nativeName, "ریڈیو")
+    try expectEqual(channel.activeStream?.id, "pk-radio-1-backup")
+    try expectEqual(channel.activeStream?.format, "hls")
+    try expectEqual(channel.genres ?? [], ["news"])
+    try expectEqual(try channelWith(["activeStreamId": NSNull()]).activeStream, nil)
+    try expectEqual(try channelWith(["activeStreamId": "nope"]).activeStream, nil)
+    // Every optional field may be absent or null.
+    let bare = try channelWith(removing: ["nativeName", "primaryLanguage", "regionIds", "country", "territory", "broadcaster",
+                                          "activeStreamId", "attributionText", "publicationStatus", "healthStatus",
+                                          "manualDisabled", "description", "genres"])
+    try expectEqual(bare.activeStream, nil)
+    try expectEqual(bare.place, "")
+    try expectEqual(try channelWith(["genres": NSNull(), "nativeName": NSNull()]).genres, nil)
+}
+
+func channelPlaceDropsWhatIsNotKnown() throws {
+    try expectEqual(try channelWith().place, "Pakistan · Urdu")
+    try expectEqual(try channelWith(["primaryLanguage": "Not yet verified"]).place, "Pakistan")
+    try expectEqual(try channelWith(["primaryLanguage": NSNull()]).place, "Pakistan")
+    try expectEqual(try channelWith(["country": ""]).place, "Urdu")
+    try expectEqual(try channelWith(["country": NSNull(), "primaryLanguage": NSNull()]).place, "")
+    try expectEqual(try channelWith(["country": "Iran", "primaryLanguage": "  "]).place, "Iran")
+    try expectEqual(try channelWith(["country": "", "primaryLanguage": "Not yet verified"]).place, "")
+}
+
+// MARK: - Eligibility
+
+func eligibilityChannel(_ id: String, name: String? = nil, publication: String? = "published", disabled: Bool? = false,
+                        health: String? = "online", streams: [String] = ["s1"], active: String? = "s1") throws -> Channel {
+    var object: [String: Any] = [
+        "id": id, "name": name ?? id, "mediaType": "radio",
+        "streams": streams.map { ["id": $0, "format": "hls"] },
+    ]
+    if let publication { object["publicationStatus"] = publication }
+    if let disabled { object["manualDisabled"] = disabled }
+    if let health { object["healthStatus"] = health }
+    if let active { object["activeStreamId"] = active }
+    return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+}
+
+func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
+    let channels: [Channel] = [
+        // kept
+        try eligibilityChannel("good"),
+        try eligibilityChannel("publication-absent", publication: nil),
+        try eligibilityChannel("disabled-absent", disabled: nil),
+        try eligibilityChannel("ratio-at-bar"),
+        try eligibilityChannel("ratio-null"),
+        try eligibilityChannel("health-feed-outranks-channel", health: "offline"),
+        try eligibilityChannel("degraded", health: "degraded"),
+        // dropped
+        try eligibilityChannel("denied"),
+        try eligibilityChannel("off-air"),
+        try eligibilityChannel("offline-by-feed"),
+        try eligibilityChannel("offline-by-channel", health: "offline"),
+        try eligibilityChannel("blocked-by-feed"),
+        try eligibilityChannel("blocked-by-channel", health: "blocked"),
+        try eligibilityChannel("manually-disabled", disabled: true),
+        try eligibilityChannel("draft", publication: "draft"),
+        try eligibilityChannel("no-active-stream", active: nil),
+        try eligibilityChannel("active-stream-matches-nothing", active: "zzz"),
+        try eligibilityChannel("slow-0-2"),
+        try eligibilityChannel("slow-0-49"),
+    ]
+    let denylist = try decode(Denylist.self, #"{"disabledChannelIds":["denied"],"reasonCodes":{}}"#)
+    let offAir = try decode(OffAir.self, #"{"offAirChannelIds":["off-air"]}"#)
+    let health = try decode(Health.self, #"""
+    {"results":[
+     {"channelId":"offline-by-feed","status":"offline","deliveryRatio":3.0},
+     {"channelId":"blocked-by-feed","status":"blocked","deliveryRatio":null},
+     {"channelId":"health-feed-outranks-channel","status":"online","deliveryRatio":1.0},
+     {"channelId":"slow-0-2","status":"online","deliveryRatio":0.2},
+     {"channelId":"slow-0-49","status":"online","deliveryRatio":0.49},
+     {"channelId":"ratio-at-bar","status":"online","deliveryRatio":0.5},
+     {"channelId":"ratio-null","status":"online","deliveryRatio":null}]}
+    """#)
+    let controls = Controls(denylist: denylist, offAir: offAir, health: health)
+    try expectEqual(controls.denied, ["denied", "off-air"])
+    try expectEqual(controls.health.count, 7)
+    let kept = ReceiverRules.eligible(channels, controls: controls).map(\.id)
+    try expectEqual(Set(kept), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
+                                "health-feed-outranks-channel", "degraded"])
+    try expectEqual(kept.count, 7)
+    // Without any feed nothing is withdrawn by a feed: only the channels' own fields count.
+    let bare = ReceiverRules.eligible(channels, controls: .empty).map(\.id)
+    try expectEqual(Set(bare), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null", "degraded",
+                                "denied", "off-air", "offline-by-feed", "blocked-by-feed", "slow-0-2", "slow-0-49"])
+    try expectEqual(bare.count, 12)
+}
+
+func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
+    let channels: [Channel] = [
+        try eligibilityChannel("dup", name: "Dup"),
+        try eligibilityChannel("dup", name: "Dup"),
+        // The first copy is ineligible, so the second is the one kept.
+        try eligibilityChannel("dup2", name: "Dup Two", health: "offline"),
+        try eligibilityChannel("dup2", name: "Dup Two"),
+        try eligibilityChannel("z", name: "zeta"),
+        try eligibilityChannel("a", name: "Alpha"),
+        try eligibilityChannel("b", name: "beta"),
+        try eligibilityChannel("r10", name: "Radio 10"),
+        try eligibilityChannel("r2", name: "Radio 2"),
+    ]
+    let result = ReceiverRules.eligible(channels, controls: .empty)
+    try expectEqual(result.map(\.id).filter { $0.hasPrefix("dup") }.sorted(), ["dup", "dup2"])
+    try expectEqual(result.count, 7)
+    try expectEqual(result.map(\.name), ["Alpha", "beta", "Dup", "Dup Two", "Radio 2", "Radio 10", "zeta"])
+    try expectEqual(ReceiverRules.eligible([], controls: .empty).count, 0)
+}
+
+func controlsFoldTheFeedsAndLastHealthRecordWins() throws {
+    let denylist = try decode(Denylist.self, #"{"disabledChannelIds":["a","b"]}"#)
+    let offAir = try decode(OffAir.self, #"{"offAirChannelIds":["b","c"]}"#)
+    try expectEqual(Controls(denylist: denylist, offAir: offAir, health: nil).denied, ["a", "b", "c"])
+    try expectEqual(Controls(denylist: denylist, offAir: nil, health: nil).denied, ["a", "b"])
+    try expectEqual(Controls(denylist: nil, offAir: offAir, health: nil).denied, ["b", "c"])
+    try expectEqual(Controls.empty.denied.count + Controls.empty.health.count, 0)
+    let health = try decode(Health.self, #"{"results":[{"channelId":"x","status":"offline"},{"channelId":"x","status":"online","deliveryRatio":2.5}]}"#)
+    let controls = Controls(denylist: nil, offAir: nil, health: health)
+    try expectEqual(controls.health["x"]?.status, "online")
+    try expectEqual(controls.health["x"]?.deliveryRatio, 2.5)
+}
+
+func tiersAndMediumLabels() throws {
+    try expectEqual(ReceiverRules.tiersOnByDefault, ["heartbeat", "core"])
+    try expect(!ReceiverRules.tiersOnByDefault.contains("islamicate"))
+    try expectEqual(ReceiverRules.mediumLabel("tv"), "Television")
+    try expectEqual(ReceiverRules.mediumLabel("radio"), "Radio")
+    try expectEqual(ReceiverRules.mediumLabel("camera"), "Cameras")
+    try expectEqual(ReceiverRules.mediumLabel("film"), "Film")
+    try expectEqual(ReceiverRules.mediumLabel("VOD"), "VOD")
+    try expectEqual(ReceiverRules.mediumLabel(""), "")
+}
+
+// MARK: - Carrier
+
+func carrierURLEncodesTheStreamID() throws {
+    let plain = ReceiverRules.carrierURL(streamID: "anatolia-t-rkiye-4u-tv-720p-primary")
+    try expectEqual(plain.absoluteString, "https://khajistan-archive.pages.dev/api/frequency?stream=anatolia-t-rkiye-4u-tv-720p-primary")
+    // An opaque id is data: no character of it may become query or fragment syntax.
+    for awkward in ["station+1&x=#fragment", "a b/c?d=e", "100%", "تهران", "a.b_c~d-e"] {
+        let url = ReceiverRules.carrierURL(streamID: awkward)
+        let parts = try require(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        try expectEqual(parts.queryItems, [URLQueryItem(name: "stream", value: awkward)], awkward)
+        try expectEqual(parts.fragment, nil, awkward)
+        try expectEqual(parts.path, "/api/frequency", awkward)
+    }
+    try expect(ReceiverRules.carrierURL(streamID: "station+1&x=#fragment").absoluteString.hasSuffix("stream=station%2B1%26x%3D%23fragment"))
+}
+
+func carrierAnswerIsValidated() throws {
+    let url = try ReceiverRules.carrier(from: Data(#"{"stream":"s","url":"https://example.com/live/index.m3u8"}"#.utf8))
+    try expectEqual(url.absoluteString, "https://example.com/live/index.m3u8")
+    for rejected in [#"{"url":"http://example.com/x"}"#, #"{"url":"https://user:pass@example.com/x"}"#,
+                     #"{"url":"https://user@example.com/x"}"#, #"{"url":"ftp://example.com/x"}"#] {
+        try expectThrows(CarrierError.rejected) { _ = try ReceiverRules.carrier(from: Data(rejected.utf8)) }
+    }
+    for malformed in [#"{"url":null}"#, "{}", "not json", #"{"url":""}"#, #"{"url":7}"#, ""] {
+        try expectThrows(CarrierError.malformed) { _ = try ReceiverRules.carrier(from: Data(malformed.utf8)) }
+    }
+}
+
+func validCarrierRules() throws {
+    func valid(_ text: String) throws -> Bool { ReceiverRules.validCarrier(try require(URL(string: text), text)) }
+    try expectEqual(try valid("https://example.com/a.m3u8"), true)
+    try expectEqual(try valid("HTTPS://EXAMPLE.COM/a"), true)
+    try expectEqual(try valid("https://example.com:8443/a?x=1"), true)
+    for bad in ["http://example.com/a", "https://user:pass@example.com/a", "https://user@example.com/a",
+                "ftp://example.com/a", "file:///etc/passwd", "https:/just-a-path", "mailto:a@example.com", "example.com/a"] {
+        try expectEqual(try valid(bad), false, bad)
+    }
+}
+
+// MARK: - Transmission
+
+let supabasePlay = "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=tvx-d35cdf39-aman-and-yane-greece-video"
+let streamUID = "625a05145f897f6a3fd10d4f67643384"
+let streamHostURL = "https://customer-0svgnorro16tedsf.cloudflarestream.com"
+
+func transmissionRoutesTheThreeShapes() throws {
+    try expectEqual(Transmission.route(for: supabasePlay), .tvPlay(try require(URL(string: supabasePlay))))
+    try expectEqual(Transmission.route(for: "https://qojysegeddztsxdmhjfb.supabase.co:443/functions/v1/tv-play?id=x"),
+                    .tvPlay(try require(URL(string: "https://qojysegeddztsxdmhjfb.supabase.co:443/functions/v1/tv-play?id=x"))))
+    try expectEqual(Transmission.route(for: "\(streamHostURL)/\(streamUID)/manifest/video.m3u8"),
+                    .stream(uid: streamUID, suffix: "manifest/video.m3u8"))
+    for direct in ["https://example.com/live/index.m3u8",
+                   "https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/public/audio/climate-change-ramzan-96.mp3"] {
+        try expectEqual(Transmission.route(for: direct), .direct(try require(URL(string: direct))), direct)
+    }
+}
+
+func transmissionNeverSendsTheTokenToAnotherHost() throws {
+    // Only the exact Supabase origin and exact function path get a bearer token. Anything that
+    // merely looks like it is a plain URL to play, never a route that carries credentials.
+    for lookalike in ["https://qojysegeddztsxdmhjfb.supabase.co.evil.example/functions/v1/tv-play?id=x",
+                      "https://evil.example/functions/v1/tv-play?id=x",
+                      "https://qojysegeddztsxdmhjfb.supabase.co:8443/functions/v1/tv-play?id=x",
+                      "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play/?id=x",
+                      "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play-other?id=x",
+                      "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-stream-token?uid=\(streamUID)"] {
+        try expectEqual(Transmission.route(for: lookalike), .direct(try require(URL(string: lookalike))), lookalike)
+    }
+    let lookalikeStream = "https://customer-0svgnorro16tedsf.cloudflarestream.com.evil.example/\(streamUID)/manifest/video.m3u8"
+    try expectEqual(Transmission.route(for: lookalikeStream), .direct(try require(URL(string: lookalikeStream))))
+}
+
+func transmissionRejects() throws {
+    let rejects = [
+        "http://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=x",
+        "http://\(streamHostURL.dropFirst(8))/\(streamUID)/manifest/video.m3u8",
+        "http://example.com/a.mp4",
+        "https://user:pass@example.com/a.mp4",
+        "https://user@example.com/a.mp4",
+        "https://:pass@example.com/a.mp4",
+        "https://user:pass@qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=x",
+        // The stream host serves exactly /<32 lowercase hex>/manifest/video.m3u8.
+        "\(streamHostURL)/\(streamUID)/manifest/audio.m3u8",
+        "\(streamHostURL)/\(streamUID)/manifest/video.m3u8/extra",
+        "\(streamHostURL)/\(streamUID)/manifest/video.m3u8/",
+        "\(streamHostURL)/\(streamUID.uppercased())/manifest/video.m3u8",
+        "\(streamHostURL)/\(streamUID)0/manifest/video.m3u8",
+        "\(streamHostURL)/\(streamUID.dropLast())/manifest/video.m3u8",
+        "\(streamHostURL)/\(streamUID.dropLast())g/manifest/video.m3u8",
+        "\(streamHostURL)/\(streamUID)/video.m3u8",
+        "\(streamHostURL)/a/\(streamUID)/manifest/video.m3u8",
+        "\(streamHostURL)/",
+        streamHostURL,
+        "javascript:alert(1)", "file:///etc/passwd", "ftp://example.com/a", "not a url", "", "https://", "//example.com/a",
+    ]
+    for text in rejects { try expectEqual(Transmission.route(for: text), nil, text) }
+}
+
+func transmissionRequests() throws {
+    let play = try require(Transmission.route(for: supabasePlay))
+    let request = try require(Transmission.request(for: play, accessToken: "tok-1"))
+    try expectEqual(request.url?.absoluteString, supabasePlay)
+    try expectEqual(request.httpMethod, "GET")
+    try expectEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok-1")
+    try expectEqual(request.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(request.value(forHTTPHeaderField: "User-Agent"), KJConfig.userAgent)
+    try expectEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+    try expectEqual(request.httpBody, nil)
+
+    let stream = try require(Transmission.request(for: .stream(uid: streamUID, suffix: "manifest/video.m3u8"), accessToken: "tok-2"))
+    try expectEqual(stream.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-stream-token?uid=\(streamUID)")
+    try expectEqual(stream.httpMethod, "GET")
+    try expectEqual(stream.value(forHTTPHeaderField: "Authorization"), "Bearer tok-2")
+    try expectEqual(stream.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(stream.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+    // A uid that is not hex cannot reshape the query.
+    let hostile = try require(Transmission.request(for: .stream(uid: "a&b=c#d", suffix: "manifest/video.m3u8"), accessToken: "t"))
+    try expect(hostile.url?.absoluteString.hasSuffix("?uid=a%26b%3Dc%23d") == true)
+
+    try expectEqual(Transmission.request(for: .direct(try require(URL(string: "https://example.com/a.mp4"))), accessToken: "tok"), nil)
+}
+
+func transmissionCarriers() throws {
+    let stream = PlayRoute.stream(uid: streamUID, suffix: "manifest/video.m3u8")
+    let good = try Transmission.carrier(from: Data(#"{"token":"eyJhbGciOi.payload-part_1.sig"}"#.utf8), route: stream)
+    try expectEqual(good.absoluteString, "https://customer-0svgnorro16tedsf.cloudflarestream.com/eyJhbGciOi.payload-part_1.sig/manifest/video.m3u8")
+    for bad in [#"{"token":""}"#, #"{"token":"a b"}"#, #"{"token":"a/b"}"#, #"{"token":"a?b"}"#, #"{"token":"a#b"}"#,
+                #"{"token":"tok\n"}"#, #"{"token":"töken"}"#, #"{"token":123}"#, #"{"token":null}"#, "{}", "nope", ""] {
+        try expectThrows(CarrierError.malformed) { _ = try Transmission.carrier(from: Data(bad.utf8), route: stream) }
+    }
+
+    let play = try require(Transmission.route(for: supabasePlay))
+    let url = try Transmission.carrier(from: Data(#"{"url":"https://cdn.example.com/a/b.mp4"}"#.utf8), route: play)
+    try expectEqual(url.absoluteString, "https://cdn.example.com/a/b.mp4")
+    try expectThrows(CarrierError.rejected) { _ = try Transmission.carrier(from: Data(#"{"url":"http://cdn.example.com/a.mp4"}"#.utf8), route: play) }
+    try expectThrows(CarrierError.rejected) { _ = try Transmission.carrier(from: Data(#"{"url":"https://u:p@cdn.example.com/a.mp4"}"#.utf8), route: play) }
+    try expectThrows(CarrierError.malformed) { _ = try Transmission.carrier(from: Data("{}".utf8), route: play) }
+
+    let direct = try require(URL(string: "https://example.com/a.mp4"))
+    try expectEqual(try Transmission.carrier(from: Data(), route: .direct(direct)), direct)
+}
+
+func scheduleURLAndBasicAuthorization() throws {
+    try expectEqual(Transmission.scheduleURL(month: "2026-10").absoluteString,
+                    "https://khajistan-archive.pages.dev/data/khajistan-tv/programming-2026-10.json")
+    try expectEqual(Transmission.basicAuthorization(user: "khajistan", password: "x"), "Basic a2hhamlzdGFuOng=")
+    try expectEqual(Transmission.basicAuthorization(user: KJConfig.previewUser, password: "pä:ss"), "Basic " + Data("khajistan:pä:ss".utf8).base64EncodedString())
+    try expectEqual(KJConfig.previewUser, "khajistan")
+    try expectEqual(KJConfig.keychainService, "com.khajistan.tv")
+    try expectEqual(KJConfig.site.absoluteString, "https://khajistan-archive.pages.dev")
+    try expectEqual(KJConfig.supabase.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co")
+    try expectEqual(KJConfig.streamHost, "customer-0svgnorro16tedsf.cloudflarestream.com")
+}
+
+func anonKeyIsTheSitesAnonRole() throws {
+    let parts = KJConfig.anonKey.split(separator: ".")
+    try expectEqual(parts.count, 3)
+    var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+    while payload.count % 4 != 0 { payload += "=" }
+    let object = try jsonObject(String(decoding: try require(Data(base64Encoded: payload)), as: UTF8.self))
+    try expectEqual(object["role"] as? String, "anon")
+    try expectEqual(object["ref"] as? String, "qojysegeddztsxdmhjfb")
+}
+
+// MARK: - Auth
+
+let authNow = Date(timeIntervalSince1970: 1_800_000_000)
+let authBody = #"{"access_token":"AT","token_type":"bearer","expires_in":3600,"refresh_token":"RT","user":{"id":"u-1","email":"a@b.example","role":"authenticated","is_anonymous":false}}"#
+
+func authSessionFromBody() throws {
+    let session = try AuthAPI.session(from: Data(authBody.utf8), now: authNow)
+    try expectEqual(session, Session(accessToken: "AT", refreshToken: "RT", expiresAt: authNow.addingTimeInterval(3600), email: "a@b.example", userId: "u-1"))
+    // expires_at (unix seconds) wins over expires_in when present.
+    let withAt = authBody.replacingOccurrences(of: #""expires_in":3600"#, with: #""expires_in":3600,"expires_at":1800007200"#)
+    try expectEqual(try AuthAPI.session(from: Data(withAt.utf8), now: authNow).expiresAt, Date(timeIntervalSince1970: 1_800_007_200))
+    // No email and no role are fine; a fractional expires_at is read as a number.
+    let sparse = #"{"access_token":"AT","refresh_token":"RT","expires_at":1800000100.5,"user":{"id":"u-2"}}"#
+    let parsed = try AuthAPI.session(from: Data(sparse.utf8), now: authNow)
+    try expectEqual(parsed.email, nil)
+    try expectEqual(parsed.expiresAt, Date(timeIntervalSince1970: 1_800_000_100.5))
+}
+
+func authSessionRefusesAnonymousAndMalformed() throws {
+    func session(_ json: String) throws { _ = try AuthAPI.session(from: Data(json.utf8), now: authNow) }
+    try expectThrows(AuthError.anonymous) { try session(authBody.replacingOccurrences(of: #""is_anonymous":false"#, with: #""is_anonymous":true"#)) }
+    try expectThrows(AuthError.anonymous) { try session(authBody.replacingOccurrences(of: #""role":"authenticated""#, with: #""role":"anon""#)) }
+    // A minimal anonymous body is anonymous, not malformed.
+    try expectThrows(AuthError.anonymous) { try session(#"{"access_token":"x","user":{"id":"1","is_anonymous":true}}"#) }
+    try expectThrows(AuthError.anonymous) { try session(#"{"access_token":"x","user":{"role":"anon"}}"#) }
+    for malformed in ["", "nope", "[]", "{}", #"{"access_token":"AT"}"#,
+                      #"{"refresh_token":"RT","expires_in":60,"user":{"id":"u"}}"#,
+                      #"{"access_token":"","refresh_token":"RT","expires_in":60,"user":{"id":"u"}}"#,
+                      #"{"access_token":"AT","refresh_token":"","expires_in":60,"user":{"id":"u"}}"#,
+                      #"{"access_token":"AT","refresh_token":"RT","expires_in":60}"#,
+                      #"{"access_token":"AT","refresh_token":"RT","expires_in":60,"user":{"id":""}}"#,
+                      #"{"access_token":"AT","refresh_token":"RT","user":{"id":"u"}}"#,
+                      #"{"access_token":"AT","refresh_token":"RT","expires_in":-5,"user":{"id":"u"}}"#,
+                      #"{"access_token":5,"refresh_token":"RT","expires_in":60,"user":{"id":"u"}}"#,
+                      #"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#] {
+        try expectThrows(AuthError.malformed) { try session(malformed) }
+    }
+}
+
+func authErrorMessages() throws {
+    func message(_ json: String) -> String? { AuthAPI.errorMessage(from: Data(json.utf8)) }
+    try expectEqual(message(#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#), "Invalid login credentials")
+    try expectEqual(message(#"{"code":400,"msg":"Email not confirmed"}"#), "Email not confirmed")
+    try expectEqual(message(#"{"code":"validation_failed","message":"Unable to validate email address"}"#), "Unable to validate email address")
+    try expectEqual(message(#"{"error_description":"D","message":"M","msg":"S"}"#), "D")
+    try expectEqual(message(#"{"message":"M","msg":"S"}"#), "M")
+    try expectEqual(message(#"{"message":{"nested":true},"msg":"S"}"#), "S")
+    try expectEqual(message(#"{"error_description":"","msg":"S"}"#), "S")
+    try expectEqual(message(#"{"error":"only_a_code"}"#), nil)
+    try expectEqual(message("{}"), nil)
+    try expectEqual(message("<html>502</html>"), nil)
+    try expectEqual(message(""), nil)
+    try expectEqual(message(#"["msg"]"#), nil)
+}
+
+func authRequests() throws {
+    let password = "pa\"ss wörd/é\\"
+    let request = AuthAPI.passwordRequest(email: "a@b.example", password: password)
+    try expectEqual(request.httpMethod, "POST")
+    try expectEqual(request.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/token?grant_type=password")
+    try expectEqual(request.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+    try expectEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer " + KJConfig.anonKey)
+    let body = try jsonObject(String(decoding: try require(request.httpBody), as: UTF8.self))
+    try expectEqual(body["email"] as? String, "a@b.example")
+    try expectEqual(body["password"] as? String, password)
+    try expectEqual(body.count, 2)
+    try expectEqual(String(decoding: try require(AuthAPI.passwordRequest(email: "a@b.example", password: "pw").httpBody), as: UTF8.self),
+                    #"{"email":"a@b.example","password":"pw"}"#)
+
+    let refresh = AuthAPI.refreshRequest(refreshToken: "RT/1+2=")
+    try expectEqual(refresh.httpMethod, "POST")
+    try expectEqual(refresh.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/token?grant_type=refresh_token")
+    try expectEqual(refresh.value(forHTTPHeaderField: "Authorization"), "Bearer " + KJConfig.anonKey)
+    try expectEqual(refresh.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(String(decoding: try require(refresh.httpBody), as: UTF8.self), #"{"refresh_token":"RT/1+2="}"#)
+
+    let logout = AuthAPI.logoutRequest(accessToken: "AT")
+    try expectEqual(logout.httpMethod, "POST")
+    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout")
+    try expectEqual(logout.value(forHTTPHeaderField: "Authorization"), "Bearer AT")
+    try expectEqual(logout.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(logout.value(forHTTPHeaderField: "Content-Type"), "application/json")
+    try expectEqual(logout.httpBody, nil)
+    for built in [request, refresh, logout] { try expectEqual(built.value(forHTTPHeaderField: "User-Agent"), KJConfig.userAgent) }
+}
+
+func sessionExpiryAndStorage() throws {
+    let expiry = Date(timeIntervalSince1970: 1_800_000_000)
+    let session = Session(accessToken: "AT", refreshToken: "RT", expiresAt: expiry, email: nil, userId: "u")
+    try expectEqual(session.isExpired(at: expiry.addingTimeInterval(-3600)), false)
+    try expectEqual(session.isExpired(at: expiry.addingTimeInterval(-61)), false)
+    try expectEqual(session.isExpired(at: expiry.addingTimeInterval(-60)), true)
+    try expectEqual(session.isExpired(at: expiry.addingTimeInterval(-59)), true)
+    try expectEqual(session.isExpired(at: expiry), true)
+    try expectEqual(session.isExpired(at: expiry.addingTimeInterval(1)), true)
+    let stored = try JSONEncoder().encode(session)
+    try expectEqual(try JSONDecoder().decode(Session.self, from: stored), session)
+}
+
+// MARK: - Station clock: arithmetic and units
+
+/// Instants read both ways: StationClock's own integer arithmetic against Calendar's reading of
+/// the same moment in a fixed UTC+5 zone. Negative epochs, leap days and year ends are in range.
+func stationNowAgreesWithCalendar() throws {
+    var reference = Calendar(identifier: .gregorian)
+    reference.timeZone = try require(TimeZone(secondsFromGMT: 5 * 3600))
+    var checked = 0
+    // Foundation's Gregorian calendar is Julian before 1582-10-15, so the sweep starts in 1779.
+    var epoch: Double = -6_000_000_000
+    while epoch < 4_200_000_000 {       // 2103
+        let date = Date(timeIntervalSince1970: epoch)
+        let c = reference.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        let now = StationClock.stationNow(date)
+        let iso = isoString(c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        let minutes = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+        let seconds = minutes * 60 + (c.second ?? 0)
+        guard now.iso == iso, now.minutes == minutes, now.seconds == seconds else {
+            throw Failure(description: "epoch \(epoch): clock \(now), calendar \(iso) \(minutes) \(seconds)")
+        }
+        checked += 1
+        epoch += 86_413 * 3 + 29
+    }
+    try expect(checked > 15_000, "only \(checked) instants checked")
+    // Leap day, century rules, year end, and the 19:00 UTC rollover into the next Pakistan day.
+    // Epochs below were computed with Python's datetime, not with this clock or Calendar.
+    let points: [(epoch: Double, iso: String, minutes: Int, seconds: Int)] = [
+        (1_582_938_000, "2020-02-29", 360, 21_600),         // 2020-02-29 06:00:00, a leap day
+        (951_850_799, "2000-02-29", 1439, 86_399),          // 2000 is a leap year (divisible by 400)
+        (4_107_524_399, "2100-02-28", 1439, 86_399),        // 2100 is not: the next second is 1 March
+        (4_107_524_400, "2100-03-01", 0, 0),
+        (1_798_743_599, "2026-12-31", 1439, 86_399),        // year end
+        (1_798_743_600, "2027-01-01", 0, 0),
+        (1_793_473_199, "2026-10-31", 1439, 86_399),        // month end, 18:59:59 UTC
+        (1_793_473_200, "2026-11-01", 0, 0),                // 19:00:00 UTC is already tomorrow in Pakistan
+        (1_835_420_400, "2028-02-29", 720, 43_200),
+        (1_835_463_600, "2028-03-01", 0, 0),
+        (-1, "1970-01-01", 299, 17_999),                    // one second before the epoch is 04:59:59 PKT
+        (-18_001, "1969-12-31", 1439, 86_399),              // negative epochs floor, never truncate
+        (-2_203_909_200, "1900-03-01", 0, 0),               // 1900 is not a leap year
+    ]
+    for p in points {
+        let now = StationClock.stationNow(Date(timeIntervalSince1970: p.epoch))
+        try expectEqual(now.iso, p.iso, "\(p.epoch)")
+        try expectEqual(now.minutes, p.minutes, "\(p.epoch)")
+        try expectEqual(now.seconds, p.seconds, "\(p.epoch)")
+    }
+    // Fractions floor to the second the way the JS getters do, before and after the epoch.
+    let boundary = pkt(2026, 10, 10, 12, 0, 0)
+    let at = StationClock.stationNow(boundary)
+    try expectEqual(StationClock.stationNow(boundary.addingTimeInterval(0.999)).seconds, at.seconds)
+    try expectEqual(StationClock.stationNow(boundary.addingTimeInterval(-0.001)).seconds, at.seconds - 1)
+    try expectEqual(StationClock.stationNow(boundary.addingTimeInterval(1)).seconds, at.seconds + 1)
+}
+
+func stationMonthFollowsPakistanTime() throws {
+    // 2026-10-31 19:00:00 UTC (epoch 1793473200) is already 1 November in Pakistan.
+    try expectEqual(StationClock.stationMonth(Date(timeIntervalSince1970: 1_793_473_200 - 1)), "2026-10")
+    try expectEqual(StationClock.stationMonth(Date(timeIntervalSince1970: 1_793_473_200)), "2026-11")
+    try expectEqual(StationClock.stationMonth(pkt(2026, 10, 31, 23, 59, 59)), "2026-10")
+    try expectEqual(StationClock.stationMonth(pkt(2026, 11, 1, 0, 0, 0)), "2026-11")
+    try expectEqual(StationClock.stationMonth(pkt(2026, 12, 31, 23, 59, 59)), "2026-12")
+    try expectEqual(StationClock.stationMonth(pkt(2027, 1, 1, 0, 0, 0)), "2027-01")
+    try expectEqual(StationClock.stationMonth(pkt(2026, 10, 10)), "2026-10")
+    try expectEqual(Transmission.scheduleURL(month: StationClock.stationMonth(pkt(2026, 11, 1, 0, 0, 1))).lastPathComponent, "programming-2026-11.json")
+    try expectEqual(StationClock.utcOffsetMinutes, 300)
+    try expectEqual(StationClock.tzLabel, "PKT")
+}
+
+func clockLabels() throws {
+    try expectEqual(StationClock.clockLabel(0), "00:00")
+    try expectEqual(StationClock.clockLabel(359), "05:59")
+    try expectEqual(StationClock.clockLabel(360), "06:00")
+    try expectEqual(StationClock.clockLabel(1380), "23:00")
+    try expectEqual(StationClock.clockLabel(1440), "00:00")
+    try expectEqual(StationClock.clockLabel(1445), "00:05")
+    try expectEqual(StationClock.clockLabel(2880 + 61), "01:01")
+}
+
+func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil, cleanStart: Double? = nil, cleanEnd: Double? = nil) -> Programming.Programme {
+    Programming.Programme(id: id, title: id, seconds: seconds, nominal_minutes: nominal, clean_start: cleanStart, clean_end: cleanEnd,
+                          show: nil, channel: 1, play_url: nil, audio_only: nil, custodian: nil, transfer: nil,
+                          work_kind: nil, country: nil, description: nil)
+}
+
+func runSecondsRules() throws {
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, nominal: 10)), 600)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, cleanStart: 20, cleanEnd: 10)), 570)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 0, nominal: 7)), 420)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: -3, nominal: 7)), 420)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: nil, nominal: 5, cleanStart: 30)), 270)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a")), 480)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", nominal: 0)), 480)
+    try expectEqual(StationClock.runSeconds(nil), 480)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 5, cleanStart: 10)), 1)
+    try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 34.3)), 34.3)
+}
+
+/// A small schedule written by hand, so every number in the expectations below is arithmetic
+/// anyone can redo: programmes run 600 s, 270 s (300 less a 20 s head and 10 s tail) and 300 s.
+let syntheticJSON = #"""
+{"_meta":{"channels":[{"id":"transfers","number":1,"name":"Channel 1","line":"x"},{"id":"audio","number":2,"name":"Channel 2"}]},
+ "shows":{"a":{"slug":"a","name":"Show A","line":null,"channel":"transfers"},"b":{"slug":"b","name":"Show B"}},
+ "programme_order":["p0","p1","p2","p3"],
+ "programmes":{
+  "p0":{"id":"p0","title":"Zero","seconds":600,"nominal_minutes":10,"channel":1},
+  "p1":{"id":"p1","title":"One","seconds":300,"clean_start":20,"clean_end":10,"channel":1},
+  "p2":{"id":"p2","nominal_minutes":5,"channel":1,"title":null},
+  "p3":{"id":"p3","title":"Three","seconds":60}},
+ "days":[
+  {"date":"2026-10-10","weekday":"Saturday","channels":{"transfers":[
+    {"start":"06:00","start_minute":360,"minutes":60,"show":"a","programmes":[0,1,2]},
+    {"start":"07:00","start_minute":420,"minutes":60,"show":"b","programmes":[3]},
+    {"start":"23:00","start_minute":1380,"minutes":60,"show":"a","programmes":[2]}],
+   "audio":[{"start":"06:00","start_minute":360,"minutes":30,"show":"b","programmes":[3]}]}},
+  {"date":"2026-10-11","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"unknown-show","programmes":[0]}]}},
+  {"date":"2026-02-28","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2026-03-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"b","programmes":[3]}]}},
+  {"date":"2028-02-28","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2028-02-29","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"b","programmes":[3]}]}},
+  {"date":"2028-03-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2026-04-30","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2026-05-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"b","programmes":[3]}]}},
+  {"date":"2026-12-31","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2027-01-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"b","programmes":[3]}]}},
+  {"date":"2026-02-30","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":1440,"show":"a","programmes":[3]}]}},
+  {"date":"2026-09-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":60,"show":"a","programmes":[0]},{"start":"00:00","start_minute":0,"minutes":60,"show":"b","programmes":[1]}]}}]}
+"""#
+
+func syntheticSchedule() throws -> Programming { try decode(Programming.self, syntheticJSON) }
+
+func programmeWithoutATitleDecodes() throws {
+    let p = try syntheticSchedule()
+    try expectEqual(p.programmes["p2"]?.title, "")   // "title": null
+    try expectEqual(p.programmes["p3"]?.title, "Three")
+    try expectEqual(p.programmes["p3"]?.seconds, 60)
+    try expectEqual(p.programmes["p3"]?.channel, nil)
+    let absent = try decode(Programming.Programme.self, #"{"id":"x","play_url":"https://example.com/x"}"#)
+    try expectEqual(absent.title, "")
+    try expectEqual(absent.play_url, "https://example.com/x")
+    // Everything else stays strict: a wrong type is a fault, not a default.
+    do {
+        _ = try decode(Programming.Programme.self, #"{"id":"x","seconds":"long"}"#)
+        throw Failure(description: "a string in `seconds` decoded")
+    } catch is DecodingError {}
+    do {
+        _ = try decode(Programming.Programme.self, #"{"title":"no id"}"#)
+        throw Failure(description: "a programme without an id decoded")
+    } catch is DecodingError {}
+}
+
+func positionInSlotWalksAndWrapsTheRoster() throws {
+    let p = try syntheticSchedule()
+    let slot = try require(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 360))
+    let start = 360 * 60
+    // 600 + 270 + 300 = 1170 s round.
+    let cases: [(second: Int, index: Int, into: Double)] = [
+        (start - 500, 0, 0),          // before the slot clamps to its start
+        (start, 0, 0), (start + 599, 0, 599), (start + 600, 1, 0), (start + 869, 1, 269),
+        (start + 870, 2, 0), (start + 1169, 2, 299),
+        (start + 1170, 0, 0),         // a short roster runs round again
+        (start + 1170 + 650, 1, 50),
+        (start + 3599, 0, 89),             // 3599 - 3 * 1170
+    ]
+    for c in cases {
+        let position = StationClock.positionInSlot(p, slot: slot, second: c.second)
+        try expectEqual(position.index, c.index, "second \(c.second)")
+        try expectClose(position.into, c.into)
+    }
+    let empty = Programming.Slot(start: "06:00", start_minute: 360, minutes: 60, show: "a", programmes: [])
+    try expectEqual(StationClock.positionInSlot(p, slot: empty, second: start + 100).index, 0)
+    try expectEqual(StationClock.positionInSlot(p, slot: empty, second: start + 100).into, 0)
+    // An index outside programme_order is an unknown programme: eight minutes, like the JS.
+    let strange = Programming.Slot(start: "06:00", start_minute: 360, minutes: 60, show: "a", programmes: [99, 0])
+    let position = StationClock.positionInSlot(p, slot: strange, second: start + 500)
+    try expectEqual(position.index, 1)   // 500 s in: past the 480 s unknown programme, 20 s into p0
+    try expectClose(position.into, 20)
+}
+
+func slotAtAndOnAirOnTheSyntheticSchedule() throws {
+    let p = try syntheticSchedule()
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 359)?.start, nil)
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 360)?.start, "06:00")
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 419)?.start, "06:00")
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 420)?.start, "07:00")
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-10", minute: 480)?.start, nil)
+    try expectEqual(StationClock.slotAt(p, channel: "nope", iso: "2026-10-10", minute: 360)?.start, nil)
+    try expectEqual(StationClock.slotAt(p, channel: "transfers", iso: "2026-10-09", minute: 360)?.start, nil)
+    try expectEqual(StationClock.channelId(p, number: 1), "transfers")
+    try expectEqual(StationClock.channelId(p, number: 2), "audio")
+    try expectEqual(StationClock.channelId(p, number: 3), nil)
+    try expectEqual(StationClock.day(p, iso: "2026-10-10")?.weekday, "Saturday")
+    try expectEqual(StationClock.day(p, iso: "2026-10-10")?.channels["audio"]?.count, 1)
+
+    // 06:12:30 is 750 s into the slot: past p0 (600) and 150 s into p1, which is read from 20 s in.
+    let air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 6, 12, 30)))
+    try expectEqual(air.channelId, "transfers")
+    try expectEqual(air.date, "2026-10-10")
+    try expectEqual(air.rosterIndex, 1)
+    try expectEqual(air.programmeId, "p1")
+    try expectEqual(air.programme?.title, "One")
+    try expectEqual(air.show?.name, "Show A")
+    try expectClose(air.into, 150)
+    try expectClose(air.seekTo, 170)
+    try expectEqual([air.startLabel, air.endLabel, air.nextStart ?? "-"], ["06:00", "07:00", "07:00"])
+    try expectEqual(air.nextShow?.slug, "b")
+    try expectEqual(StationClock.returnTime(p, channelId: "transfers", at: pkt(2026, 10, 10, 6, 12, 30)), "07:00")
+    try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 6, 12, 30)), StationClock.onAir(p, channelId: "transfers", at: pkt(2026, 10, 10, 6, 12, 30)))
+
+    // Off air is nil with a return time, on a number the schedule lacks and on a day it lacks.
+    try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 8, 0, 0)), nil)
+    try expectEqual(StationClock.returnTime(p, channelId: "transfers", at: pkt(2026, 10, 10, 8, 0, 0)), "23:00")
+    try expectEqual(StationClock.onAir(p, channel: 3, at: pkt(2026, 10, 10, 6, 30, 0)), nil)
+    try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 9, 6, 30, 0)), nil)
+    try expectEqual(StationClock.returnTime(p, channelId: "transfers", at: pkt(2026, 10, 9, 6, 30, 0)), nil)
+
+    // The show may be missing from `shows`; the programme still airs.
+    let unknownShow = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 12, 0, 0)))
+    try expectEqual(unknownShow.show, nil)
+    try expectEqual(unknownShow.programmeId, "p0")
+    // End of the grid: the last strip of the last day has no next strip.
+    let late = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 23, 59, 59)))
+    try expectEqual(late.nextStart, nil)
+    try expectEqual(late.endLabel, "00:00")
+    // On the last day of the grid the next strip is the first of the next calendar day.
+    let rollover = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 23, 30, 0)))
+    try expectEqual(rollover.nextStart, "00:00")
+    try expectEqual(rollover.nextShow?.slug, nil)   // 2026-10-11's strip names a show `shows` lacks
+}
+
+func nextSlotRollsOverEveryKindOfDayEnd() throws {
+    let p = try syntheticSchedule()
+    // From the last minute of a day: the next calendar day, across month, leap-day and year ends.
+    let rollovers: [(from: String, to: String)] = [
+        ("2026-02-28", "2026-03-01"),   // 2026 is not a leap year
+        ("2028-02-28", "2028-02-29"),   // 2028 is
+        ("2028-02-29", "2028-03-01"),
+        ("2026-04-30", "2026-05-01"),
+        ("2026-12-31", "2027-01-01"),
+    ]
+    for r in rollovers {
+        let next = try require(StationClock.nextSlot(p, channel: "transfers", iso: r.from, minute: 1439), r.from)
+        try expectEqual(next.date, r.to, r.from)
+    }
+    // Nothing after the last day, an unknown day, an unknown channel, and a date that is not a date.
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2031-01-01", minute: 0) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "nope", iso: "2026-10-10", minute: 0) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2026-02-30", minute: 1439) == nil, true)
+    // Within a day: the first strip that starts strictly after the minute.
+    let within = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2026-10-10", minute: 360))
+    try expectEqual([within.slot.start, within.date], ["07:00", "2026-10-10"])
+    let atStart = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2026-10-10", minute: 420))
+    try expectEqual(atStart.slot.start, "23:00")
+    // Two strips starting at the same minute: the earlier one in the file, as a stable sort gives.
+    let tie = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2026-09-01", minute: -1))
+    try expectEqual(tie.slot.programmes, [0])
+}
+
+func followingWalksTheRosterAndHandsBackToTheClock() throws {
+    let p = try syntheticSchedule()
+    let inside = pkt(2026, 10, 10, 6, 12, 30)       // p1, 150 s in
+    let current = try require(StationClock.onAir(p, channel: 1, at: inside))
+    // Still inside the slot: the next roster entry, from its head, read from its clean_start.
+    let next = try require(StationClock.following(current, in: p, at: inside))
+    try expectEqual(next.rosterIndex, 2)
+    try expectEqual(next.programmeId, "p2")
+    try expectEqual(next.into, 0)
+    try expectEqual(next.seekTo, 0)
+    try expectEqual(next.slot, current.slot)
+    try expectEqual([next.startLabel, next.endLabel, next.nextStart ?? "-"], ["06:00", "07:00", "07:00"])
+    // The last entry wraps to the first, and a clean_start is the seek point.
+    let wrapped = try require(StationClock.following(next, in: p, at: inside))
+    try expectEqual(wrapped.rosterIndex, 0)
+    try expectEqual(wrapped.programmeId, "p0")
+    let intoP1 = try require(StationClock.following(wrapped, in: p, at: inside))
+    try expectEqual(intoP1.programmeId, "p1")
+    try expectEqual(intoP1.seekTo, 20)
+    try expectEqual(intoP1.into, 0)
+    // A one-programme roster replays itself.
+    let single = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 7, 10, 0)))
+    try expectEqual(try require(StationClock.following(single, in: p, at: pkt(2026, 10, 10, 7, 10, 0))).rosterIndex, 0)
+    // Past the slot's end, or the same minutes on another day: the clock answers.
+    let after = pkt(2026, 10, 10, 7, 0, 0)
+    try expectEqual(StationClock.following(current, in: p, at: after), StationClock.onAir(p, channelId: "transfers", at: after))
+    try expectEqual(StationClock.following(current, in: p, at: after)?.programmeId, "p3")
+    let nextDay = pkt(2026, 10, 11, 6, 12, 30)
+    try expectEqual(StationClock.following(current, in: p, at: nextDay), StationClock.onAir(p, channelId: "transfers", at: nextDay))
+    try expectEqual(StationClock.following(current, in: p, at: nextDay)?.date, "2026-10-11")
+    // Off air after the slot: nil.
+    try expectEqual(StationClock.following(current, in: p, at: pkt(2026, 10, 10, 8, 30, 0)), nil)
+}
+
+// MARK: - Station clock: differential against the site's own JS
+
+struct Fixture: Decodable {
+    struct Case: Decodable {
+        struct Expect: Decodable, Equatable {
+            let channelId: String
+            let date: String
+            let programmeId: String
+            let rosterIndex: Int
+            let into: Double
+            let seekTo: Double
+            let startLabel: String
+            let endLabel: String
+            let nextStart: String?
+            let slotStart: String
+            let slotStartMinute: Int
+        }
+
+        let nowMs: Double
+        let channel: Int
+        let expect: Expect?
+    }
+
+    let source: String
+    let generatedFrom: String
+    let programming: Programming
+    let cases: [Case]
+}
+
+var loadedFixture: Fixture?
+func fixture() throws -> Fixture {
+    if let loadedFixture { return loadedFixture }
+    let decoded = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
+    loadedFixture = decoded
+    return decoded
+}
+
+/// What differs between the Swift clock and the JS answer for one case. Empty means they agree.
+func mismatches(_ p: Programming, _ c: Fixture.Case) -> [String] {
+    let air = StationClock.onAir(p, channel: c.channel, at: Date(timeIntervalSince1970: c.nowMs / 1000))
+    guard let want = c.expect else {
+        if let air { return ["expected off air, swift has \(air.programmeId)"] }
+        return []
+    }
+    guard let air else { return ["expected \(want.programmeId), swift is off air"] }
+    var out: [String] = []
+    func check<T: Equatable>(_ name: String, _ swift: T, _ js: T) {
+        if swift != js { out.append("\(name): swift \(swift), js \(js)") }
+    }
+    check("channelId", air.channelId, want.channelId)
+    check("date", air.date, want.date)
+    check("programmeId", air.programmeId, want.programmeId)
+    check("rosterIndex", air.rosterIndex, want.rosterIndex)
+    check("startLabel", air.startLabel, want.startLabel)
+    check("endLabel", air.endLabel, want.endLabel)
+    check("nextStart", air.nextStart, want.nextStart)
+    check("slotStart", air.slot.start, want.slotStart)
+    check("slotStartMinute", air.slot.start_minute, want.slotStartMinute)
+    if abs(air.into - want.into) > 1e-6 { out.append("into: swift \(air.into), js \(want.into)") }
+    if abs(air.seekTo - want.seekTo) > 1e-6 { out.append("seekTo: swift \(air.seekTo), js \(want.seekTo)") }
+    return out
+}
+
+func stationClockMatchesTheJS() throws {
+    let f = try fixture()
+    try expectEqual(f.source, "programming-2026-10.json")
+    try expectEqual(f.generatedFrom, "kj-station-clock.js")
+    let cases = f.cases
+    try expect(cases.count >= 400, "only \(cases.count) cases; refusing to pass")
+    var failures: [String] = []
+    var onAir = 0, offAir = 0, trimmed = 0
+    for (position, c) in cases.enumerated() {
+        let diff = mismatches(f.programming, c)
+        if !diff.isEmpty { failures.append("case \(position) nowMs \(Int(c.nowMs)) ch \(c.channel): " + diff.joined(separator: "; ")) }
+        if let want = c.expect { onAir += 1; if want.seekTo != want.into { trimmed += 1 } } else { offAir += 1 }
+    }
+    print("      \(cases.count) cases against kj-station-clock.js: \(onAir) on air, \(offAir) off air, \(trimmed) joined past a clean_start")
+    try expect(failures.isEmpty, "\(failures.count) of \(cases.count) differ; first: " + failures.prefix(3).joined(separator: " | "))
+    // The comparison must be able to say yes to both kinds of case, or it proves nothing.
+    try expect(onAir >= 300, "only \(onAir) on-air cases")
+    try expect(offAir >= 6, "only \(offAir) off-air cases")
+    try expect(trimmed >= 1, "no case exercises clean_start")
+    try expect(Set(cases.map(\.channel)) == [1, 2], "both channels must be present")
+    // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
+    for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
+}
+
+/// A check that cannot fail is decoration: bend each field of a real expectation and the
+/// comparator must object; leave it alone and it must not.
+func differentialComparatorCanFail() throws {
+    let f = try fixture()
+    let c = try require(f.cases.first { $0.expect != nil && $0.expect!.seekTo != $0.expect!.into } ?? f.cases.first { $0.expect != nil })
+    let want = try require(c.expect)
+    try expectEqual(mismatches(f.programming, c), [])
+    func bent(_ edit: (Fixture.Case.Expect) -> Fixture.Case.Expect) -> Fixture.Case {
+        Fixture.Case(nowMs: c.nowMs, channel: c.channel, expect: edit(want))
+    }
+    func with(channelId: String? = nil, date: String? = nil, programmeId: String? = nil, rosterIndex: Int? = nil, into: Double? = nil,
+              seekTo: Double? = nil, startLabel: String? = nil, endLabel: String? = nil, nextStart: String?? = nil) -> Fixture.Case {
+        bent { e in
+            Fixture.Case.Expect(channelId: channelId ?? e.channelId, date: date ?? e.date, programmeId: programmeId ?? e.programmeId,
+                                rosterIndex: rosterIndex ?? e.rosterIndex, into: into ?? e.into, seekTo: seekTo ?? e.seekTo,
+                                startLabel: startLabel ?? e.startLabel, endLabel: endLabel ?? e.endLabel,
+                                nextStart: nextStart ?? e.nextStart, slotStart: e.slotStart, slotStartMinute: e.slotStartMinute)
+        }
+    }
+    let bends: [(String, Fixture.Case)] = [
+        ("channelId", with(channelId: "x")), ("date", with(date: "1999-01-01")), ("programmeId", with(programmeId: "x")),
+        ("rosterIndex", with(rosterIndex: want.rosterIndex + 1)), ("into", with(into: want.into + 0.01)),
+        ("seekTo", with(seekTo: want.seekTo + 0.01)), ("startLabel", with(startLabel: "99:99")), ("endLabel", with(endLabel: "99:99")),
+        ("nextStart", with(nextStart: .some(nil))), ("nextStart value", with(nextStart: .some("99:99"))),
+        ("off air expected", Fixture.Case(nowMs: c.nowMs, channel: c.channel, expect: nil)),
+    ]
+    for (name, bad) in bends {
+        // `nextStart: nil` is only a bend when the real answer has a next strip.
+        if name == "nextStart", want.nextStart == nil { continue }
+        try expect(!mismatches(f.programming, bad).isEmpty, "a bent \(name) was not noticed")
+    }
+    let off = try require(f.cases.first { $0.expect == nil })
+    try expectEqual(mismatches(f.programming, off), [])
+    let onAirNow = Fixture.Case(nowMs: off.nowMs, channel: off.channel, expect: want)
+    try expect(!mismatches(f.programming, onAirNow).isEmpty, "an on-air expectation at an off-air instant was not noticed")
+}
+
+func stationClockEdgesAndTheEndOfTheGrid() throws {
+    let f = try fixture()
+    let p = f.programming
+    // 10-10 is the first kept day; before 06:00 it is the late strip filed from the same day.
+    for number in [1, 2] {
+        let id = try require(StationClock.channelId(p, number: number))
+        try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.startLabel, "06:00")
+        try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.into, 0)
+        try expect(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 5, 59, 59))?.endLabel == "06:00")
+        try expectEqual(StationClock.returnTime(p, channelId: id, at: pkt(2026, 10, 10, 5, 59, 59)), "06:00")
+        // The end of the trimmed grid, checked against the JS by hand when this was written:
+        // the last kept day's last strip airs and has nothing after it.
+        let last = try require(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 13, 23, 59, 30)))
+        try expectEqual(last.nextStart, nil)
+        try expectEqual(last.nextShow, nil)
+        try expectEqual(last.endLabel, "00:00")
+        try expectEqual(StationClock.returnTime(p, channelId: id, at: pkt(2026, 10, 13, 23, 59, 30)), nil)
+        try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 14, 0, 0, 0)), nil)
+    }
+    let one = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 13, 23, 59, 30)))
+    try expectEqual([one.startLabel, String(one.rosterIndex)], ["23:00", "24"])
+    try expectClose(one.into, 100.9, tolerance: 1e-6)
+    let two = try require(StationClock.onAir(p, channel: 2, at: pkt(2026, 10, 13, 23, 59, 30)))
+    try expectEqual([two.startLabel, String(two.rosterIndex)], ["22:10", "1"])
+    try expectClose(two.into, 2920.8, tolerance: 1e-6)
+    // And the rollover: the last strip of a day names the next day's first strip.
+    try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 12, 23, 59, 59))?.nextStart, "00:00")
+}
+
+func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
+    let f = try fixture()
+    let p = f.programming
+    var checked = 0, wrapped = 0, afterEnd = 0
+    for c in f.cases {
+        guard c.expect != nil else { continue }
+        let date = Date(timeIntervalSince1970: c.nowMs / 1000)
+        let air = try require(StationClock.onAir(p, channel: c.channel, at: date))
+        let count = air.slot.programmes.count
+        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
+        let index = (air.rosterIndex + 1) % count
+        if index == 0 { wrapped += 1 }
+        let id = p.programme_order[air.slot.programmes[index]]
+        try expectEqual(next.rosterIndex, index)
+        try expectEqual(next.programmeId, id)
+        try expectEqual(next.into, 0)
+        try expectEqual(next.seekTo, p.programmes[id]?.clean_start ?? 0)
+        try expectEqual(next.slot, air.slot)
+        try expectEqual([next.date, next.startLabel, next.endLabel, next.channelId], [air.date, air.startLabel, air.endLabel, air.channelId])
+        try expectEqual(next.nextStart, air.nextStart)
+        try expectEqual(next.show, air.show)
+        checked += 1
+        // One second past the slot's last second the clock answers, never the roster.
+        if checked % 5 == 0 {
+            let parts = air.date.split(separator: "-").compactMap { Int($0) }
+            let midnight = pkt(parts[0], parts[1], parts[2])
+            let past = midnight.addingTimeInterval(Double((air.slot.start_minute + air.slot.minutes) * 60 + 1))
+            try expectEqual(StationClock.following(air, in: p, at: past), StationClock.onAir(p, channelId: air.channelId, at: past))
+            // The same wall-clock minutes a day later are another slot of another day.
+            let tomorrow = date.addingTimeInterval(86_400)
+            try expectEqual(StationClock.following(air, in: p, at: tomorrow), StationClock.onAir(p, channelId: air.channelId, at: tomorrow))
+            afterEnd += 1
+        }
+    }
+    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock")
+    try expect(checked >= 400, "only \(checked) checked")
+    try expect(wrapped >= 1, "no roster wrapped")
+}
+
+// MARK: - Real files
+
+var realProgrammingCache: [String: Programming] = [:]
+func realProgramming(_ month: String) throws -> Programming {
+    if let cached = realProgrammingCache[month] { return cached }
+    let decoded = try JSONDecoder().decode(Programming.self, from: try realFile("data/khajistan-tv/programming-\(month).json"))
+    realProgrammingCache[month] = decoded
+    return decoded
+}
+
+func realReceiverIndexDecodes() throws {
+    let data = try realFile("data/open-frequencies/receiver-index.json")
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: data)
+    let raw = try require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let rawRegions = try require(raw["regions"] as? [[String: Any]])
+    let rawFiles = try require(raw["regionFiles"] as? [String: String])
+    let listedIds = rawRegions.compactMap { $0["id"] as? String }.filter { rawFiles[$0] != nil }
+    try expectEqual(index.regions.count, rawRegions.count)
+    try expectEqual(index.listedRegions.map(\.id), listedIds)
+    try expect(index.listedRegions.count > 20, "only \(index.listedRegions.count) listed regions")
+    try expect(index.listedRegions.count < index.regions.count, "every region is listed; the unlisted ones are the people's regions")
+    for region in index.listedRegions {
+        let url = try require(index.shardURL(regionId: region.id), region.id)
+        try expectEqual(url.host, "khajistan-archive.pages.dev")
+        try expectEqual(url.path, rawFiles[region.id])
+    }
+    for region in index.regions where rawFiles[region.id] == nil {
+        try expectEqual(index.shardURL(regionId: region.id), nil, region.id)
+    }
+    for (id, path) in (raw["cameraFiles"] as? [String: String]) ?? [:] {
+        try expectEqual(index.cameraURL(regionId: id)?.path, path)
+    }
+    // The line is rebuilt here from the raw counts by a separate route.
+    let rawCounts = try require(raw["regionCounts"] as? [String: [String: Any]])
+    for (id, entry) in rawCounts {
+        let medium = (entry["byMedium"] as? [String: Int]) ?? [:]
+        var pieces: [String] = []
+        if let n = medium["tv"], n > 0 { pieces.append(n == 1 ? "1 television" : "\(n) television") }
+        if let n = medium["radio"], n > 0 { pieces.append("\(n) radio") }
+        if let n = medium["camera"], n > 0 { pieces.append(n == 1 ? "1 camera" : "\(n) cameras") }
+        try expectEqual(index.mediumLine(regionId: id), pieces.joined(separator: " · "), id)
+    }
+    try expect(index.totals.channels > 0 && index.totals.live > 0 && index.totals.byMedium["radio"] ?? 0 > 0)
+    let tiers = Set(index.regions.map(\.tier))
+    try expect(tiers.isSubset(of: ["heartbeat", "core", "islamicate"]), "unexpected tiers \(tiers)")
+}
+
+func realShardsAndWithdrawalFeedsDecode() throws {
+    let indus = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/indus.json"))
+    try expectEqual(indus.region, "indus")
+    try expect(indus.channels.count > 50, "only \(indus.channels.count) channels")
+    try expect(indus.channels.allSatisfy { $0.mediaType == "tv" || $0.mediaType == "radio" })
+    let cameras = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/anatolia-camera.json"))
+    try expectEqual(cameras.region, "anatolia")
+    try expect(!cameras.channels.isEmpty && cameras.channels.allSatisfy { $0.mediaType == "camera" })
+
+    let denylist = try JSONDecoder().decode(Denylist.self, from: try realFile("data/open-frequencies/denylist.json"))
+    let offAir = try JSONDecoder().decode(OffAir.self, from: try realFile("data/open-frequencies/off-air-suspects.json"))
+    let health = try JSONDecoder().decode(Health.self, from: try realFile("data/open-frequencies/health.json"))
+    let controls = Controls(denylist: denylist, offAir: offAir, health: health)
+    try expectEqual(controls.denied, Set(denylist.disabledChannelIds).union(offAir.offAirChannelIds))
+    try expect(controls.health.count > 1000, "only \(controls.health.count) health results")
+
+    for shard in [indus, cameras] {
+        let eligible = ReceiverRules.eligible(shard.channels, controls: controls)
+        try expect(!eligible.isEmpty, "\(shard.region): nothing eligible")
+        try expect(eligible.count <= shard.channels.count)
+        try expectEqual(Set(eligible.map(\.id)).count, eligible.count)
+        try expect(eligible.allSatisfy { $0.activeStream != nil && !controls.denied.contains($0.id) })
+        try expect(eligible.allSatisfy { controls.health[$0.id]?.status != "offline" && controls.health[$0.id]?.status != "blocked" })
+        try expect(eligible.allSatisfy { ($0.manualDisabled ?? false) == false })
+        // The withdrawn are exactly the channels a rule names: recount them by a separate route.
+        let dropped = Set(shard.channels.map(\.id)).subtracting(eligible.map(\.id))
+        for channel in shard.channels where dropped.contains(channel.id) {
+            let check = controls.health[channel.id]
+            let status = check?.status ?? channel.healthStatus
+            let reason = controls.denied.contains(channel.id) || channel.manualDisabled == true
+                || (channel.publicationStatus ?? "published") != "published"
+                || status == "offline" || status == "blocked" || (check?.deliveryRatio ?? 1) < 0.5
+                || channel.activeStream == nil
+            try expect(reason, "\(channel.id) was dropped for no reason")
+        }
+    }
+}
+
+func everyRealShardDecodes() throws {
+    let directory = repoRoot.appendingPathComponent("data/open-frequencies/regions")
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
+        throw Skip(reason: "data/open-frequencies/regions is not in this checkout")
+    }
+    var channels = 0, shards = 0
+    var ids = Set<String>()
+    for name in names.sorted() where name.hasSuffix(".json") {
+        let shard = try JSONDecoder().decode(RegionShard.self, from: try Data(contentsOf: directory.appendingPathComponent(name)))
+        channels += shard.channels.count
+        shards += 1
+        ids.formUnion(shard.channels.map(\.id))
+    }
+    print("      \(shards) shards, \(channels) channels, \(ids.count) distinct ids")
+    try expect(shards > 30 && channels > 1000)
+}
+
+func realProgrammingDecodesInEveryMonth() throws {
+    let directory = repoRoot.appendingPathComponent("data/khajistan-tv")
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
+        throw Skip(reason: "data/khajistan-tv is not in this checkout")
+    }
+    let months = names.filter { $0.hasPrefix("programming-2026-") && $0.hasSuffix(".json") }
+        .map { String($0.dropFirst("programming-".count).dropLast(".json".count)) }.sorted()
+    try expect(!months.isEmpty, "no programming-2026-*.json files")
+    var tallies: [String: Int] = [:]
+    for month in months {
+        let data = try realFile("data/khajistan-tv/programming-\(month).json")
+        let p = try JSONDecoder().decode(Programming.self, from: data)
+        realProgrammingCache[month] = p
+        let raw = try require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let rawProgrammes = try require(raw["programmes"] as? [String: [String: Any]])
+        try expectEqual(p.programmes.count, rawProgrammes.count, month)
+        try expectEqual(p.programme_order.count, p.programmes.count, month)
+        try expectEqual(p._meta.channels.map(\.number), [1, 2], month)
+        try expectEqual(p._meta.channels.map(\.id), ["transfers", "audio"], month)
+        for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }
+        for (key, value) in p.programmes { try expectEqual(key, value.id, month) }
+        // The titleless programmes are exactly the ones whose raw record has no usable title.
+        let rawTitleless = rawProgrammes.filter { (($0.value["title"] as? String) ?? "").isEmpty }.count
+        try expectEqual(p.programmes.values.filter { $0.title.isEmpty }.count, rawTitleless, month)
+        var slots = 0
+        for day in p.days {
+            for (channel, strips) in day.channels {
+                try expect(channel == "transfers" || channel == "audio", "\(month): channel \(channel)")
+                for slot in strips {
+                    slots += 1
+                    try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
+                               "\(month) \(day.date) \(slot.start): a roster index is out of range")
+                    try expect(slot.start_minute >= 0 && slot.minutes > 0 && slot.start_minute + slot.minutes <= 1440)
+                    try expect(p.shows[slot.show] != nil, "\(month): slot names an unknown show \(slot.show)")
+                    try expectEqual(StationClock.clockLabel(slot.start_minute), slot.start, "\(month) \(day.date)")
+                }
+            }
+        }
+        for programme in p.programmes.values {
+            switch programme.play_url.flatMap(Transmission.route(for:)) {
+            case .tvPlay?: tallies["tv-play", default: 0] += 1
+            case .stream?: tallies["stream", default: 0] += 1
+            case .direct?: tallies["direct", default: 0] += 1
+            case nil: throw Failure(description: "\(month): \(programme.id) has a play_url that does not route: \(programme.play_url ?? "nil")")
+            }
+        }
+        print("      \(month): \(p.days.count) days, \(slots) slots, \(p.programmes.count) programmes, \(rawTitleless) without a title")
+    }
+    print("      every play_url routed: \(tallies.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))")
+    try expect((tallies["tv-play"] ?? 0) > 0)
+}
+
+func realProgrammingClockInvariants() throws {
+    let p = try realProgramming("2026-10")
+    var checked = 0, offAir = 0, joinedPastLeader = 0
+    for number in [1, 2] {
+        var t = pkt(2026, 10, 1, 0, 0, 0)
+        let end = pkt(2026, 10, 31, 23, 59, 59)
+        while t <= end {
+            defer { t = t.addingTimeInterval(1747) }
+            guard let air = StationClock.onAir(p, channel: number, at: t) else { offAir += 1; continue }
+            checked += 1
+            let c = karachi.dateComponents([.year, .month, .day, .hour, .minute, .second], from: t)
+            let iso = isoString(c.year ?? 0, c.month ?? 0, c.day ?? 0)
+            let minute = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            let programme = try require(air.programme, air.programmeId)
+            try expectEqual(air.date, iso)
+            try expect(minute >= air.slot.start_minute && minute < air.slot.start_minute + air.slot.minutes)
+            try expectEqual(p.programme_order[air.slot.programmes[air.rosterIndex]], air.programmeId)
+            try expect(air.into >= 0 && air.into < StationClock.runSeconds(programme), "into \(air.into) of \(StationClock.runSeconds(programme))")
+            try expectClose(air.seekTo, (programme.clean_start ?? 0) + air.into, tolerance: 1e-9)
+            if let seconds = programme.seconds, seconds > 0, StationClock.runSeconds(programme) > 1 {
+                try expect(air.seekTo < seconds - (programme.clean_end ?? 0) + 1e-9, "seeks past the end of \(air.programmeId)")
+            }
+            if (programme.clean_start ?? 0) > 0 { joinedPastLeader += 1 }
+            try expectEqual(air.startLabel, air.slot.start)
+            try expectEqual(air.channelId, StationClock.channelId(p, number: number))
+            // A next strip exists everywhere except in the last day of the month's file.
+            if iso != "2026-10-31" { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
+        }
+    }
+    print("      \(checked) instants across October on both channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
+    try expect(checked > 2500, "only \(checked) instants were on air")
+}
+
+// MARK: - Runner
+
+let tests: [(String, () throws -> Void)] = [
+    ("Skin hours at the boundaries", skinHoursAtBoundaries),
+    ("Skin hex triples", skinColours),
+    ("ReceiverIndex regions, URLs and medium lines", receiverIndexRegionsAndLines),
+    ("ReceiverIndex without cameraFiles", receiverIndexWithoutCameraFiles),
+    ("Channel decoding and active stream", channelDecodesAndFindsItsActiveStream),
+    ("Channel.place drops what is unknown", channelPlaceDropsWhatIsNotKnown),
+    ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
+    ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
+    ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
+    ("Tiers on by default and medium labels", tiersAndMediumLabels),
+    ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Carrier answer is validated", carrierAnswerIsValidated),
+    ("validCarrier rules", validCarrierRules),
+    ("Transmission routes the three shapes", transmissionRoutesTheThreeShapes),
+    ("Transmission never sends the token to another host", transmissionNeverSendsTheTokenToAnotherHost),
+    ("Transmission rejects", transmissionRejects),
+    ("Transmission requests", transmissionRequests),
+    ("Transmission carriers", transmissionCarriers),
+    ("Schedule URL, basic authorization, config", scheduleURLAndBasicAuthorization),
+    ("Anon key is the site's anon role", anonKeyIsTheSitesAnonRole),
+    ("Auth session from a body", authSessionFromBody),
+    ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
+    ("Auth error messages", authErrorMessages),
+    ("Auth requests", authRequests),
+    ("Session expiry and storage", sessionExpiryAndStorage),
+    ("stationNow agrees with Calendar", stationNowAgreesWithCalendar),
+    ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
+    ("Clock labels", clockLabels),
+    ("runSeconds rules", runSecondsRules),
+    ("Programme without a title decodes", programmeWithoutATitleDecodes),
+    ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
+    ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
+    ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
+    ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
+    ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
+    ("The differential comparator can fail", differentialComparatorCanFail),
+    ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
+    ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),
+    ("Real receiver-index.json decodes", realReceiverIndexDecodes),
+    ("Real shards and withdrawal feeds decode", realShardsAndWithdrawalFeedsDecode),
+    ("Every real region shard decodes", everyRealShardDecodes),
+    ("Real programming decodes in every month", realProgrammingDecodesInEveryMonth),
+    ("Real October schedule clock invariants", realProgrammingClockInvariants),
+]
+
+var passed = 0, failed = 0, skipped = 0
+for (name, body) in tests {
+    do {
+        try body()
+        passed += 1
+        print("PASS \(name)")
+    } catch let skip as Skip {
+        skipped += 1
+        print("SKIP \(name): \(skip.reason)")
+    } catch {
+        failed += 1
+        print("FAIL \(name): \(error)")
+    }
+}
+print("\(tests.count) tests: \(passed) passed, \(failed) failed, \(skipped) skipped")
+exit(failed == 0 ? 0 : 1)

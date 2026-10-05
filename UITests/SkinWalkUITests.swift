@@ -96,6 +96,8 @@ final class SkinWalkUITests: XCTestCase {
             let upNext = app.descendants(matching: .any)["upNext"]
             XCTAssertTrue(upNext.waitForExistence(timeout: 20), "\(skin): the player must list what is up next")
             Thread.sleep(forTimeInterval: 10)   // the opening ground holds until the signal settles
+            XCUIRemote.shared.press(.select)     // wakes the overlay, which hides 2.6 s in
+            Thread.sleep(forTimeInterval: 0.6)
             shot("\(skin)-5-transmission-player", app)
             app.terminate()
 

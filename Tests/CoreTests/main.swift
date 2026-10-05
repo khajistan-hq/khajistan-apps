@@ -2207,11 +2207,13 @@ func vodOfferLine() throws {
     try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A"}"#)), nil)
     try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","buy":20}"#)), nil)
     try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":null,"licence_price":null}"#)), nil)
-    // Over the real catalogue: 22 rent lines, 10 licence lines (the Filmfarsi volumes), none empty.
+    // Over the real catalogue as of 2026-10-05, when the owner took the films off sale (archive
+    // 260568a92: every rent and buy cleared): no rent line anywhere, the 24 licensed titles carry
+    // the licence line, and the 8 retail titles carry none, as marqueeOffer() gives them none.
     let offers = Films.offered(try vodFixture().catalogue.films).map(Films.offer)
-    try expectEqual(offers.filter { $0 == rent }.count, 22)
-    try expectEqual(offers.filter { $0?.hasPrefix("Institutional licence") == true }.count, 10)
-    try expectEqual(offers.filter { $0 == nil }.count, 0)
+    try expectEqual(offers.filter { $0 == rent }.count, 0)
+    try expectEqual(offers.filter { $0?.hasPrefix("Institutional licence") == true }.count, 24)
+    try expectEqual(offers.filter { $0 == nil }.count, 8)
 }
 
 let receiverRegionIDs: Set<String> = ["indus", "parsistan", "khorasan", "arabia", "levant", "maghreb", "qafqaz", "anatolia", "egypt-nile"]

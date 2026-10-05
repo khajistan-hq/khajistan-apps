@@ -91,7 +91,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6
+      "rent": null
     },
     {
       "handle": "qandeel-2017-khajistan",
@@ -115,7 +115,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6
+      "rent": null
     },
     {
       "handle": "aurat-raj-womens-rule-1979-uncut-khajistan",
@@ -139,7 +139,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6
+      "rent": null
     },
     {
       "handle": "chuppan-chupai-hide-seek-2013-khajistan",
@@ -163,7 +163,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6
+      "rent": null
     },
     {
       "handle": "world-ka-centre-center-of-the-world-2002-directors-cut-khajistan",
@@ -222,7 +222,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200
     },
     {
@@ -281,7 +281,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200
     },
     {
@@ -309,7 +309,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_languages": [
         {
@@ -393,7 +393,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200
     },
     {
@@ -444,7 +444,7 @@
       "download_ok": false,
       "territory": "unrecorded",
       "open_access": false,
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200
     },
     {
@@ -1137,7 +1137,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1219,7 +1219,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1287,7 +1287,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1368,7 +1368,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1436,7 +1436,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1504,7 +1504,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1572,7 +1572,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1655,7 +1655,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
     },
@@ -1693,7 +1693,7 @@
       "institutional_eligible": true,
       "download_ok": false,
       "territory": "unrecorded",
-      "rent": 6,
+      "rent": null,
       "licence_price": 1200,
       "subtitle_provenance": "No full-film subtitle tracks are currently available for this title."
     },
@@ -1776,8 +1776,8 @@
       "download_ok": true,
       "territory": "worldwide",
       "open_access": false,
-      "rent": 6,
-      "buy": 20,
+      "rent": null,
+      "buy": null,
       "synopsis": "A stage producer in the theatre district around Royal Park, Lahore, needs a Saturday-night house and tells one of his dancers to lift her shirt during her number. She does the number, takes a rickshaw, and is picked up on a dark street by a man in a black car; at the house he drives her to, the watchman is already digging.\n\nThe killings repeat weekly and the police get nowhere. In a separate household, Chaudhary Ghulam Rasool comes home from America to a wife who presides over the Women Welfare Association and cares about the money, a son running a failing car showroom, and a daughter who trawls for men using a broken-down car as bait. Rasool has his wife sign her money into his account, persuades the family to sell the house for a move to the United States, and leaves them at the airport with nothing. His son, discovering that the woman he has been promising himself to still works, shoots up the kotha.\n\nThe killer is taken with his accomplice, who is his father and the watchman; a second wife the father took years earlier is the reason he kills women he considers dirty. The police conclude his work has merit, because dancers have stopped coming to the theatres. The film sells itself on the numbers it condemns.",
       "synopsis_credit": "Plot summarised from Omar Ali Khan's review of the film for Khajistan. Credits read from the film's own opening titles.",
       "director": "Mohammad Rasheed Dogar",
@@ -1894,8 +1894,8 @@
       "download_ok": true,
       "territory": "worldwide",
       "open_access": false,
-      "rent": 6,
-      "buy": 20
+      "rent": null,
+      "buy": null
     },
     {
       "country": "Pakistan",
@@ -1977,8 +1977,8 @@
       "download_ok": true,
       "territory": "worldwide",
       "open_access": false,
-      "rent": 6,
-      "buy": 20
+      "rent": null,
+      "buy": null
     },
     {
       "country": "Pakistan",
@@ -2063,8 +2063,8 @@
       "download_ok": true,
       "territory": "worldwide",
       "open_access": false,
-      "rent": 6,
-      "buy": 20
+      "rent": null,
+      "buy": null
     },
     {
       "handle": "filmfarsi-trailers-vol-9-khajistan",

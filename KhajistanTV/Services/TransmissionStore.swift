@@ -271,7 +271,8 @@ final class TransmissionStore {
                 await self?.handover()
             }
         }
-        player.attach(url: url, seekTo: air.seekTo, title: nowPlayingTitle(air), subtitle: air.show?.name)
+        player.attach(url: url, seekTo: air.seekTo, title: nowPlayingTitle(air), subtitle: air.show?.name,
+                      listen: Self.dancerMayListen(air, channel: channelNumber))
         phase = .onAir(air)
         watchSlotEnd(air, generation: gen)
     }
@@ -406,6 +407,17 @@ final class TransmissionStore {
             return nil
         }
         return url
+    }
+
+    /// The dancer listens to a programme that is sound with no picture — every programme on
+    /// channel 2, and channel 1's records — unless it is reverent. The site's house channel is
+    /// named by its show (open-frequencies.js houseChannel()), so the show name is what the
+    /// reverent rule reads. Whether the samples can be read is the carrier's to say: a Supabase
+    /// storage file or a Dropbox link can be tapped, a Cloudflare Stream manifest cannot.
+    static func dancerMayListen(_ air: OnAir, channel: Int) -> Bool {
+        guard air.programme?.audio_only == true else { return false }
+        let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
+        return !Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
     }
 
     /// Five vinyl transfers carry no title; the show name stands in for it.

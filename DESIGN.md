@@ -190,6 +190,30 @@ before the press. Measured on the owner's Apple TV HD: decode 47-50 fps against 
 0-1 late refreshes per flight. Reduced Motion keeps the fades and leaves the bird out.
 Overlays hide 2.6 seconds into playback.
 
+## The dancer
+
+Ported from the website's `kj-scope.js` "dancer" and the terms `open-frequencies.js` and
+`video.html` run him on: the same 23 moves (Twerk weighted four to one, Kawliya only for the
+long-haired figure), the same two figures, the six entrances, six exits and five breaks, the same
+proportions and angles. He is drawn in the band colour with ink stripes, head and props: green on
+yellow by day, `#002800` on the grove ground, `#6E003F` on smut. What he dances in front of drops
+to 26% while he draws.
+
+- **Where.** Full screen over the ground while sound with no picture plays: a receiver radio
+  channel, and a Khajistan Transmission programme marked `audio_only` (all of channel 2, and
+  channel 1's records). Never over television, a camera or a programme with a picture.
+- **Never on recitation.** A channel whose name, native name or broadcaster says Quran, Koran,
+  recitation, tilawa or Nida al-Islam (Latin or Arabic), or whose record carries
+  `reverent: true` or `visualiser: false`, gets no dancer and no tap.
+- **Only to real audio, only to a beat.** He reads the samples of the signal being heard and
+  comes on only when the onset envelope carries a beat (the site's comb autocorrelation, on at
+  .20 held a second, off under .14 for five seconds). A voice alone never brings him on.
+- **Which carriers.** A Transmission file (Supabase storage, a Dropbox link) is tapped on
+  AVPlayer. A live MP3 or AAC radio mount is played by the app itself (`LiveRadio.swift`, the
+  site's Safari player), because AVPlayer exposes nothing to tap on one. HLS carries no readable
+  samples: no dancer, and nothing in his place.
+- **Reduce Motion:** no dancer, and radio plays on AVPlayer as before.
+
 ## Assets
 
 `khajistan-pigeon.gif` is bundled from `archive/assets` unmodified (the 1080px master; owner:

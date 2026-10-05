@@ -13,6 +13,11 @@ final class PlayerController {
 
     let player = AVPlayer()
     var state: State = .idle
+    /// The samples of the signal now playing, when it was asked to listen and its carrier can be
+    /// read (a progressive file or stream; never HLS). The dancer reads this; nil means no dancer.
+    private(set) var signal: SignalTap?
+    /// A live radio mount the app is playing itself (LiveRadio.swift), in place of AVPlayer.
+    @ObservationIgnored private var liveRadio: LiveRadio?
     @ObservationIgnored var onEnded: (() -> Void)?
 
     @ObservationIgnored private var generation = 0
@@ -35,13 +40,41 @@ final class PlayerController {
 
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
-    /// card says; a recording (a mix, a clip) passes false.
-    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true) {
+    /// card says; a recording (a mix, a clip) passes false. `listen` taps the audio for the
+    /// dancer; the caller passes it only for sound with no picture on a channel that is not
+    /// reverent (DancerView.swift). `live` plays a live MP3 or AAC radio mount through
+    /// LiveRadio, the only way its samples can be read; anything it cannot play comes back here
+    /// and plays on AVPlayer, with no dancer.
+    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
         generation += 1
         let gen = generation
         state = .tuning
+        signal = nil
         timeoutTask?.cancel()
         removeItemObservers()
+        stopLive()
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
+            MPMediaItemPropertyTitle: title,
+            MPMediaItemPropertyArtist: subtitle ?? "Khajistan",
+            MPNowPlayingInfoPropertyIsLiveStream: isLive
+        ]
+        startTimeout(gen)
+
+        if live && listen {
+            player.replaceCurrentItem(with: nil)
+            fadeTask?.cancel()
+            fadeInPending = true
+            let radio = LiveRadio(userAgent: KJConfig.userAgent) { [weak self] event in
+                Task { @MainActor in
+                    self?.liveEvent(event, generation: gen, url: url, title: title, subtitle: subtitle)
+                }
+            }
+            radio.volume = 0
+            liveRadio = radio
+            signal = radio.signal
+            radio.start(url: url)
+            return
+        }
 
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": KJConfig.userAgent]])
         let item = AVPlayerItem(asset: asset)
@@ -80,34 +113,72 @@ final class PlayerController {
             }
         }
 
+        if listen { installTap(on: item, asset: asset, generation: gen) }
+
         fadeTask?.cancel()
         player.volume = 0
         fadeInPending = true
         player.replaceCurrentItem(with: item)
         if start == nil { player.play() }
+    }
 
+    private func startTimeout(_ gen: Int) {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
             self.state = .failed("The signal did not start.")
         }
+    }
 
-        MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: title,
-            MPMediaItemPropertyArtist: subtitle ?? "Khajistan",
-            MPNowPlayingInfoPropertyIsLiveStream: isLive
-        ]
+    private func liveEvent(_ event: LiveRadio.Event, generation gen: Int, url: URL, title: String, subtitle: String?) {
+        guard gen == generation else { return }
+        switch event {
+        case .started:
+            timeoutTask?.cancel()
+            state = .playing
+            if fadeInPending {
+                fadeInPending = false
+                Task { await ramp(to: 1, over: 0.5) }
+            }
+        case .failed(let message):
+            state = .failed(message)
+            stopLive()
+            signal = nil
+        case .fallback:
+            // Played plainly, as the site hands the element back to src playback.
+            attach(url: url, seekTo: nil, title: title, subtitle: subtitle, listen: false, live: false)
+        }
+    }
+
+    private func stopLive() {
+        liveRadio?.stop()
+        liveRadio = nil
+    }
+
+    /// The level the listener hears, on whichever player is carrying the signal.
+    private var volume: Float {
+        get { liveRadio?.volume ?? player.volume }
+        set {
+            if let liveRadio { liveRadio.volume = newValue } else { player.volume = newValue }
+        }
     }
 
     func pause() {
-        player.pause()
+        if let liveRadio { liveRadio.pause() } else { player.pause() }
         state = .paused
     }
 
     func resume() {
-        player.volume = 0
+        volume = 0
         fadeInPending = true
-        player.play()
+        if let liveRadio {
+            liveRadio.resume()
+            state = .playing
+            fadeInPending = false
+            Task { await ramp(to: 1, over: 0.5) }
+        } else {
+            player.play()
+        }
     }
 
     /// Brings the sound down to nothing over `seconds`, for a channel change: the old channel
@@ -133,7 +204,7 @@ final class PlayerController {
     /// signal, cancels this one where it stands.
     private func ramp(to target: Float, over seconds: Double) async {
         fadeTask?.cancel()
-        let from = player.volume
+        let from = volume
         let steps = max(1, Int(seconds * 60))
         let task = Task { @MainActor [weak self] in
             for step in 1...steps {
@@ -142,7 +213,7 @@ final class PlayerController {
                 let t = Float(step) / Float(steps)
                 // Ease in-out, so neither end of the fade clicks.
                 let eased = t * t * (3 - 2 * t)
-                self.player.volume = from + (target - from) * eased
+                self.volume = from + (target - from) * eased
             }
         }
         fadeTask = task
@@ -159,11 +230,39 @@ final class PlayerController {
         generation += 1
         timeoutTask?.cancel()
         timeoutTask = nil
+        stopLive()
         player.pause()
         player.replaceCurrentItem(with: nil)
         removeItemObservers()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         state = .idle
+        signal = nil
+    }
+
+    /// Where the audio has got to, in ms of item time, for reading the tap in step with it.
+    var playTimeMS: Double? {
+        if let liveRadio { return liveRadio.playTimeMS }
+        let time = player.currentTime()
+        return time.isNumeric ? time.seconds * 1000 : nil
+    }
+
+    /// Whether anything can be heard: the site's `!paused && !muted && volume > 0`.
+    var audible: Bool {
+        if let liveRadio { return liveRadio.isPlaying && liveRadio.volume > 0 }
+        return player.timeControlStatus == .playing && !player.isMuted && player.volume > 0
+    }
+
+    /// Taps the item's audio once its tracks are known. An HLS asset has no audio track to tap,
+    /// and then nothing is installed: no signal, no dancer.
+    private func installTap(on item: AVPlayerItem, asset: AVURLAsset, generation gen: Int) {
+        Task { [weak self] in
+            guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
+            guard let self, gen == self.generation else { return }
+            let tap = SignalTap()
+            guard let mix = tap.audioMix(for: track) else { return }
+            item.audioMix = mix
+            self.signal = tap
+        }
     }
 
     /// Seeks a ready item to where the transmission has got to, then plays. An item with no
@@ -181,6 +280,7 @@ final class PlayerController {
     /// Reads the player's live status rather than the value the callback carried, so a callback
     /// that arrives late cannot put back a state the viewer has already left.
     private func syncWithPlayer() {
+        guard liveRadio == nil else { return }
         switch player.timeControlStatus {
         case .playing:
             timeoutTask?.cancel()

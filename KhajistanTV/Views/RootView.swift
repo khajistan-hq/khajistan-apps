@@ -7,6 +7,20 @@ struct RootView: View {
 
     var body: some View {
         let palette = Palette(model.skin)
+        #if DEBUG
+        if let check = SoundCheckView.requested {
+            check
+                .environment(\.palette, palette)
+                .foregroundStyle(palette.ink)
+        } else {
+            screens(palette)
+        }
+        #else
+        screens(palette)
+        #endif
+    }
+
+    private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             TopBar(current: model.section, select: { model.section = $0 })
             content

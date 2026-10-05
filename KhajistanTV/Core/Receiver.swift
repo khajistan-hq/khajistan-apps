@@ -79,6 +79,10 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     let manualDisabled: Bool?
     let description: String?
     let genres: [String]?
+    /// A person's ruling that the dancer stays off this channel (open-frequencies.js
+    /// isReverentChannel). Absent on every record today; honoured when present.
+    let reverent: Bool?
+    let visualiser: Bool?
 
     /// The stream the channel says is live. Nil when none is named or the name matches nothing.
     var activeStream: Stream? {

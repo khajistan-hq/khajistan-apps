@@ -8,13 +8,13 @@ struct ReceiverPlayerView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var controller = PlayerController()
     @State private var current: Channel
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
     /// press steps on from here, not from the channel still on screen.
     @State private var destination: Channel?
     @State private var overlayVisible = true
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var changeTask: Task<Void, Never>?
@@ -34,12 +34,15 @@ struct ReceiverPlayerView: View {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
-            if current.mediaType == "radio" && controller.state == .playing {
-                // The band says live radio; the centre carries the name alone.
-                Text(current.name)
-                    .kjDisplay()
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, KJLayout.inset)
+            // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
+            // front of the channel's name. The band says live radio; the centre carries the name.
+            DancerLayer(controller: controller) {
+                if current.mediaType == "radio" && controller.state == .playing {
+                    Text(current.name)
+                        .kjDisplay()
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, KJLayout.inset)
+                }
             }
             overlay(palette)
             // The focus target. It draws nothing; its job is to hold focus so the remote's
@@ -171,13 +174,24 @@ struct ReceiverPlayerView: View {
                     url: url,
                     seekTo: nil,
                     title: target.name,
-                    subtitle: target.place.isEmpty ? nil : target.place
+                    subtitle: target.place.isEmpty ? nil : target.place,
+                    // Radio only: television and cameras carry a picture (owner, 2026-07-21).
+                    listen: dancerMayListen(target),
+                    // A live mount the app plays itself, so its samples can be read; HLS stays
+                    // on AVPlayer and has no dancer.
+                    live: target.activeStream?.format != "hls" && !url.path.lowercased().hasSuffix(".m3u8")
                 )
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
             }
         }
+    }
+
+    /// The dancer: radio, not reverent, and not for a viewer who has asked for less motion (who
+    /// then gets AVPlayer, as before).
+    private func dancerMayListen(_ channel: Channel) -> Bool {
+        channel.mediaType == "radio" && !channel.isReverent && !reduceMotion
     }
 
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the

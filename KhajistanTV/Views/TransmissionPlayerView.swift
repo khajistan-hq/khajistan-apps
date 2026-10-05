@@ -109,7 +109,9 @@ struct TransmissionPlayerView: View {
     private func onAir(_ air: OnAir) -> some View {
         ZStack {
             if air.programme?.audio_only == true {
-                soundOnly(air)
+                DancerLayer(controller: store.player) {
+                    soundOnly(air)
+                }
             } else {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
                 Color.black.ignoresSafeArea()

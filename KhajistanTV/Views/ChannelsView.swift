@@ -21,12 +21,18 @@ struct ChannelsView: View {
         model.receiver.index?.cameraURL(regionId: region.id) != nil
     }
 
+    /// The Screening Room's films filed to this region, as the site's On Demand files them.
+    private var films: [Film] {
+        model.films.films(in: region.id, known: Set(model.receiver.index?.regions.map(\.id) ?? []))
+    }
+
     /// The media this region carries, in switch order. A medium with nothing in it is not offered.
     private var media: [String] {
         var found: [String] = []
         if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
         if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
         if hasCameras { found.append("camera") }
+        if !films.isEmpty { found.append("vod") }
         return found
     }
 
@@ -51,6 +57,7 @@ struct ChannelsView: View {
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
+        .task { await model.films.load() }
         .fullScreenCover(item: $playing) { channel in
             ReceiverPlayerView(channel: channel, list: shown)
         }
@@ -94,6 +101,8 @@ struct ChannelsView: View {
     /// "Television 39". A medium counts what the receiver may offer, so the camera shard, which is
     /// fetched only when asked for, shows the index's own count until it has arrived.
     private func switchTitle(_ kind: String) -> String {
+        // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
+        if kind == "vod" { return "On Demand \(films.count)" }
         let title = ReceiverRules.mediumLabel(kind)
         let count: Int?
         if kind == "camera" {
@@ -126,6 +135,8 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
+        } else if medium == "vod" {
+            FilmGrid(films: films)
         } else if loading {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)

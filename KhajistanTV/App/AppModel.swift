@@ -16,6 +16,8 @@ final class AppModel {
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
     let mixes = MixesStore()
+    /// The Screening Room's films, read from vod.json with the preview password.
+    let films: FilmStore
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
 
@@ -39,6 +41,7 @@ final class AppModel {
         self.receiver = ReceiverStore()
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
+        self.films = FilmStore(auth: auth)
         self.skin = Skin.current(at: Date(), calendar: .current)
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {

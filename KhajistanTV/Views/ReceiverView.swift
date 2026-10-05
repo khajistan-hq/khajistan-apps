@@ -10,6 +10,7 @@ struct ReceiverView: View {
     @State private var composed: ComposedMap?
     @State private var mapError: String?
     @State private var showMixes = false
+    @State private var showFilms = false
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -24,10 +25,15 @@ struct ReceiverView: View {
                 .navigationDestination(isPresented: $showMixes) {
                     MixesView()
                 }
+                .navigationDestination(isPresented: $showFilms) {
+                    FilmsView()
+                }
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         .task { await model.mixes.load() }
+        // vod.json opens with the preview password, so a password entered later loads it.
+        .task(id: model.auth.previewPassword) { await model.films.load() }
     }
 
     @ViewBuilder
@@ -96,6 +102,7 @@ struct ReceiverView: View {
                     RegionMapView(map: composed, highlighted: focusedRegion)
                     regionStrip(composed)
                     mixesEntry
+                    filmsEntry
                 }
             } else {
                 TuningLoader("Loading the receiver\u{2026}")
@@ -158,6 +165,27 @@ struct ReceiverView: View {
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
             .accessibilityIdentifier("khajistanRadioMixes")
             // The plate's padding is pulled back so the label sits on the map's margin.
+            .padding(.horizontal, -22)
+        }
+    }
+
+    /// The Screening Room: every film, as the site's On Demand carries them. Offered once vod.json
+    /// has loaded with a film in it, and spanning the map's width like the mixes row above it.
+    @ViewBuilder
+    private var filmsEntry: some View {
+        let count = model.films.films.count
+        if count > 0 {
+            Button {
+                showFilms = true
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Kicker("The Screening Room")
+                    Text("\(count) \(count == 1 ? "film" : "films") on demand").kjSmall(faint: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+            .accessibilityIdentifier("screeningRoom")
             .padding(.horizontal, -22)
         }
     }

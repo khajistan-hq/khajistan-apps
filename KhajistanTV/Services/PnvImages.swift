@@ -19,13 +19,16 @@ final class PnvImages: @unchecked Sendable {
     }
 
     /// The first candidate that loads, no larger than `maxPixel` on its long side. Nil when none does
-    /// or the task is cancelled.
-    func image(_ candidates: [URL], maxPixel: Int) async -> UIImage? {
+    /// or the task is cancelled. `authorization` is sent with each request (the preview gate's
+    /// Basic header, for the Screening Room's posters while the site is behind it).
+    func image(_ candidates: [URL], maxPixel: Int, authorization: String? = nil) async -> UIImage? {
         for url in candidates {
             if Task.isCancelled { return nil }
             let key = url as NSURL
             if let hit = cache.object(forKey: key) { return hit }
-            guard let (data, response) = try? await session.data(from: url),
+            var request = URLRequest(url: url)
+            if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+            guard let (data, response) = try? await session.data(for: request),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = Self.downsample(data, maxPixel: maxPixel) else { continue }
             cache.setObject(image, forKey: key)

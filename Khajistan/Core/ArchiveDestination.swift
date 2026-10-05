@@ -12,6 +12,16 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
     let path: String
     var url: URL { URL(string: path, relativeTo: ArchiveURL.base)!.absoluteURL }
 
+    /// The rooms the app draws itself; every other room is the live website.
+    var nativeRoom: NativeRoom? {
+        switch id {
+        case "receiver": return .receiver
+        case "picsnvids": return .picsVids
+        case "passport": return .yours
+        default: return nil
+        }
+    }
+
     static let all: [Self] = [
         .init(id: "home", door: "HOME", title: "Home", subtitle: "Explore by region", path: "/"),
         .init(id: "publications", door: "PUBLICATIONS", title: "Publications", subtitle: "Khajistan Press — books, catalogues and printed editions", path: "/publications.html"),
@@ -39,6 +49,24 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
         var order: [String] = []
         for destination in all where !order.contains(destination.door) { order.append(destination.door) }
         return order.map { door in (door, all.filter { $0.door == door }) }
+    }
+}
+
+/// A room of the website the app draws natively, and the bottom-bar door that holds it.
+enum NativeRoom: String, CaseIterable, Sendable {
+    case receiver, picsVids, yours
+}
+
+/// Reading Room All Access, sold by the website's own checkout (scripts/kj-join.js): a link with
+/// `?join=<plan>` resumes it after sign-in. No price is written into the app; the site states it.
+enum JoinPlan: String, CaseIterable, Sendable {
+    case monthly, annual
+
+    var label: String { self == .monthly ? "Monthly" : "Annual" }
+    var url: URL {
+        var parts = URLComponents(url: ArchiveURL.base.appendingPathComponent("reading-room.html"), resolvingAgainstBaseURL: false)!
+        parts.queryItems = [URLQueryItem(name: "join", value: rawValue)]
+        return parts.url!
     }
 }
 

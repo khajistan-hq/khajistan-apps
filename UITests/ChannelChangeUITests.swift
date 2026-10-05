@@ -1,7 +1,7 @@
 import XCTest
 
-/// Photographs a channel change from the first press to the new picture: the ground coming up
-/// behind the pigeon, the held ground with the incoming channel's name, and the reveal.
+/// Photographs a channel change from the first press to the new picture: the pigeon flying in
+/// over the skin's ground, the held wing, and the wing sweeping off the new picture.
 final class ChannelChangeUITests: XCTestCase {
     private func shot(_ name: String, _ app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
@@ -34,7 +34,7 @@ final class ChannelChangeUITests: XCTestCase {
         shot("02-first-picture", app)
 
         XCUIRemote.shared.press(.down)
-        for (index, wait) in [0.15, 0.35, 0.5, 0.8, 1.5, 2.5, 3.0].enumerated() {
+        for (index, wait) in [0.2, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5].enumerated() {
             Thread.sleep(forTimeInterval: wait)
             shot(String(format: "%02d-change", index + 3), app)
         }

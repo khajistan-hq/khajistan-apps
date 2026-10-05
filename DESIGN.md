@@ -88,8 +88,8 @@ way the website marks the brand link.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
   (state kicker, the name as headline, the place, the attribution line in small type). The
-  screen opens on the ground with TUNING and the channel's name; the pigeon flies up off it as
-  the picture arrives. Radio shows its name as display type on the ground. A channel change is
+  screen opens on the ground with TUNING and the channel's name, which fades off as the picture
+  arrives. Radio shows its name as display type on the ground. A channel change is
   described under Motion.
 
 ## Khajistan Transmission
@@ -98,9 +98,9 @@ way the website marks the brand link.
   time (UTC+5)*, then one card per channel: CHANNEL 1 kicker, the channel's own line from the
   schedule, and what is on now (show, programme, hours) or when it returns. Select tunes it.
   The preview-password and sign-in steps live on this page.
-- **Player**: opens on the ground with the channel's name, and the pigeon flies off it as the
-  programme, joined where the clock has reached, arrives; that is the sign-on. Up and down
-  switch channel as under Motion. The
+- **Player**: once per launch the sign-on, as the website's: the wing wipe in, the programme
+  (joined where the clock has reached) tuned behind the held wing, the wing off. Later visits
+  open on the ground with the channel's name. Up and down switch channel as under Motion. The
   status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 · 18:00–18:15 PKT · MEHFIL ON TAPE with
   UP NEXT 18:15 VINYL RIPS trailing; the panel carries the slot kicker, the title, the show's
   line, KIND and ORIGIN, and the custodian and transfer credits. Off air is OFF AIR in display
@@ -108,24 +108,29 @@ way the website marks the brand link.
 
 ## Motion
 
-Only the content moves: the pigeon mark, and the flying pigeon at a changeover (owner ruling
-2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One pigeon in the
-apps, the flying one, on the skin's colours** (owner, 2026-10-05: "we have to choose one"); the
-grooming loop and the sign-on ident, which opens on it and is on black, are not in the apps.
+Only the content moves: the pigeon mark, and the website's wing wipe at a changeover (owner
+ruling 2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One pigeon
+in the apps: the website's wing-wipe pigeon, flying at the viewer, on the skin's colours**
+(owner, 2026-10-05: "we have to choose one", then "the pigeon that was flying before this one
+but with skin color backgrounds"). The grooming loop and the sign-on ident, which opens on it
+and is on black, are not in the apps. Two other flights (Across, Upward) were tried the same
+day and refused: shown at their own 9:16 shape the bird hit the clip's sides on a 16:9 screen.
 
-A channel change: the old sound fades to nothing (0.45 s, eased); the skin's ground comes up
-over the picture (0.35 s) while the pigeon flies at the viewer; the ground holds with TUNING and
-the incoming channel's name until the signal plays or fails (8 s at most); then the ground
-lifts (0.7 s) as the pigeon flies up and away over the new picture, whose sound fades in once
-it is actually playing (0.9 s). Reduced Motion keeps the fades and leaves the flights out.
+A channel change: the old sound fades to nothing (0.45 s, eased) while the skin's ground comes
+up (0.35 s) and the pigeon flies at the viewer until a wing fills the screen (1.6 s); the wing
+holds while the next signal tunes (until it plays or fails, 8 s at most); the wing sweeps off
+the new picture (0.9 s), whose sound fades in once it is actually playing (0.9 s). Reduced
+Motion keeps the fades and leaves the wipe out.
 Overlays hide 2.6 seconds into playback.
 
 ## Assets
 
 `khajistan-pigeon.gif` is bundled from `archive/assets` unmodified (the 1080px master; owner:
-the master everywhere). The two flights, `flight-in.mov` and `flight-out.mov`, are rendered by
-`scripts/make-pigeon-flight.py` from the Higgsfield ProRes 4444 masters (Flight-Across and
-Flight-Upward V10, 1080×1920, 60 fps) as HEVC with alpha, premultiplied, with the black keying
-rim choked out and the side edges feathered; the app draws the ground, so one file serves all
-three skins. They are drawn at screen height, never stretched past their pixels. The rainbow TV bug is NOT used: it is not on
+the master everywhere). The wipe, `wipe-in.mov` and `wipe-out.mov`, is rendered by `scripts/make-pigeon-wipe.py` from
+the Higgsfield original of the website's wipe (clip 0ea14f57, 1080×1920, 24 fps), cut exactly
+as `archive/assets/tv/khajistan-wing-wipe-*.mp4` (16:9 at y=600; 1.0–2.6 s and 2.6–3.5 s),
+matted with BiRefNet (a brightness key cannot separate the dark chest from the black ground),
+premultiplied, at 1920×1080, as HEVC with alpha. The app draws the ground, so one file serves
+all three skins. The 16:9 band is 1080 px wide at source, so 1920 is a 1.78× enlargement and
+there is no larger master of this flight. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

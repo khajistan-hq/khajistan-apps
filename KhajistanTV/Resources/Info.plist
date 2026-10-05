@@ -26,6 +26,8 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoadsForMedia</key>

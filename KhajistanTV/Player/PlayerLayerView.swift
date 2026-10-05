@@ -6,10 +6,12 @@ import UIKit
 /// its own, so whatever the picture does not cover shows the skin's ground behind it.
 struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    var gravity: AVLayerVideoGravity = .resizeAspect
 
     func makeUIView(context: Context) -> PlayerUIView {
         let view = PlayerUIView()
         (view.layer as! AVPlayerLayer).player = player
+        (view.layer as! AVPlayerLayer).videoGravity = gravity
         return view
     }
 

@@ -268,7 +268,7 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Up and down switch channel behind the pigeon. While a flight is on screen they skip it.
+    /// Up and down switch channel through the wing wipe. While a clip is on screen they skip it.
     private func move(_ direction: MoveCommandDirection) {
         wake()
         guard direction == .up || direction == .down else { return }
@@ -279,13 +279,12 @@ struct TransmissionPlayerView: View {
         guard holdsFocus, !switching else { return }
         switching = true
         Task {
-            let next = store.channelNumber == 1 ? 2 : 1
             async let quiet: Void = store.player.fadeOut()
-            await model.clips.flyIn(caption: store.channelName(next))
+            await model.clips.wipeIn()
             await quiet
             if !left { await store.switchChannel() }
             if !left { await store.player.settled() }
-            if !left { await model.clips.flyOut() }
+            if !left { await model.clips.wipeOut() }
             switching = false
         }
     }
@@ -305,14 +304,23 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Coming and going
 
-    /// The screen opens on the ground with the channel's name, and the pigeon flies off it as
-    /// the first picture arrives: that is the sign-on. Every step checks that the viewer is
-    /// still here: a flight must not start after the screen has gone.
+    /// The sign-on, once per launch, as the website's: the wing wipe in, the programme tuned
+    /// behind the held wing, the wing off. Later visits open on the ground with the channel's
+    /// name, which fades off as the picture arrives. Every step checks that the viewer is still
+    /// here: a clip must not start after the screen has gone.
     private func start() async {
-        model.clips.cover(caption: store.channelName(channel), animated: false)
-        if !gone { await store.tune(channel: channel) }
-        if !gone { await store.player.settled() }
-        if !gone { await model.clips.flyOut() }
+        if !model.clips.signOnPlayed {
+            model.clips.signOnPlayed = true
+            await model.clips.wipeIn()
+            if !gone { await store.tune(channel: channel) }
+            if !gone { await store.player.settled() }
+            if !gone { await model.clips.wipeOut() }
+        } else {
+            model.clips.cover(caption: store.channelName(channel), animated: false)
+            if !gone { await store.tune(channel: channel) }
+            if !gone { await store.player.settled() }
+            if !gone { model.clips.uncover() }
+        }
     }
 
     private var gone: Bool {

@@ -3,21 +3,23 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The channel change: the skin's ground covers the picture while the pigeon flies at the
-/// viewer, holds while the next signal tunes, and lifts off it as the pigeon flies away.
+/// The channel change: the website's wing wipe, on the skin's colour. The pigeon flies at the
+/// viewer over the skin's ground until a wing fills the screen; the wing holds while the next
+/// signal tunes; the wing sweeps off the new picture.
 ///
-/// The two flights are HEVC with alpha (tvos/scripts/make-pigeon-flight.py), so the pigeon is
-/// drawn over whatever ground the skin of the hour paints: yellow by day, green at night, pink at
-/// dawn and dusk. They play on a player of their own, so a flight never disturbs the signal.
+/// The two halves are HEVC with alpha (tvos/scripts/make-pigeon-wipe.py, from the same Higgsfield
+/// clip and the same cut as archive/assets/tv/khajistan-wing-wipe-*.mp4), so the ground behind
+/// the pigeon is whatever the skin paints: yellow by day, green at night, pink at dawn and dusk.
+/// They play on a player of their own, so the wipe never disturbs the signal.
 @MainActor @Observable
 final class StationClips {
     enum Clip: String {
-        /// Flies at the viewer: plays as the ground comes up over the picture.
-        case flightIn = "flight-in"
-        /// Flies up and away: plays as the ground lifts off the new picture.
-        case flightOut = "flight-out"
+        /// Flies at the viewer until a wing fills the screen (1.6 s); its last frame is held.
+        case wipeIn = "wipe-in"
+        /// The wing sweeps off (0.9 s).
+        case wipeOut = "wipe-out"
 
-        /// The longest a flight may hold the screen, so a file that stalls cannot trap the viewer.
+        /// The longest a clip may hold the screen, so a file that stalls cannot trap the viewer.
         fileprivate var cap: Duration { .seconds(4) }
     }
 
@@ -28,6 +30,8 @@ final class StationClips {
     /// What the held ground says while the next signal tunes: the channel on its way.
     private(set) var caption: String?
     let player = AVPlayer()
+    /// Set after the sign-on, and kept for the life of the app.
+    var signOnPlayed = false
 
     /// Every play gets a number. A play that wakes to find it is no longer the newest leaves the
     /// screen to the newer one.
@@ -57,22 +61,25 @@ final class StationClips {
         withAnimation(.easeOut(duration: 0.7)) { coverage = 0 }
     }
 
-    /// The pigeon flies in and the ground comes up with it. Returns once the picture is covered.
-    func flyIn(caption: String?) async {
-        cover(caption: caption)
-        await play(.flightIn)
+    /// The pigeon flies in over the ground, which comes up with it, and the wing that fills the
+    /// screen at the end is held there. Returns once the screen is covered.
+    func wipeIn() async {
+        cover(caption: nil)
+        await play(.wipeIn, holdLastFrame: true)
     }
 
-    /// The ground lifts and the pigeon flies off the new picture. Returns when the flight ends.
-    func flyOut() async {
+    /// The ground fades from under the held wing (unseen behind it, a plain fade with Reduce
+    /// Motion) and the wing sweeps off the picture.
+    func wipeOut() async {
         uncover()
-        await play(.flightOut)
+        await play(.wipeOut)
     }
 
-    /// Plays a flight and returns when it ends, fails, is skipped or cleared, or runs out of time.
-    /// Never throws; a flight that is not in the bundle returns at once. Reduce Motion leaves the
-    /// flights out and keeps the ground's fade.
-    func play(_ clip: Clip) async {
+    /// Plays half of the wipe and returns when it ends, fails, is skipped or cleared, or runs out
+    /// of time. `holdLastFrame` leaves it on screen: the wing that covers the screen stays until
+    /// the next `play` or `clear`. Never throws; a clip that is not in the bundle returns at once.
+    /// Reduce Motion leaves the wipe out and keeps the ground's fade.
+    func play(_ clip: Clip, holdLastFrame: Bool = false) async {
         if UIAccessibility.isReduceMotionEnabled { return }
         guard let url = Bundle.main.url(forResource: clip.rawValue, withExtension: "mov") else { return }
 
@@ -108,16 +115,24 @@ final class StationClips {
 
         guard mine == generation else { return }
         self.latch = nil
-        stopPlayer()
-        showing = nil
+        if holdLastFrame {
+            // Left early (skipped, or out of time) the wing is part-way across. The last frame is
+            // the one that covers the screen. The seek is not awaited: it can only be late.
+            if item.duration.isNumeric {
+                player.seek(to: item.duration, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+            }
+        } else {
+            stopPlayer()
+            showing = nil
+        }
     }
 
-    /// Ends the flight that is playing now. `play` returns; the ground stays where it is.
+    /// Ends the clip that is playing now. `play` returns; a held wing and the ground stay.
     func skip() {
         latch?.open()
     }
 
-    /// Ends the flight, stops the player and takes the ground off the screen at once.
+    /// Ends the clip, stops the player and takes the wing and the ground off the screen at once.
     func clear() {
         generation += 1
         latch?.open()
@@ -153,8 +168,8 @@ private final class Latch {
     }
 }
 
-/// The ground and the pigeon, over everything beneath them. The flight is drawn at the screen's
-/// height in its own 9:16 frame, never stretched past its pixels.
+/// The ground and the pigeon, over everything beneath them. The wipe is 16:9 and fills the screen,
+/// so the bird's edges are the screen's own edges.
 struct StationClipLayer: View {
     let clips: StationClips
     @Environment(\.palette) private var palette
@@ -175,7 +190,8 @@ struct StationClipLayer: View {
                 .opacity(clips.coverage)
             }
             if clips.showing != nil {
-                PlayerLayerView(player: clips.player)
+                // Fill: on a screen that is not exactly 16:9 the wing still reaches every edge.
+                PlayerLayerView(player: clips.player, gravity: .resizeAspectFill)
                     .ignoresSafeArea()
             }
         }

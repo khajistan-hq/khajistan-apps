@@ -180,22 +180,22 @@ struct ReceiverPlayerView: View {
         changeTask = Task { await change(to: target) }
     }
 
-    /// The screen opens on the ground with the channel's name; the pigeon flies off it as the
-    /// picture arrives.
+    /// The screen opens on the ground with the channel's name, which fades off the picture as it
+    /// arrives.
     private func open() async {
         model.clips.cover(caption: current.name, animated: false)
         tune(current)
         await controller.settled()
         guard !Task.isCancelled else { return }
-        await model.clips.flyOut()
+        model.clips.uncover()
     }
 
-    /// The old sound fades as the ground comes up behind the pigeon, the new channel tunes under
-    /// the held ground, and the ground lifts as the pigeon flies off the new picture, whose
+    /// The website's wing wipe on the skin's colour: the old sound fades as the pigeon flies in,
+    /// the new channel tunes behind the held wing, and the wing sweeps off the new picture, whose
     /// sound fades in once it plays.
     private func change(to target: Channel) async {
         async let quiet: Void = controller.fadeOut()
-        await model.clips.flyIn(caption: target.name)
+        await model.clips.wipeIn()
         await quiet
         // A newer press, or leaving, cancelled this one while the pigeon was flying.
         guard !Task.isCancelled else { return }
@@ -203,7 +203,7 @@ struct ReceiverPlayerView: View {
         destination = nil
         await controller.settled()
         guard !Task.isCancelled else { return }
-        await model.clips.flyOut()
+        await model.clips.wipeOut()
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.

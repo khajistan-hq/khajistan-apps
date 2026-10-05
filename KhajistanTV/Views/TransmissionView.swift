@@ -50,6 +50,18 @@ struct TransmissionView: View {
         .fullScreenCover(item: $playing) { choice in
             TransmissionPlayerView(channel: choice.number)
         }
+        // A Top Shelf link: the station page, or one channel tuned from it.
+        .task(id: model.link) {
+            switch model.link {
+            case .transmission:
+                model.link = nil
+            case .channel(let number):
+                model.link = nil
+                choose(number)
+            default:
+                break
+            }
+        }
     }
 
     // MARK: - The page

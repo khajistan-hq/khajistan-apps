@@ -35,24 +35,15 @@ struct Palette: Equatable {
         ground = Color(hex: skin.groundHex)
         self.ink = ink
         lift = Color(hex: skin.liftHex)
-        onBand = Color(hex: 0xF3FB04)
-        mapTint = Color(hex: 0x7E9B45)
+        onBand = Color(hex: Skin.onBandHex)
+        mapTint = Color(hex: Skin.mapTintHex)
+        accent = Color(hex: skin.accentHex)
+        band = Color(hex: skin.bandHex)
+        mapDeep = Color(hex: skin.mapDeepHex)
         switch skin {
-        case .day:
-            accent = Color(hex: 0x186409)
-            faint = ink.opacity(0.62)
-            band = Color(hex: 0x186409)
-            mapDeep = Color(hex: 0x006F00)
-        case .grove:
-            accent = Color(hex: 0xF3FB04)
-            faint = ink.opacity(0.85)
-            band = Color(hex: 0x002800)
-            mapDeep = Color(hex: 0x7E9B45)
-        case .smut:
-            accent = Color(hex: 0xF3FB04)
-            faint = ink.opacity(0.95)
-            band = Color(hex: 0x6E003F)
-            mapDeep = Color(hex: 0x006F00)
+        case .day: faint = ink.opacity(0.62)
+        case .grove: faint = ink.opacity(0.85)
+        case .smut: faint = ink.opacity(0.95)
         }
     }
 

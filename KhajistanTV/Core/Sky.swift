@@ -30,6 +30,24 @@ enum Skin: String, CaseIterable, Codable, Sendable {
         }
     }
 
+    /// Labels and kickers on the ground (DESIGN.md accent).
+    var accentHex: UInt32 { self == .day ? 0x186409 : 0xF3FB04 }
+
+    /// Status bands and the focus plate.
+    var bandHex: UInt32 {
+        switch self {
+        case .day: return 0x186409
+        case .grove: return 0x002800
+        case .smut: return 0x6E003F
+        }
+    }
+
+    /// The map's first green. The second, `mapTintHex`, is the same in every skin.
+    var mapDeepHex: UInt32 { self == .grove ? 0x7E9B45 : 0x006F00 }
+    static let mapTintHex: UInt32 = 0x7E9B45
+    /// Text on a band, in every skin.
+    static let onBandHex: UInt32 = 0xF3FB04
+
     /// Hours 8 to 16 are day, 5 to 7 and 17 to 19 are smut, the rest is grove. The hour is the
     /// calendar's own, so the caller chooses whose clock it is (the viewer's, or Pakistan's).
     static func current(at date: Date, calendar: Calendar) -> Skin {

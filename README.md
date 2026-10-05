@@ -25,6 +25,8 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 
 **Pics/Vids.** The website's PICS/VIDS door (`/browse-archive.html`, Born Digital Media). It reads the same Supabase view and function the page reads, with the anon key: `pnv_accounts` for the roster of vetted accounts, `pnv_media` for rows of those accounts only (ordered `feed_rank`, then `corpus`, 60 to a page), and `rpc('pnv_facets')` for the summary line. The filters are the page's Everything / Pictures / Videos and its regions, which the page reaches through the atlas map. Rows become URLs by `kj-media.js`'s rules (Supabase storage, R2, and Khajistan TV's poster bucket and `tv-play`), tested against that file. The entry notice is the site's, in its words, with its three states. Khajistan TV rows show their poster to anyone; their video needs the same account `tv-play` asks for on the Transmission page, and the viewer opens the sign-in sheet in place.
 
+**The Top Shelf.** While the icon has focus, tvOS shows a carousel the extension in `TopShelf/` draws from live data, in the skin of the hour: the receiver's live count over its map, and what Channel 1 and Channel 2 are carrying now (or, without the schedule, the station's own description). Each slide opens the app at its screen through a `khajistan://` link. When the extension cannot draw a slide, tvOS shows the static masthead. DESIGN.md has the layout and the reasons.
+
 **Assets.** The pigeon master GIF is a byte-identical copy of the website's. The channel change is the website's wing wipe over the skin's own colour: HEVC with alpha rendered by `scripts/make-pigeon-wipe.py` from the Higgsfield original of the website's wipe. The old sound fades out and the new one in. The pigeon is used only where the owner's ruling of 2026-10-04 allows it: waiting states and changeovers.
 **The dancer.** The website's dancer, ported from `kj-scope.js`, dances full screen over the ground to receiver radio and to Khajistan Transmission's sound-only programmes, all of channel 2 included, when what is playing carries a beat. He reads the real signal and is never shown on a recitation channel, over a picture, on an HLS carrier or with Reduce Motion on. A live radio mount is played by the app itself so its samples can be read. The rules are in [`DESIGN.md`](DESIGN.md) under The dancer.
 
@@ -36,7 +38,6 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - **Subtitles.** `subtitle_url` is not loaded.
 - **Interstitials and idents.** The station-id audio, the ads and the sign-on ident stay on the website.
 - **The rainbow TV bug.** It is not used on the live site and has no ruling for a new surface.
-- **A Top Shelf extension.** The brand assets carry the two static top shelf images only.
 - **Open Sans.** The system font is used.
 - **Magic-link sign-in.** The Supabase magic-link email template carries no `{{ .Token }}` code, so a television cannot complete it. Adding that token to the template is a one-line change that would enable "email me a code".
 
@@ -102,7 +103,7 @@ After adding or removing Swift files, regenerate the Xcode project:
 python3 tvos/scripts/generate-project.py
 ```
 
-Redraw the app icon and top shelf images from the pigeon mark:
+Redraw the app icon from the pigeon mark:
 
 ```sh
 swift tvos/scripts/make-brand-assets.swift \
@@ -110,7 +111,14 @@ swift tvos/scripts/make-brand-assets.swift \
   tvos/KhajistanTV/Resources/Assets.xcassets
 ```
 
-The app icon is a two-layer stack: the pigeon on a transparent front layer over a solid house-yellow back layer, at 400×240 (with a 2x) and at the 1280×768 App Store size. The two top shelf images, 1920×720 and 2320×720 (each with a 2x), are the same pigeon on the same yellow.
+The app icon is a two-layer stack: the pigeon on a transparent front layer over a solid house-yellow back layer, at 400×240 (with a 2x) and at the 1280×768 App Store size.
+
+Redraw the two static top shelf images, 1920×720 and 2320×720 (each with a 2x), with the extension's own drawing code; `--slides <dir>` draws the carousel slides from this checkout's data files in all three skins, for review:
+
+```sh
+sh tvos/scripts/make-top-shelf.sh
+sh tvos/scripts/make-top-shelf.sh --slides /tmp/slides
+```
 
 ## CI
 

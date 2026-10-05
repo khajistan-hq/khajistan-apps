@@ -8,6 +8,7 @@ struct KhajistanTVApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .onOpenURL { model.open($0) }
         }
     }
 }

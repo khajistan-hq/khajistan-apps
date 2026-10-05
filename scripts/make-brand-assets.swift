@@ -1,10 +1,11 @@
-// Draws the tvOS brand assets from the pigeon mark: the layered app icons and the two top shelf
-// images. House yellow #F3FB04 ground, the pigeon centred at 72% of the canvas height, no text,
-// no other colour.
+// Draws the tvOS app icons from the pigeon mark: house yellow #F3FB04 ground, the pigeon centred at
+// 72% of the canvas height, no text, no other colour. The two static Top Shelf images in the same
+// .brandassets are drawn by scripts/make-top-shelf.sh, with the extension's own drawing code, and
+// are left as they are here.
 //
 //   swift tvos/scripts/make-brand-assets.swift <pigeon.png> <Assets.xcassets directory>
 //
-// Writes "App Icon & Top Shelf Image.brandassets" inside that directory, rewritten from scratch.
+// Rewrites the two icon image stacks and the .brandassets Contents.json inside that directory.
 import Foundation
 import CoreGraphics
 import ImageIO
@@ -94,17 +95,13 @@ func run() {
     let catalog = URL(fileURLWithPath: args[2], isDirectory: true)
     guard FileManager.default.fileExists(atPath: catalog.path) else { fail("\(catalog.path) does not exist") }
     let brand = catalog.appendingPathComponent("App Icon & Top Shelf Image.brandassets", isDirectory: true)
-    _ = try? FileManager.default.removeItem(at: brand)
     makeDirectory(brand)
+    for stack in ["App Icon - App Store.imagestack", "App Icon.imagestack"] {
+        _ = try? FileManager.default.removeItem(at: brand.appendingPathComponent(stack))
+    }
 
     writeImagestack(brand.appendingPathComponent("App Icon - App Store.imagestack"), size: (1280, 768), scales: [1], pigeon: pigeon)
     writeImagestack(brand.appendingPathComponent("App Icon.imagestack"), size: (400, 240), scales: [1, 2], pigeon: pigeon)
-    writeImageset(brand.appendingPathComponent("Top Shelf Image Wide.imageset"), stem: "top-shelf-wide", size: (2320, 720), scales: [1, 2]) { w, h in
-        render(w, h, ground: true, pigeon: pigeon)
-    }
-    writeImageset(brand.appendingPathComponent("Top Shelf Image.imageset"), stem: "top-shelf", size: (1920, 720), scales: [1, 2]) { w, h in
-        render(w, h, ground: true, pigeon: pigeon)
-    }
     let assets: [[String: String]] = [
         ["filename": "App Icon - App Store.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "1280x768"],
         ["filename": "App Icon.imagestack", "idiom": "tv", "role": "primary-app-icon", "size": "400x240"],

@@ -15,6 +15,11 @@ final class ArchiveBrowser: NSObject {
     var downloadMessage: String?
     var activeDownloads = 0
     var onVisit: ((URL, String) -> Void)?
+    /// The page on screen is the last one opened, not the one asked for: drawn as the ground
+    /// until the new page commits, so the old page never flashes up.
+    var isStale = false
+    /// A JavaScript alert, confirm or prompt from the page, drawn in the house style.
+    var dialog: WebDialog?
     private var observations: [NSKeyValueObservation] = []
     private var downloads: [ObjectIdentifier: URL] = [:]
     private var requestedURL: URL?
@@ -32,8 +37,8 @@ final class ArchiveBrowser: NSObject {
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.isOpaque = false
-        webView.backgroundColor = UIColor(Brand.yellow)
-        webView.scrollView.backgroundColor = UIColor(Brand.yellow)
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
         webView.scrollView.refreshControl = UIRefreshControl()
         webView.scrollView.refreshControl?.addTarget(self, action: #selector(refresh), for: .valueChanged)
         observations = [
@@ -49,7 +54,20 @@ final class ArchiveBrowser: NSObject {
     func load(_ url: URL) {
         requestedURL = url
         error = nil
+        if webView.url != url { isStale = true }
         webView.load(URLRequest(url: url))
+    }
+
+    /// Starts WebKit's page process at launch, so the first page opened does not wait for it.
+    func warm() {
+        webView.loadHTMLString("", baseURL: nil)
+    }
+
+    /// The website's skin keys, written before any of its scripts run, on every page.
+    func applySkin(script: String) {
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     }
     @objc func refresh() {
         error = nil
@@ -65,6 +83,7 @@ final class ArchiveBrowser: NSObject {
     private func fail(_ failure: Error) {
         guard (failure as NSError).code != NSURLErrorCancelled else { return }
         error = failure.localizedDescription
+        isStale = false
         webView.scrollView.refreshControl?.endRefreshing()
         sync()
     }
@@ -77,6 +96,7 @@ final class ArchiveBrowser: NSObject {
 
 extension ArchiveBrowser: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { isStale = false }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         sync()
         if let url = webView.url { onVisit?(url, title) }
@@ -119,30 +139,43 @@ extension ArchiveBrowser: WKUIDelegate {
         return nil
     }
 
-    private func presentDialog(_ alert: UIAlertController) {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        var controller = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
-        while let presented = controller?.presentedViewController { controller = presented }
-        controller?.present(alert, animated: true)
-    }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
-        let alert = UIAlertController(title: frame.request.url?.host ?? "Khajistan", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
-        presentDialog(alert)
+        dialog?.cancel()
+        dialog = WebDialog(message: message, kind: .alert, answer: { _ in completionHandler() })
     }
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        let alert = UIAlertController(title: frame.request.url?.host ?? "Khajistan", message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
-        presentDialog(alert)
+        dialog?.cancel()
+        dialog = WebDialog(message: message, kind: .confirm, answer: { completionHandler($0 != nil) })
     }
     func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
-        let alert = UIAlertController(title: frame.request.url?.host ?? "Khajistan", message: prompt, preferredStyle: .alert)
-        alert.addTextField { $0.text = defaultText }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(nil) })
-        alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(alert.textFields?.first?.text) })
-        presentDialog(alert)
+        dialog?.cancel()
+        dialog = WebDialog(message: prompt, kind: .prompt(defaultText ?? ""), answer: completionHandler)
     }
+}
+
+/// A page's alert, confirm or prompt. WebKit waits for exactly one answer: `answer` gives it, and
+/// a dialog replaced or abandoned is answered as cancelled.
+@MainActor
+final class WebDialog: Identifiable {
+    enum Kind { case alert, confirm, prompt(String) }
+    let id = UUID()
+    let message: String
+    let kind: Kind
+    private var reply: ((String?) -> Void)?
+
+    init(message: String, kind: Kind, answer: @escaping (String?) -> Void) {
+        self.message = message
+        self.kind = kind
+        reply = answer
+    }
+
+    /// OK carries the entered text (or "" where there is none); nil is Cancel.
+    func answer(_ value: String?) {
+        reply?(value)
+        reply = nil
+    }
+
+    func cancel() { answer(nil) }
 }
 
 extension ArchiveBrowser: WKDownloadDelegate {

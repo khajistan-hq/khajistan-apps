@@ -1,98 +1,114 @@
 import SwiftUI
 
+/// The four doors and the house bar under them. There is no system tab bar: its tint, its glass
+/// and its selection pill are not the house's. A door is mounted the first time it is opened and
+/// then kept, so going back to it finds it where it was left.
 struct RootView: View {
     @Bindable var model: AppModel
-    var body: some View {
-        TabView(selection: $model.selectedTab) {
-            ExploreView(model: model)
-                .tabItem { Label("Explore", systemImage: "globe.asia.australia") }.tag(AppTab.explore)
-            RadioView(model: model)
-                .tabItem { Label("Radio", systemImage: "antenna.radiowaves.left.and.right") }.tag(AppTab.radio)
-            LibraryView(model: model)
-                .tabItem { Label("Library", systemImage: "bookmark") }.tag(AppTab.library)
-            PassportView(model: model)
-                .tabItem { Label("Passport", systemImage: "person.crop.rectangle") }.tag(AppTab.passport)
-        }
-        .toolbarBackground(Brand.yellow, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .fullScreenCover(isPresented: $model.isShowingBrowser) { BrowserView(model: model) }
-        .alert("Khajistan", isPresented: Binding(get: { model.message != nil }, set: { if !$0 { model.message = nil } })) {
-            Button("OK") { model.message = nil }
-        } message: { Text(model.message ?? "") }
-    }
-}
+    @State private var mounted: Set<AppTab> = []
 
-struct ExploreView: View {
-    let model: AppModel
-    @State private var query = ""
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    HStack(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("KHAJISTAN").font(.system(.largeTitle, design: .default, weight: .black)).tracking(-1.5).minimumScaleFactor(0.65).lineLimit(1)
-                            Text("MEDIA OF THE\nMIDDLE WORLD").font(.caption.weight(.bold)).tracking(2)
-                        }
-                        Spacer(minLength: 4)
-                        Image("Pigeon").resizable().scaledToFit().frame(width: 90, height: 110).accessibilityHidden(true)
-                    }.padding(20)
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                        TextField("Search the archive", text: $query, prompt: Text("Search the archive").foregroundStyle(Brand.green)).submitLabel(.search)
-                            .onSubmit(search).accessibilityIdentifier("archiveSearch")
-                        Button(action: search) { Image(systemName: "arrow.right").frame(width: 44, height: 44) }
-                            .accessibilityLabel("Search archive").disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }.padding(.leading, 12).overlay { Rectangle().stroke(.black) }.padding(.horizontal, 20).padding(.bottom, 22)
-                    ForEach(ArchiveDestination.doors, id: \.door) { group in
-                        SectionBand(title: group.door)
-                        LazyVStack(spacing: 0) {
-                            ForEach(group.rooms) { destination in
-                                Button { model.open(destination.url) } label: {
-                                    HStack(spacing: 16) {
-                                        VStack(alignment: .leading, spacing: 5) {
-                                            Text(destination.title).font(.title3.weight(.bold))
-                                            Text(destination.subtitle).font(.subheadline).foregroundStyle(Brand.green)
-                                        }
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right").font(.body.weight(.medium))
-                                    }.padding(.horizontal, 20).padding(.vertical, 17).frame(maxWidth: .infinity, alignment: .leading)
-                                        .contentShape(Rectangle())
-                                }.buttonStyle(.plain).accessibilityIdentifier("destination-\(destination.id)")
-                                if destination != group.rooms.last { Divider().overlay(.black) }
-                            }
-                        }
+        let palette = Palette(model.skin)
+        VStack(spacing: 0) {
+            ZStack {
+                ForEach(AppTab.allCases) { tab in
+                    if mounted.contains(tab) || tab == model.tab {
+                        page(tab)
+                            .opacity(tab == model.tab ? 1 : 0)
+                            .allowsHitTesting(tab == model.tab)
+                            .accessibilityHidden(tab != model.tab)
                     }
                 }
             }
-            .background(Brand.yellow).foregroundStyle(.black)
-            .toolbar(.hidden, for: .navigationBar)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The ground under the status bar, so a page scrolled up never shows behind the clock.
+            .overlay(alignment: .top) {
+                Color.clear.frame(height: 0).background(palette.ground, ignoresSafeAreaEdges: .top)
+            }
+            HouseTabBar(current: model.tab) { tab in
+                withAnimation(.kj) { model.tab = tab }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let message = model.message {
+                HouseBanner(text: message) { withAnimation(.kj) { model.message = nil } }
+            }
+        }
+        .animation(.kj, value: model.message)
+        .background(palette.ground.ignoresSafeArea())
+        .environment(model)
+        .environment(\.palette, palette)
+        // The system's grey scroll indicators are not drawn; spacing and the rules do the work.
+        .scrollIndicators(.hidden)
+        .foregroundStyle(palette.ink)
+        .tint(palette.accent)
+        // What iOS draws itself (the status bar, the keyboard) follows the skin's lightness.
+        .preferredColorScheme(model.skin == .day ? .light : .dark)
+        .onChange(of: model.tab, initial: true) { mounted.insert(model.tab) }
+        .fullScreenCover(isPresented: $model.isShowingBrowser) {
+            BrowserView(model: model)
         }
     }
-    private func search() { if let url = ArchiveURL.search(query) { model.open(url) } }
+
+    @ViewBuilder
+    private func page(_ tab: AppTab) -> some View {
+        switch tab {
+        case .home: HomeView()
+        case .receiver: ReceiverView()
+        case .picsVids: PicsVidsView()
+        case .yours: YoursView()
+        }
+    }
 }
 
-struct PassportView: View {
-    let model: AppModel
+/// The house bar: the doors as kickers, the current one in the accent with the rule under it, the
+/// way the website marks the section you are in. One pixel of ink separates it from the page.
+struct HouseTabBar: View {
+    let current: AppTab
+    let select: (AppTab) -> Void
+    @Environment(\.palette) private var palette
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Image(systemName: "person.crop.rectangle").font(.system(size: 64, weight: .thin)).padding(.top, 20)
-                    Text("Your Passport").font(.largeTitle.weight(.black))
-                    Text("Sign in to your Khajistan account to open your library and manage your membership.").font(.title3)
-                    Button("Open Passport") { model.open(ArchiveURL.base.appendingPathComponent("dashboard.html")) }
-                        .buttonStyle(ArchiveButtonStyle())
-                    Button("My downloads") { model.open(ArchiveURL.base.appendingPathComponent("downloads.html")) }
-                        .buttonStyle(ArchiveButtonStyle())
-                    Divider().overlay(.black)
-                    Text("ON THIS DEVICE").font(.caption.weight(.bold)).tracking(1.5)
-                    Text("Saved page links and recent visits stay on this device. Files you choose to download are available in Library. Account access is managed by the archive website.").font(.body)
-                    Button("About Khajistan") { model.open(ArchiveURL.base.appendingPathComponent("about.html")) }
-                        .buttonStyle(ArchiveButtonStyle())
-                    Text("Khajistan for iOS · 1.0").font(.caption.monospaced()).foregroundStyle(Brand.green)
-                }.padding(24)
-            }.background(Brand.yellow).foregroundStyle(.black).toolbar(.hidden, for: .navigationBar)
+        VStack(spacing: 0) {
+            HouseRule()
+            HStack(spacing: 0) {
+                ForEach(AppTab.allCases) { tab in
+                    Button {
+                        select(tab)
+                    } label: {
+                        Text(tab.title).kjKicker().lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .buttonStyle(HouseTabStyle(isCurrent: tab == current, padding: EdgeInsets(top: 14, leading: 6, bottom: 14, trailing: 6)))
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("tab-\(tab.rawValue)")
+                    .accessibilityAddTraits(tab == current ? [.isSelected, .isButton] : .isButton)
+                }
+            }
+            .padding(.horizontal, 6)
         }
+        .background(palette.ground.ignoresSafeArea(edges: .bottom))
+    }
+}
+
+/// A page title block: the kicker above (where it sits in the site), the title, and a line.
+struct PageHead: View {
+    let kicker: String?
+    let title: String
+    let line: String?
+
+    init(kicker: String? = nil, _ title: String, line: String? = nil) {
+        self.kicker = kicker
+        self.title = title
+        self.line = line
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let kicker { Kicker(kicker) }
+            Text(title).kjDisplay().accessibilityAddTraits(.isHeader)
+            if let line { Text(line).kjBody() }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

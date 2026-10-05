@@ -202,6 +202,13 @@ the attribution or the show's line under them in small type, the medium at the r
 Transmission UP NEXT with its time and show. It rises 40pt and fades in over 0.35 s, and goes
 the same way 2.6 s into playback. It waits while a signal tunes: the ground says so.
 
+**Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
+centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no
+outline, no shadow, each line laid out on its own direction. The plate sits 24pt above the strip
+(or the film's panel) while it is up and moves down with it. Its control is the strip's last item,
+a kicker in onBand underlined while on; reached with right, it takes the inverted plate (band text
+on onBand), which reads on the band in every skin.
+
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.
 

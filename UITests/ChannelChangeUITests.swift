@@ -13,7 +13,7 @@ final class ChannelChangeUITests: XCTestCase {
     func testChannelChangeSequence() {
         openChannel()
         XCUIRemote.shared.press(.down)
-        for (index, wait) in [0.2, 0.4, 0.5, 0.6, 0.8, 1.0, 1.5].enumerated() {
+        for (index, wait) in [0.3, 0.6, 0.6, 0.6, 0.6, 0.8, 1.0, 1.5, 2.0].enumerated() {
             Thread.sleep(forTimeInterval: wait)
             shot(String(format: "%02d-change", index + 3), app)
         }
@@ -25,6 +25,17 @@ final class ChannelChangeUITests: XCTestCase {
         openChannel()
         XCUIRemote.shared.press(.down)
         Thread.sleep(forTimeInterval: 8)
+    }
+
+    /// A slow signal: the change flight, then the long flights over the held ground.
+    func testSlowTuneShowsTheWaitFlights() {
+        app.launchArguments += ["-kjslowtune", "12"]
+        openChannel()
+        XCUIRemote.shared.press(.down)
+        for index in 0..<10 {
+            Thread.sleep(forTimeInterval: 1.4)
+            shot(String(format: "w%02d", index), app)
+        }
     }
 
     private let app = XCUIApplication()

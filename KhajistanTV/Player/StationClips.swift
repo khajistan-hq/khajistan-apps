@@ -3,61 +3,104 @@ import Observation
 import SwiftUI
 import UIKit
 
-/// The channel change: the website's wing-wipe pigeon, on the skin's colour, in one unbroken
-/// flight. The pigeon flies at the viewer as the skin's ground comes up over the picture, a wing
-/// passes over the camera and lifts off the top of the screen; the ground stays, saying which
-/// channel is tuning, until the new picture plays, and then the picture cuts in.
+/// The house pigeon, crossing the screen when a channel changes.
 ///
-/// The bird never stops (owner, 2026-10-05: the wing held while a channel tuned "gets hung").
-/// The two halves are HEVC with alpha (tvos/scripts/make-pigeon-wipe.py, from the same Higgsfield
-/// clip and cut as archive/assets/tv/khajistan-wing-wipe-*.mp4), queued back to back on one
-/// AVQueuePlayer, which plays them without a gap; the out half's first frame is the in half's
-/// last. The ground is whatever the skin paints: yellow by day, green at night, pink at dawn and
-/// dusk. Measured on the owner's Apple TV HD: 0 late refreshes in 5 flights (one 33 ms in a 6th
-/// half), decode at 47-50 fps against the clip's 24.
+/// Five flights, generated for the apps and lifted off their backdrop so the app paints the
+/// skin's ground behind the bird (tvos/scripts/flights/, FLIGHTS.json). Owner, 2026-10-05: "4-5
+/// is good of varying lengths but our mascot needs to be consistent in look"; "the pigeon do
+/// flamboyant swirling and twirling to cross ... when the transition needs to be long".
+///
+/// - A **change** flight carries every channel change, in rotation, so no two changes in a row
+///   look the same: Across (the website's wing wipe, remade), Approach, Swoop.
+/// - A **wait** flight crosses the held ground when the next signal is still tuning after the
+///   change flight has gone, Twirl and Spiral in turn, until the picture is ready; the picture
+///   then cuts in.
+///
+/// Each flight is HEVC with alpha in up to three sizes; the device plays the largest it can play
+/// smoothly (see `Tier`). Two players, one per role, each prerolled before it is needed, both
+/// layers always in the view tree.
 @MainActor @Observable
 final class StationClips {
-    /// The flight on screen.
-    private(set) var flying = false
-    /// The flight, if one is on screen; kept so callers can tell a press during it apart.
-    var showing: Bool { flying }
+    enum Flight: String, CaseIterable {
+        case across, approach, swoop, twirl, spiral
+        static let change: [Flight] = [.across, .approach, .swoop]
+        static let wait: [Flight] = [.twirl, .spiral]
+    }
+
+    /// Which size of each flight this device plays. Measured on the owner's Apple TV HD (A8),
+    /// 2026-10-05: 1080p HEVC with alpha decodes at 24-32 fps against the clips' 24, 720p at
+    /// 44-48. A 4K-capable box on a 4K screen plays 2160 where a flight has it.
+    enum Tier: String {
+        case p720 = "720", p1080 = "1080", p2160 = "2160"
+
+        static let device: Tier = {
+            var info = utsname()
+            uname(&info)
+            let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            // AppleTV5,3 is the Apple TV HD: no hardware for HEVC with alpha at 1080p.
+            if machine.hasPrefix("AppleTV5") { return .p720 }
+            return UIScreen.main.nativeBounds.width >= 3800 ? .p2160 : .p1080
+        }()
+
+        var fallbacks: [Tier] {
+            switch self {
+            case .p2160: return [.p2160, .p1080, .p720]
+            case .p1080: return [.p1080, .p720]
+            case .p720: return [.p720]
+            }
+        }
+    }
+
+    enum Role { case change, wait }
+
+    /// The roles whose flight is on screen.
+    private(set) var visible: Set<Role> = []
+    /// A flight is on screen.
+    var showing: Bool { !visible.isEmpty }
     /// How much of the ground covers the picture, 0 to 1. Animated by `cover` and `uncover`.
     private(set) var coverage: Double = 0
-    /// How far the wing has lifted off the top of the screen, 0 to 1 of its height.
-    private(set) var lift: Double = 0
     /// What the ground says while a signal tunes: the channel on its way.
     private(set) var caption: String?
     /// Set after the sign-on, and kept for the life of the app.
     var signOnPlayed = false
 
-    let player = AVQueuePlayer()
+    let changePlayer = AVPlayer()
+    let waitPlayer = AVPlayer()
 
-    /// The flight's two halves, opened once.
-    @ObservationIgnored private let assets: [AVURLAsset]
-    /// Every flight gets a number. One that wakes to find it is no longer the newest stops there.
+    @ObservationIgnored private var nextChange = 0
+    @ObservationIgnored private var nextWait = 0
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var latch: Latch?
-    @ObservationIgnored private var armed = false
-    /// The re-queue after a flight runs in the background so the ground can lift at once.
-    @ObservationIgnored private var arming: Task<Void, Never>?
-
-    /// The longest a flight may hold the screen, so a file that stalls cannot trap the viewer.
-    private static let cap: Duration = .seconds(5)
-    /// The out half's length (7 frames at 24 fps) and the lift that carries the wing off.
-    private static let outTime = 7.0 / 24.0
-    private static let liftTime = 0.5
+    @ObservationIgnored private var armedChange: Flight?
+    @ObservationIgnored private var armedWait: Flight?
 
     init() {
-        assets = ["wipe-in", "wipe-out"].compactMap { name in
-            Bundle.main.url(forResource: name, withExtension: "mov").map { AVURLAsset(url: $0) }
+        for player in [changePlayer, waitPlayer] {
+            // A flight must never take the audio session from the signal under it.
+            player.isMuted = true
+            player.preventsDisplaySleepDuringVideoPlayback = false
+            // A bundled file needs no buffer; waiting for one is a late first frame.
+            player.automaticallyWaitsToMinimizeStalling = false
+            player.actionAtItemEnd = .pause
         }
-        // A flight must never take the audio session from the signal under it.
-        player.isMuted = true
-        player.preventsDisplaySleepDuringVideoPlayback = false
-        // A bundled file needs no buffer; waiting for one is a late first frame.
-        player.automaticallyWaitsToMinimizeStalling = false
-        rearm()
+        Task {
+            await arm(.change)
+            await arm(.wait)
+        }
     }
+
+    func player(_ role: Role) -> AVPlayer { role == .change ? changePlayer : waitPlayer }
+
+    static func url(_ flight: Flight) -> URL? {
+        for tier in Tier.device.fallbacks {
+            if let url = Bundle.main.url(forResource: "flight-\(flight.rawValue)-\(tier.rawValue)", withExtension: "mov") {
+                return url
+            }
+        }
+        return nil
+    }
+
+    // MARK: - The ground
 
     /// Brings the ground up over the picture with `caption` on it. `animated: false` puts it
     /// there at once, for a screen that opens on a signal still tuning.
@@ -71,7 +114,7 @@ final class StationClips {
     }
 
     /// Takes the ground off the picture. A cut by default: the pigeon is the transition, so the
-    /// new picture arrives like a channel on a television, and only its sound eases in. `fade`
+    /// new picture arrives like a channel on a television, and only its sound eases up. `fade`
     /// is for a screen that opens on a signal, where nothing flew.
     func uncover(fade: Bool = false) {
         if fade {
@@ -83,82 +126,49 @@ final class StationClips {
         }
     }
 
-    /// The pigeon flies through: the ground comes up as it flies in, a wing passes over the
-    /// camera, and it flies out. Returns when it has gone, the ground still up and now carrying
-    /// `caption`. `covered` is called the moment the wing covers the screen, so the caller can
-    /// start tuning behind it. Reduce Motion leaves the bird out and keeps the fades.
+    // MARK: - Flights
+
+    /// A channel change: the ground comes up as the next change flight crosses it. `covered`
+    /// runs once the ground hides the old picture (0.38 s), so the caller tunes behind the bird;
+    /// returns when the bird has left the screen, with the ground up and carrying `caption`.
+    /// Reduce Motion keeps the ground and leaves the bird out.
     func flyThrough(caption: String?, covered: @escaping @MainActor () -> Void = {}) async {
         cover(caption: nil)
-        guard !UIAccessibility.isReduceMotionEnabled, assets.count == 2 else {
-            try? await Task.sleep(for: .milliseconds(350))
-            covered()
-            withAnimation(.easeIn(duration: 0.3)) { self.caption = caption }
-            return
-        }
         let mine = begin()
-        if !armed {
-            if arming == nil { rearm() }
-            await arming?.value
-        }
-        // Another flight began while this one waited for the queue.
-        guard mine == generation, armed, let first = player.items().first else { return }
-
-        let latch = Latch()
-        self.latch = latch
-        // The wing covers the screen where the first half ends; the queue goes straight on.
-        // `covered` runs once: there, or after the flight if it was cut short before it.
-        var coveredDone = false
-        let coverOnce: @MainActor () -> Void = {
-            guard !coveredDone else { return }
-            coveredDone = true
+        let coverTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(380))
             covered()
         }
-        // At the cover the wing starts lifting off the top of the screen, as the bird passing over
-        // the camera; the clip stops before the source's own jump cut (make-pigeon-wipe.py), and
-        // the queue holds the out half's last frame instead of advancing to nothing.
-        let coverToken = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: first, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, mine == self.generation else { return }
-                self.player.actionAtItemEnd = .pause
-                withAnimation(.timingCurve(0.45, 0, 0.75, 0.6, duration: Self.liftTime)) { self.lift = 1 }
-                coverOnce()
-            }
+        if !UIAccessibility.isReduceMotionEnabled, let flight = await take(.change) {
+            await run(.change, flight: flight, mine: mine)
         }
-        let last = player.items().last
-        let endTokens = [Notification.Name.AVPlayerItemDidPlayToEndTime, .AVPlayerItemFailedToPlayToEndTime].map { name in
-            NotificationCenter.default.addObserver(forName: name, object: last, queue: .main) { _ in
-                Task { @MainActor in latch.open() }
-            }
-        }
-        let timeout = Task {
-            do { try await Task.sleep(for: Self.cap) } catch { return }
-            latch.open()
-        }
-        armed = false
-        withAnimation(.easeIn(duration: 0.1)) { flying = true }
-        player.play()
-        await latch.wait()
-        // The lift outlasts the out half's few frames; let it finish before the layer comes off.
-        if mine == generation, lift > 0 {
-            try? await Task.sleep(for: .seconds(Self.liftTime - Self.outTime + 0.02))
-        }
-        timeout.cancel()
-        NotificationCenter.default.removeObserver(coverToken)
-        for token in endTokens { NotificationCenter.default.removeObserver(token) }
+        // The caller's tuning starts behind the ground whatever happened to the bird.
+        await coverTask.value
         guard mine == generation else { return }
-        self.latch = nil
-        coverOnce()
-        // The wing has lifted clear of the screen, so the layer comes off with nothing showing.
-        flying = false
-        lift = 0
         withAnimation(.easeIn(duration: 0.25)) { self.caption = caption }
-        // Re-queue in the background, well after the layer is off: re-queuing puts the first
-        // frame of the in half (a wingtip) on the layer, which must never be seen.
-        Task {
-            try? await Task.sleep(for: .milliseconds(400))
-            if mine == generation, !flying { rearm() }
+    }
+
+    /// While the next signal is still tuning, wait flights cross the held ground in turn until
+    /// `ready` returns. Then the bird is taken off at once: the caller cuts the picture in.
+    func holdUntil(_ ready: @escaping @MainActor () async -> Void) async {
+        let mine = generation
+        let flights = Task { @MainActor [weak self] in
+            // A brief beat on the bare ground first: most signals arrive within it, and then no
+            // second bird is wanted.
+            try? await Task.sleep(for: .milliseconds(600))
+            while !Task.isCancelled, let self, mine == self.generation {
+                guard !UIAccessibility.isReduceMotionEnabled, let flight = await self.take(.wait) else { return }
+                if Task.isCancelled { return }
+                await self.run(.wait, flight: flight, mine: mine)
+            }
+        }
+        await ready()
+        flights.cancel()
+        guard mine == generation else { return }
+        if visible.contains(.wait) {
+            latch?.open()
+            waitPlayer.pause()
+            visible.remove(.wait)
         }
     }
 
@@ -167,15 +177,18 @@ final class StationClips {
         latch?.open()
     }
 
-    /// Takes the bird and the ground off the screen at once and readies the flight for next time.
+    /// Takes the bird and the ground off the screen at once and readies the flights again.
     func clear() {
         _ = begin()
-        player.pause()
-        flying = false
-        lift = 0
+        changePlayer.pause()
+        waitPlayer.pause()
+        visible = []
         caption = nil
         coverage = 0
-        rearm()
+        Task {
+            await arm(.change)
+            await arm(.wait)
+        }
     }
 
     private func begin() -> Int {
@@ -185,32 +198,60 @@ final class StationClips {
         return generation
     }
 
-    /// Arms run one after another, never two at once: each waits for the one before it.
-    private func rearm() {
-        armed = false
-        let previous = arming
-        arming = Task {
-            await previous?.value
-            await arm()
-        }
+    /// The flight armed for a role, arming it now if nothing is (a press before the first arm).
+    private func take(_ role: Role) async -> Flight? {
+        if (role == .change ? armedChange : armedWait) == nil { await arm(role) }
+        let flight = role == .change ? armedChange : armedWait
+        if role == .change { armedChange = nil } else { armedWait = nil }
+        return flight
     }
 
-    /// Queues both halves from their first frame, paused, with the decoder warmed (preroll), so
-    /// the next press starts on time. The first decode on a cold Apple TV HD ran at 27 fps
-    /// against the clip's 24, warm at 47-50 (measured on the device, 2026-10-05).
-    private func arm() async {
-        player.pause()
-        player.actionAtItemEnd = .advance
-        player.removeAllItems()
-        for asset in assets {
-            let item = AVPlayerItem(asset: asset)
-            if player.canInsert(item, after: nil) { player.insert(item, after: nil) }
+    /// Plays the role's armed flight from its first frame and returns when it ends, is skipped
+    /// or superseded, or runs a second past its length; then arms the next one.
+    private func run(_ role: Role, flight: Flight, mine: Int) async {
+        let player = player(role)
+        guard let item = player.currentItem else { return }
+        let latch = Latch()
+        self.latch = latch
+        let ended = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in
+            Task { @MainActor in latch.open() }
         }
-        guard let first = player.items().first else { return }
-        while first.status == .unknown { try? await Task.sleep(for: .milliseconds(20)) }
-        guard first.status == .readyToPlay else { return }
+        let failed = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { _ in
+            Task { @MainActor in latch.open() }
+        }
+        let length = item.duration.isNumeric ? item.duration.seconds : 10
+        let timeout = Task {
+            do { try await Task.sleep(for: .seconds(length + 1)) } catch { return }
+            latch.open()
+        }
+        // The first frame may already carry part of the bird: it comes in over a tenth of a second.
+        withAnimation(.easeIn(duration: 0.1)) { _ = visible.insert(role) }
+        player.play()
+        await latch.wait()
+        timeout.cancel()
+        NotificationCenter.default.removeObserver(ended)
+        NotificationCenter.default.removeObserver(failed)
+        if mine == generation { self.latch = nil }
+        player.pause()
+        visible.remove(role)
+        Task { await arm(role) }
+    }
+
+    /// Loads the role's next flight in rotation at its first frame, paused, decoder warmed.
+    private func arm(_ role: Role) async {
+        let list = role == .change ? Flight.change : Flight.wait
+        let index = role == .change ? nextChange : nextWait
+        let flight = list[index % list.count]
+        if role == .change { nextChange += 1 } else { nextWait += 1 }
+        guard let url = Self.url(flight) else { return }
+        let player = player(role)
+        let item = AVPlayerItem(url: url)
+        player.replaceCurrentItem(with: item)
+        while item.status == .unknown { try? await Task.sleep(for: .milliseconds(20)) }
+        guard item.status == .readyToPlay else { return }
+        _ = await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         _ = await player.preroll(atRate: 1)
-        armed = true
+        if role == .change { armedChange = flight } else { armedWait = flight }
     }
 }
 
@@ -233,8 +274,8 @@ private final class Latch {
     }
 }
 
-/// The ground and the pigeon, over everything beneath them. The wipe is 16:9 and fills the screen,
-/// so the bird's edges are the screen's own edges.
+/// The ground and the pigeon, over everything beneath them. The flights are 16:9 and fill the
+/// screen, so the bird's edges are the screen's own edges.
 struct StationClipLayer: View {
     let clips: StationClips
     @Environment(\.palette) private var palette
@@ -254,14 +295,13 @@ struct StationClipLayer: View {
                 .padding(.horizontal, KJLayout.inset)
                 .opacity(clips.coverage)
             }
-            // Always in the tree, so its first frame is drawn before it is shown. Fill: on a
-            // screen that is not exactly 16:9 the wing still reaches every edge.
-            GeometryReader { proxy in
-                PlayerLayerView(player: clips.player, gravity: .resizeAspectFill)
-                    .offset(y: -clips.lift * (proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom))
-            }
-            .ignoresSafeArea()
-            .opacity(clips.flying ? 1 : 0)
+            // Always in the tree, so each player's first frame is drawn before it is shown.
+            PlayerLayerView(player: clips.waitPlayer, gravity: .resizeAspectFill)
+                .ignoresSafeArea()
+                .opacity(clips.visible.contains(.wait) ? 1 : 0)
+            PlayerLayerView(player: clips.changePlayer, gravity: .resizeAspectFill)
+                .ignoresSafeArea()
+                .opacity(clips.visible.contains(.change) ? 1 : 0)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)

@@ -229,7 +229,16 @@ struct ReceiverPlayerView: View {
         }
         await quiet
         guard !Task.isCancelled else { return }
-        await controller.settled()
+        // A slow signal: the long flights cross the held ground until it plays.
+        await model.clips.holdUntil {
+            #if DEBUG
+            // `-kjslowtune 9` holds every change for that many seconds, so a UI test can watch
+            // the wait flights over a signal that would otherwise arrive too fast.
+            let slow = UserDefaults.standard.integer(forKey: "kjslowtune")
+            if slow > 0 { try? await Task.sleep(for: .seconds(slow)) }
+            #endif
+            await controller.settled()
+        }
         guard !Task.isCancelled else { return }
         model.clips.uncover()
     }

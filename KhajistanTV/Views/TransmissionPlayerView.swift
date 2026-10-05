@@ -267,7 +267,7 @@ struct TransmissionPlayerView: View {
             }
             await quiet
             await retune?.value
-            if !left { await store.player.settled() }
+            if !left { await model.clips.holdUntil { await store.player.settled() } }
             if !left { model.clips.uncover() }
             switching = false
         }
@@ -302,6 +302,7 @@ struct TransmissionPlayerView: View {
                 if !gone { tuning = Task { await store.tune(channel: channel) } }
             }
             await tuning?.value
+            if !gone { await model.clips.holdUntil { await store.player.settled() } }
         } else {
             model.clips.cover(caption: store.channelName(channel), animated: false)
             if !gone { await store.tune(channel: channel) }

@@ -176,13 +176,25 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 
 ## Motion
 
-Only the content moves: the pigeon mark, and the website's wing wipe at a changeover (owner
-ruling 2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One pigeon
-in the apps: the website's wing-wipe pigeon, flying at the viewer, on the skin's colours**
-(owner, 2026-10-05: "we have to choose one", then "the pigeon that was flying before this one
-but with skin color backgrounds"). The grooming loop and the sign-on ident, which opens on it
-and is on black, are not in the apps. Two other flights (Across, Upward) were tried the same
-day and refused: shown at their own 9:16 shape the bird hit the clip's sides on a 16:9 screen.
+Only the content moves: the pigeon mark, and the pigeon in flight at a changeover (owner ruling
+2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One mascot, five
+flights, the same bird in each** (owner, 2026-10-05: "4-5 is good of varying lengths but our
+mascot needs to be consistent in look"; "the one where the pigeon flies across and into us was a
+great transition but just very glitchy and pixelated"). The grooming loop and the sign-on ident,
+which opens on it and is on black, are not in the apps.
+
+| flight | role | length | source |
+|---|---|---|---|
+| Across | change | 3.8 s | the website's wing wipe, remade: diagonally across and into the lens, a wing fills the frame. Kling 3.0, native 4K |
+| Approach | change | 4.8 s | straight at the camera, passes over it. Kling 3.0, native 4K |
+| Swoop | change | 3.9 s | a fast low glide, right to left. Seedance 2.5, 1080p |
+| Twirl | wait | 9.5 s | loops and a barrel roll, left to right (the owner's "flamboyant swirling and twirling"). Seedance 2.5, 1080p |
+| Spiral | wait | 6.0 s | a banking climb out of the top. Seedance 2.5, 1080p |
+
+Every flight starts from a 4K frame drawn from the house reference photograph and ends on the
+empty backdrop, so the bird leaves the shot inside one take: no jump cut, no repeated frame (the
+website's wipe had both). The Seedance bird is colour-matched to the Kling bird. Records,
+prompts, job ids and the refused takes: `scripts/flights/FLIGHTS.json`.
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
 along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
@@ -193,17 +205,17 @@ the same way 2.6 s into playback. It waits while a signal tunes: the ground says
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.
 
-A channel change, in one unbroken flight (owner, 2026-10-05: the held wing "gets hung"; "as
-smooth and beautiful and natural as possible"): the old sound fades to nothing (0.45 s, eased)
-while the skin's ground comes up (0.35 s) and the pigeon flies at the viewer; at 1.6 s a wing
-covers the screen and the new channel starts tuning behind it; the close wing lifts off the top
-of the screen (0.5 s, eased in) as the bird passing over the camera. The generated source has a
-repeated frame and a jump cut just after this point (read frame by frame, 2026-10-05), which
-showed as a glitch at the end; the clip stops before them and repeated frames are dropped. The
-ground holds with TUNING and the channel's name until the picture plays (8 s at most), and the
-picture then CUTS in: the pigeon is the transition, and only the sound eases up (0.5 s). The two halves are queued on one AVQueuePlayer, gapless, prerolled
-before the press. Measured on the owner's Apple TV HD: decode 47-50 fps against the clip's 24,
-0-1 late refreshes per flight. Reduced Motion keeps the fades and leaves the bird out.
+A channel change: the old sound fades to nothing (0.45 s, eased) while the skin's ground comes up
+(0.35 s); the next change flight in rotation crosses it, and the new channel starts tuning as
+soon as the ground hides the old picture (0.38 s). If the signal is still tuning when the bird
+has gone, the ground holds with TUNING and the name, and after 0.6 s the wait flights cross it
+in turn until the picture plays; then the bird comes off and the picture CUTS in, with only the
+sound easing up (0.5 s). Reduced Motion keeps the fades and leaves the bird out.
+
+Each flight ships as HEVC with alpha in up to three sizes, and a device plays the largest it can
+play smoothly: the Apple TV HD 720p (measured on the owner's box: 1080p decodes at 24-32 fps
+against the clips' 24, 720p at 44-48), an Apple TV 4K 1080p, or 2160p on a 4K screen where the
+flight has it. Two players, one per role, each prerolled before it is needed.
 Overlays hide 2.6 seconds into playback.
 
 ## The dancer
@@ -274,11 +286,9 @@ clicked yet you can use higgsfield but it has to be very khajistan in house styl
 ## Assets
 
 `khajistan-pigeon.gif` is bundled from `archive/assets` unmodified (the 1080px master; owner:
-the master everywhere). The wipe, `wipe-in.mov` and `wipe-out.mov`, is rendered by `scripts/make-pigeon-wipe.py` from
-the Higgsfield original of the website's wipe (clip 0ea14f57, 1080×1920, 24 fps), cut exactly
-as `archive/assets/tv/khajistan-wing-wipe-*.mp4` (16:9 at y=600; 1.0–2.6 s and 2.6–3.5 s),
-matted with BiRefNet (a brightness key cannot separate the dark chest from the black ground),
-premultiplied, as HEVC with alpha at the band's own 1080×608, scaled to the screen by the GPU
-(a 1920×1080 encode was the same picture enlarged, and decoded at 15-21 fps on the Apple TV HD).
-The app draws the ground, so one file serves all three skins. The rainbow TV bug is NOT used: it is not on
+the master everywhere). The flights, `flight-<name>-<720|1080|2160>.mov`, are rendered by
+`scripts/flights/render_flight.py` from the Higgsfield masters (owner-local, `output/Higgsfield
+Assets/Khajistan Flights 2026-10-05/`): the backdrop plate per pixel, alpha unmixed against it,
+the generator's colourless shadows and its bright edge halo removed, colour premultiplied. The
+app draws the ground, so one file serves all three skins. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

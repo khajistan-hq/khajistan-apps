@@ -28,7 +28,8 @@ try:
 except Exception:
     sys.exit(0)
 teams = []
-for account in (prefs.get('IDEProvisioningTeams') or {}).values():
+# Xcode 27 renamed the key; the shape is the same.
+for account in (prefs.get('IDEProvisioningTeams') or prefs.get('IDEProvisioningTeamByIdentifier') or {}).values():
     for team in account or []:
         if team.get('teamID'):
             teams.append((team.get('isFreeProvisioningTeam', False), team['teamID'], team.get('teamName', '')))

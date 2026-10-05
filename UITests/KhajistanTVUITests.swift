@@ -82,11 +82,17 @@ final class KhajistanTVUITests: XCTestCase {
             XCUIRemote.shared.press(.left)
             XCUIRemote.shared.press(.down)
         }
+        // The switch is kept on the device, so it is read rather than assumed: on for the
+        // picture, and off again at the end so later tests see the core map.
         if toggle.exists && toggle.hasFocus {
-            XCUIRemote.shared.press(.select)
+            for _ in 0..<2 where (toggle.value as? String) != "On" { XCUIRemote.shared.press(.select) }
             wait(upTo: 8) { false }
         }
         screenshot("06-map-extended", app: app)
+        if toggle.exists && toggle.hasFocus {
+            for _ in 0..<2 where (toggle.value as? String) != "Off" { XCUIRemote.shared.press(.select) }
+            XCTAssertEqual(toggle.value as? String, "Off", "the wider atlas is left off")
+        }
     }
 
     func testKhajistanTVTab() {

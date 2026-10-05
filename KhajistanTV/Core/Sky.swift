@@ -40,3 +40,34 @@ enum Skin: String, CaseIterable, Codable, Sendable {
         }
     }
 }
+
+/// What the viewer chose in Account: follow the hour, or hold one skin. The website's switch
+/// names the three skins Day, Grove and Smut (archive/scripts/kj-theme.js, LABEL); it has no
+/// name for following the sky because that is its default, so this app calls it Automatic.
+enum SkinChoice: String, CaseIterable, Sendable {
+    case automatic, day, grove, smut
+
+    /// A stored value. Absent or unknown is Automatic, so a bad value can never pin a skin.
+    init(stored: String?) {
+        self = stored.flatMap(SkinChoice.init(rawValue:)) ?? .automatic
+    }
+
+    var label: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .day: return "Day"
+        case .grove: return "Grove"
+        case .smut: return "Smut"
+        }
+    }
+
+    /// The skin on screen at `date`: the hour's for Automatic, otherwise the one chosen.
+    func skin(at date: Date, calendar: Calendar) -> Skin {
+        switch self {
+        case .automatic: return Skin.current(at: date, calendar: calendar)
+        case .day: return .day
+        case .grove: return .grove
+        case .smut: return .smut
+        }
+    }
+}

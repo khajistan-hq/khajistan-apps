@@ -7,8 +7,8 @@ struct TransmissionView: View {
     @Environment(AppModel.self) private var model
     @State private var password = ""
     @State private var showSignIn = false
-    /// The channel the viewer chose while signed out, and the one to open once the sign-in sheet
-    /// has closed. A cover cannot open over a sheet that is still on its way down.
+    /// The channel the viewer chose while signed out, and the one to open once the sign-in screen
+    /// has closed. A cover cannot open over one that is still on its way down.
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
     @State private var playing: ChannelChoice?
@@ -43,7 +43,8 @@ struct TransmissionView: View {
                 if store.schedule == .ready { await store.loadSchedule() }
             }
         }
-        .sheet(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+        // Full screen on the ground, as in Account: a sheet is a shadowed card.
+        .fullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
         .fullScreenCover(item: $playing) { choice in
@@ -91,13 +92,14 @@ struct TransmissionView: View {
                 if let message {
                     Text(message).kjBody()
                 }
-                HouseInputField("Password") {
+                HouseInputField("Password", text: password, secure: true) {
                     SecureField("", text: $password)
                 }
                 Button("Continue") {
                     submitPassword()
                 }
                 .buttonStyle(HouseButtonStyle())
+                .padding(.leading, -26)
                 .disabled(password.isEmpty)
                 .opacity(password.isEmpty ? 0.5 : 1)
             }
@@ -117,15 +119,18 @@ struct TransmissionView: View {
             }
         case .ready:
             VStack(alignment: .leading, spacing: 48) {
-                // The cards read the clock, so they are drawn again every half minute.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                // The cards read the clock. Slots start on the minute, so they are drawn again on
+                // every minute and "now" is never the slot that has just ended.
+                TimelineView(.everyMinute) { context in
                     HStack(alignment: .top, spacing: 40) {
                         ForEach([1, 2], id: \.self) { number in
                             card(number, at: context.date)
                         }
                     }
+                    // The plates' padding is pulled back so the cards' text sits on the page margin.
+                    .padding(.horizontal, -26)
                 }
-                if !model.auth.isSignedIn {
+                if !model.auth.isSignedIn && !store.isScheduleFile {
                     VStack(alignment: .leading, spacing: 24) {
                         Text("Sign in to watch Khajistan Transmission.")
                             .kjBody()
@@ -134,6 +139,7 @@ struct TransmissionView: View {
                             showSignIn = true
                         }
                         .buttonStyle(HouseButtonStyle())
+                        .padding(.leading, -26)
                     }
                 }
             }
@@ -145,6 +151,7 @@ struct TransmissionView: View {
             Task { await store.loadSchedule() }
         }
         .buttonStyle(HouseButtonStyle())
+        .padding(.leading, -26)
     }
 
     private func card(_ number: Int, at date: Date) -> some View {
@@ -155,7 +162,7 @@ struct TransmissionView: View {
                 number: number,
                 line: store.channelLine(number),
                 onAir: store.nowOn(channel: number, at: date),
-                returns: store.returnTime(channel: number, at: date)
+                upcoming: store.upcoming(channel: number, at: date)
             )
         }
         .buttonStyle(HouseButtonStyle())
@@ -165,9 +172,9 @@ struct TransmissionView: View {
     // MARK: - Choosing
 
     /// A signed-in viewer opens the channel. A signed-out one signs in first, and the channel
-    /// opens when the sheet has closed.
+    /// opens when the sign-in screen has closed.
     private func choose(_ number: Int) {
-        if model.auth.isSignedIn {
+        if model.auth.isSignedIn || store.isScheduleFile {
             playing = ChannelChoice(number: number)
         } else {
             chosen = number
@@ -193,37 +200,54 @@ struct TransmissionView: View {
     }
 }
 
-/// One channel's card: its number, whether it is on air, its own line from the schedule, and
-/// what is on it now or when it returns. It sits inside a button's plate, so every colour comes
-/// from the palette the plate sets for it, through the kicker and the inherited ink.
+/// One channel's card, as the website's channel card reads: the channel, whether it is on air,
+/// the show on now and its hours, and what is up next. Off air, when it is back and with what.
+/// Show names only: programme titles are file names (owner, 2026-09-06, on the receiver's two
+/// channel rows). It sits inside a button's plate, so every colour comes from the palette the
+/// plate sets for it, through the kicker and the inherited ink.
 private struct ChannelCardLabel: View {
     let number: Int
     let line: String?
     let onAir: OnAir?
-    let returns: String?
+    let upcoming: [ScheduleStrip]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 20) {
                 Kicker("Channel \(number)")
-                Kicker(onAir == nil ? "Off air" : "\u{25CF} On air")
+                // Off air is the card's headline, so it is not said here as well.
+                if onAir != nil { Kicker("\u{25CF} On air") }
             }
             if let line, !line.isEmpty {
-                Text(line).kjBody()
+                Text(line).kjSmall(faint: true).lineLimit(3)
             }
             if let air = onAir {
-                if let show = air.show?.name, !show.isEmpty {
-                    Text(show).kjName()
+                Text(air.show?.name ?? "Channel \(number)")
+                    .kjName(48)
+                    .lineLimit(2)
+                    .padding(.top, 10)
+                Kicker("Now \(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
+                UpNextList(title: "Up next", strips: upcoming)
+                    .padding(.top, 18)
+            } else {
+                Text("Off air")
+                    .kjName(48)
+                    .padding(.top, 10)
+                if let back = upcoming.first {
+                    Text(backLine(back)).kjBody()
+                    UpNextList(title: "Later", strips: Array(upcoming.dropFirst()), emphasizesFirst: false)
+                        .padding(.top, 18)
                 }
-                if let title = air.programme?.title, !title.isEmpty {
-                    Text(title).kjBody()
-                }
-                Kicker("\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
-            } else if let returns, !returns.isEmpty {
-                Text("Returns at \(returns) \(StationClock.tzLabel)").kjBody()
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 420, alignment: .topLeading)
+    }
+
+    /// The website's off-air line: "Back at 23:00 PKT with The Feature."
+    private func backLine(_ strip: ScheduleStrip) -> String {
+        var text = "Back at \(strip.startLabel) \(StationClock.tzLabel)"
+        if let show = strip.show?.name, !show.isEmpty { text += " with \(show)" }
+        return text + "."
     }
 }
 

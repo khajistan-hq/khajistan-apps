@@ -8,14 +8,16 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 
 **The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, PICS/VIDS and ACCOUNT beside them. There is no system tab bar.
 
+**The skin.** Account offers Automatic, Day, Grove and Smut. Day, Grove and Smut are the names on the website's switch; Automatic follows the hour and is the default. The choice is kept on the Apple TV and applies at once.
+
 **The Receiver.** The front is the region map, drawn from the website's own geometry and colour rules, with the four live figures and the "Beyond the atlas" switch beside it. A strip of the regions with channels runs under the map, west to east, and the remote walks it; the focused region is outlined on the map and carries its plate with the native name and live count. The switch adds the Islamicate extensions, including the two Indian doors the website keeps behind it. A region opens on its figures and a grid of television, radio and cameras. The lists come from the public files the website's receiver reads: the receiver index, the per-region shards, the denylist, and the off-air and health feeds. Each stream is resolved through `/api/frequency` at tune time and played by AVPlayer, under the status band (KHAJISTAN RECEIVER, BROADCASTING FROM …). The grooming pigeon stands in for CONNECTING… while a signal tunes, and the wing wipe plays at a channel change.
 
-**Khajistan Transmission.** A station page shows both channels and what each is carrying now. Channel 1 and Channel 2 are tuned by the station clock, which runs on Pakistan Standard Time, the same clock as the website. Once per launch the player signs on with the wing and the ident, as the website does.
+**Khajistan Transmission.** A station page shows both channels, the show each is carrying now with its hours, and the next three strips on each, in Pakistan time. Off air, a card says when the channel is back and with what. Channel 1 and Channel 2 are tuned by the station clock, which runs on Pakistan Standard Time, the same clock as the website. Once per launch the player signs on with the wing and the ident, as the website does.
 
 - Tuning joins the programme on air at the point it has reached.
 - A handover starts the next programme inside the slot's roster.
 - A channel with nothing on shows an off-air state that names when the channel returns.
-- The status band carries the slot and what is up next; the panel carries the show's line, kind, origin, and the custodian and transfer lines.
+- The panel carries what is on now, its hours and the show's line, kind, origin, and the custodian and transfer lines, beside the next three strips. In the last minute of a slot a notice names what is up next. When a slot ends the channel moves to the next one, as the website does.
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
 
@@ -77,6 +79,10 @@ The script compiles the Foundation-only core and runs its checks:
 - The Pics/Vids URL builders agree with the site's `kj-media.js` on 44 rows, 36 of them real rows of the view, taken from a fixture that Node generates (`tvos/scripts/pnv-media-fixture.mjs`).
 - The models decode the real feed files.
 - The carrier and auth requests have the expected shapes.
+- A skin choice resolves: Automatic follows the hour, Day, Grove and Smut hold at every hour, and an unknown stored value is Automatic.
+- What is up next walks the schedule across midnight and stops where the month's grid ends, and the countdown to a slot's end is nil once the slot is over.
+
+UI tests that need the schedule run without the preview password: a DEBUG build takes `-kjschedulefile <path>` and reads the month from the checkout's `data/khajistan-tv/`, and opens the Transmission player with no account and no picture. `-kjskin` sets the skin and `-kjhandoverlead` stretches the up-next notice's lead. None of these exist in a Release build.
 
 ### Typecheck without Xcode
 

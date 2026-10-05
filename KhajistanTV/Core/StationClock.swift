@@ -19,6 +19,17 @@ struct OnAir: Equatable, Sendable {
     let nextStart: String?
 }
 
+/// One strip of a channel's schedule as the guide lists it: when it starts and ends, and whose
+/// show it is. The show is nil when the schedule names one its `shows` lacks.
+struct ScheduleStrip: Equatable, Sendable {
+    let date: String
+    let slot: Programming.Slot
+    let show: Programming.Show?
+
+    var startLabel: String { slot.start }
+    var endLabel: String { StationClock.clockLabel(slot.start_minute + slot.minutes) }
+}
+
 /// The one answer to "what is on Khajistan TV right now", ported from kj-station-clock.js.
 ///
 /// A SIGNAL COMES FROM SOMEWHERE: every reading is taken in Pakistan Standard Time (UTC+5, no
@@ -188,6 +199,33 @@ enum StationClock {
             nextShow: current.nextShow,
             nextStart: current.nextStart
         )
+    }
+
+    // MARK: Up next
+
+    /// The strips that start after `date` on a channel, soonest first, at most `count` of them:
+    /// what the station page and the player list under "Up next". The walk is nextSlot's, so it
+    /// crosses midnight into the next day the schedule holds and stops where the month's grid
+    /// ends; a channel on air and a channel off air both start from the first strip after now.
+    static func upcoming(_ p: Programming, channelId: String, at date: Date, count: Int) -> [ScheduleStrip] {
+        let now = stationNow(date)
+        var found: [ScheduleStrip] = []
+        var cursor = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes)
+        while let hit = cursor, found.count < count {
+            found.append(ScheduleStrip(date: hit.date, slot: hit.slot, show: p.shows[hit.slot.show]))
+            cursor = nextSlot(p, channel: channelId, iso: hit.date, minute: hit.slot.start_minute)
+        }
+        return found
+    }
+
+    /// Whole seconds until the slot `air` belongs to ends, or nil once the clock has left it
+    /// (another day, or past its end). The player uses it for the notice before a handover and
+    /// to tune the next strip the moment this one ends.
+    static func secondsLeft(in air: OnAir, at date: Date) -> Int? {
+        let now = stationNow(date)
+        let end = (air.slot.start_minute + air.slot.minutes) * 60
+        guard now.iso == air.date, now.seconds >= air.slot.start_minute * 60, now.seconds < end else { return nil }
+        return end - now.seconds
     }
 
     // MARK: Helpers

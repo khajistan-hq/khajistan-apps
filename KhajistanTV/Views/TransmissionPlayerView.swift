@@ -124,6 +124,11 @@ struct TransmissionPlayerView: View {
             overlay(air)
                 .opacity(overlayVisible ? 1 : 0)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: overlayVisible)
+            HandoverNotice(
+                air: air,
+                next: store.upcoming(channel: store.channelNumber, at: Date(), count: 1).first,
+                overlayVisible: overlayVisible
+            )
         }
     }
 
@@ -158,29 +163,37 @@ struct TransmissionPlayerView: View {
         }
     }
 
+    /// The station and the channel. The slot's hours head the panel and what is up next is the
+    /// panel's right column, so neither is said twice.
     private func bandLeading(_ air: OnAir) -> [String] {
-        var items = [
-            "Khajistan Transmission",
-            "Channel \(store.channelNumber)",
-            "\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)"
-        ]
-        if let show = nonEmpty(air.show?.name) { items.append(show) }
-        return items
+        ["Khajistan Transmission", "Channel \(store.channelNumber)"]
     }
 
     private func bandTrailing(_ air: OnAir) -> [String] {
-        guard let start = air.nextStart else { return [] }
-        var text = "Up next \(start)"
-        if let next = nonEmpty(air.nextShow?.name) { text += " \(next)" }
-        return [text]
+        ["\u{25CF} On air"]
     }
 
     private func panel(_ air: OnAir) -> some View {
         let soundOnly = air.programme?.audio_only == true
         let kind = nonEmpty(air.programme?.work_kind)
         let origin = nonEmpty(air.programme?.country)
-        return VStack(alignment: .leading, spacing: 16) {
-            Kicker(stateText)
+        return HStack(alignment: .top, spacing: 60) {
+            nowColumn(air, soundOnly: soundOnly, kind: kind, origin: origin)
+            // Redrawn on the minute, so a list read past a handover drops the strip now on air.
+            TimelineView(.everyMinute) { context in
+                UpNextList(title: "Up next", strips: store.upcoming(channel: store.channelNumber, at: context.date))
+            }
+            .frame(width: 560, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, KJLayout.inset)
+        .padding(.vertical, 40)
+        .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
+    }
+
+    private func nowColumn(_ air: OnAir, soundOnly: Bool, kind: String?, origin: String?) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Kicker(stateText(air))
                 .accessibilityIdentifier("playerState")
             if !soundOnly {
                 Text(headline(air))
@@ -210,9 +223,6 @@ struct TransmissionPlayerView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, KJLayout.inset)
-        .padding(.vertical, 40)
-        .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
     }
 
     private func pair(_ label: String, _ value: String) -> some View {
@@ -224,16 +234,17 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Words
 
-    /// Five vinyl transfers carry no title, and for those the show name stands in.
+    /// The show, not the programme: programme titles are file names (owner, 2026-09-06, on
+    /// the receiver's two channel rows: "just programming block names").
     private func headline(_ air: OnAir) -> String {
-        nonEmpty(air.programme?.title) ?? nonEmpty(air.show?.name) ?? store.channelName(store.channelNumber)
+        nonEmpty(air.show?.name) ?? nonEmpty(air.programme?.title) ?? store.channelName(store.channelNumber)
     }
 
-    private var stateText: String {
+    /// While the programme plays, the slot it belongs to, as the station page says it.
+    private func stateText(_ air: OnAir) -> String {
         switch store.player.state {
-        case .idle: return ""
+        case .idle, .playing: return "Now \(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)"
         case .tuning: return "Tuning\u{2026}"
-        case .playing: return "Playing"
         case .paused: return "Paused"
         case .failed(let message): return message
         }
@@ -346,7 +357,8 @@ struct TransmissionPlayerView: View {
     private func wake() {
         overlayVisible = true
         hideTask?.cancel()
-        guard store.player.state == .playing else { return }
+        // A schedule file (DEBUG, UI tests) plays no picture; its overlay hides as a playing one does.
+        guard store.player.state == .playing || store.isScheduleFile else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
             if !Task.isCancelled { overlayVisible = false }

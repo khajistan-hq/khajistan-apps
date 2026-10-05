@@ -601,6 +601,8 @@ struct TopBar: View {
             }
             .defaultFocus($focused, current)
         }
+        // The launch focus is the system's first pick, top-left; place it on the current tab.
+        .onAppear { focused = current }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 40)
         .padding(.bottom, 20)

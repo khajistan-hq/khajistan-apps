@@ -73,6 +73,10 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     let broadcaster: String?
     let streams: [Stream]
     let activeStreamId: String?
+    /// A language a person verified, and the one the STT worker detected (kj-captions-live.js
+    /// effectiveLangCode() reads both before `primaryLanguage`).
+    let languageCode: String?
+    let detectedLanguageName: String?
     let attributionText: String?
     let publicationStatus: String?
     let healthStatus: String?

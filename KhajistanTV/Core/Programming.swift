@@ -44,6 +44,8 @@ struct Programming: Decodable, Sendable {
         let work_kind: String?
         let country: String?
         let description: String?
+        /// A prepared WebVTT file on the site, e.g. /assets/tv-subtitles/<id>.en.vtt (video.html).
+        let subtitle_url: String?
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -72,7 +74,7 @@ struct Programming: Decodable, Sendable {
 extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
-        case play_url, audio_only, custodian, transfer, work_kind, country, description
+        case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
     }
 
     init(from decoder: Decoder) throws {
@@ -92,5 +94,6 @@ extension Programming.Programme {
         work_kind = try values.decodeIfPresent(String.self, forKey: .work_kind)
         country = try values.decodeIfPresent(String.self, forKey: .country)
         description = try values.decodeIfPresent(String.self, forKey: .description)
+        subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
     }
 }

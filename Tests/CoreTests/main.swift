@@ -766,7 +766,7 @@ func clockLabels() throws {
 func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil, cleanStart: Double? = nil, cleanEnd: Double? = nil) -> Programming.Programme {
     Programming.Programme(id: id, title: id, seconds: seconds, nominal_minutes: nominal, clean_start: cleanStart, clean_end: cleanEnd,
                           show: nil, channel: 1, play_url: nil, audio_only: nil, custodian: nil, transfer: nil,
-                          work_kind: nil, country: nil, description: nil)
+                          work_kind: nil, country: nil, description: nil, subtitle_url: nil)
 }
 
 func runSecondsRules() throws {
@@ -2748,6 +2748,378 @@ func vodPathsRefuseOtherHosts() throws {
     try expectEqual(Films.catalogueURL(origin: KJConfig.site).absoluteString, "https://khajistan-archive.pages.dev/data/khajistan-tv/vod.json")
 }
 
+// MARK: - Subtitles: WebVTT
+
+func vttParsesCues() throws {
+    let file = "\u{FEFF}WEBVTT - prepared\r\nKind: captions\r\n\r\nNOTE this block is a comment\r\nover two lines\r\n\r\nSTYLE\r\n::cue { color: red }\r\n\r\n"
+        + "cue-2\r\n00:01:02.500 --> 00:01:04.000 line:85% align:center\r\n<i>Second</i> &amp; <c.loud>last</c>\r\nof two lines\r\n\r\n"
+        + "00:01.000 --> 00:02.250\r\n<v Narrator>First &lt;one&gt;\r\n\r\n"
+        + "01:00:00.000 --> 01:00:01.000\rمرحبا\r"
+    let cues = try require(WebVTT.parse(file))
+    try expectEqual(cues.count, 3)
+    try expectEqual(cues[0], SubtitleCue(start: 1, end: 2.25, text: "First <one>"))
+    try expectEqual(cues[1], SubtitleCue(start: 62.5, end: 64, text: "Second & last\nof two lines"))
+    try expectEqual(cues[2], SubtitleCue(start: 3600, end: 3601, text: "مرحبا"))
+    try expectEqual(WebVTT.parse("WEBVTT")?.count, 0)
+    try expectEqual(WebVTT.parse("WEBVTT\tfile\n\n00:00.000 --> 00:01.000\nx")?.count, 1)
+}
+
+func vttRefusesWhatIsNotAFile() throws {
+    try expect(WebVTT.parse("") == nil)
+    try expect(WebVTT.parse("WEBVTTX\n\n00:00.000 --> 00:01.000\nx") == nil, "a signature must end at a space or the line")
+    try expect(WebVTT.parse("1\n00:00:00,000 --> 00:00:01,000\nan SRT file") == nil)
+    try expect(WebVTT.parse("<html>Unauthorized</html>") == nil, "a gate page is not a subtitle file")
+}
+
+func vttSkipsMalformedCues() throws {
+    let file = """
+    WEBVTT
+
+    00:00:1.000 --> 00:00:02.000
+    one-digit seconds
+
+    00:00:60.000 --> 00:01:01.000
+    sixty seconds
+
+    00:00.00 --> 00:01.000
+    two-digit fraction
+
+    0:00:01.000 --> 0:00:02.000
+    one-digit hours
+
+    00:05.000 --> 00:04.000
+    ends before it starts
+
+    00:05.000 00:06.000
+    no arrow
+
+    00:07.000 --> 00:08.000
+
+    a
+    b
+    00:09.000 --> 00:10.000
+    timing on the third line
+
+    00:11.000 --> 00:12.000
+    the one good cue
+    """
+    let cues = try require(WebVTT.parse(file))
+    try expectEqual(cues.map(\.text), ["the one good cue"])
+    for bad in ["", "1.000", "00:00:00", "00:00:00.0000", "aa:bb.ccc", "00:+1.000", "00:00.+12", "-1:00.000"] {
+        try expect(WebVTT.timestamp(bad) == nil, bad)
+    }
+    try expectEqual(WebVTT.timestamp("123:04:05.006"), 123 * 3600 + 245.006)
+}
+
+func vttTextAtTime() throws {
+    let cues = [SubtitleCue(start: 1, end: 3, text: "a"), SubtitleCue(start: 2, end: 4, text: "b\nc")]
+    try expect(WebVTT.text(at: 0.999, in: cues) == nil)
+    try expectEqual(WebVTT.text(at: 1, in: cues), "a")
+    try expectEqual(WebVTT.text(at: 2.5, in: cues), "a\nb\nc")
+    try expectEqual(WebVTT.text(at: 3, in: cues), "b\nc", "an end time is exclusive")
+    try expect(WebVTT.text(at: 4, in: cues) == nil)
+}
+
+/// Every prepared file on the site parses, and the cue count matches the file's own timing lines,
+/// counted by a different route than the parser's.
+func vttRealFilesParse() throws {
+    let directory = repoRoot.appendingPathComponent("assets/tv-subtitles")
+    guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path), !names.isEmpty else {
+        throw Skip(reason: "assets/tv-subtitles is not in this checkout")
+    }
+    var total = 0
+    for name in names.sorted() where name.hasSuffix(".vtt") {
+        let text = try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
+        let cues = try require(WebVTT.parse(text), name)
+        let arrows = text.components(separatedBy: "\n").filter { $0.contains(" --> ") }.count
+        try expectEqual(cues.count, arrows, name)
+        try expect(cues.allSatisfy { $0.end > $0.start && !$0.text.isEmpty }, name)
+        total += cues.count
+    }
+    try expect(total > 1000, "\(total) cues")
+}
+
+func programmeCarriesSubtitleURL() throws {
+    let programme = try decode(Programming.Programme.self, #"{"id":"tv-1","title":"t","subtitle_url":"/assets/tv-subtitles/tv-1.en.vtt"}"#)
+    try expectEqual(programme.subtitle_url, "/assets/tv-subtitles/tv-1.en.vtt")
+    try expect(try decode(Programming.Programme.self, #"{"id":"tv-2","title":"t"}"#).subtitle_url == nil)
+}
+
+// MARK: - Subtitles: the plate and the direction
+
+/// The three plates against the site's own stylesheet, read from the checkout.
+func captionPlateMatchesTheSite() throws {
+    let css = String(decoding: try realFile("styles/kj-captions.css"), as: UTF8.self)
+    for skin in Skin.allCases {
+        let marker = ".captions-audio-line[data-kj-caption-skin=\"\(skin.rawValue)\"] > span{"
+        let rule = try require(css.components(separatedBy: marker).dropFirst().first?.components(separatedBy: "}").first, skin.rawValue)
+        /// "#000" and "#F3FB04" alike, as a 24-bit value.
+        func hex(_ property: String) throws -> UInt32? {
+            let found = try require(rule.range(of: "(?<![-a-z])\(property):#[0-9A-Fa-f]{3,6}", options: .regularExpression), "\(skin) \(property)")
+            var digits = String(rule[found].split(separator: "#")[1])
+            if digits.count == 3 { digits = digits.map { "\($0)\($0)" }.joined() }
+            return UInt32(digits, radix: 16)
+        }
+        try expectEqual(try hex("color"), skin.captionTextHex, "\(skin) text")
+        try expectEqual(try hex("background-color"), skin.captionPlateHex, "\(skin) plate")
+    }
+}
+
+func captionDirection() throws {
+    for rtl in ["یہ اردو ہے", "این فارسی است.", "هذا عربي", "זה עברית", "«123» مرحبا", "ڈرامہ"] {
+        try expect(CaptionText.isRightToLeft(rtl), rtl)
+    }
+    for ltr in ["English line.", "123 456", "", "— Hello مرحبا", "Привет"] {
+        try expect(!CaptionText.isRightToLeft(ltr), ltr)
+    }
+    try expectEqual(CaptionText.lines("a\n\nb"), ["a", "b"])
+}
+
+// MARK: - Subtitles: a film's tracks
+
+func filmSubtitleChoice() throws {
+    try expectEqual(SubtitleChoice.distinct(["en", "en-forced", "fa-IR", "", "UR"]), ["en", "fa", "ur"])
+    try expect(SubtitleChoice.desired(available: ["en", "fa"], stored: "off", preferred: ["en"]) == nil, "off is remembered")
+    try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: "fa", preferred: ["en-US"]), "fa")
+    try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: "de", preferred: ["fa-IR", "en"]), "fa")
+    try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: nil, preferred: ["de"]), "en")
+    try expect(SubtitleChoice.desired(available: ["fa", "ur"], stored: nil, preferred: ["de"]) == nil, "nothing else is guessed")
+    try expect(SubtitleChoice.desired(available: [], stored: "en", preferred: ["en"]) == nil)
+    let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
+    try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
+    try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")
+    try expectEqual(SubtitleChoice.label("fa", listed: listed, fallback: "Farsi"), "Farsi")
+    try expectEqual(SubtitleChoice.label("fa", listed: listed, fallback: nil), "FA")
+}
+
+func filmSubtitleLanguagesDecode() throws {
+    let catalogue = try JSONDecoder().decode(FilmCatalogue.self, from: try realFile("data/khajistan-tv/vod.json"))
+    let showgirls = try require(catalogue.films.first { $0.handle == "showgirls-of-pakistan-2021-khajistan" })
+    try expectEqual(showgirls.subtitle_languages?.first, SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"))
+    try expect(catalogue.films.contains { $0.subtitle_languages == nil }, "a film with no list still decodes")
+}
+
+// MARK: - Live captions: who may caption
+
+func liveChannel(_ overrides: [String: Any] = [:]) throws -> Channel {
+    var base: [String: Any] = ["mediaType": "tv", "primaryLanguage": "Urdu", "country": "Pakistan", "regionIds": ["indus"]]
+    for (key, value) in overrides { base[key] = value }
+    return try channelWith(base)
+}
+
+func liveCaptionEligibility() throws {
+    let accuracy = try decode(CaptionAccuracy.self, #"{"extended_regions":["bengal","nusantara"],"languages":{"bn":{"name":"Bengali"},"prs":{"name":"Dari"}},"by_channel":{"nus-measured":{"name":"Malay"}}}"#)
+    // Offered.
+    for media in ["tv", "radio", "camera"] {
+        try expect(CaptionRules.eligible(try liveChannel(["mediaType": media]), detected: nil, accuracy: accuracy), media)
+    }
+    try expect(CaptionRules.eligible(try liveChannel(["primaryLanguage": NSNull(), "country": "Borderland / diaspora"]), detected: nil, accuracy: nil),
+               "no language known is Auto, and offered")
+    try expect(CaptionRules.eligible(try liveChannel(["regionIds": ["bengal"], "primaryLanguage": "Bengali"]), detected: nil, accuracy: accuracy),
+               "an extension with a measured language")
+    try expect(CaptionRules.eligible(try liveChannel(["id": "nus-measured", "regionIds": ["nusantara"], "primaryLanguage": "Malay"]), detected: nil, accuracy: accuracy),
+               "an extension channel measured by itself")
+    try expect(CaptionRules.eligible(try liveChannel(["primaryLanguage": "Pashto"]), detected: DetectedLanguage(lang_code: nil, confirmed_lang_code: "fa", needs_confirmation: nil), accuracy: nil),
+               "listeners' confirmed language outranks the registry")
+    // Refused.
+    for media in ["analog", "sound", "vod", "mixtape", ""] {
+        try expect(!CaptionRules.eligible(try liveChannel(["mediaType": media]), detected: nil, accuracy: nil), "house or film: \(media)")
+    }
+    try expect(!CaptionRules.eligible(try liveChannel(["activeStreamId": NSNull()]), detected: nil, accuracy: nil), "nothing to listen to")
+    let pashto = try liveChannel(["primaryLanguage": "Pashto"])
+    try expect(!CaptionRules.eligible(pashto, detected: nil, accuracy: nil))
+    try expectEqual(CaptionRules.parkedReason(pashto, detected: nil, accuracy: nil), CaptionRules.parked["ps"]!)
+    let kashmiri = try liveChannel(["languageCode": "ks"])
+    try expect(!CaptionRules.eligible(kashmiri, detected: nil, accuracy: nil))
+    try expectEqual(CaptionRules.parkedReason(kashmiri, detected: nil, accuracy: nil), "No captions: Kashmiri is not on the live recogniser.")
+    let malay = try liveChannel(["regionIds": ["nusantara"], "primaryLanguage": "Malay"])
+    try expect(!CaptionRules.eligible(try liveChannel(["regionIds": ["nusantara"], "primaryLanguage": "Indonesian"]), detected: nil, accuracy: accuracy))
+    try expectEqual(CaptionRules.parkedReason(malay, detected: nil, accuracy: accuracy), "No captions here yet: Malay has not been measured on this atlas.")
+    try expect(CaptionRules.eligible(malay, detected: nil, accuracy: nil), "before the measurement file lands an extension reads as core")
+    try expect(!CaptionRules.eligible(try liveChannel(["primaryLanguage": "Urdu"]), detected: DetectedLanguage(lang_code: nil, confirmed_lang_code: "sd", needs_confirmation: nil), accuracy: nil),
+               "a confirmed Sindhi channel is not captioned as Urdu")
+    try expectEqual(CaptionRules.parkedReason(try liveChannel(), detected: nil, accuracy: nil), "", "an offered channel says nothing")
+}
+
+func liveCaptionLanguageOrder() throws {
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["languageCode": "pa", "detectedLanguageName": "Urdu"]), detected: nil), "pa")
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["detectedLanguageName": "Arabic"]), detected: nil), "ar")
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Dari"]), detected: nil), "fa")
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Persian, Dari"]), detected: nil), "fa")
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Egypt"]), detected: nil), "ar")
+    try expect(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Israel"]), detected: nil) == nil, "two-language countries are held")
+    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(), detected: DetectedLanguage(lang_code: "pa", confirmed_lang_code: nil, needs_confirmation: true)), "pa")
+}
+
+// MARK: - Live captions: the server's answers
+
+func liveCaptionServerAnswers() throws {
+    try expectEqual(CaptionRules.startRefusal("sign_in_required"), "Sign in from the top of the page to use live captions.")
+    try expectEqual(CaptionRules.startRefusal("credits_exhausted"), "Your free caption minutes are used up. The channel keeps playing.")
+    try expectEqual(CaptionRules.startRefusal("email_unverified"), "Verify your email address to use your caption allowance.")
+    try expectEqual(CaptionRules.startRefusal("not_live"), "Live captions are for live television and radio. This channel carries its own subtitles.")
+    try expectEqual(CaptionRules.startRefusal("daily_cap_reached"), "Live captioning has reached its spending limit for now. Nothing was counted against your minutes.")
+    try expectEqual(CaptionRules.heartbeatRefusal("monthly_cap_reached"), "Live captioning has reached its spending limit for now. The channel keeps playing.")
+    try expect(CaptionRules.startRefusal("at_capacity").hasPrefix("As many channels as we can caption at once"))
+    try expectEqual(CaptionRules.startRefusal("settings_unavailable"), "Live captioning is not configured at the source right now.")
+    try expectEqual(CaptionRules.startRefusal("atomic_protocol_required"), "Captions could not be started for this channel just now. Nothing was counted against your minutes.")
+    try expectEqual(CaptionRules.startRefusal(nil), CaptionRules.startRefusal("anything new"))
+    try expectEqual(CaptionRules.heartbeatRefusal("rate_limited"), "Live captions are unavailable right now. The channel keeps playing.")
+    try expectEqual(CaptionRules.heartbeatRefusal("passphrase_required"), "Caption access has expired. Turn captions on to enter the owner passphrase again.")
+
+    try expectEqual(CaptionRules.label(on: false, balance: nil), "Captions")
+    try expectEqual(CaptionRules.label(on: false, balance: .infinity), "Captions")
+    try expectEqual(CaptionRules.label(on: false, balance: 600), "Captions \u{00B7} 10 min left")
+    try expectEqual(CaptionRules.label(on: false, balance: 61), "Captions \u{00B7} 2 min left")
+    try expectEqual(CaptionRules.label(on: true, balance: 0), "Captions \u{00B7} English \u{00B7} 0 min left")
+    try expectEqual(CaptionRules.label(on: true, balance: .infinity), "Captions \u{00B7} English")
+
+    let allowed = try decode(CaptionReply.self, #"{"allowed":true,"billing_mode":"enforced","session_id":"s-1","lease_expires_at":"2026-10-05T12:01:30.000Z","unlimited":false,"remaining_seconds":540,"heartbeat_seconds":30}"#)
+    let now = try require(CaptionRules.isoDate("2026-10-05T12:00:00Z"))
+    try expectEqual(CaptionRules.balance(of: allowed), 540)
+    try expect(CaptionRules.leaseExpiry(of: allowed, session: "s-1", now: now) != nil)
+    try expect(CaptionRules.leaseExpiry(of: allowed, session: "s-2", now: now) == nil, "another session's lease is not ours")
+    try expect(CaptionRules.leaseExpiry(of: allowed, session: "s-1", now: now.addingTimeInterval(91)) == nil, "a lapsed lease is refused")
+    let uncapped = try decode(CaptionReply.self, #"{"allowed":true,"unlimited":true,"remaining_seconds":null}"#)
+    try expectEqual(CaptionRules.balance(of: uncapped), .infinity)
+    let refused = try decode(CaptionReply.self, #"{"allowed":false,"reason":"credits_exhausted","billing_mode":"enforced","session_id":"s-1","remaining_seconds":0}"#)
+    try expectEqual(refused.reason, "credits_exhausted")
+    try expect(CaptionRules.leaseExpiry(of: refused, session: "s-1", now: now) == nil)
+}
+
+func liveCaptionRequests() throws {
+    let start = CaptionRules.demandRequest(action: "start", channelId: "indus-ptv-news", viewerId: "vabc", sessionId: "s-1", accessToken: "user.jwt")
+    try expectEqual(start.url, URL(string: "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/request-captions"))
+    try expectEqual(start.httpMethod, "POST")
+    try expectEqual(start.value(forHTTPHeaderField: "Authorization"), "Bearer user.jwt")
+    try expectEqual(start.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    let body = try require(try JSONSerialization.jsonObject(with: try require(start.httpBody)) as? [String: Any])
+    try expectEqual(Set(body.keys), ["channel_id", "viewer_id", "mode", "action", "session_id", "src_lang", "pass"])
+    try expectEqual(body["mode"] as? String, "english")
+    try expectEqual(body["channel_id"] as? String, "indus-ptv-news")
+    try expect(body["src_lang"] is NSNull, "automatic language")
+    try expect(body["billing_path"] == nil, "the site speaks the enforced contract, not atomic_v1")
+    let stop = CaptionRules.demandRequest(action: "stop", channelId: "c", viewerId: "v", sessionId: nil, accessToken: "t")
+    let stopBody = try require(try JSONSerialization.jsonObject(with: try require(stop.httpBody)) as? [String: Any])
+    try expectEqual(Set(stopBody.keys), ["channel_id", "viewer_id", "mode", "action", "session_id"])
+    try expect(stopBody["session_id"] is NSNull)
+
+    let wire = CaptionRules.wireRequest(channelId: "a&b", now: try require(CaptionRules.isoDate("2026-10-05T12:00:30Z")), accessToken: "user.jwt")
+    let wireURL = try require(wire.url?.absoluteString)
+    try expect(wireURL.hasPrefix("https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/live_caption_wire?select="))
+    try expect(wireURL.contains("&channel_id=eq.a%26b&"), wireURL)
+    try expect(wireURL.contains("created_at=gte.2026-10-05T12%3A00%3A00Z"), wireURL)
+    try expect(wireURL.hasSuffix("&order=id.desc&limit=50"))
+    try expectEqual(wire.value(forHTTPHeaderField: "Authorization"), "Bearer user.jwt", "the wire is read as the account, never anon")
+
+    let row = CaptionWireRow(id: 7, channel_id: "c", text: "سلام", english: nil, lang: "fa", script: nil, at_epoch: 1, spoken_seconds: 2, final: true, uncertain: false, program_epoch: nil)
+    let translate = CaptionRules.translateRequest(row: row, channelLang: "ur", sessionId: "s-1", accessToken: "t")
+    let tBody = try require(try JSONSerialization.jsonObject(with: try require(translate.httpBody)) as? [String: Any])
+    try expectEqual(tBody["wire_id"] as? Int, 7)
+    try expectEqual(tBody["source_lang"] as? String, "fa")
+    try expectEqual(tBody["target"] as? String, "en")
+}
+
+// MARK: - Live captions: what is painted
+
+func liveCaptionEnglishGate() throws {
+    func row(_ text: String, english: String?, lang: String? = "ur", script: String? = nil) -> CaptionWireRow {
+        CaptionWireRow(id: 1, channel_id: "c", text: text, english: english, lang: lang, script: script, at_epoch: 1, spoken_seconds: 2, final: true, uncertain: nil, program_epoch: nil)
+    }
+    try expectEqual(CaptionRules.english(for: row("آج کی خبریں", english: "Today's news")), "Today's news")
+    try expectEqual(CaptionRules.english(for: row("Hello there", english: nil, lang: "en")), "Hello there", "English speech paints as itself")
+    try expect(CaptionRules.english(for: row("آج کی خبریں", english: nil)) == nil, "no English, nothing to paint")
+    try expect(CaptionRules.english(for: row("Hello", english: nil, lang: "en", script: "Arab")) == nil, "a contradictory script tag is not English")
+    for bad in ["آج کی news", "As an AI language model, I cannot", "Translation note: unclear", "```json", #"{"english":"x"}"#,
+                "I'm unable to provide a meaningful translation of this fragment.", "Could you please provide the complete sentence to be translated?",
+                "The input appears to be incomplete."] {
+        try expect(CaptionRules.english(for: row("آج", english: bad)) == nil, bad)
+    }
+    for good in ["Surely the minister will speak.", "Here is the minister.", "We cannot translate love into numbers, he said."] {
+        try expectEqual(CaptionRules.english(for: row("آج", english: good)), good)
+    }
+    try expect(CaptionRules.admits(row("کل", english: nil), channelId: "c"))
+    try expect(!CaptionRules.admits(row("…!", english: nil), channelId: "c"), "a line with no letter is not a caption")
+    try expect(!CaptionRules.admits(row("x", english: nil), channelId: "other"), "another channel's row")
+    let partial = CaptionWireRow(id: 2, channel_id: "c", text: "x", english: nil, lang: "en", script: nil, at_epoch: 1, spoken_seconds: nil, final: false, uncertain: nil, program_epoch: nil)
+    try expect(!CaptionRules.admits(partial, channelId: "c"), "a partial is not painted")
+}
+
+func liveCaptionBlocks() throws {
+    let long = "The minister said that the new road from Peshawar to Jalalabad would open before the winter and that tolls would be lower than the old road's tolls for every lorry"
+    let blocks = CaptionRules.blocks(long)
+    try expect(blocks.count >= 2)
+    for block in blocks {
+        let lines = block.components(separatedBy: "\n")
+        try expect(lines.count <= 2, block)
+        try expect(lines.allSatisfy { $0.count <= CaptionRules.lineChars }, block)
+    }
+    try expectEqual(blocks.joined(separator: " ").replacingOccurrences(of: "\n", with: " "), long, "every word kept, in order")
+    try expectEqual(CaptionRules.blocks("one two three"), ["one two three"])
+    let pair = try require(CaptionRules.blocks("aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk").first)
+    let halves = pair.components(separatedBy: "\n")
+    try expectEqual(halves.count, 2)
+    try expect(abs(halves[0].count - halves[1].count) <= 5, "the pair is balanced: \(halves)")
+    let name = String(repeating: "ب", count: 50)
+    try expectEqual(CaptionRules.blocks(name).first?.replacingOccurrences(of: "\n", with: ""), name, "a long word is split, never dropped")
+    try expect(CaptionRules.blocks(name).first?.components(separatedBy: "\n").allSatisfy { $0.count <= 42 } == true)
+
+    let short = CaptionRules.timed("Yes.", at: 10, spokenSeconds: 0.4)
+    try expectEqual(short, [SubtitleCue(start: 10, end: 12, text: "Yes.")], "two seconds at least")
+    let slow = CaptionRules.timed("A short line", at: 0, spokenSeconds: 30)
+    try expectEqual(slow.first?.end, 7, "seven at most")
+    let two = CaptionRules.timed(long, at: 100, spokenSeconds: 12)
+    try expectEqual(two.first?.start, 100)
+    for (a, b) in zip(two, two.dropFirst()) { try expectEqual(b.start, a.end, "blocks follow one another") }
+}
+
+func liveCaptionClock() throws {
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 24), 62, "12 s of lag under a 24 s hold lands 12 s ahead")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1030, mediaNow: 50, behindLive: 24), 50, "a late row shows now")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 0), 50, "radio, no hold: now")
+    try expect(CaptionRules.mediaTime(atEpoch: 1000, now: 1181, mediaNow: 0, behindLive: 0) == nil, "skewed by over three minutes")
+    try expect(CaptionRules.mediaTime(atEpoch: 1031, now: 1000, mediaNow: 0, behindLive: 0) == nil, "from the future")
+    try expectEqual(CaptionRules.holdTarget(lags: [], ceiling: 60), 24)
+    try expectEqual(CaptionRules.holdTarget(lags: [10, 12, 30, 31, 33, 35, 36, 37, 38, 40], ceiling: 60), 44)
+    try expectEqual(CaptionRules.holdTarget(lags: [50, 55], ceiling: 30), 30, "never past the live window")
+}
+
+func liveCaptionRealtime() throws {
+    try expectEqual(CaptionRealtime.socketURL().absoluteString,
+                    "wss://qojysegeddztsxdmhjfb.supabase.co/realtime/v1/websocket?apikey=\(KJConfig.anonKey)&vsn=1.0.0")
+    let join = try jsonObject(CaptionRealtime.join(channelId: "indus-x", accessToken: "user.jwt", ref: "1"))
+    try expectEqual(join["topic"] as? String, "realtime:captions:indus-x")
+    try expectEqual(join["event"] as? String, "phx_join")
+    let payload = try require(join["payload"] as? [String: Any])
+    try expectEqual(payload["access_token"] as? String, "user.jwt")
+    let changes = try require(((payload["config"] as? [String: Any])?["postgres_changes"] as? [[String: Any]])?.first)
+    try expectEqual(changes["table"] as? String, "live_caption_wire")
+    try expectEqual(changes["filter"] as? String, "channel_id=eq.indus-x")
+    try expectEqual(changes["event"] as? String, "INSERT")
+
+    let insert = #"{"event":"postgres_changes","payload":{"data":{"type":"INSERT","schema":"public","table":"live_caption_wire","record":{"id":42,"channel_id":"indus-x","text":"خبر","english":"News","lang":"ur","at_epoch":1759666000.5,"spoken_seconds":1.8,"final":true,"sn":12,"program_epoch":null}},"ids":[1]},"ref":null,"topic":"realtime:captions:indus-x"}"#
+    guard case .row(let row) = CaptionRealtime.event(insert, channelId: "indus-x") else { throw Failure(description: "an insert must be a row") }
+    try expectEqual(row.id, 42)
+    try expectEqual(row.english, "News")
+    try expectEqual(row.at_epoch, 1759666000.5)
+    try expectEqual(CaptionRealtime.event(insert, channelId: "other"), .other, "another channel's topic")
+    try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"ok","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .subscribed)
+    try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"error","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .closed)
+    try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"ok"},"ref":"2","topic":"phoenix"}"#, channelId: "indus-x"), .other)
+    try expectEqual(CaptionRealtime.event("not json", channelId: "indus-x"), .other)
+    try expectEqual(CaptionRealtime.event(#"{"event":"postgres_changes","payload":{"data":{"type":"DELETE","record":{}}},"topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .other)
+}
+
+func liveCaptionRealChannelsDecode() throws {
+    let shard = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/indus.json"))
+    let offered = shard.channels.filter { CaptionRules.eligible($0, detected: nil, accuracy: nil) }
+    try expect(!offered.isEmpty, "Indus offers captions somewhere")
+    try expect(offered.count < shard.channels.count || shard.channels.allSatisfy { CaptionRules.liveMedia.contains($0.mediaType) })
+    let accuracy = try JSONDecoder().decode(CaptionAccuracy.self, from: try realFile("data/open-frequencies/caption-accuracy.json"))
+    try expect((accuracy.extended_regions ?? []).contains("bengal"))
+    try expect(accuracy.languages?["ur"] != nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Skin hours at the boundaries", skinHoursAtBoundaries),
     ("Skin hex triples", skinColours),
@@ -2843,6 +3215,25 @@ let tests: [(String, () throws -> Void)] = [
     ("Screening Room: SKU table matches the site's VARIANTS", vodVariantsMatchTheSite),
     ("Screening Room: access line", vodAccessLine),
     ("Screening Room: paths stay on their host", vodPathsRefuseOtherHosts),
+    ("Subtitles: WebVTT cues, timing, multi-line, BOM", vttParsesCues),
+    ("Subtitles: WebVTT refuses what is not a file", vttRefusesWhatIsNotAFile),
+    ("Subtitles: WebVTT skips malformed cues", vttSkipsMalformedCues),
+    ("Subtitles: WebVTT text at a time", vttTextAtTime),
+    ("Subtitles: the site's prepared files parse", vttRealFilesParse),
+    ("Subtitles: a programme carries subtitle_url", programmeCarriesSubtitleURL),
+    ("Subtitles: the plate matches kj-captions.css", captionPlateMatchesTheSite),
+    ("Subtitles: right-to-left lines", captionDirection),
+    ("Subtitles: a film's track choice", filmSubtitleChoice),
+    ("Subtitles: vod.json subtitle_languages decode", filmSubtitleLanguagesDecode),
+    ("Live captions: eligibility both ways", liveCaptionEligibility),
+    ("Live captions: language order", liveCaptionLanguageOrder),
+    ("Live captions: the server's answers in the site's words", liveCaptionServerAnswers),
+    ("Live captions: request shapes", liveCaptionRequests),
+    ("Live captions: the English gate", liveCaptionEnglishGate),
+    ("Live captions: blocks of two 42-character lines", liveCaptionBlocks),
+    ("Live captions: the clock and the hold", liveCaptionClock),
+    ("Live captions: realtime messages", liveCaptionRealtime),
+    ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
 ]
 
 var passed = 0, failed = 0, skipped = 0

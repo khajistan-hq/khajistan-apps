@@ -21,6 +21,8 @@ struct Film: Decodable, Identifiable, Hashable, Sendable {
     let rent: Double?
     let buy: Double?
     let licence_price: Double?
+    /// Label source for the manifest's subtitle tracks, never the list of them.
+    let subtitle_languages: [SubtitleLanguage]?
 
     var id: String { handle }
 

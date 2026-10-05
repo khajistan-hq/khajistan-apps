@@ -356,7 +356,9 @@ struct StatusBand: View {
         .padding(.vertical, 14)
         .padding(.horizontal, KJLayout.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.band, ignoresSafeAreaEdges: .horizontal)
+        // The text stays inside the safe area; the colour runs to the screen's edges, the top
+        // included when the band is the first thing on screen.
+        .background(palette.band, ignoresSafeAreaEdges: [.horizontal, .top])
     }
 }
 
@@ -563,6 +565,8 @@ enum Section: String, CaseIterable, Identifiable {
 struct TopBar: View {
     let current: Section
     let select: (Section) -> Void
+    /// Focus enters the bar on the section on screen, so a first press never jumps elsewhere.
+    @FocusState private var focused: Section?
 
     init(current: Section, select: @escaping (Section) -> Void) {
         self.current = current
@@ -591,9 +595,11 @@ struct TopBar: View {
                         Text(section.title).kjKicker()
                     }
                     .buttonStyle(HouseTabStyle(isCurrent: section == current))
+                    .focused($focused, equals: section)
                     .accessibilityIdentifier("nav-\(section.rawValue)")
                 }
             }
+            .defaultFocus($focused, current)
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 40)
@@ -602,61 +608,7 @@ struct TopBar: View {
     }
 }
 
-// MARK: - Still used by the screens that have not moved to the house components
-
-// KJFont, PlateButtonStyle and PlateToggleStyle are the previous look, kept only so the six screens
-// that still call them compile. Delete each when its last caller has moved to HouseButtonStyle,
-// HouseSwitch and the kj* type modifiers. SurfaceButtonStyle is not legacy: it stays.
-
-enum KJFont {
-    static func title() -> Font { .system(size: 56, weight: .bold) }
-    static func heading() -> Font { .system(size: 40, weight: .semibold) }
-    static func body() -> Font { .system(size: 31) }
-    static func bodyBold() -> Font { .system(size: 31, weight: .bold) }
-    static func caption() -> Font { .system(size: 25) }
-}
-
-struct PlateButtonStyle: ButtonStyle {
-    let palette: Palette
-
-    func makeBody(configuration: ButtonStyleConfiguration) -> some View {
-        PlateBody(palette: palette, configuration: configuration)
-    }
-}
-
-private struct PlateBody: View {
-    let palette: Palette
-    let configuration: ButtonStyleConfiguration
-    @Environment(\.isFocused) private var isFocused
-
-    var body: some View {
-        configuration.label
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .foregroundStyle(palette.ink)
-            .background(isFocused ? palette.lift : palette.ground)
-            .scaleEffect(isFocused ? 1.04 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: isFocused)
-    }
-}
-
-struct PlateToggleStyle: ToggleStyle {
-    let palette: Palette
-
-    func makeBody(configuration: ToggleStyleConfiguration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            HStack {
-                configuration.label
-                Spacer()
-                Text(configuration.isOn ? "On" : "Off")
-            }
-        }
-        .buttonStyle(PlateButtonStyle(palette: palette))
-        .accessibilityValue(configuration.isOn ? "On" : "Off")
-    }
-}
+// MARK: - The focus target
 
 /// A button that draws nothing and shows no focus effect. It is the focus target of a
 /// full-screen player surface, so the remote's presses have somewhere to land.

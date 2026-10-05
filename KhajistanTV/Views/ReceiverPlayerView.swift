@@ -32,13 +32,11 @@ struct ReceiverPlayerView: View {
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
             if current.mediaType == "radio" && controller.state == .playing {
-                VStack(spacing: 24) {
-                    Kicker("Live radio")
-                    Text(current.name)
-                        .kjDisplay()
-                        .multilineTextAlignment(.center)
-                }
-                .padding(.horizontal, KJLayout.inset)
+                // The band says live radio; the centre carries the name alone.
+                Text(current.name)
+                    .kjDisplay()
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, KJLayout.inset)
             }
             if controller.state == .tuning {
                 TuningLoader(nil)
@@ -88,7 +86,6 @@ struct ReceiverPlayerView: View {
         VStack(spacing: 0) {
             // The band's text stays inside the safe area; its colour runs up to the screen edge.
             StatusBand(leading: bandLeading, trailing: ["\u{25CF} \(liveLabel)"])
-                .background(palette.band, ignoresSafeAreaEdges: .top)
             Spacer(minLength: 0)
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
@@ -101,8 +98,10 @@ struct ReceiverPlayerView: View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(stateText)
                 .accessibilityIdentifier("playerState")
-            Text(current.name)
-                .kjDisplay(KJType.headline, tracking: -0.055)
+            if !(current.mediaType == "radio" && controller.state == .playing) {
+                Text(current.name)
+                    .kjDisplay(KJType.headline, tracking: -0.055)
+            }
             if !current.place.isEmpty {
                 Text(current.place)
                     .kjBody()
@@ -139,7 +138,7 @@ struct ReceiverPlayerView: View {
         switch controller.state {
         case .idle: return ""
         case .tuning: return "Connecting\u{2026}"
-        case .playing: return liveLabel
+        case .playing: return "Playing"   // the band already names the medium
         case .paused: return "Paused"
         case .failed(let message): return message
         }

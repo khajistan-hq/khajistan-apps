@@ -69,7 +69,8 @@ final class AuthStore {
         // only a refusal of the refresh token ends it.
         let (data, response) = try await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        if code >= 500 { throw AuthStoreError.unavailable }
+        // A server fault, a rate limit or a timeout is not a refusal: the session stays.
+        if code >= 500 || code == 429 || code == 408 { throw AuthStoreError.unavailable }
         guard code < 400, let fresh = try? AuthAPI.session(from: data, now: Date()) else {
             clearSession()
             throw AuthError.server("Sign in again.")

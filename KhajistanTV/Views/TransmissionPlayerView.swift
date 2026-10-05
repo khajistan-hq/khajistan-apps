@@ -43,6 +43,17 @@ struct TransmissionPlayerView: View {
         }
         .onChange(of: store.phase) { wake() }
         .onChange(of: store.player.state) { wake() }
+        // A schedule that now needs the preview password, or is not published, is answered on
+        // the station page, which carries the password step. The player goes back to it.
+        .onChange(of: store.schedule) { _, schedule in
+            switch schedule {
+            case .needsPreviewPassword, .noSchedule:
+                leave()
+                dismiss()
+            default:
+                break
+            }
+        }
         .task { await start() }
         .onDisappear { leave() }
         .sheet(isPresented: $showSignIn) {

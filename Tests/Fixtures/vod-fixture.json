@@ -1,0 +1,2187 @@
+{
+  "_meta": {
+    "purpose": "Channel 3 (VOD) — Film Vault rent/buy/license. Consumer films rent or buy (purchase grants a watch-anywhere entitlement on the buyer's Khajistan account, same login as Reading Room + TV). Institutional = request a DSL/streaming license. Source: Shopify FILM VAULT collection 432862494934. owned-check + Cloudflare playback wire up post-migration.",
+    "generated": "2026-07-27",
+    "consumer": 4,
+    "institutional": "Consumer films also carry a $1,500 institutional license, shown + checkout ONLY to signed-in users with an institutional-domain email (.edu/.ac.xx/.gov/museum...). Directors-cut films show their price to institutional emails too.",
+    "playback": "stream_uid per film = Cloudflare Stream UID (empty until migrated). vod-token edge fn signs a token for entitled users; vodWatch() plays it.",
+    "region_note": "country/region set 2026-07-21 from each film's own Shopify product listing (Country: field / explicit description text) — see COORDINATION.md Packet J. All 7 titles are Pakistan/indus; none required owner review.",
+    "installations": 2,
+    "vault": 10,
+    "vault_note": "tier \"vault\" = held by Khajistan and streamed in-site through vod-token rather than sold through a Shopify product. 10 titles: Filmfarsi Trailers Vol. 1–8, Shab-Neshini dar Jahannam, and Cinema Cinema. The Filmfarsi handles and Cloudflare Stream UIDs are copied verbatim from the live vod-token edge function; every one of those 8 UIDs requires a signed URL (unsigned manifest + thumbnail both return 401, verified 2026-07-27), which is why playback must go through vod-token and why the poster is owner-supplied. NOTE (2026-08-06): this figure read 8 while 9 titles already carried the tier — Shab-Neshini was tier vault and uncounted. It is recomputed here, not asserted. Shab-Neshini also carries open_access:true, so film.html plays it unsigned and it does not need a vod-token entry; Cinema Cinema does not, and does.",
+    "preview_note": "Each vault volume carries preview_uid — a separate Cloudflare Stream asset holding only the first 60 seconds of the reel, cut by scripts/ops/make_filmfarsi_previews.py. The clip is public (requireSignedURLs false) so the preview plays without an account, while the full reel stays signed-URL only; because the clip contains nothing but the first minute, there is no way to reach the rest of the reel through it. Playback is still origin-locked to the Khajistan hosts. Titles whose master lives in Dropbox are cut locally by ffmpeg (ranged read, never a full download) and uploaded by scripts/ops/upload_film_previews.py; the authoritative masters are one-per-title in KHAJISTAN RELEASING/VIDEO FILES. preview_start_seconds records where in the film the minute comes from, chosen to open on picture rather than on leader or an intertitle. preview_segments, where present, means the preview is a montage stitched from several separated clips rather than one continuous run.",
+    "runtime_note": "runtime_minutes is measured off the file itself, never estimated: Cloudflare Stream asset duration for titles hosted there, ffprobe on the Dropbox releasing master for the three Directors' Cuts (read 2026-07-27).",
+    "cinema_cinema_note": "Added 2026-08-06 under owner directive. Provenance forensics and the burned-in broadcaster mark are recorded in OPEN_FLAGS.md FLAG-018; the copy held is a YouTube-sourced off-air TV Asia recording, not a Khajistan transfer, and is not preservation grade.",
+    "pricing": "Consumer: rent $6 (30 days to start, 48 hours to finish once played), buy $20 (permanent entitlement on the buyer's account, vod_entitlements.expires_at NULL). Buy is offered ONLY where Khajistan owns outright — you cannot promise permanent on a licence you do not hold. Streaming of every non-open title is included in Reading Room All Access; the $25 wing tier does NOT include it. Institutional is quoted on request and never priced on the page — see docs/rights/SCREENING_ROOM_INSTITUTIONAL_RATE_CARD.md. Fields retail_eligible/institutional_eligible/download_ok/territory replace the old consumer|institutional|vault taxonomy, which described three different things at once and matched nothing a customer saw."
+  },
+  "films": [
+    {
+      "handle": "showgirls-of-pakistan-2021-khajistan",
+      "title": "Showgirls of Pakistan (2021)",
+      "year": 2021,
+      "country": "Pakistan",
+      "region": "indus",
+      "url": "https://khajistan.com/products/showgirls-of-pakistan-2021-khajistan",
+      "variantId": "gid://shopify/ProductVariant/45119319179478",
+      "poster": "/assets/film-vault/showgirls-of-pakistan-2021-khajistan.png",
+      "status": "DRAFT",
+      "stream_uid": "c5d3151b1ba2cb6924fbf456f88a9796",
+      "playback_ready": true,
+      "preview_uid": "8a7664a8165ea0476d9e5bc0535ae1de",
+      "preview_seconds": 60,
+      "preview_start_seconds": 1508,
+      "runtime_minutes": 105,
+      "extras": [
+        {
+          "handle": "showgirls-of-pakistan-the-short-list-vice",
+          "title": "The Short List with Suroosh Alvi",
+          "kind": "Interview",
+          "series": "The Short List with Suroosh Alvi",
+          "series_publisher": "VICE",
+          "season": 1,
+          "episode": 1,
+          "runtime_minutes": 46,
+          "stream_uid": "f696d081554806f45cd3d0cac1525c3a",
+          "preview_uid": "41c179e5ca27b199fd1e8d00a6e69c9b",
+          "preview_seconds": 60,
+          "preview_start_seconds": 694,
+          "description": "The first episode of the first season of The Short List with Suroosh Alvi, VICE’s documentary series in which the company’s co-founder pairs a full film with a conversation with the people who made it. The series launched on 31 January 2021 with eleven selections, free to watch, and was built to carry the kind of exchange usually confined to a festival green room out to a general audience. Showgirls of Pakistan is the film in this episode.",
+          "preview_captions": {
+            "language": "en",
+            "source": "spoken",
+            "cues": 15
+          }
+        }
+      ],
+      "module": "pakistani",
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "retail_eligible": true,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6
+    },
+    {
+      "handle": "qandeel-2017-khajistan",
+      "title": "Qandeel (2017)",
+      "year": 2017,
+      "country": "Pakistan",
+      "region": "indus",
+      "url": "https://khajistan.com/products/qandeel-2017-khajistan",
+      "variantId": "gid://shopify/ProductVariant/46062530298070",
+      "poster": "/assets/film-vault/qandeel-2017-khajistan.png",
+      "status": "ACTIVE",
+      "stream_uid": "8faeb4e0087fbbb51884a0abf0d2237c",
+      "playback_ready": true,
+      "preview_uid": "0aae2e18f0b673daebce690861ba32e5",
+      "preview_seconds": 60,
+      "preview_start_seconds": 372,
+      "runtime_minutes": 25,
+      "module": "pakistani",
+      "retail_eligible": true,
+      "institutional_eligible": false,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6
+    },
+    {
+      "handle": "aurat-raj-womens-rule-1979-uncut-khajistan",
+      "title": "Aurat Raj (Women's Rule, 1979) — Uncut",
+      "year": 1979,
+      "country": "Pakistan",
+      "region": "indus",
+      "url": "https://khajistan.com/products/aurat-raj-womens-rule-1979-uncut-khajistan",
+      "variantId": "gid://shopify/ProductVariant/45133434028246",
+      "poster": "/assets/film-vault/aurat-raj-womens-rule-1979-uncut-khajistan.jpg",
+      "status": "DRAFT",
+      "stream_uid": "2c61010231901bd62a7bcd4941dc983e",
+      "playback_ready": true,
+      "preview_seconds": 60,
+      "preview_start_seconds": 595,
+      "runtime_minutes": 152,
+      "module": "pakistani",
+      "preview_uid": "d7876687a1dd0a2a974d80d5acdf150d",
+      "retail_eligible": true,
+      "institutional_eligible": false,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6
+    },
+    {
+      "handle": "chuppan-chupai-hide-seek-2013-khajistan",
+      "title": "Chuppan Chupai (Hide & Seek, 2013)",
+      "year": 2013,
+      "country": "Pakistan",
+      "region": "indus",
+      "url": "https://khajistan.com/products/chuppan-chupai-hide-seek-2013-khajistan",
+      "variantId": "gid://shopify/ProductVariant/45134607155414",
+      "poster": "/assets/film-vault/chuppan-chupai-hide-seek-2013-khajistan.jpg",
+      "status": "DRAFT",
+      "stream_uid": "b74486702424095dc523cbebb025db9a",
+      "playback_ready": true,
+      "preview_uid": "bd8e7535450cca054b02a734a14394b6",
+      "preview_seconds": 60,
+      "preview_start_seconds": 1007,
+      "runtime_minutes": 67,
+      "module": "pakistani",
+      "retail_eligible": true,
+      "institutional_eligible": false,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6
+    },
+    {
+      "handle": "world-ka-centre-center-of-the-world-2002-directors-cut-khajistan",
+      "title": "World ka Centre (2002) — Directors' Cut",
+      "year": 2002,
+      "country": "Pakistan",
+      "region": "indus",
+      "variantId": "gid://shopify/ProductVariant/47556539121878",
+      "poster": "/assets/film-vault/world-ka-centre-center-of-the-world-2002-directors-cut-khajistan.jpg",
+      "status": "ACTIVE",
+      "stream_uid": "ccdcb48394faee7defd5bf76f90f5f29",
+      "playback_ready": true,
+      "preview_uid": "fcd53f15e2a427b51f3b27c40a16597e",
+      "preview_seconds": 60,
+      "preview_start_seconds": 892,
+      "runtime_minutes": 59,
+      "poster_alt": "Khajistan Releasing poster for World ka Centre (2002) — Directors' Cut",
+      "poster_bg": "black",
+      "alternate_title": "World Ka Centre (2002) — Directors' Cut",
+      "module": "pakistani",
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "subtitle_provenance": "Machine transcript, machine translation, uncorrected. ElevenLabs Scribe v2 produced the source at 576 lines; it detected the speech as hin (0.977) and wrote DEVANAGARI, because Hindi and Urdu are one spoken language in two scripts. The transcript was then rewritten into Urdu script with claude-sonnet-5 — a spelling task, not a transliteration, because Urdu spells Perso-Arabic vocabulary etymologically. English, Arabic, Persian, Pashto and Hebrew are translated from that Urdu with claude-sonnet-5. Nothing here has been read against the audio by a person. The print carries the distributor's own English subtitles burned into the picture; our tracks are positioned above them (line:70%) rather than over them, and were cross-checked against them where they overlap.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6,
+      "licence_price": 1200
+    },
+    {
+      "handle": "javaid-shampoo-2004-directors-cut-khajistan",
+      "title": "Javaid Shampoo (2004) — Directors' Cut",
+      "year": 2004,
+      "country": "Pakistan",
+      "region": "indus",
+      "variantId": "gid://shopify/ProductVariant/47557010555094",
+      "poster": "/assets/film-vault/javaid-shampoo-2004-directors-cut-khajistan.jpg",
+      "status": "ACTIVE",
+      "stream_uid": "ff5162fc4055535e489314eaf0ea658f",
+      "playback_ready": true,
+      "preview_uid": "10dcd6e241316383aa9deaad0305e4ee",
+      "preview_seconds": 60,
+      "preview_start_seconds": 1090,
+      "runtime_minutes": 73,
+      "poster_alt": "Khajistan Releasing poster for Javaid Shampoo (2004) — Directors' Cut",
+      "poster_bg": "black",
+      "module": "pakistani",
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "subtitle_provenance": "Machine transcript, machine translation, uncorrected. ElevenLabs Scribe v2 produced the source at 924 lines; it detected the speech as hin (0.979) and wrote DEVANAGARI, because Hindi and Urdu are one spoken language in two scripts. The transcript was then rewritten into Urdu script with claude-sonnet-5 — a spelling task, not a transliteration, because Urdu spells Perso-Arabic vocabulary etymologically. English, Arabic, Persian, Pashto and Hebrew are translated from that Urdu with claude-sonnet-5. Nothing here has been read against the audio by a person. The print carries the distributor's own English subtitles burned into the picture; our tracks are positioned above them (line:70%) rather than over them, and were cross-checked against them where they overlap.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6,
+      "licence_price": 1200
+    },
+    {
+      "handle": "kali-shalwar-black-shalwar-2007-directors-cut-khajistan",
+      "title": "Kaali Shalwar (2007) — Directors' Cut",
+      "year": 2007,
+      "country": "Pakistan",
+      "region": "indus",
+      "variantId": "gid://shopify/ProductVariant/47558226378966",
+      "poster": "/assets/film-vault/kali-shalwar-black-shalwar-2007-directors-cut-khajistan.jpg",
+      "status": "ACTIVE",
+      "stream_uid": "0690b245d98fa0db4ad70e92cedd09c2",
+      "playback_ready": true,
+      "preview_uid": "11936dfe9da1a68322b3ce525c774d57",
+      "preview_seconds": 30,
+      "preview_start_seconds": 2200,
+      "runtime_minutes": 44,
+      "poster_alt": "Khajistan Releasing poster for Kaali Shalwar (2007) — Directors' Cut",
+      "poster_bg": "black",
+      "alternate_title": "Kali Shalwar (Black Shalwar, 2007) — Directors' Cut",
+      "module": "pakistani",
+      "source_reel": "Khajistan Releasing distribution master, 1920x1080 — 44 min 24 s",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "native": "français"
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "native": "español"
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "native": "Deutsch"
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ]
+    },
+    {
+      "handle": "spasial-program-narrow-corridor-pashto-punjabi",
+      "title": "Spasial Program — Tape 2: Porn TV",
+      "year": 2025,
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/spasial-program-tape-2-porn-tv.jpg",
+      "poster_alt": "Khajistan Releasing cover for Spasial Program Tape 2: Porn TV",
+      "stream_uid": "51705de80ad647d5907f38812f0a57e7",
+      "playback_ready": true,
+      "exhibition": "Spasial Program by Khajistan · SculptureCenter, New York · June 19–July 28, 2025",
+      "historical_period": "c. late 1990s–2000s",
+      "regions": [
+        "Pakistan",
+        "Afghanistan"
+      ],
+      "description": "Presented in Spasial Program by Khajistan at SculptureCenter in 2025, this Narrow Corridor installation gathers Pashto and Punjabi erotic videos circulating in Pakistan and Afghanistan from the late 1990s through the 2000s. Many survive as low-resolution VCD and digital rips, sometimes concealed between tracks on music discs. Khajistan places these fragments within a history of regional video circulation, censorship, desire, and the unofficial routes by which banned or disreputable images endure.",
+      "content_advisory": "Explicit sexual content. Adults only.",
+      "runtime_minutes": 12,
+      "alternate_title": "Narrow Corridor: Pashto and Punjabi Erotic Video Compilation",
+      "poster_bg": "black",
+      "module": "spasial",
+      "preview_start_seconds": 285,
+      "preview_uid": "df54d529a0fbdd03d6932a20c6459578",
+      "preview_seconds": 60,
+      "preview_captions": {
+        "language": "en",
+        "source": "spoken",
+        "cues": 7
+      },
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6,
+      "licence_price": 1200
+    },
+    {
+      "handle": "spasial-program-living-room-television-program",
+      "title": "Spasial Program — Tape 1: Living Room TV",
+      "year": 2025,
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/spasial-program-tape-1-living-room-tv.jpg",
+      "poster_alt": "Khajistan Releasing cover for Spasial Program Tape 1: Living Room TV",
+      "stream_uid": "158fe10bcb02917ed5b4764721decc39",
+      "playback_ready": true,
+      "exhibition": "Spasial Program by Khajistan · SculptureCenter, New York · June 19–July 28, 2025",
+      "historical_period": "c. 1960s–2000s",
+      "regions": [
+        "Iran",
+        "Pakistan",
+        "Afghanistan",
+        "Sudan",
+        "Iraq",
+        "Saudi Arabia",
+        "United Kingdom–Pakistan"
+      ],
+      "description": "Made for the Living Room in Spasial Program by Khajistan at SculptureCenter in 2025, this television sequence moves across borders, decades, and formats: pre-revolution Iranian variety television and trailers; Pakistani and Saudi news and advertising; dance videos from Sudan, Pakistan, Afghanistan, Iran, and Iraq; Pashto film songs; Punjabi stage recordings; and work connected to Jamil Dehlavi, Faisal Rehman and Bilal Minto, Saqib Malik, and Jami. Played on a domestic television, the compilation turns the familiar living-room screen into an unsettled regional archive of broadcast authority, popular pleasure, censorship, and private memory.",
+      "content_advisory": "Contains mature themes and archival material that may include sexual imagery, violence, and politically sensitive content.",
+      "preview_uid": "1989902f90aa047e159f4120266af0c6",
+      "preview_seconds": 59,
+      "runtime_minutes": 96,
+      "alternate_title": "Living Room Television Program — Spasial Program by Khajistan",
+      "poster_bg": "black",
+      "preview_segments": [
+        461,
+        1037,
+        2246,
+        2880,
+        3456,
+        4666,
+        5357
+      ],
+      "preview_opens_with": "Behti Naar (RUSHK), 10s from 0:15",
+      "module": "spasial",
+      "preview_captions": {
+        "language": "en",
+        "source": "spoken",
+        "cues": 9
+      },
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "open_access": false,
+      "rent": 6,
+      "licence_price": 1200
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-1-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 1",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-1-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 1",
+      "stream_uid": "625a05145f897f6a3fd10d4f67643384",
+      "playback_ready": true,
+      "source_reel": "Khajistan Reel 1",
+      "tv_programme_id": "khajistan-filmfarsi-trailers-reel-1",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A feature-length procession of Iranian coming attractions built around the voices, faces and promises of popular cinema. The reel includes Ganj-e Qarun (1965), Siamak Yasami’s landmark box-office melodrama, among a much larger field of trailers preserved in their original sequence. Identified passages include Kaka Siah (1973).",
+      "poster_bg": "black",
+      "preview_uid": "3424ea9f67b43785700f12426fc1110a",
+      "preview_seconds": 60,
+      "runtime_minutes": 115,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "1",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 22
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "lead_title": "Kaka Siah (1973)",
+      "buy": null,
+      "price": null,
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-2-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 2",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-2-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 2",
+      "stream_uid": "e721e5d21b267f1a2a4ed99ba93596ff",
+      "playback_ready": true,
+      "source_reel": "Khajistan Reel 2",
+      "tv_programme_id": "khajistan-filmfarsi-trailers-reel-2",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A compact hour of Iranian trailers in which fantasy, comedy, romance and social aspiration arrive one after another. Ali Hatami’s Hasan Kachal (1969), the celebrated filmmaker’s first feature, anchors a reel crowded with further attractions. Identified passages include Kaj Kolah Khan (1973).",
+      "poster_bg": "black",
+      "preview_uid": "ccf7f8a6052dfde12f00aedf093bf5d3",
+      "preview_seconds": 60,
+      "runtime_minutes": 62,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "2",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 11
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "lead_title": "Kaj Kolah Khan (1973)",
+      "buy": null,
+      "price": null,
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-3-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 3",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-3-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 3",
+      "stream_uid": "16ace73bf4bb48bea4c70e05634a20fd",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 3",
+      "tv_programme_id": "filmfarsi-trailers-vol-3",
+      "languages": [
+        "Persian"
+      ],
+      "description": "Wrestlers, adventurers, lovers and paper kingdoms crowd a long reel of Iranian coming attractions. Identified passages include Parviz Khatibi’s Kamarband-e Zarrin (1970) and Hassan Sasanpour’s Sarzamin-e Delavaran (1972).",
+      "poster_bg": "black",
+      "preview_uid": "6eb4ba623cd83c372b403d4f9178793e",
+      "preview_seconds": 60,
+      "runtime_minutes": 68,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "3",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 16
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 3",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-4-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 4",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-4-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 4",
+      "stream_uid": "3a27d071d925db68e1b1e069ea530f72",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 4",
+      "tv_programme_id": "filmfarsi-trailers-vol-4",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A sprawling survey of Iranian popular cinema in the first half of the 1970s. Among its securely identified attractions are Amir Shervan’s Antar o Mantar (1976) and Parviz Khatibi’s Kamarband-e Zarrin (1970), surrounded by comedy, action and melodrama. Identified passages include Shahrah-e Zendegi (1968).",
+      "poster_bg": "black",
+      "preview_uid": "e47d5ef44c753f067ee0aba894e0d472",
+      "preview_seconds": 60,
+      "runtime_minutes": 100,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "4",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 19
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "lead_title": "Shahrah-e Zendegi (1968)",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 4",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-5-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 5",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-5-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 5",
+      "stream_uid": "ee8a4f87bbebd64dca4ed1fda8501f2f",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 7",
+      "tv_programme_id": "filmfarsi-trailers-vol-5",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A fast, fifty-minute chain of Iranian theatrical attractions: danger, romance and heroic display compressed into the hard sell of the trailer form.",
+      "poster_bg": "black",
+      "preview_uid": "f8f141a382b82215de8be294dd7f6c8f",
+      "preview_seconds": 60,
+      "runtime_minutes": 50,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "7",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 14
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 7",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-6-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 6",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-6-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 6",
+      "stream_uid": "4ecb6d246eb9da4324f4ecac607026aa",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 8",
+      "tv_programme_id": "filmfarsi-trailers-vol-6",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A long reel of Iranian coming attractions moving from urban comedy and romantic intrigue to castles, performers and popular heroics.",
+      "poster_bg": "black",
+      "preview_uid": "956917609bde8143d028a35a048491fe",
+      "preview_seconds": 60,
+      "runtime_minutes": 106,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "8",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 16
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 8",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-7-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 7",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-7-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 7",
+      "stream_uid": "53edf6c715ff35971a250d06fe70d476",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 12",
+      "tv_programme_id": "filmfarsi-trailers-vol-7",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A gallery of Iranian stars and screen worlds featuring trailers for Tangeh-ye Ejdeha, Nosrat Karimi’s Takhte Khab-e Se Nafareh and Reza Mirlouhi’s Shekast-napazir.",
+      "poster_bg": "black",
+      "preview_uid": "ea1fff1946882c25c7fc14c04b667967",
+      "preview_seconds": 60,
+      "runtime_minutes": 96,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "12",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 8
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 12",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-8-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 8",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-8-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 8",
+      "stream_uid": "a6810863340e5eace8386bd85940b50d",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 14",
+      "tv_programme_id": "filmfarsi-trailers-vol-8",
+      "languages": [
+        "Persian"
+      ],
+      "description": "More than two hours of Iranian theatrical attractions: crime, romance, sacrifice and star power announced at full volume across a densely assembled reel.",
+      "poster_bg": "black",
+      "preview_uid": "78b3726314996cdf674af33ded552c2a",
+      "preview_seconds": 60,
+      "runtime_minutes": 123,
+      "preview_start_seconds": 1845,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "14",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 13
+      },
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 14",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "Imported Persian subtitles with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-خسرو-میرزای-دوم",
+      "title": "Khosrow Mirza the Second — خسرو میرزای دوم",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "26a50366f319003256709409e0a4d781",
+      "playback_ready": true,
+      "runtime_minutes": 160,
+      "poster": "/assets/film-vault/nirt-خسرو-میرزای-دوم.jpg",
+      "url": "/library/iranian-popular-media/programmes/خسرو-میرزای-دوم/",
+      "description": "The longest programme held here, at two hours forty, and the most talk-driven — 1,731 subtitle lines against roughly 600 for the variety programmes. A narrator opens by introducing his own descent from a Qajar grandee titled Divan Salar, reading a photograph of the sons right to left. What follows is a household comedy of inheritance and marriage: Kamran Khan will not take the wife his mother has chosen, relatives argue over whose name is on the deed and whose furniture is whose, and a daughter is told that every girl who marries late has turned away more suitors than she has hairs on her head.",
+      "source_reel": "Joined from 8 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "preview_uid": "72f0849b10545b8600f8b2ba0db018d9",
+      "preview_seconds": 60,
+      "preview_start_seconds": 2880,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 4
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-bonbast",
+      "title": "Dead End — بن‌بست",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "fb99d405c1887a7e14d39cf06f9f404e",
+      "playback_ready": true,
+      "runtime_minutes": 54,
+      "poster": "/assets/film-vault/nirt-bonbast.jpg",
+      "url": "/library/iranian-popular-media/programmes/bonbast/",
+      "description": "A household drama from the Divorce strand. Two children return from a stay with their mother and are received by their father; an aunt keeps the house and says she cannot cook three meals a day and chase two children at her age. The argument that runs through it is about who the children belong to and who feeds them. One line states the case plainly: the children have been passed from hand to hand like a handkerchief. It closes on a threat to report the situation to the committees, with the answer to carry on regardless.",
+      "source_reel": "Joined from 3 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "synopsis": "A divorced father comes to his ex-wife's door with a decision already made: he is sending their two children abroad, to live with a friend until a boarding school is found. He has come to inform her, not to ask. She tells him he is doing it to be free of them; he says it is his own decision and nobody else's; she says she has no right, then, to decide her children's future. He answers that she should have thought of that when she asked for the divorce. She answers that things had got to the point where she asked.\n\nThe father's second wife, Maliheh, has a baby of her own and is losing to a dead woman's advantage — the children compare her cooking with their mother's at the table, and one of them walks out of the room saying that if the other woman is better at everything then what is he doing here. She has heard it from every direction: from him, from his children, from his ex-wife, who telephones to curse her and to pray that whatever is being done to her children is one day done to Maliheh's own. Maliheh tells him plainly that she is not the mother of an eight-year-old and a five-year-old and cannot become one, that trying is not the same as meaning it, and that a child can tell the difference. Their peace, she says, comes only from separating. He promises instead to send the children away.\n\nA second household runs alongside it. The mother, Touran, shares rooms with Mehri, who is being courted by a man who told her that her not being able to have children did not matter to him, that he had asked her nothing and wanted to know nothing because he had no misplaced beliefs, that they were two lonely creatures. He was telling the truth about the loneliness. He also already had a wife, which he discloses late, and Mehri asks why they all tell the truth so late, and why they make a person wish for their own death.\n\nBetween the two houses the programme lays out the law, twice, plainly. A court bars a mother from custody only where it does not find her fit; even then she may see her child on the court's terms; a father who ignores that can be fined; and sending a child beyond her reach requires her agreement. And in a magazine office an editor reads a piece aloud — divorce is sometimes unavoidable, but the children's life and future must not collapse with the family; children between six and twelve are the most vulnerable, because those are the years of watching and understanding while controlling nothing. A colleague puts it less carefully: the children should not be kicked back and forth in the middle like a football.\n\nThe father asks his sister to take them. She is alone and past the age for it, and she says what nobody else in the programme says out loud — that the children were not raised properly, that it is not their fault, that they have been passed from hand to hand like a rag — and then sets her conditions: everything neat, everything on schedule, and no questions, especially from the younger one, who wants to work everything out.\n\nThe children have their own account of the aunt. She shouted at them the whole time they stayed; she has no television; she grumbles and will not let them touch anything; she gives them looks while they eat; she takes them into her room at night and snores so loudly they wake in a fright. Told they are going there, perhaps for good, they ask instead to be sent to their mother, and their father breaks — where is he supposed to get them a mother from. They decide between themselves not to go.\n\nSo they run. Not to their mother's and not to their father's, because either would start the fight again; they end up at the magazine, which had interviewed them at school, and are photographed, given lunch, promised a tour of the building. The journalist has promised not to tell their father. He telephones him anyway, reasoning that the man will be put at ease and might then agree to send them to their mother. The children overhear. They tell him he lied to them and they are gone before the father arrives — who, when he does, wants to know by whose permission a stranger went after his children.\n\nIt ends on a bench. The older child is tired and says he knows that in the end they are going to be lost; the younger is hungry; the older goes to buy a chicken sandwich with the last of the money, telling the other not to move and never to tell anyone that they ran away. The last thing said is by the adults, who have called everyone they can think of and are about to report the children missing: if they had wanted to come back or telephone, they would have done it by now. Nobody finds them. The programme is called بن‌بست — dead end.",
+      "context": "This is a public-service drama with a case to make, not a melodrama that happens to contain a divorce, and the difference shows in its construction. It states its thesis twice in dialogue — once read off a page by an editor, once argued between colleagues — and it walks through custody and visitation law in a scene whose only purpose is to walk through custody and visitation law. Iranian television made a great deal of this kind of programme: a domestic story built to carry an argument to a mass audience, with the argument surfaced rather than buried.\n\nWhat keeps it from being a lecture is that it refuses to hand anyone the moral high ground. The father is selfish and also cornered. The mother is wronged and also uses the children as leverage, coaching them on what to say if she reaches court. The stepmother is the villain of the children's story and the most honest speaker in the programme. The journalist is the one adult who acts, and he breaks his word to a child to do it, and that broken promise is what sends them into the street. The aunt is unkind and is the only person who names what has been done to them. The programme's own conclusion is not that divorce is wrong — it says outright that separation is sometimes unavoidable — but that the adults' settlement is being paid for by two people who had no part in it.\n\nIt is filed under a folder named طلاق, divorce, alongside `fasele` — distance. They are two works in one strand on one subject, which is worth knowing before either is described as standalone.\n\nThe archive's catalogue attributes this to NIRT television, pre-1979. One detail in the transcript sits uneasily with that and is recorded below rather than smoothed over: near the end the father says he is going to inform the committees. If that is کمیته in the Persian, the term belongs to the revolutionary committees established after 1979, which would place the programme after the date the catalogue gives it. It may equally be a translator's word for an ordinary pre-revolutionary body. The archive does not know which, and this page does not pretend to.",
+      "dating_evidence": [
+        "CHECKED. At 52:59 the Persian reads «میخوام به کمیته‌ها اطلاع بدم» — “I want to inform the committees”, کمیته‌ها, plural. That is the revolutionary-committee term, and those bodies were established after February 1979; before the revolution a missing child was reported to the شهربانی or a کلانتری. On the face of it this programme is POST-1979 and cannot be NIRT, which was renamed after the revolution — yet the catalogue stamps all eight “NIRT television, pre-1979”. Two things keep this short of proof: the Persian here is ASR, not a human subtitle file, so the word is a machine reading; and one plural noun is thin ground on which to redate a broadcaster. Someone should listen at 52:59 and settle it.",
+        "The other seven programmes were scanned for the same markers — کمیته, انقلاب, جمهوری اسلامی, and for pre-revolutionary ones (شهربانی, ساواک, شاهنشاهی, اعلیحضرت). NONE of them carries any, in either direction. So whatever this line means, it is evidence about THIS programme only; it does not redate the batch, and nothing found so far contradicts the catalogue on the other seven.",
+        "A telephone number is spoken in full — 89-51-19, six digits — and the magazine's address is given as Pedrouki Street, Athar Alley, the Kimia Institute. Tehran numbering and street names of the period would bound this; neither has been checked against a source the archive holds.",
+        "The children are stated to be about eight and five, and the second wife has an infant. If the cast is ever identified these are datable facts about them, not about the programme."
+      ],
+      "uncertain": [
+        "The year. Nothing in the programme states one, and one line may contradict the catalogue's pre-1979 attribution — see above.",
+        "Every name is heard through an ASR transcript of a degraded transfer: Touran and Mehri, Maliheh, Naser and Nahid, Masoumeh. Treat them as provisional spellings of provisional readings.",
+        "No cast, director, writer or broadcast date is stated anywhere in the programme.",
+        "Whether the children are found. The programme does not say, and this page does not resolve it either — the ending is the point."
+      ],
+      "preview_uid": "ca43d73eb7ae8955b4f7940bc601850d",
+      "preview_seconds": 60,
+      "preview_start_seconds": 700,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 16
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-fasele",
+      "title": "Distance — فاصله",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "bc3e434018b543c7fba060e42212d8e4",
+      "playback_ready": true,
+      "runtime_minutes": 68,
+      "poster": "/assets/film-vault/nirt-fasele.jpg",
+      "url": "/library/iranian-popular-media/programmes/fasele/",
+      "description": "The second play held from the Divorce strand, and the most dialogue-dense of the two. It opens on a demand for a divorce and a secretary reading a businessman's day back to him — the insurance representative at eight, shareholders at eight forty-five, the tax officer at ten. A second line runs through a magazine office, where someone waits each week for an anonymous letter, tries to find who is writing them, and eventually asks the writer to come in. It ends on a parable about a red fish and a black fish: wherever the red one goes the black one follows, and has never caught it, and now will.",
+      "source_reel": "Joined from 4 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "preview_uid": "707392684ce751bb64bd331362d4346b",
+      "preview_seconds": 60,
+      "preview_start_seconds": 890,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 14
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-show-kafei-10",
+      "title": "Cabaret Show 10 — شو کافه‌ای",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "99e45e7a0ce1471a3f362571b7ac36a8",
+      "playback_ready": true,
+      "runtime_minutes": 107,
+      "poster": "/assets/film-vault/nirt-show-kafei-10.jpg",
+      "url": "/library/iranian-popular-media/programmes/show-kafei-10/",
+      "description": "Tenth in the cabaret strand: a floor show of musical numbers with a host who works the room between them. It opens on a song about two vagrants moving corner to corner looking for water and work and staying cheerful about the state of the economy. The bill is not only Persian — one number is sung in Arabic.",
+      "source_reel": "Joined from 37 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "synopsis": "A cabaret floor show built from musical numbers, with spoken links between them and a live audience that is applauded, addressed and asked for money. The songs are almost all about working life and its costs. It opens on two drifters — “two wanderers, two homeless, two evicted again” — moving from corner to corner after water and work, closing each verse on “from us, the effort, from Him, the blessing”. A builder's song follows, calling ya Allah up the scaffold and then turning on the contractor: cement, plaster and brick are expensive, everyone knows it, so “master, don't jack up the price of the house”. A car-washer sings that he will wash any model you name and that not a penny comes of it. A street vendor's cry runs through the alley.\n\nThe show's centre is a performer who steps out of the songs to talk to the room directly. He tells the audience they know him and he knows them, that he grew up in this city among them, and that they watched him sell newspapers, sell popsicles and repair shoes; he says he carried kerosene into their houses a hundred times, that they used to call him Nemat-e Nafti — Nemat the kerosene man — and that he is still the same. He remembers the nights he was out of work in front of the cinema they are sitting near, “which was first called Pars and is now Apadana”. He sings the song he used to sing to the children, a hard piece of self-reliance: everyone has his own work, his own load, fire to his own barn, and be your own father if your father was no father to you. Word arrives from Tehran, mid-performance, that a son has been born to him, and he asks leave to sing a lullaby — for the audience's children, for his own son, and for all the children who have no one to sing them a lullaby.\n\nThe second half turns to a wedding. A bride's song claims the singer as a girl of the water-city and the bride of the moon, refusing a golden palace for a kind heart. A congratulation chorus takes over — old and young singing together, the bride like a star, petals scattered at the feet of the couple — and a master of ceremonies works the room, calling for applause for both families and asking anyone with something in his pocket to pour it out into the middle. A dance number follows, then a comic exchange in which a man who has never been in love admits he is caught up over a girl named Pari.\n\nThe programme ends where a cabaret evening ends. An announcer welcomes the audience and tells them that tonight their beloved singer is at this cabaret for them, and a nervous performer is talked onto the stage from the wings — told to walk straight ahead, that after a few steps he will be in the middle of it, that it will be a hit like the old days. What he sings is not another working song but a lament in the Homayoun mode: every heart you see is a sea of blood, the sky wandering in dust, the star of my fortune fixed, the hearth of my heart without light, and time, whose name is treacherous, has never once turned toward what I wanted. A voice from the room answers it — “what a heavenly melody”.",
+      "context": "This is café-cabaret entertainment of the kind Iranian television carried before 1979, and its repertoire is what Persian criticism calls kucheh-bazari — literally street-and-bazaar song, the popular idiom of working-class Tehran, sung in plain speech about rent, work, debt, drink and love, and long held at arm's length by both the classical establishment and the state's cultural programming. The whole first half of this programme is that genre working at its most direct: the labourer, the car-washer, the vendor and the out-of-work man are not characters observed from outside but the singer's own claimed biography, recited to an audience he insists already knows it.\n\nThe closing lament is the other half of the same tradition. Homayoun is one of the twelve dastgāh of Persian classical music, conventionally the mode of grief, and moving into it at the end of a night of comic working songs is a deliberate change of register — the evening earns its sorrow rather than opening with it. That a cabaret bill ends in a classical mode is the ordinary shape of this kind of programme, not an anomaly.\n\nThe announcer names the evening's singer, and the name heard in the transcript is Nematollah Aghasi — consistent with the Nemat persona the performer builds through the show, and with the kucheh-bazari repertoire throughout. A name heard through a degraded audio transfer is not a confirmed credit, and the archive does not treat it as one: it is recorded here as what the programme says, pending a viewing that can confirm it on screen or on a caption.\n\nWhat the programme is worth is partly what it is not. Very little Iranian cabaret performance of this period survives as television rather than as audio, and almost none of it with the room in it — the applause, the money called for from the floor, the announcer selling the act, the wings visible before a performer walks out. The camera stays with the whole event rather than with the song, which makes this a record of a venue and an audience as much as of a repertoire.",
+      "dating_evidence": [
+        "The performer places the venue near a cinema “which was first called Pars and is now Apadana”. The programme therefore postdates that rename. The date of the rename would bound it, and has not yet been established from a source the archive holds.",
+        "Mid-performance he is told from Tehran that a son has been born to him. If the singer is confirmed, that birth is a datable event.",
+        "The builder's complaint about the cost of cement, plaster and brick, and the car-washer's line about an apartment being built, both sit inside a construction boom — suggestive of period, far too general to date anything on its own."
+      ],
+      "uncertain": [
+        "The year. Nothing in the programme states one.",
+        "The performer's identity. The announcer's naming is heard in an ASR transcript of a degraded transfer and is not confirmed on screen.",
+        "The venue, the city, the other performers, the musical director and the broadcast date — none are stated.",
+        "Several song passages are marked unclear or garbled in the transcript and are not represented in the synopsis."
+      ],
+      "open_access": false,
+      "preview_uid": "f6b03a61e610c3f939e3068552550b63",
+      "preview_seconds": 60,
+      "preview_start_seconds": 1930,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 13
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-show-kafei-11",
+      "title": "Cabaret Show 11 — شو کافه‌ای",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "286a38df06d2656eb6e13fd3b1656f4e",
+      "playback_ready": true,
+      "runtime_minutes": 107,
+      "poster": "/assets/film-vault/nirt-show-kafei-11.jpg",
+      "url": "/library/iranian-popular-media/programmes/show-kafei-11/",
+      "description": "Eleventh in the cabaret strand and the most song-dominated programme held here. Between the numbers there is a sketch involving an old man and a young one, and a dance routine sung in the first person — I dance and I dance, tell me I am lovely — with an aside about dancing in the European manner. The sung passages are the least reliable transcription in this collection and are presented as such.",
+      "source_reel": "Joined from 37 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "preview_uid": "3e19ec56ea89c436adf43f13f51835f1",
+      "preview_seconds": 60,
+      "preview_start_seconds": 1915,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 23
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-جنگ-نوروزی-1357",
+      "title": "Nowruz Variety Special, 1357 (1978–79) — جنگ نوروزی ۱۳۵۷",
+      "year": 1357,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "faf38c81ed2e9d37f378b9cbad114d3a",
+      "playback_ready": true,
+      "runtime_minutes": 91,
+      "poster": "/assets/film-vault/nirt-جنگ-نوروزی-1357.jpg",
+      "url": "/library/iranian-popular-media/programmes/جنگ-نوروزی-1357/",
+      "description": "A New Year variety special, and the only programme here whose filing states a year: 1357 in the solar calendar, spanning March 1978 to March 1979 — the last Nowruz before the revolution. It opens not on a comic number but on a classical ghazal welcoming the flower and the golden cup, and counting the day toward the rose garden as a prize. Later come the sketches, and then the Haji Firuz song that announces the season: Nowruz has come, get up and celebrate, Uncle Nowruz is here again. It ends on a solitary number about wanting to be alone, far from the world.",
+      "source_reel": "Joined from 4 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": "1978–79",
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "preview_uid": "f1de913cc446727019173caeee57f248",
+      "preview_seconds": 60,
+      "preview_start_seconds": 540,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 14
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-دنیای-خوب-ما",
+      "title": "Our Good World — دنیای خوب ما",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "57f67c7076ea318efa5d787a3db7f938",
+      "playback_ready": true,
+      "runtime_minutes": 86,
+      "poster": "/assets/film-vault/nirt-دنیای-خوب-ما.jpg",
+      "url": "/library/iranian-popular-media/programmes/دنیای-خوب-ما/",
+      "description": "A Nowruz programme that alternates songs with studio conversation. The presenter asks a guest to sing something Shirazi, on the grounds that Nowruz makes everyone think of Shiraz, and they talk about whose poem became one of the best-known Shirazi songs. A composer describes writing for a particular singer's voice and introduces a new song called Ba To Budan, Being With You. The closing announcement is the one hard fact the programme states about itself: what you have seen tonight was a collaboration between Iran and Turkey, and the hope that there will be more of them.",
+      "source_reel": "Joined from 20 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "preview_uid": "ca433e18cf2695d681513da6a915a46c",
+      "preview_seconds": 60,
+      "preview_start_seconds": 505,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 7
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "nirt-شبکه-صفر",
+      "title": "Channel Zero — شبکه صفر",
+      "year": null,
+      "country": "Iran",
+      "region": "parsistan",
+      "module": "nirt",
+      "status": "PUBLISHED",
+      "stream_uid": "7ddb852f859d2e8b87d66649a66787d6",
+      "playback_ready": true,
+      "runtime_minutes": 64,
+      "poster": "/assets/film-vault/nirt-شبکه-صفر.jpg",
+      "url": "/library/iranian-popular-media/programmes/شبکه-صفر/",
+      "description": "Filed with چشمک (Cheshmak, Wink) on the same disc set. The comedy is set inside a television station and turns on its own hierarchy — a secretary is told she cannot speak to the head of the network that way, and is asked to reconsider how she behaves and how she decides. Songs run between the sketches, opening on a ballad addressed to a sleeping face and closing on one about being left alone. A television programme whose joke is the television station that makes it.",
+      "source_reel": "Joined from 20 disc chapters · NIRT television, pre-1979 · Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "provenance": "Digitized by Khajistan — Arvin Sehhatigdiri, Istanbul, Turkey",
+      "gregorian_span": null,
+      "poster_bg": "black",
+      "subtitle_languages": [
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "open_access": false,
+      "synopsis": "A sketch-and-song programme staged as a television channel that is broke. “Channel Zero” has a network chief — Mr Engineer, addressed at one point as Engineer Bili — a secretary who is also the channel's only singer, and a running argument about money that every sketch feeds back into.\n\nThe first long stretch is songs, straight and unironised: a lover who does not know what colour his beloved's eyes turn when they are heavy with sleep, likened to a cup of wine and to a book of Hafez; a lament that the sky has only ever told the story of sorrows and of a world that is aimless and unfaithful; a song of return in which the singer was killed and brought back to life by the same love.\n\nThen the channel itself becomes the joke, and the joke is austerity. The singer, the audience is told, has been given every flattering title going — best dressed, best smile, best teeth — and one more, awarded by the power grid: for two years the lights in her house have simply been left on, which has made her the Ministry of Energy's single biggest problem while it tells everyone else to economise. She defends herself: the lights only flicker. Asked for a glass of water, the chief orders half a glass, so the water is economised too. Later he lists the network's savings: stop making so many series — television wants a series, fine, instead of a series make a rial, that is a two-rial difference — and a deal of 420 million tomans where the purchases exist on paper and nobody knows where the goods are, which he proposes to fix while everyone practises economy.\n\nThe singer and the chief fight over the schedule. She was to be the only singer on the programme; another has been booked without telling her; she is not his secretary and sings when she feels like it; he threatens to advertise for one. Viewers, he explains, had complained that only Googoosh ever sings and nobody else is invited on, so he has widened it. It is settled the way these things are settled, with both of them claiming to be cousins.\n\nThe news comes next, and it is sung. Two announcers greet the ladies and the gentlemen, promise hot and cold news from all over Iran and the world, and then deliver almost none: the world has turned from the affairs of humankind, the Middle East is in uproar again, and solving that rested on our hopes. On one side poisons have grown strong; on the other, weapons are slowly being arranged; neither will accept a word or give up an inch. For two days there was hope and then the hangover came back. God, let the fire of war not catch, because the world is perishing over this war. The bulletin ends by thanking the viewers and telling them their time was wasted — until the next news programme.\n\nMore songs, and the best of the comic ones is about not owning a car: lucky is the man who has none, he goes on foot, his speed is higher anyway, he needs no parking place and no service, and there is no fine to pay. Then a visitor arrives to see the chief, is warned by the secretary that he is furious today, and greets him by saying how happy and cheerful he looks — and is beaten for it, twice, for repeating it. At the end an old man is conjugating Persian verbs aloud, I ate, you ate, he ate, we went, and is taken for someone dabbling in politics; he says he is only learning grammar, and is congratulated on the distinction.",
+      "context": "The frame is the oldest one in television comedy — a programme about a programme — but the target here is specific and local. Channel Zero is not a parody of television being silly; it is a parody of television being POOR, and of an institution telling the public to economise while its own accounts do not survive a glance. The electricity campaign, the half glass of water, the series cut to save a rial, the 420 million tomans of purchases that exist on paper: it is the same joke five times, aimed at state broadcasting from inside state broadcasting.\n\nThe sung news bulletin is the sharpest thing in it. Iranian television news of the period was a fixed, formal ritual, and setting it to a love-song refrain — «oh my beloved, oh my dear, the love of your face became my fate, la la la» — while the content is arms build-ups and a war that has not started yet is a joke about how much of the news is delivery. Signing off by telling the audience their time was wasted is the same joke landing on the programme itself.\n\nThe name is the last of them. شبکه صفر is Channel Zero — the channel that is not on the dial, the one before the ones that count.\n\nUNLIKE Dead End in the same batch, nothing here argues against the catalogue's pre-1979 attribution, and one thing supports it. The programme's running complaint is that only Googoosh ever sings on it. Googoosh was the pre-eminent Iranian pop singer of the 1960s and 70s; after the 1979 revolution she did not perform publicly in Iran for two decades. A television comedy whose premise is that she is on too often belongs to the years when she was, which is to say before 1979 — and that is consistent with NIRT.",
+      "dating_evidence": [
+        "Googoosh is named as the singer who is on the programme too often. She stopped performing publicly in Iran after the 1979 revolution, so the joke only works while she was performing — evidence FOR the catalogue's pre-1979 dating.",
+        "The economy is in tomans and rials, and a 420 million toman figure is spoken. Whether that sum reads as plausible for a broadcaster's purchasing in a given year would narrow the period; nobody has checked it against a source the archive holds.",
+        "The sung bulletin describes a Middle East arming for a war that has not begun — “let the fire of war not catch”. Several years fit that, so on its own it dates nothing; paired with Googoosh it points before 1979 rather than to the Iran–Iraq war.",
+        "A Ministry of Energy campaign urging households to economise on electricity is the premise of a whole sketch. If that campaign can be dated it bounds the programme."
+      ],
+      "uncertain": [
+        "The year. Nothing in the programme states one.",
+        "Every name is heard through an ASR transcript of a degraded transfer — “Engineer Bili” especially, which may not be a name at all.",
+        "Whether the singer in the sketch is played by Googoosh or is a character complaining about her. The transcript can be read both ways and the archive has not viewed it to settle which.",
+        "No cast, director, writer or broadcast date is stated.",
+        "The folder pairs this with a companion programme, شو چشمک (Cheshmak — “Wink”), which the archive has not joined or examined. Whatever that is, it is part of the same strand."
+      ],
+      "preview_uid": "a871dc45f6933c346129e05c717f1040",
+      "preview_seconds": 60,
+      "preview_start_seconds": 838,
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 9
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "Persian speech-recognition transcript with machine-assisted translations. Technical caption corrections checked on 10 September 2026. Source-audio proofreading and language review remain incomplete."
+    },
+    {
+      "handle": "filmfarsi-kalak-nazan-khoshgele",
+      "title": "Kalak Nazan Khoshgele — کلک نزن خوشگله",
+      "year": 1976,
+      "country": "Iran",
+      "region": "persia",
+      "module": "pre-rev-cinema",
+      "status": "ACTIVE",
+      "stream_uid": "618536218297cb9fe50fb6984a28980b",
+      "playback_ready": true,
+      "runtime_minutes": 97,
+      "poster": "/assets/film-vault/filmfarsi-kalak-nazan-khoshgele.jpg",
+      "poster_bg": "black",
+      "url": null,
+      "open_access": false,
+      "subtitle_languages": [],
+      "description": "Directed by Saeed Motalebi. Written by Mehdi Madaniyan. With Naser Malek Motiei and Bahman Mofid.",
+      "synopsis": "Directed by Saeed Motalebi. Written by Mehdi Madaniyan. With Naser Malek Motiei and Bahman Mofid.\n\nHeld by Khajistan and cleared title by title: Iranian production, no foreign co-production, no live underlying rights, and no diaspora distributor working it. The famous films of this era are not here — their Los Angeles distributors publish those already. This is the deep catalogue nobody reissued.",
+      "provenance": "Pre-revolution Iranian cinema · Iranian media archive, Istanbul — Arvin Sehhatigdiri",
+      "source_reel": "Pre-revolution Iranian cinema · Iranian media archive, Istanbul — Arvin Sehhatigdiri",
+      "gregorian_span": null,
+      "preview_start_seconds": 3400,
+      "preview_uid": "b423026d12cc2590af8efb18a4b43c09",
+      "preview_seconds": 60,
+      "preview_captions": {
+        "language": "en",
+        "source": "spoken",
+        "cues": 5
+      },
+      "access_note": "Not free. Access is set per title in the Screening Room; this flag no longer grants anyone anything.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "rent": 6,
+      "licence_price": 1200,
+      "subtitle_provenance": "No full-film subtitle tracks are currently available for this title."
+    },
+    {
+      "country": "Pakistan",
+      "region": "indus",
+      "module": "pakistani",
+      "status": "ACTIVE",
+      "rights_basis": "Owned outright — rights assigned to Khajistan by deed, Lahore, 20 December 2023. Distribution copy; film cans not yet scanned.",
+      "subtitle_provenance": "Machine-assisted subtitles. English checked against the Urdu transcript; targeted translation corrections and timing repairs reviewed on 10 September 2026. Transcript gaps, fast dialogue and song lyrics still require bilingual audio review.",
+      "handle": "saturday-night-2006-khajistan",
+      "title": "Saturday Night (2006)",
+      "year": 2006,
+      "poster": "/assets/film-vault/saturday-night-2006-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Saturday Night (2006)",
+      "stream_uid": "14567127093da99e3a32dc3ef5ae4abc",
+      "playback_ready": true,
+      "runtime_minutes": 125,
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "native": "français"
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "native": "español"
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "native": "Deutsch"
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "alternate_title": "Hotal Saturday Night",
+      "languages": [
+        "Urdu"
+      ],
+      "preview_start_seconds": 6172,
+      "preview_seconds": 60,
+      "preview_uid": "04a4fe3bd6f55b43297f2f4433e8b8fe",
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 28
+      },
+      "retail_eligible": true,
+      "institutional_eligible": true,
+      "download_ok": true,
+      "territory": "worldwide",
+      "open_access": false,
+      "rent": 6,
+      "buy": 20,
+      "synopsis": "A stage producer in the theatre district around Royal Park, Lahore, needs a Saturday-night house and tells one of his dancers to lift her shirt during her number. She does the number, takes a rickshaw, and is picked up on a dark street by a man in a black car; at the house he drives her to, the watchman is already digging.\n\nThe killings repeat weekly and the police get nowhere. In a separate household, Chaudhary Ghulam Rasool comes home from America to a wife who presides over the Women Welfare Association and cares about the money, a son running a failing car showroom, and a daughter who trawls for men using a broken-down car as bait. Rasool has his wife sign her money into his account, persuades the family to sell the house for a move to the United States, and leaves them at the airport with nothing. His son, discovering that the woman he has been promising himself to still works, shoots up the kotha.\n\nThe killer is taken with his accomplice, who is his father and the watchman; a second wife the father took years earlier is the reason he kills women he considers dirty. The police conclude his work has merit, because dancers have stopped coming to the theatres. The film sells itself on the numbers it condemns.",
+      "synopsis_credit": "Plot summarised from Omar Ali Khan's review of the film for Khajistan. Credits read from the film's own opening titles.",
+      "director": "Mohammad Rasheed Dogar",
+      "director_as_credited": "Rashid Dogger",
+      "cast": [
+        "Moammar Rana",
+        "Megha",
+        "Haya",
+        "Saif Ali",
+        "Aqsa",
+        "Nida Khan",
+        "Sana Butt",
+        "Abida Baig",
+        "Dr. Masood Ehsan",
+        "Mujahid Rana",
+        "Javed Hassan",
+        "Fakhar Imam"
+      ],
+      "writer": [
+        "Saleem Murad"
+      ],
+      "music": [
+        "Ali Afzal"
+      ],
+      "playback_singers": [
+        "Humaira Channa",
+        "Asma Lata",
+        "Sarwar Mehdi"
+      ],
+      "producers": [
+        "Riaz Gujjar",
+        "Shahzad Gujjar"
+      ],
+      "presented_by": "Mohd Waseem",
+      "production_company": "Gujjar Art Production",
+      "genre": "Crime thriller / stage-theatre melodrama",
+      "credits_source": "Opening title sequence of the Khajistan distribution copy, read frame by frame at 1 fps. Not from the PakMag index: its 'Saturday, Night' (2005) is a different film — director Darwesh, none of this cast."
+    },
+    {
+      "country": "Pakistan",
+      "region": "indus",
+      "module": "pakistani",
+      "status": "ACTIVE",
+      "rights_basis": "Owned outright — rights assigned to Khajistan by deed, Lahore, 20 December 2023. Distribution copy; film cans not yet scanned.",
+      "subtitle_provenance": "Machine-assisted subtitles. English checked against the Urdu transcript; targeted translation corrections and timing repairs reviewed on 10 September 2026. Transcript gaps, fast dialogue and song lyrics still require bilingual audio review.",
+      "handle": "jism-2006-khajistan",
+      "title": "Jism (2006)",
+      "year": 2006,
+      "poster": "/assets/film-vault/jism-2006-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Jism (2006)",
+      "stream_uid": "a708226770f5f9871f8ded98b720b168",
+      "playback_ready": true,
+      "runtime_minutes": 121,
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "native": "français"
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "native": "español"
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "native": "Deutsch"
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "languages": [
+        "Urdu"
+      ],
+      "preview_start_seconds": 1520,
+      "preview_seconds": 60,
+      "preview_uid": "d48661365cd293bef8241f2304558f7e",
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 24
+      },
+      "retail_eligible": true,
+      "institutional_eligible": true,
+      "download_ok": true,
+      "territory": "worldwide",
+      "open_access": false,
+      "rent": 6,
+      "buy": 20
+    },
+    {
+      "country": "Pakistan",
+      "region": "indus",
+      "module": "pakistani",
+      "status": "ACTIVE",
+      "poster_bg": "black",
+      "rights_basis": "Owned outright — rights assigned to Khajistan by deed, Lahore, 20 December 2023. Distribution copy; film cans not yet scanned.",
+      "subtitle_provenance": "Khajistan subtitles. Speech recognised from the film's own audio, written in Urdu, and translated from that Urdu — never from another translation. Song passages need a human pass.",
+      "handle": "madam-bavari-madam-x-2009-khajistan",
+      "title": "Madam Bavari (2009)",
+      "year": 2009,
+      "poster": "/assets/film-vault/madam-bavari-madam-x-2009-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Madam Bavari (2009)",
+      "stream_uid": "0ce856e546e2332694dfe3f8cecb50bc",
+      "playback_ready": true,
+      "runtime_minutes": 126,
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "native": "français"
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "native": "español"
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "native": "Deutsch"
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "alternate_title": "Madam X",
+      "languages": [
+        "Urdu"
+      ],
+      "preview_start_seconds": 4245,
+      "preview_seconds": 60,
+      "preview_uid": "2273e08b498851ee97c856bbca593337",
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 22
+      },
+      "retail_eligible": true,
+      "institutional_eligible": true,
+      "download_ok": true,
+      "territory": "worldwide",
+      "open_access": false,
+      "rent": 6,
+      "buy": 20
+    },
+    {
+      "country": "Pakistan",
+      "region": "indus",
+      "module": "pakistani",
+      "status": "ACTIVE",
+      "rights_basis": "Owned outright — rights assigned to Khajistan by deed, Lahore, 20 December 2023. Distribution copy; film cans not yet scanned.",
+      "subtitle_provenance": "Khajistan subtitles. Speech recognised from the film's own audio, written in Urdu, and translated from that Urdu — never from another translation. Song passages need a human pass.",
+      "handle": "razia-phas-gayi-ghundon-main-2015-khajistan",
+      "title": "Razia Phas Gayi Ghundon Main (2015)",
+      "year": 2015,
+      "poster": "/assets/film-vault/razia-phas-gayi-ghundon-main-2015-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Razia Phas Gayi Ghundon Main (2015)",
+      "stream_uid": "f38eb37af73255f0411f00dbecaf045f",
+      "playback_ready": true,
+      "runtime_minutes": 124,
+      "subtitle_languages": [
+        {
+          "code": "ur",
+          "name": "Urdu",
+          "native": "اردو"
+        },
+        {
+          "code": "en",
+          "name": "English",
+          "native": ""
+        },
+        {
+          "code": "fr",
+          "name": "French",
+          "native": "français"
+        },
+        {
+          "code": "es",
+          "name": "Spanish",
+          "native": "español"
+        },
+        {
+          "code": "de",
+          "name": "German",
+          "native": "Deutsch"
+        },
+        {
+          "code": "ar",
+          "name": "Arabic",
+          "native": "العربية"
+        },
+        {
+          "code": "fa",
+          "name": "Persian",
+          "native": "فارسی"
+        },
+        {
+          "code": "ps",
+          "name": "Pashto",
+          "native": "پښتو"
+        },
+        {
+          "code": "he",
+          "name": "Hebrew",
+          "native": "עברית"
+        }
+      ],
+      "languages": [
+        "Urdu"
+      ],
+      "preview_start_seconds": 326,
+      "preview_seconds": 60,
+      "preview_uid": "91ef27681c9284fec1977eb4d95a6da7",
+      "preview_reframe": {
+        "crop": "1280:512:0:64",
+        "frame": "1280x512",
+        "why": "blurred distributor bug cropped out of the preview"
+      },
+      "preview_captions": {
+        "language": "en",
+        "source": "attached",
+        "cues": 32
+      },
+      "retail_eligible": true,
+      "institutional_eligible": true,
+      "download_ok": true,
+      "territory": "worldwide",
+      "open_access": false,
+      "rent": 6,
+      "buy": 20
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-9-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 9",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "tier": "vault",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-9-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 9",
+      "poster_bg": "black",
+      "stream_uid": "0a924c35a0de9b377d33816dd14a6d12",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 10",
+      "tv_programme_id": "filmfarsi-trailers-vol-9",
+      "languages": [
+        "Persian"
+      ],
+      "description": "Seventy-four minutes of Iranian coming attractions off a single reel. Identified passages include Sad Kilo Damad (1961). The rest is not yet named title by title; the reel is presented whole, as it was cut.",
+      "runtime_minutes": 74,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "9",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "provenance": "Pre-revolution Iranian cinema · Iranian media archive, Istanbul — Arvin Sehhatigdiri",
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "lead_title": "Sad Kilo Damad (1961)",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 10",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "No full-film subtitle tracks are currently available for this title."
+    },
+    {
+      "handle": "filmfarsi-trailers-vol-10-khajistan",
+      "title": "Filmfarsi Trailers — Vol. 10",
+      "year": null,
+      "period": "c. 1960s–70s",
+      "country": "Iran",
+      "region": "persia",
+      "tier": "vault",
+      "status": "ACTIVE",
+      "poster": "/assets/film-vault/filmfarsi-trailers-vol-10-khajistan.jpg",
+      "poster_alt": "Khajistan Releasing poster for Filmfarsi Trailers — Vol. 10",
+      "poster_bg": "black",
+      "stream_uid": "3a22d8e6a77f58ba136bd2239aad23ce",
+      "playback_ready": true,
+      "source_reel": "Trailer reel 15",
+      "tv_programme_id": "filmfarsi-trailers-vol-10",
+      "languages": [
+        "Persian"
+      ],
+      "description": "A trailer reel that runs on into a cabaret programme — the tape carries both and they are kept together, because the join is how this material survived. Individual passages are not yet identified.",
+      "runtime_minutes": 117,
+      "collection": "Filmfarsi Trailers",
+      "collection_number": "10",
+      "edition": "2026",
+      "publisher": "Khajistan",
+      "module": "filmfarsi",
+      "open_access": false,
+      "provenance": "Pre-revolution Iranian cinema · Iranian media archive, Istanbul — Arvin Sehhatigdiri",
+      "rent": null,
+      "access_note": "Institutional licensing only. Owner ruling, 2026-08-12 — the volumes air in full on Khajistan TV, so there is no retail price to charge. No Screening Room title is free.",
+      "retail_eligible": false,
+      "institutional_eligible": true,
+      "download_ok": false,
+      "territory": "unrecorded",
+      "buy": null,
+      "price": null,
+      "source_reel_label": "Anons 15",
+      "licence_price": 1200,
+      "licence_terms": "Perpetual institutional licence. One public performance included; further public screenings are licensed separately.",
+      "subtitle_provenance": "No full-film subtitle tracks are currently available for this title."
+    }
+  ],
+  "modules": [
+    {
+      "key": "nirt",
+      "title": "Pre-Revolution Iranian Television",
+      "native": "تلویزیون ملی ایران",
+      "blurb": "Complete NIRT programmes from before 1979 — variety, cabaret, plays and Nowruz specials, subtitled in six languages. Digitized by Khajistan in Istanbul."
+    },
+    {
+      "key": "filmfarsi",
+      "title": "Filmfarsi Trailers",
+      "native": "فیلمفارسی",
+      "blurb": "Reels of Iranian cinema trailers, compiled volume by volume from the pre-revolution commercial industry.",
+      "set_licence_price": 10000,
+      "set_licence_note": "All ten volumes on one perpetual institutional licence. One public performance included across the set."
+    },
+    {
+      "key": "pakistani",
+      "title": "Pakistani Cinema & Documentary",
+      "native": "پاکستانی سنیما",
+      "blurb": "Features and documentaries Khajistan distributes — director's cuts, uncut restorations, and films that were banned or cut on release."
+    },
+    {
+      "key": "spasial",
+      "title": "Spasial Program Exhibition Tapes",
+      "native": "",
+      "blurb": "Home-recorded television tapes shown as exhibition works — what was actually playing in the living room, kept as recorded."
+    },
+    {
+      "key": "pre-rev-cinema",
+      "title": "Pre-Revolution Iranian Cinema",
+      "native": "سینمای پیش از انقلاب",
+      "blurb": "Feature films from the Iranian commercial industry before 1979, cleared title by title. The famous ones are not here: the canon is already published by its Los Angeles distributors. These are the films nobody reissued."
+    }
+  ]
+}

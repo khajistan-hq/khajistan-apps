@@ -2144,6 +2144,186 @@ func mixClockFormat() throws {
 
 // MARK: - Runner
 
+// MARK: - The Screening Room (vod.json, as open-frequencies.js reads it)
+
+func vodFixture() throws -> (catalogue: FilmCatalogue, raw: [[String: Any]]) {
+    let data = try Data(contentsOf: fixtureURL.deletingLastPathComponent().appendingPathComponent("vod-fixture.json"))
+    let raw = try require((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["films"] as? [[String: Any]])
+    return (try JSONDecoder().decode(FilmCatalogue.self, from: data), raw)
+}
+
+func film(_ json: String) throws -> Film { try decode(Film.self, json) }
+
+func vodFixtureDecodes() throws {
+    let (catalogue, raw) = try vodFixture()
+    try expectEqual(catalogue.films.count, raw.count)
+    try expectEqual(catalogue.films.count, 32)
+    let offered = Films.offered(catalogue.films)
+    try expectEqual(offered.map(\.handle), raw.compactMap { $0["handle"] as? String }, "every film offered, in the file's order")
+    // 30 carry a preview clip, as the site's filmChannel() comment says; every one builds a URL.
+    try expectEqual(offered.filter { Films.previewURL($0) != nil }.count, raw.filter { ($0["preview_uid"] as? String)?.isEmpty == false }.count)
+    try expectEqual(offered.filter { Films.previewURL($0) != nil }.count, 30)
+    for f in offered {
+        let preview = Films.previewURL(f)
+        if let preview { try expect(preview.absoluteString.hasPrefix("https://\(KJConfig.streamHost)/") && preview.absoluteString.hasSuffix("/manifest/video.m3u8"), f.handle) }
+        try expect(Films.posterURL(f, origin: KJConfig.site) != nil, "poster \(f.handle)")
+        // The full film's own id is never something the app can reach.
+        if let uid = raw.first(where: { $0["handle"] as? String == f.handle })?["stream_uid"] as? String, !uid.isEmpty {
+            try expect(preview?.absoluteString.contains(uid) != true, "preview is not the full film \(f.handle)")
+        }
+    }
+    let byHandle = Dictionary(uniqueKeysWithValues: offered.map { ($0.handle, $0) })
+    let showgirls = try require(byHandle["showgirls-of-pakistan-2021-khajistan"])
+    try expectEqual(Films.displayTitle(showgirls), "Showgirls of Pakistan (2021)", "the year is not printed twice")
+    try expectEqual(Films.detail(showgirls), "105 minutes \u{00B7} Pakistan")
+    try expectEqual(Films.detail(try require(byHandle["jism-2006-khajistan"])), "121 minutes \u{00B7} Urdu \u{00B7} Pakistan")
+    try expectEqual(Films.posterURL(showgirls, origin: KJConfig.site)?.absoluteString,
+                    "https://khajistan-archive.pages.dev/assets/film-vault/showgirls-of-pakistan-2021-khajistan.png")
+    // A handle in Persian script is percent-encoded the way encodeURIComponent encodes it.
+    let persian = try require(byHandle["nirt-شبکه-صفر"])
+    try expectEqual(Films.pageURL(persian).absoluteString,
+                    "https://khajistan-archive.pages.dev/film/nirt-%D8%B4%D8%A8%DA%A9%D9%87-%D8%B5%D9%81%D8%B1")
+    try expectEqual(Films.pageURL(showgirls).absoluteString, "https://khajistan-archive.pages.dev/film/showgirls-of-pakistan-2021-khajistan")
+}
+
+func vodLanguagesTakeEitherShape() throws {
+    try expectEqual(try film(#"{"handle":"a","title":"A","languages":["Urdu","Punjabi"]}"#).languages?.text, "Urdu, Punjabi")
+    try expectEqual(try film(#"{"handle":"a","title":"A","languages":"Pashto"}"#).languages?.text, "Pashto")
+    try expectEqual(try film(#"{"handle":"a","title":"A"}"#).languages, nil)
+    try expectEqual(Films.offered([try film(#"{"handle":"","title":"A"}"#), try film(#"{"handle":"b"}"#), try film(#"{"handle":"c","title":""}"#)]).count, 0,
+                    "no handle or no title is not offered")
+}
+
+/// marqueeOffer(): rent first, then the licence, else nothing; the figure is the record's own.
+func vodOfferLine() throws {
+    let rent = "Rent $6 \u{00B7} 48 hours to finish"
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":6}"#)), rent)
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":6,"licence_price":1200}"#)), rent, "rent outranks the licence")
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":6,"buy":20}"#)), rent, "the line quotes the rent, never the purchase")
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","licence_price":1200}"#)), "Institutional licence \u{00B7} by inquiry on the film's page")
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":7.5}"#)), "Rent $7.5 \u{00B7} 48 hours to finish", "no price constant: the record's figure")
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":0}"#)), "Rent $0 \u{00B7} 48 hours to finish", "0 is a value, as rent != null is in JS")
+    // Negative cases: nothing to quote is no line, a purchase alone is no line, null is absence.
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A"}"#)), nil)
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","buy":20}"#)), nil)
+    try expectEqual(Films.offer(try film(#"{"handle":"a","title":"A","rent":null,"licence_price":null}"#)), nil)
+    // Over the real catalogue: 22 rent lines, 10 licence lines (the Filmfarsi volumes), none empty.
+    let offers = Films.offered(try vodFixture().catalogue.films).map(Films.offer)
+    try expectEqual(offers.filter { $0 == rent }.count, 22)
+    try expectEqual(offers.filter { $0?.hasPrefix("Institutional licence") == true }.count, 10)
+    try expectEqual(offers.filter { $0 == nil }.count, 0)
+}
+
+let receiverRegionIDs: Set<String> = ["indus", "parsistan", "khorasan", "arabia", "levant", "maghreb", "qafqaz", "anatolia", "egypt-nile"]
+
+/// broadcastRegionFor() on a film's region: a receiver id passes, a site key maps, none is nowhere.
+func vodRegionFiling() throws {
+    try expectEqual(Films.filedRegion("indus", known: receiverRegionIDs), "indus")
+    try expectEqual(Films.filedRegion("parsistan", known: receiverRegionIDs), "parsistan")
+    try expectEqual(Films.filedRegion("persia", known: receiverRegionIDs), "parsistan", "the site key persia is the receiver's parsistan")
+    try expectEqual(Films.filedRegion(" Persia ", known: receiverRegionIDs), "parsistan")
+    try expectEqual(Films.filedRegion("mashriq", known: receiverRegionIDs), "arabia")
+    try expectEqual(Films.filedRegion("egypt", known: receiverRegionIDs), "maghreb")
+    try expectEqual(Films.filedRegion("caucasus", known: receiverRegionIDs), "qafqaz")
+    try expectEqual(Films.filedRegion("egypt-nile", known: receiverRegionIDs), "egypt-nile", "a registry id is never re-mapped")
+    try expectEqual(Films.filedRegion(nil, known: receiverRegionIDs), nil)
+    try expectEqual(Films.filedRegion("", known: receiverRegionIDs), nil)
+    // Over the real catalogue: Indus 11, Persia 19 (eleven "persia", eight "parsistan"), two unfiled.
+    let films = Films.offered(try vodFixture().catalogue.films)
+    var tally: [String: Int] = [:]
+    for f in films { tally[Films.filedRegion(f.region, known: receiverRegionIDs) ?? "(none)", default: 0] += 1 }
+    try expectEqual(tally, ["indus": 11, "parsistan": 19, "(none)": 2])
+    try expect(films.filter { Films.filedRegion($0.region, known: receiverRegionIDs) == nil }.allSatisfy { $0.handle.hasPrefix("spasial-") },
+               "the two unfiled are the Spasial programmes")
+}
+
+/// requestFilmToken(): POST {"film_handle"} with the session, and what the answer means.
+func vodTokenRequestAndAnswer() throws {
+    let request = Films.tokenRequest(handle: "nirt-bonbast", accessToken: "tok")
+    try expectEqual(request.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/vod-token")
+    try expectEqual(request.httpMethod, "POST")
+    try expectEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    try expectEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+    try expectEqual(request.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+    let body = try require(try JSONSerialization.jsonObject(with: try require(request.httpBody)) as? [String: String])
+    try expectEqual(body, ["film_handle": "nirt-bonbast"])
+
+    try expectEqual(Films.access(status: 200, body: Data(#"{"token":"a.b-c_d","kind":"rent","expires_at":"2026-10-07T10:00:00Z"}"#.utf8)),
+                    .granted(token: "a.b-c_d", kind: "rent", expiresAt: "2026-10-07T10:00:00Z"))
+    try expectEqual(Films.access(status: 200, body: Data(#"{"kind":"rent"}"#.utf8)), .refused(status: 409), "2xx without a token is 409")
+    try expectEqual(Films.access(status: 200, body: Data("not json".utf8)), .refused(status: 409))
+    try expectEqual(Films.access(status: 403, body: Data(#"{"token":"x"}"#.utf8)), .refused(status: 403), "a token on a refusal is not used")
+    try expectEqual(Films.access(status: 401, body: Data()), .refused(status: 401))
+    try expectEqual(Films.fullFilmURL(token: "a.b-c_d")?.absoluteString,
+                    "https://\(KJConfig.streamHost)/a.b-c_d/manifest/video.m3u8")
+    try expectEqual(Films.fullFilmURL(token: "a/b?c")?.absoluteString,
+                    "https://\(KJConfig.streamHost)/a%2Fb%3Fc/manifest/video.m3u8", "a token cannot leave its path segment")
+}
+
+/// denyText(): the site's words, by status and by what a SKU can actually charge.
+func vodDenyText() throws {
+    let rentable = try film(#"{"handle":"a","title":"A","rent":6,"licence_price":1200}"#)
+    try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film, then press Watch the full film again.")
+    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it here, then press Watch the full film again.")
+    let buyOnly = try film(#"{"handle":"a","title":"A","rent":7,"buy":20}"#)
+    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it here, then press Watch the full film again.",
+                    "a rent with no SKU at its price does not say rent")
+    let licensed = try film(#"{"handle":"a","title":"A","licence_price":1200}"#)
+    try expectEqual(Films.denyText(licensed, status: 403), "This film is licensed rather than sold. Screening and institutional terms are by inquiry.")
+    try expectEqual(Films.denyText(try film(#"{"handle":"a","title":"A","buy":99}"#), status: 403), "This film is not on your Khajistan account yet.")
+    for status in [0, 400, 409, 500, 503] {
+        try expectEqual(Films.denyText(rentable, status: status), Films.faultText, "status \(status) is ours")
+    }
+    try expect(Films.faultText.hasSuffix("write to info@khajistan.com"))
+}
+
+/// The SKU table is a copy of the site's VARIANTS; this fails when the two disagree.
+func vodVariantsMatchTheSite() throws {
+    let js = String(decoding: try realFile("scripts/open-frequencies.js"), as: UTF8.self)
+    let start = try require(js.range(of: "var VARIANTS = {"), "VARIANTS in open-frequencies.js")
+    let block = String(js[start.upperBound...].prefix { $0 != ";" })
+    func parse(_ kind: String) throws -> [Int: String] {
+        let line = try require(block.components(separatedBy: "\n").first { $0.trimmingCharacters(in: .whitespaces).hasPrefix(kind + ":") }, kind)
+        var out: [Int: String] = [:]
+        let body = line[try require(line.firstIndex(of: "{"))...]
+        for pair in body.split(whereSeparator: { $0 == "," || $0 == "{" || $0 == "}" }) {
+            let parts = pair.split(separator: ":")
+            guard parts.count == 2, let price = Int(parts[0].trimmingCharacters(in: .whitespaces)) else { continue }
+            out[price] = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " \"/")).components(separatedBy: "\"").first
+        }
+        return out
+    }
+    try expectEqual(try parse("rent"), try require(Films.variants["rent"]))
+    try expectEqual(try parse("buy"), try require(Films.variants["buy"]))
+    // The comparator can fail: a table with one price moved does not match.
+    try expect(try parse("rent") != [7: "50071506125014"])
+    try expectEqual(Films.variant("rent", 6), "50071506125014")
+    try expectEqual(Films.variant("rent", 6.5), nil)
+    try expectEqual(Films.variant("buy", nil), nil)
+}
+
+func vodAccessLine() throws {
+    let utc = try require(TimeZone(identifier: "UTC"))
+    try expectEqual(Films.accessLine(kind: "staff", expiresAt: nil), "Staff access")
+    try expectEqual(Films.accessLine(kind: "subscription", expiresAt: "2027-01-01T00:00:00Z"), "All Access annual")
+    try expectEqual(Films.accessLine(kind: "rent", expiresAt: "2026-10-07T15:00:00Z", timeZone: utc), "Rented \u{00B7} until Oct 7, 3:00 PM")
+    try expectEqual(Films.accessLine(kind: "rent", expiresAt: "2026-10-07T15:04:05.123+00:00", timeZone: utc), "Rented \u{00B7} until Oct 7, 3:04 PM")
+    try expectEqual(Films.accessLine(kind: "residency", expiresAt: "2026-11-01T09:30:00Z", timeZone: utc), "Yours until Nov 1, 9:30 AM")
+    try expectEqual(Films.accessLine(kind: "rent", expiresAt: "not a date"), "Rented")
+    try expectEqual(Films.accessLine(kind: "buy", expiresAt: nil), "Bought \u{2014} yours to keep")
+    try expectEqual(Films.accessLine(kind: nil, expiresAt: nil), "On your Khajistan account")
+}
+
+func vodPathsRefuseOtherHosts() throws {
+    try expectEqual(Films.posterURL(try film(#"{"handle":"a","title":"A","poster":"//evil.example/x.png"}"#), origin: KJConfig.site), nil)
+    try expectEqual(Films.posterURL(try film(#"{"handle":"a","title":"A","poster":"https://evil.example/x.png"}"#), origin: KJConfig.site), nil)
+    try expectEqual(Films.posterURL(try film(#"{"handle":"a","title":"A","poster":"/assets/film-vault/nirt-شبکه-صفر.jpg"}"#), origin: KJConfig.site)?.absoluteString,
+                    "https://khajistan-archive.pages.dev/assets/film-vault/nirt-%D8%B4%D8%A8%DA%A9%D9%87-%D8%B5%D9%81%D8%B1.jpg")
+    try expectEqual(Films.previewURL(try film(#"{"handle":"a","title":"A","preview_uid":"../x"}"#)), nil, "a preview id is one path segment")
+    try expectEqual(Films.previewURL(try film(#"{"handle":"a","title":"A","preview_uid":""}"#)), nil)
+    try expectEqual(Films.catalogueURL(origin: KJConfig.site).absoluteString, "https://khajistan-archive.pages.dev/data/khajistan-tv/vod.json")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Skin hours at the boundaries", skinHoursAtBoundaries),
     ("Skin hex triples", skinColours),
@@ -2218,6 +2398,15 @@ let tests: [(String, () throws -> Void)] = [
     ("Mix presentation rules", mixPresentationRules),
     ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
     ("Mix clock format", mixClockFormat),
+    ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
+    ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),
+    ("Screening Room: the offer line (marqueeOffer)", vodOfferLine),
+    ("Screening Room: region filing (broadcastRegionFor)", vodRegionFiling),
+    ("Screening Room: vod-token request and answer", vodTokenRequestAndAnswer),
+    ("Screening Room: refusal wording (denyText)", vodDenyText),
+    ("Screening Room: SKU table matches the site's VARIANTS", vodVariantsMatchTheSite),
+    ("Screening Room: access line", vodAccessLine),
+    ("Screening Room: paths stay on their host", vodPathsRefuseOtherHosts),
 ]
 
 var passed = 0, failed = 0, skipped = 0

@@ -365,6 +365,8 @@ struct PlayerStrip: View {
     let trailing: [String]
     /// What comes next on a scheduled channel: its start time and its name.
     var upNext: (time: String, name: String)? = nil
+    /// The caption control, at the right end, where a press of right reaches it.
+    var accessory: AnyView? = nil
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -411,6 +413,9 @@ struct PlayerStrip: View {
                 .frame(maxWidth: 520, alignment: .trailing)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("upNext")
+            }
+            if let accessory {
+                accessory
             }
         }
         .foregroundStyle(palette.onBand)

@@ -246,6 +246,41 @@ final class PlayerController {
         return time.isNumeric ? time.seconds * 1000 : nil
     }
 
+    /// The clock live captions are placed on (kj-captions-live.js reads the same from the media
+    /// element): where the picture is, how far behind the live edge, the programme date the HLS
+    /// playlist stamps on it, and the seekable window. A radio mount the app plays itself has no
+    /// window and no hold, so it runs on the wall clock.
+    struct CaptionClock {
+        let now: Double
+        let behindLive: Double
+        let programDate: Date?
+        let window: ClosedRange<Double>?
+    }
+
+    var captionClock: CaptionClock? {
+        if liveRadio != nil {
+            return CaptionClock(now: Date().timeIntervalSince1970, behindLive: 0, programDate: nil, window: nil)
+        }
+        guard let item = player.currentItem else { return nil }
+        let now = player.currentTime().seconds
+        guard now.isFinite else { return nil }
+        var window: ClosedRange<Double>?
+        if let range = item.seekableTimeRanges.last?.timeRangeValue, range.duration.seconds > 0,
+           range.start.seconds.isFinite, range.end.seconds.isFinite {
+            window = range.start.seconds...range.end.seconds
+        }
+        return CaptionClock(now: now, behindLive: window.map { max(0, $0.upperBound - now) } ?? 0,
+                            programDate: item.currentDate(), window: window)
+    }
+
+    /// Holds the picture further back, so a caption lands with the speech (the site's resync).
+    func seekBack(by seconds: Double) {
+        let target = player.currentTime().seconds - seconds
+        guard target.isFinite, seconds > 0 else { return }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
+                    toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600))
+    }
+
     /// Whether anything can be heard: the site's `!paused && !muted && volume > 0`.
     var audible: Bool {
         if let liveRadio { return liveRadio.isPlaying && liveRadio.volume > 0 }

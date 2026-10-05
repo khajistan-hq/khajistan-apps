@@ -26,6 +26,8 @@ final class AppModel {
     let films: FilmStore
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
+    /// Live captions on the receiver's player. One at a time, as there is one player at a time.
+    let captions: LiveCaptionSession
 
     /// "Beyond the atlas", persisted on the device and off by default. The value lives in
     /// UserDefaults, so the registrar is told by hand when it is read and when it changes.
@@ -63,6 +65,7 @@ final class AppModel {
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
         self.films = FilmStore(auth: auth)
+        self.captions = LiveCaptionSession(auth: auth)
         if let launched = UserDefaults.standard.string(forKey: DefaultsKey.launchSkin) {
             UserDefaults.standard.set(SkinChoice(stored: launched).rawValue, forKey: DefaultsKey.skinChoice)
         }

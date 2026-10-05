@@ -44,24 +44,25 @@ struct ExploreView: View {
                         Button(action: search) { Image(systemName: "arrow.right").frame(width: 44, height: 44) }
                             .accessibilityLabel("Search archive").disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }.padding(.leading, 12).overlay { Rectangle().stroke(.black) }.padding(.horizontal, 20).padding(.bottom, 22)
-                    SectionBand(title: "Enter the archive")
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(ArchiveDestination.all.prefix(10).enumerated()), id: \.element.id) { index, destination in
-                            Button { model.open(destination.url) } label: {
-                                HStack(spacing: 16) {
-                                    Text(String(format: "%02d", index + 1)).font(.caption.monospaced()).foregroundStyle(Brand.green).frame(width: 24)
-                                    VStack(alignment: .leading, spacing: 5) {
-                                        Text(destination.title).font(.title3.weight(.bold))
-                                        Text(destination.subtitle).font(.subheadline).foregroundStyle(Brand.green)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right").font(.body.weight(.medium))
-                                }.padding(.horizontal, 20).padding(.vertical, 19).frame(maxWidth: .infinity, alignment: .leading)
-                            }.buttonStyle(.plain).accessibilityIdentifier("destination-\(destination.id)")
-                            Divider().overlay(.black)
+                    ForEach(ArchiveDestination.doors, id: \.door) { group in
+                        SectionBand(title: group.door)
+                        LazyVStack(spacing: 0) {
+                            ForEach(group.rooms) { destination in
+                                Button { model.open(destination.url) } label: {
+                                    HStack(spacing: 16) {
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(destination.title).font(.title3.weight(.bold))
+                                            Text(destination.subtitle).font(.subheadline).foregroundStyle(Brand.green)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right").font(.body.weight(.medium))
+                                    }.padding(.horizontal, 20).padding(.vertical, 17).frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }.buttonStyle(.plain).accessibilityIdentifier("destination-\(destination.id)")
+                                if destination != group.rooms.last { Divider().overlay(.black) }
+                            }
                         }
                     }
-                    Text("KHAJISTAN / IN YOUR POCKET").font(.caption2.monospaced()).tracking(1.5).padding(24)
                 }
             }
             .background(Brand.yellow).foregroundStyle(.black)

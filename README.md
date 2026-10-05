@@ -19,7 +19,7 @@ Players (receiver channel, Transmission, mix, Pics/Vids video) are full screen w
 
 **Skins** follow the website exactly (`Core/Sky.swift`, a port of KJSky in `kj-theme-boot.js`): Day with the sun above +6°, Smut between ±6°, Grove below, read from the device's time zone and tzdata's coordinate for it, hour bands where the zone is not in the table. Automatic, Day, Grove or Smut is chosen on the ACCOUNT page and stored under the site's own keys (`kj:theme`, `kj:theme:band`); a pick holds until the sky moves to another band. The same keys are written into every in-app web page before the site's scripts run, so the website opens in the app's skin. `-kjskin grove` on the command line forces a skin for screenshots and is never stored.
 
-No system tab bar, navigation bar, alert or grey panel is drawn by the app. What iOS still draws itself: the status bar (black glyphs on Day, white on Grove and Smut, as iOS offers only those two), the keyboard, the share sheet and Quick Look.
+No system tab bar, navigation bar, alert or grey panel is drawn by the app. What iOS still draws itself: the status bar (black glyphs on Day, white on Grove and Smut, as iOS offers only those two; white there is the owner's ruling of 2026-10-05, recorded in `.claude/rules/frontend.md` §2), the keyboard, the share sheet and Quick Look.
 
 ## Source repository and build previews
 

@@ -1,0 +1,5 @@
+WEBVTT - a UI-test fixture: one cue long enough to cover any moment of any slot
+
+00:00:00.000 --> 99:00:00.000 line:85% align:center
+یہ سطر دائیں سے بائیں پڑھی جاتی ہے۔
+This line reads left to right.

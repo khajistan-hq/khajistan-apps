@@ -3,6 +3,11 @@ import SwiftUI
 /// A receiver channel, full screen. Up and down tune the neighbouring channel in the list the
 /// viewer came from, behind the pigeon (StationClips); play/pause pauses, and pressing it again tunes the
 /// channel afresh, because a live signal paused for a minute is not the live signal any more.
+///
+/// Live captions: where the channel offers them the strip ends in the Captions control. Right moves
+/// to it and left comes back; Select on it turns captions on or off. Play/Pause, Select on the
+/// picture and up/down are already the player's, and a control the viewer can see in the strip says
+/// what it does, which a hidden gesture would not.
 struct ReceiverPlayerView: View {
     let list: [Channel]
 
@@ -18,6 +23,11 @@ struct ReceiverPlayerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var changeTask: Task<Void, Never>?
+    /// The Captions control takes focus only when the viewer moves right to it, so the focus engine
+    /// never lands on it from an up or down press, which change channel.
+    @State private var captionArmed = false
+    @State private var stripHeight: CGFloat = 0
+    @FocusState private var focus: PlayerFocus?
 
     init(channel: Channel, list: [Channel]) {
         self.list = list
@@ -44,15 +54,18 @@ struct ReceiverPlayerView: View {
                         .padding(.horizontal, KJLayout.inset)
                 }
             }
-            overlay(palette)
             // The focus target. It draws nothing; its job is to hold focus so the remote's
-            // presses reach the handlers below, and a click on it wakes the overlay.
+            // presses reach the handlers below, and a click on it wakes the overlay. It sits under
+            // the strip, so the Captions control above it can take focus.
             Button {
                 wake()
             } label: {
                 Color.clear
             }
             .buttonStyle(SurfaceButtonStyle())
+            .focused($focus, equals: .surface)
+            overlay(palette)
+            CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)
@@ -62,6 +75,8 @@ struct ReceiverPlayerView: View {
             switch direction {
             case .up: step(by: -1)
             case .down: step(by: 1)
+            case .right: moveToCaptions()
+            case .left: leaveCaptions()
             default: break
             }
         }
@@ -105,9 +120,10 @@ struct ReceiverPlayerView: View {
                 name: current.mediaType == "radio" && controller.state == .playing ? nil : current.name,
                 detail: stripDetail,
                 attribution: current.attributionText,
-                trailing: stripTrailing
+                trailing: stripTrailing,
+                accessory: model.captions.offered ? AnyView(captionsControl) : nil
             )
-            .accessibilityElement(children: .combine)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
             .opacity(stripShown ? 1 : 0)
         }
@@ -130,13 +146,52 @@ struct ReceiverPlayerView: View {
         }
     }
 
-    /// What follows the name: a failure's reason, Paused, or the place.
+    /// What follows the name: a failure's reason, Paused, the captions' note, or the place.
     private var stripDetail: String? {
         switch controller.state {
         case .failed(let message): return message
         case .paused: return "Paused"
-        default: return current.place.isEmpty ? nil : current.place
+        default:
+            if !model.captions.note.isEmpty { return model.captions.note }
+            return current.place.isEmpty ? nil : current.place
         }
+    }
+
+    /// The site's Captions button: its label says what is on and what is left.
+    /// A button only once the viewer has moved to it, and focused as it appears; until then the
+    /// same label drawn plain, so no up or down press can land on it.
+    @ViewBuilder
+    private var captionsControl: some View {
+        if captionArmed {
+            Button {
+                model.captions.toggle()
+            } label: {
+                Text(model.captions.label)
+            }
+            .buttonStyle(StripChipStyle(isOn: model.captions.isOn))
+            .focused($focus, equals: .captions)
+            .onAppear { focus = .captions }
+            .accessibilityIdentifier("captionsControl")
+            .accessibilityValue(model.captions.isOn ? "On" : "Off")
+        } else {
+            StripChipStyle.face(Text(model.captions.label), isOn: model.captions.isOn)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("captionsControl")
+                .accessibilityValue(model.captions.isOn ? "On" : "Off")
+        }
+    }
+
+    private func moveToCaptions() {
+        guard model.captions.offered, stripShown else { return }
+        hideTask?.cancel()
+        captionArmed = true
+    }
+
+    private func leaveCaptions() {
+        guard captionArmed else { return }
+        captionArmed = false
+        focus = .surface
+        wake()
     }
 
     /// The medium only: the place is already beside the name, and one thing is said once.
@@ -193,6 +248,7 @@ struct ReceiverPlayerView: View {
                     // on AVPlayer and has no dancer.
                     live: target.activeStream?.format != "hls" && !url.path.lowercased().hasSuffix(".m3u8")
                 )
+                model.captions.attach(target, player: controller)
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
@@ -260,6 +316,7 @@ struct ReceiverPlayerView: View {
         tuneTask?.cancel()
         changeTask?.cancel()
         hideTask?.cancel()
+        model.captions.detach()
         controller.stop()
         model.clips.clear()
     }
@@ -272,7 +329,16 @@ struct ReceiverPlayerView: View {
         guard controller.state == .playing else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
-            if !Task.isCancelled { overlayVisible = false }
+            // The strip stays while the viewer is on its Captions control.
+            if !Task.isCancelled, focus != .captions {
+                overlayVisible = false
+                captionArmed = false
+            }
         }
     }
+}
+
+/// What holds focus on a player: the picture, or the caption control in its strip.
+enum PlayerFocus: Hashable {
+    case surface, captions
 }

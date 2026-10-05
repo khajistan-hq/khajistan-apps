@@ -4,6 +4,9 @@ import SwiftUI
 /// on (the wing, the ident, the wing), then the channel is joined where the clock has reached.
 /// Up and down switch channel through the wing wipe. There is no list of programmes and no
 /// scrub bar: a channel is tuned, a programme is not chosen.
+///
+/// A programme that carries a prepared subtitle file (`subtitle_url`) shows it, on by default as on
+/// the website, and the strip ends in the Subtitles control: right moves to it, left comes back.
 struct TransmissionPlayerView: View {
     /// The channel the viewer chose. The store holds the channel now on air, which Up and Down change.
     let channel: Int
@@ -18,6 +21,10 @@ struct TransmissionPlayerView: View {
     @State private var switching = false
     /// Set when the viewer leaves, so a sequence that is part-way through does not start the next step.
     @State private var left = false
+    @State private var subtitles = RecordedSubtitles()
+    @State private var captionArmed = false
+    @State private var stripHeight: CGFloat = 0
+    @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
 
@@ -25,7 +32,9 @@ struct TransmissionPlayerView: View {
         ZStack {
             palette.ground.ignoresSafeArea()
             content
-            if holdsFocus {
+            // On air the focus target sits inside the picture's layers, under the strip, so the
+            // Subtitles control in the strip can take focus; a view covered by the picture cannot.
+            if holdsFocus && !isOnAir {
                 focusTarget
             }
             StationClipLayer(clips: model.clips)
@@ -55,6 +64,7 @@ struct TransmissionPlayerView: View {
             }
         }
         .task { await start() }
+        .task(id: subtitleKey) { await loadSubtitles() }
         .onDisappear { leave() }
         .sheet(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
@@ -123,7 +133,9 @@ struct TransmissionPlayerView: View {
                 // sits in the overlay, between the band and the panel.
                 palette.ground.ignoresSafeArea()
             }
+            focusTarget
             overlay(air)
+            CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             HandoverNotice(
                 air: air,
                 next: store.upcoming(channel: store.channelNumber, at: Date(), count: 1).first,
@@ -169,9 +181,11 @@ struct TransmissionPlayerView: View {
                     detail: stateText(air),
                     attribution: credit(air),
                     trailing: ["\u{25CF} Channel \(store.channelNumber)"],
-                    upNext: next.map { ($0.startLabel, $0.show?.name ?? "") }
+                    upNext: next.map { ($0.startLabel, $0.show?.name ?? "") },
+                    accessory: subtitles.tracks.isEmpty ? nil : AnyView(subtitlesControl)
                 )
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
             .opacity(stripShown ? 1 : 0)
         }
@@ -186,6 +200,8 @@ struct TransmissionPlayerView: View {
 
     private var stripShown: Bool {
         guard overlayVisible else { return false }
+        // A schedule file (DEBUG, UI tests) plays no picture; its strip shows as a playing one does.
+        if store.isScheduleFile { return true }
         switch store.player.state {
         case .playing, .paused, .failed: return true
         case .idle, .tuning: return false
@@ -238,7 +254,82 @@ struct TransmissionPlayerView: View {
             Color.clear
         }
         .buttonStyle(SurfaceButtonStyle())
+        .focused($focus, equals: .surface)
         .accessibilityLabel("Show details")
+    }
+
+    /// A button only once the viewer has moved to it, and focused as it appears.
+    @ViewBuilder
+    private var subtitlesControl: some View {
+        if captionArmed {
+            Button {
+                subtitles.cycle()
+            } label: {
+                Text(subtitles.label)
+            }
+            .buttonStyle(StripChipStyle(isOn: subtitles.current != nil))
+            .focused($focus, equals: .captions)
+            .onAppear { focus = .captions }
+            .accessibilityIdentifier("subtitlesControl")
+        } else {
+            StripChipStyle.face(Text(subtitles.label), isOn: subtitles.current != nil)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("subtitlesControl")
+        }
+    }
+
+    // MARK: - Subtitles
+
+    /// The programme on air, so a handover loads the next programme's file.
+    private var subtitleKey: String? {
+        guard case .onAir(let air) = store.phase else { return nil }
+        return "\(air.date) \(air.slot.start) \(air.programmeId)"
+    }
+
+    /// The programme's prepared file, read through the site's gate like the schedule: without the
+    /// preview password first, then with it. A programme without one shows no control.
+    private func loadSubtitles() async {
+        subtitles.clear()
+        guard case .onAir(let air) = store.phase, let source = await subtitleSource(air) else { return }
+        let opened = Date()
+        let store = store
+        subtitles.load(vtt: source, language: .init(code: "en", label: "English")) {
+            let player = store.player.player
+            if player.currentItem != nil {
+                let time = player.currentTime().seconds
+                return time.isFinite ? time : nil
+            }
+            #if DEBUG
+            // A schedule file plays no picture; the slot's own position stands in for the file's.
+            if store.isScheduleFile { return air.seekTo + Date().timeIntervalSince(opened) }
+            #endif
+            return nil
+        }
+    }
+
+    private func subtitleSource(_ air: OnAir) async -> String? {
+        #if DEBUG
+        // `-kjsubtitlefile <path>`: a UI test's WebVTT file for whatever is on air.
+        if let path = UserDefaults.standard.string(forKey: "kjsubtitlefile") {
+            return try? String(contentsOfFile: path, encoding: .utf8)
+        }
+        #endif
+        guard let path = air.programme?.subtitle_url, let url = KJURL.sitePath(path) else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        guard var (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
+        if (response as? HTTPURLResponse)?.statusCode == 401, let password = model.auth.previewPassword {
+            request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: password), forHTTPHeaderField: "Authorization")
+            guard let again = try? await URLSession.shared.data(for: request) else { return nil }
+            (data, response) = again
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private var isOnAir: Bool {
+        if case .onAir = store.phase { return true }
+        return false
     }
 
     private var holdsFocus: Bool {
@@ -251,6 +342,17 @@ struct TransmissionPlayerView: View {
     /// Up and down switch channel behind the pigeon. While it is flying they skip it.
     private func move(_ direction: MoveCommandDirection) {
         wake()
+        if direction == .right, !subtitles.tracks.isEmpty, stripShown {
+            hideTask?.cancel()
+            captionArmed = true
+            return
+        }
+        if direction == .left, captionArmed {
+            captionArmed = false
+            focus = .surface
+            wake()
+            return
+        }
         guard direction == .up || direction == .down else { return }
         if model.clips.showing {
             model.clips.skip()
@@ -318,6 +420,7 @@ struct TransmissionPlayerView: View {
     private func leave() {
         left = true
         hideTask?.cancel()
+        subtitles.clear()
         store.stop()
         model.clips.clear()
     }
@@ -331,7 +434,11 @@ struct TransmissionPlayerView: View {
         guard store.player.state == .playing || store.isScheduleFile else { return }
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
-            if !Task.isCancelled { overlayVisible = false }
+            // The strip stays while the viewer is on its Subtitles control.
+            if !Task.isCancelled, focus != .captions {
+                overlayVisible = false
+                captionArmed = false
+            }
         }
     }
 }

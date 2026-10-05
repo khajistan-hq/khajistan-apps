@@ -32,12 +32,18 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 **Assets.** The pigeon master GIF is a byte-identical copy of the website's. The channel change is one of seven flights of the same pigeon over the skin's own colour, generated in Higgsfield and rendered onto each skin's ground as ordinary video by `scripts/flights/` (see DESIGN.md, Motion). The old sound fades out and the new one in. The pigeon is used only where the owner's ruling of 2026-10-04 allows it: waiting states and changeovers.
 **The dancer.** The website's dancer, ported from `kj-scope.js`, dances full screen over the ground to receiver radio and to Khajistan Transmission's sound-only programmes, all of channel 2 included, when what is playing carries a beat. He reads the real signal and is never shown on a recitation channel, over a picture, on an HLS carrier or with Reduce Motion on. A live radio mount is played by the app itself so its samples can be read. The rules are in [`DESIGN.md`](DESIGN.md) under The dancer.
 
+**Subtitles and live captions.** One caption view draws all three, as the site's `kj-captions.css` draws its plate: semibold type at 2.7% of the frame, centred, one opaque plate in the skin's caption colours (black on yellow by day, yellow on `#002800` in grove and on `#6E003F` in smut). Each line is laid out on its own direction, so Urdu, Persian and Arabic read right to left. It sits above the strip or the film's panel while that is up and drops when it hides.
+
+- *Khajistan Transmission*: a programme's `subtitle_url` (WebVTT), read through the site's gate as the schedule is, timed to the programme's file, on by default as `video.html` has it.
+- *The Screening Room*: the tracks the film's HLS manifest announces, one per language, labelled from `subtitle_languages`, starting on the remembered choice, then the device's language, then English, else none (the receiver's `desiredSubtitle()`). A Subtitles button in the panel cycles them and Off.
+- *Live captions on receiver television, radio and cameras*: `kj-captions-live.js` on the television. A signed-in, confirmed account; info@ and saad@ uncapped, everyone else ten minutes once, which `request-captions` enforces and the app only reports, in the site's words. Start, a heartbeat inside the 90-second lease, stop on leaving; lines arrive on the realtime subscription to `live_caption_wire` with the site's thirty-second REST read as recovery, English only, and are placed on the media clock with the picture held back. Khajistan's own channels, the mixes and the films never ask. Rows the site places by HLS fragment number are placed by the clock here, because AVPlayer does not expose fragment numbers.
+- *The control* is the last thing in the strip: right moves to it, left leaves it, Select turns it over. It becomes a button only when reached, so up and down still change channel; Play/Pause and Select on the picture keep their jobs.
 
 ## What it does not carry
 
 - **Pics/Vids search, the account and hashtag lists, Shuffle and the makers.** Search needs a keyboard, and the lists run to 81 accounts and 300 hashtags. Make a GIF, Make an emoji, Make a sticker and Save to the Wall are browser tools with nowhere to go on a television.
 - **Buying a film in the app.** The Screening Room's films are listed and play here (above), but renting, buying and licensing happen on the film's own web page, which the app offers as a code. Apple's in-app-purchase rules for that are the open question in INTENT §6 and `STORE.md`.
-- **Subtitles.** `subtitle_url` is not loaded.
+- **From the site's captions menu:** the spoken-language picker, "Not this language?" (a vote is a write), "How accurate?" and "Get an hour of captions · $5". The hour is bought on the website.
 - **Interstitials and idents.** The station-id audio, the ads and the sign-on ident stay on the website.
 - **The rainbow TV bug.** It is not used on the live site and has no ruling for a new surface.
 - **Open Sans.** The system font is used.
@@ -86,8 +92,9 @@ The script compiles the Foundation-only core and runs its checks:
 - The carrier and auth requests have the expected shapes.
 - A skin choice resolves: Automatic follows the hour, Day, Grove and Smut hold at every hour, and an unknown stored value is Automatic.
 - What is up next walks the schedule across midnight and stops where the month's grid ends, and the countdown to a slot's end is nil once the slot is over.
+- The WebVTT reader takes the site's seven prepared files cue for cue and skips malformed timing; the caption plate matches `kj-captions.css`; live-caption eligibility, the server's refusals in the site's words, the request shapes, the English gate, the 42-character blocks, the clock and the realtime frames each have negative cases.
 
-UI tests that need the schedule run without the preview password: a DEBUG build takes `-kjschedulefile <path>` and reads the month from the checkout's `data/khajistan-tv/`, and opens the Transmission player with no account and no picture. `-kjskin` sets the skin and `-kjhandoverlead` stretches the up-next notice's lead. None of these exist in a Release build.
+UI tests that need the schedule run without the preview password: a DEBUG build takes `-kjschedulefile <path>` and reads the month from the checkout's `data/khajistan-tv/`, and opens the Transmission player with no account and no picture. `-kjskin` sets the skin, `-kjhandoverlead` stretches the up-next notice's lead and `-kjsubtitlefile <path>` gives whatever is on air that WebVTT file. None of these exist in a Release build.
 
 ### Typecheck without Xcode
 

@@ -7,6 +7,9 @@ import SwiftUI
 /// asks vod-token, and the answer decides: a token plays the film here, a refusal is shown in the
 /// site's own words with a code for the film's own page, where it is rented, bought or licensed.
 /// Nothing is decided in the app.
+///
+/// Subtitles are the tracks the stream's manifest announces, listed under the site's labels and
+/// switched with a Subtitles control in the panel, beside Watch the full film.
 struct FilmPlayerView: View {
     let film: Film
 
@@ -23,6 +26,8 @@ struct FilmPlayerView: View {
     @State private var position: Double = 0
     @State private var duration: Double?
     @FocusState private var watchFocused: Bool
+    @State private var subtitles = RecordedSubtitles()
+    @State private var panelHeight: CGFloat = 0
 
     private static let jump: Double = 30
 
@@ -34,6 +39,7 @@ struct FilmPlayerView: View {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
+            CaptionLayer(text: subtitles.text, skin: model.skin, lift: overlayVisible ? panelHeight : 0)
             if overlayVisible {
                 overlay(palette)
             } else {
@@ -67,7 +73,10 @@ struct FilmPlayerView: View {
             stopEverything()
             dismiss()
         }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) {
+            wake()
+            followTracks()
+        }
         .sheet(isPresented: $showSignIn) {
             SignInView(onSignedIn: { refusal = nil })
                 .environment(\.palette, palette)
@@ -93,6 +102,7 @@ struct FilmPlayerView: View {
             .padding(.vertical, 40)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { panelHeight = $0 }
         }
         .transition(.opacity)
     }
@@ -149,6 +159,15 @@ struct FilmPlayerView: View {
                 .disabled(checking)
                 .focused($watchFocused)
                 .accessibilityIdentifier("watchFullFilm")
+            }
+            if !subtitles.tracks.isEmpty {
+                Button {
+                    subtitles.cycle()
+                } label: {
+                    Text(subtitles.label).kjKicker()
+                }
+                .buttonStyle(HouseButtonStyle())
+                .accessibilityIdentifier("subtitlesControl")
             }
             if refusal == 401 && !model.auth.isSignedIn {
                 Button {
@@ -272,8 +291,22 @@ struct FilmPlayerView: View {
         }
     }
 
+    /// The tracks of whatever is playing: the preview's, then the full film's once it plays.
+    private func followTracks() {
+        switch controller.state {
+        case .playing:
+            guard let item = controller.player.currentItem, !subtitles.follows(item) else { return }
+            Task { await subtitles.attach(item, listed: film.subtitle_languages ?? []) }
+        case .idle:
+            subtitles.clear()
+        default:
+            break
+        }
+    }
+
     private func stopEverything() {
         hideTask?.cancel()
+        subtitles.clear()
         controller.stop()
         model.clips.clear()
     }

@@ -65,7 +65,11 @@ struct ReceiverView: View {
                 // The plate's padding is pulled back so the switch sits on the page margin.
                 .padding(.leading, -26)
         }
+        // Full height, so the focus section reaches down beside the region strip: a press left
+        // off the strip's west end lands on the switch. Sized to its content it ended above
+        // the strip, and the switch could not be reached with the remote at all.
         .frame(width: 560, alignment: .topLeading)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
         .focusSection()
     }
 

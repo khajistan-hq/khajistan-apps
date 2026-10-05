@@ -81,6 +81,18 @@ way the website marks the brand link.
   and its label sits on a yellow plate with black text. Select opens the region. (Until
   2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
   on the owner's TV focus stuck on one region.)
+- **Khajistan Radio** is the last row of the map area, under the strip: *KHAJISTAN RADIO · 22 mixes*,
+  as wide as the map so that a press down from any region lands on it. It appears once the public
+  register (`/data/radio/mixtapes.json`) has loaded with a mix that plays. Select opens the mixes:
+  crumb RECEIVER → KHAJISTAN RADIO, the name (display), *22 mixes*, then four columns of cards in the
+  register's own order, each the mix's title, the programme block it aired in as a kicker, and
+  *place · language* in small type. A mix is a finished recording Khajistan made, not a live signal,
+  so its player has no LIVE: the band reads KHAJISTAN RECEIVER · the block, and *Khajistan Radio mix*
+  at right. The name is display type on the ground, as radio's is; under it the state, the register's
+  line for the mix, *place · language · decade*, the position (*12:04 / 1:24:13*) and the attribution
+  (*A Khajistan Radio mix, made and carried by Khajistan.*, or *mixed by X and carried by Khajistan.*).
+  A recording has a position: left and right move thirty seconds, up and down move to the
+  neighbouring mix, and a mix that ends rolls on to the next, stopping at the last.
 - **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
   faint), the region's figures, the medium switch (TELEVISION 39 · RADIO 40 · CAMERAS 19 as
   focusable kickers, the current one underlined), then the channel grid: four columns, each card

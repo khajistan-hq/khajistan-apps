@@ -9,6 +9,7 @@ struct ReceiverView: View {
     @State private var path: [ReceiverIndex.Region] = []
     @State private var composed: ComposedMap?
     @State private var mapError: String?
+    @State private var showMixes = false
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -20,9 +21,13 @@ struct ReceiverView: View {
                 .navigationDestination(for: ReceiverIndex.Region.self) { region in
                     ChannelsView(region: region)
                 }
+                .navigationDestination(isPresented: $showMixes) {
+                    MixesView()
+                }
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
+        .task { await model.mixes.load() }
     }
 
     @ViewBuilder
@@ -90,6 +95,7 @@ struct ReceiverView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     RegionMapView(map: composed, highlighted: focusedRegion)
                     regionStrip(composed)
+                    mixesEntry
                 }
             } else {
                 TuningLoader("Loading the receiver\u{2026}")
@@ -130,6 +136,30 @@ struct ReceiverView: View {
         }
         .scrollClipDisabled()
         .frame(height: 96)
+    }
+
+    /// The Khajistan Radio mixes. The website's receiver took them in as one of its media (owner,
+    /// 2026-08-16: television, radio and the mixes are one door), so they open from here, on a row
+    /// of their own under the regions. The row spans the map's width so that a press down from any
+    /// region lands on it. Offered only once the register has loaded and holds a mix that plays.
+    @ViewBuilder
+    private var mixesEntry: some View {
+        let count = model.mixes.mixes.count
+        if count > 0 {
+            Button {
+                showMixes = true
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Kicker("Khajistan Radio")
+                    Text("\(count) \(count == 1 ? "mix" : "mixes")").kjSmall(faint: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+            .accessibilityIdentifier("khajistanRadioMixes")
+            // The plate's padding is pulled back so the label sits on the map's margin.
+            .padding(.horizontal, -22)
+        }
     }
 
     private func failure(_ message: String) -> some View {

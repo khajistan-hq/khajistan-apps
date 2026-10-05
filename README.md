@@ -19,6 +19,8 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
 
+**Khajistan Radio.** The 22 mixes of `data/radio/mixtapes.json`, the public register, open from a row under the region strip on the Receiver's front. The website folded the mixes into its receiver as one of its media (owner, 2026-08-16) and, on 2026-08-21, made them programmes on Khajistan TV's sound channel, keeping the register as the record of what a mix is. The app lists the register itself, in its order, and plays each mix's public mp3 in AVPlayer with the old receiver's labels (*Khajistan Radio mix*, the programme block, *made and carried by Khajistan*) and its position bar's time format. A mix with `hidden` set, or an address that is not a public https one, is dropped, as the old receiver dropped it.
+
 **Pics/Vids.** The website's PICS/VIDS door (`/browse-archive.html`, Born Digital Media). It reads the same Supabase view and function the page reads, with the anon key: `pnv_accounts` for the roster of vetted accounts, `pnv_media` for rows of those accounts only (ordered `feed_rank`, then `corpus`, 60 to a page), and `rpc('pnv_facets')` for the summary line. The filters are the page's Everything / Pictures / Videos and its regions, which the page reaches through the atlas map. Rows become URLs by `kj-media.js`'s rules (Supabase storage, R2, and Khajistan TV's poster bucket and `tv-play`), tested against that file. The entry notice is the site's, in its words, with its three states. Khajistan TV rows show their poster to anyone; their video needs the same account `tv-play` asks for on the Transmission page, and the viewer opens the sign-in sheet in place.
 
 **Assets.** The pigeon master GIF, the grooming loop, the sign-on ident and the two wing wipes are byte-identical copies of the website's files in `archive/assets`. The pigeon clips are used only where the owner's ruling of 2026-10-04 allows them: waiting states and changeovers.
@@ -71,6 +73,7 @@ sh tvos/scripts/test-core.sh
 The script compiles the Foundation-only core and runs its checks:
 
 - The Swift station clock agrees with the website's `kj-station-clock.js` on roughly 500 instants, taken from a fixture that Node generates (`tvos/scripts/station-clock-fixture.mjs`).
+- The mixes register decodes and every mix in it plays; the refusals (hidden, http, localhost, private ranges) and the clock format have negative cases.
 - The Pics/Vids URL builders agree with the site's `kj-media.js` on 44 rows, 36 of them real rows of the view, taken from a fixture that Node generates (`tvos/scripts/pnv-media-fixture.mjs`).
 - The models decode the real feed files.
 - The carrier and auth requests have the expected shapes.

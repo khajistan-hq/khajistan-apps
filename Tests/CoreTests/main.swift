@@ -2070,6 +2070,78 @@ func adultNoticeWordingIsTheSitesOwn() throws {
     try expect(js.contains("'localStorage'") && js.contains("'dismissed'") && js.contains("var KEY = 'kj_adult_notice'"))
 }
 
+// MARK: - Khajistan Radio mixes
+
+func realMixRegister() throws -> MixRegister {
+    try JSONDecoder().decode(MixRegister.self, from: try realFile("data/radio/mixtapes.json"))
+}
+
+func realMixesDecodeAndAllPlay() throws {
+    let data = try realFile("data/radio/mixtapes.json")
+    let register = try JSONDecoder().decode(MixRegister.self, from: data)
+    let raw = try require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    try expectEqual(register.mixes.count, raw["mix_count"] as? Int, "the register's own count")
+    let playable = Mixes.playable(register.mixes)
+    try expectEqual(playable.count, register.mixes.count, "every mix in the register plays")
+    try expectEqual(playable.map(\.id), register.mixes.map(\.id), "the register's order is kept")
+    for mix in playable {
+        let url = try require(Mixes.playURL(mix), mix.id)
+        try expectEqual(url.scheme, "https")
+        try expect(url.pathExtension == "mp3", mix.id)
+    }
+    // Where the record says a place, the label says it; where it says none, there is none.
+    let byID = Dictionary(uniqueKeysWithValues: register.mixes.map { ($0.id, $0) })
+    try expectEqual(byID["mix_psychedelistan"]?.place, "Kurdistan")
+    try expectEqual(byID["mix_pia"]?.place, "Pakistan")
+    try expectEqual(byID["mix_mashriq_maghreb"]?.place, nil)
+    try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
+}
+
+func mixPresentationRules() throws {
+    let both = try decode(Mix.self, #"{"id":"a","title":"  ","play_url":"https://x.example/a.mp3","country":"Pakistan","territory":"Punjab","mixed_by":" DJ Z "}"#)
+    try expectEqual(both.name, "Khajistan Radio mix")
+    try expectEqual(both.place, "Punjab, Pakistan")
+    try expectEqual(both.attribution, "A Khajistan Radio mix, mixed by DJ Z and carried by Khajistan.")
+    let same = try decode(Mix.self, #"{"id":"a","title":"T","play_url":"https://x.example/a.mp3","country":"Cyprus","territory":"Cyprus"}"#)
+    try expectEqual(same.place, "Cyprus")
+    try expectEqual(same.name, "T")
+    try expectEqual(same.attribution, "A Khajistan Radio mix, made and carried by Khajistan.")
+    // Negative: blank strings are no place and no maker.
+    let blank = try decode(Mix.self, #"{"id":"a","play_url":"https://x.example/a.mp3","country":" ","territory":"","mixed_by":""}"#)
+    try expectEqual(blank.place, nil)
+    try expectEqual(blank.attribution, "A Khajistan Radio mix, made and carried by Khajistan.")
+}
+
+func mixesRefuseWhatMustNotPlay() throws {
+    func mix(_ extra: String) throws -> Mix { try decode(Mix.self, #"{"id":"m",\#(extra)}"#) }
+    let good = try mix(#""play_url":"https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/public/audio/a.mp3""#)
+    let hidden = try mix(#""play_url":"https://x.example/a.mp3","hidden":true"#)
+    let notHidden = try mix(#""play_url":"https://x.example/a.mp3","hidden":false"#)
+    try expectEqual(Mixes.playable([good, hidden, notHidden]).count, 2)
+    for bad in ["http://x.example/a.mp3", "https://localhost/a.mp3", "https://printer.local/a.mp3", "https://10.0.0.5/a.mp3",
+                "https://192.168.1.9/a.mp3", "https://172.20.0.1/a.mp3", "https://127.0.0.1/a.mp3", "https://169.254.1.1/a.mp3",
+                "https://0.0.0.0/a.mp3", "https://[::1]/a.mp3", "file:///etc/passwd", "not a url", ""] {
+        try expectEqual(Mixes.playable([try mix(#""play_url":"\#(bad)""#)]).count, 0, bad)
+    }
+    // Negative: the public neighbours of the private ranges are fine.
+    for ok in ["https://172.32.0.1/a.mp3", "https://172.15.0.1/a.mp3", "https://11.0.0.1/a.mp3", "https://193.168.0.1/a.mp3"] {
+        try expectEqual(Mixes.playable([try mix(#""play_url":"\#(ok)""#)]).count, 1, ok)
+    }
+    try expectEqual(Mixes.registerURL.absoluteString, "https://khajistan-archive.pages.dev/data/radio/mixtapes.json")
+}
+
+func mixClockFormat() throws {
+    try expectEqual(Mixes.clock(0), "0:00")
+    try expectEqual(Mixes.clock(9.9), "0:09")
+    try expectEqual(Mixes.clock(75), "1:15")
+    try expectEqual(Mixes.clock(3599), "59:59")
+    try expectEqual(Mixes.clock(3600), "1:00:00")
+    try expectEqual(Mixes.clock(5053), "1:24:13")
+    try expectEqual(Mixes.clock(-1), "\u{2014}:\u{2014}")
+    try expectEqual(Mixes.clock(.nan), "\u{2014}:\u{2014}")
+    try expectEqual(Mixes.clock(.infinity), "\u{2014}:\u{2014}")
+}
+
 // MARK: - Runner
 
 let tests: [(String, () throws -> Void)] = [
@@ -2142,6 +2214,10 @@ let tests: [(String, () throws -> Void)] = [
     ("Adult notice: the suppression rule", adultNoticeSuppressionRule),
     ("Adult notice: the profile request", adultNoticeProfileRequest),
     ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
+    ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
+    ("Mix presentation rules", mixPresentationRules),
+    ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
+    ("Mix clock format", mixClockFormat),
 ]
 
 var passed = 0, failed = 0, skipped = 0

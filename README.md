@@ -1,28 +1,35 @@
 # Khajistan for Apple TV
 
-Native SwiftUI application for the Khajistan Receiver and Khajistan TV, targeting tvOS 17 and later. Open **tvos/KhajistanTV.xcodeproj** in Xcode 26 or newer. The app has no third-party dependencies and uses no keys beyond the public Supabase anon key.
+Native SwiftUI application for the Khajistan Receiver and Khajistan Transmission, targeting tvOS 17 and later. Open **tvos/KhajistanTV.xcodeproj** in Xcode 26 or newer. The app has no third-party dependencies and uses no keys beyond the public Supabase anon key.
+
+It is drawn in the house style measured from the website, recorded in [`DESIGN.md`](DESIGN.md): the yellow ground and green bands of the day skin, grove at night and smut at dawn and dusk, the system font at the website's weights, and focus drawn as the website's hover, a green plate with yellow text.
 
 ## What v1 carries
 
-**The Receiver.** The heartbeat regions come first, then the rest of the atlas, each in the receiver index's own order; the tier names are filing vocabulary and are not shown. The Islamicate extensions sit behind the website's own switch, "Beyond the atlas", with its line "The wider Islamicate, Rumelia to Nusantara". The switch is off by default and remembered on the device. Each region lists its television, radio and cameras. The lists come from the public files the website's receiver reads: the receiver index, the per-region shards, the denylist, and the off-air and health feeds. Each stream is resolved through `/api/frequency` at tune time and played by AVPlayer.
+**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION and ACCOUNT beside them. There is no system tab bar.
 
-**Khajistan TV.** Channel 1 and Channel 2 are tuned by the station clock, which runs on Pakistan Standard Time, the same clock as the website.
+**The Receiver.** The front is the region map, drawn from the website's own geometry and colour rules, with the four live figures and the "Beyond the atlas" switch beside it. Regions with channels are focus points; the focused one is outlined and carries its plate with the native name and live count. The switch adds the Islamicate extensions, including the two Indian doors the website keeps behind it. A region opens on its figures and a grid of television, radio and cameras. The lists come from the public files the website's receiver reads: the receiver index, the per-region shards, the denylist, and the off-air and health feeds. Each stream is resolved through `/api/frequency` at tune time and played by AVPlayer, under the status band (KHAJISTAN RECEIVER, BROADCASTING FROM …). The grooming pigeon stands in for CONNECTING… while a signal tunes, and the wing wipe plays at a channel change.
+
+**Khajistan Transmission.** A station page shows both channels and what each is carrying now. Channel 1 and Channel 2 are tuned by the station clock, which runs on Pakistan Standard Time, the same clock as the website. Once per launch the player signs on with the wing and the ident, as the website does.
 
 - Tuning joins the programme on air at the point it has reached.
 - A handover starts the next programme inside the slot's roster.
 - A channel with nothing on shows an off-air state that names when the channel returns.
-- The overlay carries the custodian and transfer lines.
+- The status band carries the slot and what is up next; the panel carries the show's line, kind, origin, and the custodian and transfer lines.
 - Playback needs a free account, signed in with email and password. `tv-play` refuses anonymous requests (owner ruling 2026-09-09, recorded in the function's source). INTENT §5 still says Khajistan TV is open with no account; the server decides. Accounts made on the website with a password sign in here. An account that has only ever signed in through emailed links has no password, and no public page on the website sets one.
 - Until launch the schedule sits behind the site's preview password, which the app asks for.
+
+**Assets.** The pigeon master GIF, the grooming loop, the sign-on ident and the two wing wipes are byte-identical copies of the website's files in `archive/assets`. The pigeon clips are used only where the owner's ruling of 2026-10-04 allows them: waiting states and changeovers.
 
 ## What it does not carry
 
 - **The Screening Room.** Its films are paid and gated by entitlement. Apple's in-app-purchase rules for it are the open question in INTENT §6.
 - **Subtitles.** `subtitle_url` is not loaded.
-- **Station idents and interstitials.**
+- **Interstitials, and every ident but the sign-on.** The station-id audio and the ads stay on the website.
+- **The rainbow TV bug.** It is not used on the live site and has no ruling for a new surface.
 - **A Top Shelf extension.** The brand assets carry the two static top shelf images only.
 - **Open Sans.** The system font is used.
-- **House colours on two system controls.** The tab bar and the television/radio switch are drawn by tvOS, which paints the focused item as a white pill. The house allows no white; restyling them needs UIKit appearance work checked on a simulator, and v1 leaves them as tvOS draws them.
+- **House colours on one system control.** The television/radio switch is drawn by tvOS, which paints the focused item as a white pill. The house allows no white; restyling it needs UIKit appearance work checked on a simulator, and v1 leaves it as tvOS draws it. The root screens are not a system tab bar: `TopBar` is the app's own, with the house focus plate.
 - **Magic-link sign-in.** The Supabase magic-link email template carries no `{{ .Token }}` code, so a television cannot complete it. Adding that token to the template is a one-line change that would enable "email me a code".
 
 ## Source and publish doors
@@ -97,7 +104,7 @@ The **tvOS app** workflow (`.github/workflows/tvos.yml`) runs on a GitHub macOS 
 
 The workflow holds no signing secrets and never deploys the website. A simulator app cannot be installed on a physical Apple TV or uploaded to App Store Connect.
 
-This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. `sh tvos/scripts/typecheck-catalyst.sh` typechecks the SwiftUI layer as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the three tvOS-only remote modifiers; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS. The first build passed on 2026-10-05, in run 37310699348: Xcode 26.6, an Apple TV 4K (3rd generation) simulator on tvOS 26.5, three UI tests, and no compiler warnings from the app's sources. Its screenshots show the region list, the Indus channel grid, ABN Urdu playing with its attribution line, the Khajistan TV preview-password screen and the Account tab.
+This Mac has no Xcode, so the app is checked here in two ways before CI. `sh tvos/scripts/test-core.sh` runs the core. `sh tvos/scripts/typecheck-catalyst.sh` typechecks the SwiftUI layer as Mac Catalyst against the real UIKit and SwiftUI interfaces in the Command Line Tools SDK, with stand-ins only for `@State` (a macro whose plugin ships with Xcode) and the tvOS-only remote and focus modifiers listed in the script's header; a planted wrong member and a planted missing unwrap were both reported. APIs that exist on iOS but not on tvOS were checked for by name. Neither check builds for tvOS. The first build passed on 2026-10-05, in run 37310699348: Xcode 26.6, an Apple TV 4K (3rd generation) simulator on tvOS 26.5, three UI tests, and no compiler warnings from the app's sources. Its screenshots show the region list, the Indus channel grid, ABN Urdu playing with its attribution line, the Khajistan TV preview-password screen and the Account tab.
 
 ## Cost plan (INTENT §6)
 

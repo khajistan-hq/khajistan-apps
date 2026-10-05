@@ -1,94 +1,76 @@
 import SwiftUI
 
-/// The receiver's front page: regions by tier, and one switch for the ones beyond the atlas.
+/// The receiver's front, and the front is the map. At left, what the receiver is and how much is
+/// on air; at right, the regions to open. The switch under the figures widens the map beyond the
+/// atlas.
 struct ReceiverView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+    @State private var path: [ReceiverIndex.Region] = []
+    @State private var composed: ComposedMap?
+    @State private var mapError: String?
+    @FocusState private var focusedRegion: String?
 
     var body: some View {
-        let palette = Palette(model.skin)
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 40) {
-                    Text("Receiver")
-                        .font(KJFont.title())
-                    content(palette)
+        NavigationStack(path: $path) {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(palette.ground.ignoresSafeArea())
+                .foregroundStyle(palette.ink)
+                .navigationDestination(for: ReceiverIndex.Region.self) { region in
+                    ChannelsView(region: region)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 80)
-                .padding(.vertical, 40)
-            }
-            .background(palette.ground.ignoresSafeArea())
-            .navigationDestination(for: ReceiverIndex.Region.self) { region in
-                ChannelsView(region: region)
-            }
         }
-        .foregroundStyle(palette.ink)
-        .task { await model.receiver.loadIndex() }
+        // The id restarts the load when the switch moves, so the map follows it.
+        .task(id: model.extendedAtlas) { await load() }
     }
 
     @ViewBuilder
-    private func content(_ palette: Palette) -> some View {
+    private var content: some View {
         if let index = model.receiver.index {
-            // The heartbeat regions, then the rest of the atlas, each in the index's own order.
-            // The tier names are filing vocabulary and are not shown.
-            regionLinks(
-                index.listedRegions.filter { $0.tier == "heartbeat" }
-                    + index.listedRegions.filter { $0.tier != "heartbeat" && ReceiverRules.tiersOnByDefault.contains($0.tier) },
-                index: index, palette: palette
-            )
-            // The website's switch, in the website's words. Its regions follow it when it is on.
-            VStack(alignment: .leading, spacing: 16) {
-                Toggle(isOn: extendedBinding) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Beyond the atlas")
-                            .font(KJFont.bodyBold())
-                        Text("The wider Islamicate, Rumelia to Nusantara")
-                            .font(KJFont.caption())
-                    }
-                }
-                .toggleStyle(PlateToggleStyle(palette: palette))
-                .accessibilityIdentifier("beyondTheAtlas")
-                if model.extendedAtlas {
-                    regionLinks(index.listedRegions.filter { $0.tier == "islamicate" }, index: index, palette: palette)
-                }
+            HStack(alignment: .top, spacing: 60) {
+                sidebar(index)
+                mapArea
             }
-            .frame(maxWidth: 900, alignment: .leading)
+            .padding(.horizontal, KJLayout.inset)
+            .padding(.vertical, 20)
+            .defaultFocus($focusedRegion, "indus")
         } else if let message = model.receiver.indexError {
-            Text(message)
-                .font(KJFont.body())
-            Button("Try again") {
-                Task { await model.receiver.loadIndex() }
-            }
-            .buttonStyle(PlateButtonStyle(palette: palette))
-            .frame(maxWidth: 500, alignment: .leading)
+            failure(message)
         } else {
-            Text("Loading the receiver\u{2026}")
-                .font(KJFont.body())
+            TuningLoader("Loading the receiver\u{2026}")
         }
     }
 
-    @ViewBuilder
-    private func regionLinks(_ regions: [ReceiverIndex.Region], index: ReceiverIndex, palette: Palette) -> some View {
-        if !regions.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(regions) { region in
-                    NavigationLink(value: region) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(region.label)
-                                .font(KJFont.bodyBold())
-                            let line = index.mediumLine(regionId: region.id)
-                            if !line.isEmpty {
-                                Text(line)
-                                    .font(KJFont.caption())
-                            }
-                        }
-                    }
-                    .buttonStyle(PlateButtonStyle(palette: palette))
-                    .accessibilityIdentifier("region-\(region.id)")
+    // MARK: - Sidebar
+
+    private func sidebar(_ index: ReceiverIndex) -> some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Text("Receiver")
+                .kjDisplay()
+            Text("Live television, live radio and public cameras from the Middle World.")
+                .kjBody()
+            Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
+                GridRow {
+                    Figure(label: "Live now", value: figure(index.totals.live))
+                    Figure(label: "Television", value: figure(index.totals.byMedium["tv"]))
+                }
+                GridRow {
+                    Figure(label: "Radio", value: figure(index.totals.byMedium["radio"]))
+                    Figure(label: "Cameras", value: figure(index.totals.byMedium["camera"]))
                 }
             }
-            .frame(maxWidth: 900, alignment: .leading)
+            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: extendedBinding)
+                .accessibilityIdentifier("beyondTheAtlas")
+                // The plate's padding is pulled back so the switch sits on the page margin.
+                .padding(.leading, -26)
         }
+        .frame(width: 560, alignment: .topLeading)
+        .focusSection()
+    }
+
+    private func figure(_ count: Int?) -> String {
+        (count ?? 0).formatted()
     }
 
     private var extendedBinding: Binding<Bool> {
@@ -96,5 +78,82 @@ struct ReceiverView: View {
             get: { model.extendedAtlas },
             set: { model.extendedAtlas = $0 }
         )
+    }
+
+    // MARK: - Map
+
+    private var mapArea: some View {
+        Group {
+            if let mapError {
+                failure(mapError)
+            } else if let composed {
+                RegionMapView(map: composed, focused: $focusedRegion, onSelect: open)
+            } else {
+                TuningLoader("Loading the receiver\u{2026}")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .focusSection()
+    }
+
+    private func failure(_ message: String) -> some View {
+        VStack(spacing: 28) {
+            Text(message)
+                .kjBody()
+                .multilineTextAlignment(.center)
+            Button {
+                Task { await load() }
+            } label: {
+                Text("Try again").kjKicker()
+            }
+            .buttonStyle(HouseButtonStyle())
+        }
+        .frame(maxWidth: 900)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Opens a region from the map. The region is the index's own line for it; a map shape the
+    /// index has no line for is still opened, as what the map says it is.
+    private func open(_ mapRegion: MapRegion) {
+        guard let index = model.receiver.index else { return }
+        let region = index.regions.first { $0.id == mapRegion.id }
+            ?? ReceiverIndex.Region(
+                id: mapRegion.id, label: mapRegion.label,
+                kind: mapRegion.isPeople ? "people" : "state",
+                tier: mapRegion.isExtension ? "islamicate" : "core"
+            )
+        path.append(region)
+    }
+
+    // MARK: - Loading
+
+    private func load() async {
+        await model.receiver.loadIndex()
+        if Task.isCancelled { return }
+        guard model.receiver.index != nil else { return }
+        await loadMap()
+    }
+
+    /// Fetches the shapes the switch calls for and composes them with the index. A map already on
+    /// screen stays until its replacement is ready; composing runs off the main actor.
+    private func loadMap() async {
+        let extended = model.extendedAtlas
+        mapError = nil
+        do {
+            let shapes = try await model.receiver.mapShapes(extended: extended)
+            guard let index = model.receiver.index else { return }
+            let map = await Task.detached(priority: .userInitiated) {
+                RegionMapRules.compose(core: shapes.core, extended: shapes.extended, index: index, showExtensions: extended)
+            }.value
+            if Task.isCancelled { return }
+            if let map {
+                composed = map
+            } else {
+                mapError = "The receiver sent a map that could not be read."
+            }
+        } catch {
+            if Task.isCancelled { return }
+            mapError = error.localizedDescription
+        }
     }
 }

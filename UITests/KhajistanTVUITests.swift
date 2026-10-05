@@ -21,26 +21,35 @@ final class KhajistanTVUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)], timeout: timeout)
     }
 
+    private func regionButtons(_ app: XCUIApplication) -> XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+    }
+
     func testReceiverRegionsChannelsAndPlayer() {
         let app = XCUIApplication()
         app.launch()
 
-        let indus = app.buttons["region-indus"]
-        XCTAssertTrue(indus.waitForExistence(timeout: 60), "The receiver must list the Indus region")
-        screenshot("01-receiver-regions", app: app)
+        // The map is a Canvas; what the remote can reach is a button over each region's label.
+        let regions = regionButtons(app)
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
+        screenshot("01-receiver-map", app: app)
 
-        for _ in 0..<12 {
-            if indus.hasFocus { break }
-            XCUIRemote.shared.press(.down)
+        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for attempt in 0..<20 {
+            if focusedRegion.exists { break }
+            // Down first; after six tries right as well, in case the way down is the switch.
+            XCUIRemote.shared.press(attempt >= 6 && attempt % 2 == 0 ? .right : .down)
         }
+        XCTAssertTrue(focusedRegion.exists, "A region on the map must take focus")
+        screenshot("02-map-focused", app: app)
         XCUIRemote.shared.press(.select)
 
         let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
-        XCTAssertTrue(channels.firstMatch.waitForExistence(timeout: 60), "Indus must list at least one channel")
-        screenshot("02-indus-channels", app: app)
+        XCTAssertTrue(channels.firstMatch.waitForExistence(timeout: 60), "The region must list at least one channel")
+        screenshot("03-region-channels", app: app)
 
         let focusedChannel = channels.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<6 {
+        for _ in 0..<8 {
             if focusedChannel.exists { break }
             XCUIRemote.shared.press(.down)
         }
@@ -51,11 +60,33 @@ final class KhajistanTVUITests: XCTestCase {
         wait(upTo: 45) {
             guard state.exists else { return false }
             let label = state.label
-            return !label.isEmpty && label != "Tuning\u{2026}"
+            return !label.isEmpty && label.caseInsensitiveCompare("Connecting\u{2026}") != .orderedSame
         }
         let outcome = state.exists ? state.label : "overlay-hidden"
-        screenshot("03-receiver-player-\(outcome)", app: app)
+        screenshot("04-receiver-player-\(outcome)", app: app)
         XCUIRemote.shared.press(.menu)
+    }
+
+    /// Best effort: reaching the switch depends on where focus starts, and what the wider map
+    /// draws depends on the day's data. The screenshot is the record; nothing here is asserted
+    /// beyond the map having drawn.
+    func testBeyondTheAtlas() {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(regionButtons(app).firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
+
+        let toggle = app.buttons["beyondTheAtlas"]
+        for _ in 0..<12 {
+            if toggle.exists && toggle.hasFocus { break }
+            XCUIRemote.shared.press(.left)
+            XCUIRemote.shared.press(.down)
+        }
+        if toggle.exists && toggle.hasFocus {
+            XCUIRemote.shared.press(.select)
+            wait(upTo: 8) { false }
+        }
+        screenshot("06-map-extended", app: app)
     }
 
     func testKhajistanTVTab() {

@@ -1278,6 +1278,543 @@ func realProgrammingClockInvariants() throws {
     try expect(checked > 2500, "only \(checked) instants were on air")
 }
 
+// MARK: - Region map
+
+func mp(_ x: Double, _ y: Double) -> MapPoint { MapPoint(x: x, y: y) }
+
+func boxValues(_ box: ViewBox) -> [Double] { [box.minX, box.minY, box.width, box.height] }
+
+func inside(_ point: MapPoint, _ box: ViewBox) -> Bool {
+    point.x >= box.minX && point.x <= box.minX + box.width && point.y >= box.minY && point.y <= box.minY + box.height
+}
+
+func viewBoxParsesAndRefuses() throws {
+    try expectEqual(boxValues(try require(ViewBox("0 0 1000 700"))), [0, 0, 1000, 700])
+    try expectEqual(boxValues(try require(ViewBox("-12.0 -12.0 1444.0 949.8"))), [-12, -12, 1444, 949.8])
+    try expectEqual(boxValues(try require(ViewBox("0,0,10,5"))), [0, 0, 10, 5])
+    // Commas, spaces and line breaks in any mix.
+    try expectEqual(boxValues(try require(ViewBox(" 1, 2 ,\n3 ,4 "))), [1, 2, 3, 4])
+    // "0 0 x 10 20" has five parts, only four of them numbers; it must not pass for a box.
+    let refused = ["", "0 0 0 10", "0 0 10 0", "0 0 -10 5", "a b c d", "1 2 3", "1 2 3 4 5",
+                   "0 0 x 10 20", "0 0 nan 10", "0 0 inf 10", "0 0 1e999 10"]
+    for text in refused {
+        try expect(ViewBox(text) == nil, "\"\(text)\" was accepted")
+    }
+}
+
+func svgPathAbsoluteSubpaths() throws {
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z"), [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+    let two = SVGPath.polygons("M0,0 L10,0 L10,10 Z M20,20 L30,20 L30,30 L20,30 Z")
+    try expectEqual(two.map(\.count), [3, 4])
+    try expectEqual(two[1], [mp(20, 20), mp(30, 20), mp(30, 30), mp(20, 30)])
+    // No Z: the next M closes a polygon, and so does the end of the data.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 M20,20 L30,20 L30,30").map(\.count), [3, 3])
+    // Coordinates after M repeat as L.
+    try expectEqual(SVGPath.polygons("M0,0 10,0 10,10 Z"), [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+    // Nothing to draw.
+    try expectEqual(SVGPath.polygons(""), [])
+    try expectEqual(SVGPath.polygons(" \n "), [])
+    try expectEqual(SVGPath.polygons("Z"), [])
+}
+
+func svgPathRelativeCommands() throws {
+    // m is read from the origin, h and v move along one axis, and z puts the pen back at the
+    // start of the polygon so that the next m is read from there; the pair after l repeats as l.
+    try expectEqual(SVGPath.polygons("m10,10 h10 v10 h-10 z m5,5 l10,0 0,10 z"), [
+        [mp(10, 10), mp(20, 10), mp(20, 20), mp(10, 20)],
+        [mp(15, 15), mp(25, 15), mp(25, 25)],
+    ])
+    // The same pairs after M are absolute and after m relative.
+    try expectEqual(SVGPath.polygons("M0,0 10,0 0,10 z"), [[mp(0, 0), mp(10, 0), mp(0, 10)]])
+    try expectEqual(SVGPath.polygons("m0,0 10,0 0,10 z"), [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+    // Absolute H and V, and H with its number repeated.
+    try expectEqual(SVGPath.polygons("M5,5 H15 V15 H5 Z"), [[mp(5, 5), mp(15, 5), mp(15, 15), mp(5, 15)]])
+    try expectEqual(SVGPath.polygons("M0,0 H10 20 V10 Z"), [[mp(0, 0), mp(10, 0), mp(20, 0), mp(20, 10)]])
+    // A relative move after a subpath with no z is read from its last point.
+    try expectEqual(SVGPath.polygons("M10,10 L20,10 L20,20 m5,5 l5,0 l0,5 z"), [
+        [mp(10, 10), mp(20, 10), mp(20, 20)],
+        [mp(25, 25), mp(30, 25), mp(30, 30)],
+    ])
+    // A line drawn after Z starts a new polygon where the last one began.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z L0,10 L5,5 Z"), [
+        [mp(0, 0), mp(10, 0), mp(10, 10)],
+        [mp(0, 0), mp(0, 10), mp(5, 5)],
+    ])
+}
+
+func svgPathNumberSyntax() throws {
+    // Scientific, signed, and a sign standing in for a separator.
+    try expectEqual(SVGPath.polygons("M-1e1,0L0-5L5,5z"), [[mp(-10, 0), mp(0, -5), mp(5, 5)]])
+    // A leading point, a second point that starts a new number, an explicit plus, a trailing
+    // point, an exponent in either case.
+    try expectEqual(SVGPath.polygons("M.5,.5 L1.5.5 L+2,3e-1 L5.,1E+1 Z"),
+                    [[mp(0.5, 0.5), mp(1.5, 0.5), mp(2, 0.3), mp(5, 10)]])
+    try expectEqual(SVGPath.polygons("M1e-3,0 L0,1e0 L1,1 Z"), [[mp(0.001, 0), mp(0, 1), mp(1, 1)]])
+    // Separators in any mix, and none between a command letter and its number.
+    try expectEqual(SVGPath.polygons("M 0 , 0\n\tL10,0\r\nL 10 10Z"), [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+}
+
+func svgPathDropsShortSubpathsAndStopsOnTheUnreadable() throws {
+    // A subpath of two points is not a polygon, and does not stop the read.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 Z"), [])
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 Z M0,0 L10,0 L10,10 Z").map(\.count), [3])
+    // An unsupported command stops the read: what came before stays, nothing after it is read.
+    let curve = "C1,2 3,4 5,6"
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z \(curve) M20,20 L30,20 L30,30 Z"),
+                    [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+    // The polygon in progress stays when it has three points so far, and goes when it has fewer.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z M20,20 L30,20 L30,30 \(curve) Z").map(\.count), [3, 3])
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z M20,20 L30,20 \(curve) Z").map(\.count), [3])
+    for letter in ["A", "a", "C", "c", "Q", "q", "S", "s", "T", "t", "X", "e"] {
+        try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z \(letter)1 2 M5,5 L6,5 L6,6 Z").count, 1, letter)
+    }
+    // A malformed number stops the read the same way: a half pair is ignored, the rest unread.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 L5 Z M1,1 L2,1 L2,2 Z").map(\.count), [3])
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 L- Z").map(\.count), [3])
+    // A command letter with no numbers at all is malformed too, not skipped.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 L Z M1,1 L2,1 L2,2 Z").map(\.count), [3])
+    // A number too large for a Double is not a point either.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 L1e999,5 Z").map(\.count), [3])
+    // An "e" with no digits after it is not an exponent: the 5 stands, the e is a stray command.
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 L5,5e Z"), [[mp(0, 0), mp(10, 0), mp(10, 10), mp(5, 5)]])
+    // Numbers with no command, and lines before any moveto, are errors, not a start at the origin.
+    try expectEqual(SVGPath.polygons("10,10 20,20 30,10 Z"), [])
+    try expectEqual(SVGPath.polygons("L10,0 L10,10 L0,10 Z"), [])
+    try expectEqual(SVGPath.polygons("M0,0 L10,0 L10,10 Z 5,5 M1,1 L2,1 L2,2 Z").map(\.count), [3])
+}
+
+func mapFillFollowsLuminance() throws {
+    try expectEqual(RegionMapRules.fill(forData: "#050505"), .tint)
+    try expectEqual(RegionMapRules.fill(forData: "#006f00"), .deep)
+    try expectEqual(RegionMapRules.fill(forData: "#7E9B45"), .deep)
+    try expectEqual(RegionMapRules.fill(forData: nil), .deep)
+    try expectEqual(RegionMapRules.fill(forData: "nonsense"), .deep)
+    // Read the way the site reads a colour: three digits, no hash, spaces round it.
+    try expectEqual(RegionMapRules.fill(forData: "#000"), .tint)
+    try expectEqual(RegionMapRules.fill(forData: "#fff"), .deep)
+    try expectEqual(RegionMapRules.fill(forData: "050505"), .tint)
+    try expectEqual(RegionMapRules.fill(forData: " #050505\n"), .tint)
+    // The bar is a relative luminance of 0.06, which falls between the greys 0x45 (0.0595) and
+    // 0x46 (0.0612), both worked out by hand rather than by this code.
+    try expectEqual(RegionMapRules.fill(forData: "#454545"), .tint)
+    try expectEqual(RegionMapRules.fill(forData: "#464646"), .deep)
+    // Letter digits, in both cases. #006f00 cannot show a misread letter, since an unreadable
+    // colour and a bright one are both deep, so these are dark colours that need the letters
+    // read right: a/f in near-black greys, and the bar crossed inside the blue channel, between
+    // 0xEB (0.05998) and 0xEC (0.06056).
+    for text in ["#0a0a0a", "#0A0A0A", "#0f0f0f", "#0F0F0F", "#0000eb", "#0000EB"] {
+        try expectEqual(RegionMapRules.fill(forData: text), .tint, text)
+    }
+    for text in ["#0000ec", "#0000EC"] {
+        try expectEqual(RegionMapRules.fill(forData: text), .deep, text)
+    }
+    // Not three or six hex digits: unparseable, so left alone, even where the digits are dark.
+    // The last five put the character just outside each digit range (g, G, :, @, `) into a dark
+    // colour, since read as a digit each would come out near-black and tint.
+    for text in ["", "#", "#05", "#05050", "#0505050", "#05050505", "##050505", "#gg0000", "rgb(0,0,0)", "black",
+                 "#0g0g0g", "#0G0G0G", "#0:0:0:", "#0@0@0@", "#0`0`0`"] {
+        try expectEqual(RegionMapRules.fill(forData: text), .deep, "\"\(text)\"")
+    }
+}
+
+/// A hand-made map that reaches the rules the real files never test: an umbrella, a bad centroid,
+/// a shape with no polygon, a native name that only repeats the label, an extended id that is
+/// already a core id or repeats itself. Region ids are the ones the shared `indexJSON` knows.
+let miniCoreJSON = #"""
+{"viewBox":"0 0 100 80","projection":{"kind":"ignored"},"regions":[
+ {"id":"indus","label":"Indus","path":"M0,0 L10,0 L10,10 Z","ref_path":"M0,0 L20,0 L20,20 L0,20 Z","fillRule":"evenodd","fillColor":"#050505","centroid":[5,5],"native":"  INDUS ","composition":["ignored"]},
+ {"id":"kurdistan","label":"Kurdistan","path":"M30,30 L40,30 L40,40 Z","fillColor":"#006f00","centroid":[35,33],"native":"کردستان"},
+ {"id":"anatolia","label":"Anatolia","path":"M50,50 L60,50 L60,60 Z","fillColor":"mauve","centroid":[55,53],"native":"   "},
+ {"id":"mashriq","label":"Mashriq","path":"M1,1 L2,1 L2,2 Z","fillColor":"#006f00","centroid":[1,1],"role":"umbrella"},
+ {"id":"no-centroid","label":"No centroid","path":"M1,1 L2,1 L2,2 Z","centroid":[1]},
+ {"id":"three-numbers","label":"Three numbers","path":"M1,1 L2,1 L2,2 Z","centroid":[1,2,3]},
+ {"id":"no-polygon","label":"No polygon","path":"M1,1 L2,1 Z","centroid":[1,1]}]}
+"""#
+
+let miniExtendedJSON = #"""
+{"viewBox":"-10 -10 200 160","coreViewBox":"0 0 100 80","regions":[
+ {"id":"anatolia","label":"Anatolia again","path":"M70,70 L80,70 L80,80 Z","centroid":[75,73],"tier":"islamicate"},
+ {"id":"nusantara","label":"Nusantara","path":"M120,120 L130,120 L130,130 Z","centroid":[125,123],"tier":"islamicate","native":"NUSANTARA"},
+ {"id":"nusantara","label":"Nusantara twice","path":"M140,120 L150,120 L150,130 Z","centroid":[145,123],"tier":"islamicate"},
+ {"id":"khorasan","label":"Khorasan","path":"M1,1 L2,1 L2,2 Z","centroid":[1,1],"role":"umbrella"}]}
+"""#
+
+func composeAppliesEachRuleOnAHandMadeMap() throws {
+    let core = try decode(RegionShapes.self, miniCoreJSON)
+    let extended = try decode(RegionShapes.self, miniExtendedJSON)
+    let index = try decode(ReceiverIndex.self, indexJSON)
+    // Unknown keys are ignored, optional ones may be absent, ref_path is read as refPath.
+    try expectEqual(core.regions.count, 7)
+    try expectEqual(core.regions[0].refPath, "M0,0 L20,0 L20,20 L0,20 Z")
+    try expectEqual(core.regions[1].refPath, nil)
+    try expectEqual(extended.coreViewBox, "0 0 100 80")
+
+    // Extensions off: umbrella, bad centroids and the polygon-less shape are left out.
+    let plain = try require(RegionMapRules.compose(core: core, extended: extended, index: index, showExtensions: false))
+    try expectEqual(plain.regions.map(\.id), ["indus", "kurdistan", "anatolia"])
+    try expectEqual(boxValues(plain.viewBox), [0, 0, 100, 80])
+    let indus = plain.regions[0], kurdistan = plain.regions[1], anatolia = plain.regions[2]
+    try expectEqual(indus.polygons, [[mp(0, 0), mp(10, 0), mp(10, 10)]])
+    try expectEqual(indus.outline, [[mp(0, 0), mp(20, 0), mp(20, 20), mp(0, 20)]])
+    try expectEqual(indus.centroid, mp(5, 5))
+    try expectEqual(indus.native, nil, "a native name that only repeats the label, in other case and with spaces")
+    try expectEqual(indus.fill, .tint)
+    try expectEqual(indus.isPeople, false)
+    try expectEqual(indus.isExtension, false)
+    try expectEqual(indus.opensChannels, true)
+    try expectEqual(indus.live, 3)
+    try expectEqual(kurdistan.native, "کردستان")
+    try expectEqual(kurdistan.outline, kurdistan.polygons, "no ref_path, so the outline is the polygons")
+    try expectEqual(kurdistan.fill, .deep)
+    try expectEqual(kurdistan.isPeople, true)
+    try expectEqual(kurdistan.opensChannels, false, "a people's region has no shard file")
+    try expectEqual(kurdistan.live, nil)
+    try expectEqual(anatolia.fill, .deep, "an unparseable colour is left alone")
+    try expectEqual(anatolia.native, nil, "a blank native name")
+    try expectEqual(anatolia.live, 150)
+
+    // Extensions on: the extended viewBox, then the new ids in file order. The extended anatolia
+    // is a core id, the second nusantara repeats the first, the umbrella is an umbrella.
+    let wide = try require(RegionMapRules.compose(core: core, extended: extended, index: index, showExtensions: true))
+    try expectEqual(wide.regions.map(\.id), ["indus", "kurdistan", "anatolia", "nusantara"])
+    try expectEqual(boxValues(wide.viewBox), [-10, -10, 200, 160])
+    try expectEqual(wide.regions.map(\.isExtension), [false, false, false, true])
+    let nusantara = wide.regions[3]
+    try expectEqual(nusantara.polygons, [[mp(120, 120), mp(130, 120), mp(130, 130)]])
+    try expectEqual(nusantara.centroid, mp(125, 123))
+    try expectEqual(nusantara.fill, .tint)
+    try expectEqual(nusantara.native, nil, "NUSANTARA repeats Nusantara")
+    try expectEqual(nusantara.opensChannels, true)
+    try expectEqual(nusantara.live, 2)
+    try expectEqual(wide.regions[2].polygons, anatolia.polygons, "the core anatolia stays")
+
+    // Extensions asked for with no extended file: the core map, in the core viewBox.
+    let missing = try require(RegionMapRules.compose(core: core, extended: nil, index: index, showExtensions: true))
+    try expectEqual(missing.regions.map(\.id), ["indus", "kurdistan", "anatolia"])
+    try expectEqual(boxValues(missing.viewBox), [0, 0, 100, 80])
+
+    // A viewBox that does not parse makes the map nil when it is the one needed, and only then:
+    // the core file's frame with extensions off, the extended file's with them on.
+    let badCore = try decode(RegionShapes.self, miniCoreJSON.replacingOccurrences(of: "\"viewBox\":\"0 0 100 80\"", with: "\"viewBox\":\"0 0 0 80\""))
+    let badExtended = try decode(RegionShapes.self, miniExtendedJSON.replacingOccurrences(of: "\"viewBox\":\"-10 -10 200 160\"", with: "\"viewBox\":\"wide\""))
+    try expect(RegionMapRules.compose(core: badCore, extended: extended, index: index, showExtensions: false) == nil)
+    try expect(RegionMapRules.compose(core: badCore, extended: extended, index: index, showExtensions: true) != nil)
+    try expect(RegionMapRules.compose(core: core, extended: badExtended, index: index, showExtensions: false) != nil)
+    try expect(RegionMapRules.compose(core: core, extended: badExtended, index: index, showExtensions: true) == nil)
+}
+
+/// A core shape the receiver index tiers islamicate is an extension on the receiver. Ids are the
+/// ones the shared `indexJSON` knows: indus (heartbeat), anatolia (core) and nusantara
+/// (islamicate); "unlisted" is on no line of that index. Nusantara's data colour is the first
+/// green, so a tint on it can only come from the rule, and the ordinary shapes' fills differ from
+/// it, so a forced tint on them would show. The extended file has a nusantara of its own.
+let miniDoorsCoreJSON = #"""
+{"viewBox":"0 0 100 80","regions":[
+ {"id":"indus","label":"Indus","path":"M0,0 L10,0 L10,10 Z","fillColor":"#006f00","centroid":[5,5]},
+ {"id":"nusantara","label":"Nusantara","path":"M20,20 L30,20 L30,30 Z","fillColor":"#006f00","centroid":[25,23]},
+ {"id":"unlisted","label":"Unlisted","path":"M40,40 L50,40 L50,50 Z","fillColor":"#006f00","centroid":[45,43]},
+ {"id":"anatolia","label":"Anatolia","path":"M60,60 L70,60 L70,70 Z","fillColor":"#050505","centroid":[65,63]}]}
+"""#
+
+let miniDoorsExtendedJSON = #"""
+{"viewBox":"-10 -10 200 160","coreViewBox":"0 0 100 80","regions":[
+ {"id":"nusantara","label":"Nusantara from the extended file","path":"M140,100 L150,100 L150,110 Z","centroid":[145,103]},
+ {"id":"far","label":"Far","path":"M120,120 L130,120 L130,130 Z","centroid":[125,123]}]}
+"""#
+
+func composeHoldsACoreShapeTheIndexTiersIslamicateBehindTheSwitch() throws {
+    let core = try decode(RegionShapes.self, miniDoorsCoreJSON)
+    let extended = try decode(RegionShapes.self, miniDoorsExtendedJSON)
+    let index = try decode(ReceiverIndex.self, indexJSON)
+
+    // Switch off: nusantara is not on the map. The ordinary shapes are, the one the index does
+    // not list among them, each with the fill its data gives it.
+    let off = try require(RegionMapRules.compose(core: core, extended: extended, index: index, showExtensions: false))
+    try expectEqual(off.regions.map(\.id), ["indus", "unlisted", "anatolia"])
+    try expectEqual(off.regions.map(\.isExtension), [false, false, false])
+    try expectEqual(off.regions.map(\.fill), [.deep, .deep, .tint])
+    try expectEqual(boxValues(off.viewBox), [0, 0, 100, 80])
+
+    // Switch on: it comes back where the core file has it, as an extension in the second green
+    // though its data colour is the first. The extended file's shapes follow, and that file's own
+    // nusantara, a core id, is skipped for the core file's.
+    let on = try require(RegionMapRules.compose(core: core, extended: extended, index: index, showExtensions: true))
+    try expectEqual(on.regions.map(\.id), ["indus", "nusantara", "unlisted", "anatolia", "far"])
+    try expectEqual(on.regions.map(\.isExtension), [false, true, false, false, true])
+    try expectEqual(on.regions.map(\.fill), [.deep, .tint, .deep, .tint, .tint])
+    try expectEqual(boxValues(on.viewBox), [-10, -10, 200, 160])
+    let nusantara = on.regions[1]
+    try expectEqual(nusantara.polygons, [[mp(20, 20), mp(30, 20), mp(30, 30)]], "the core file's shape, not its namesake in the extended file")
+    try expectEqual(nusantara.centroid, mp(25, 23))
+    try expectEqual(nusantara.label, "Nusantara")
+    try expectEqual(nusantara.opensChannels, true)
+    try expectEqual(nusantara.live, 2)
+
+    // Switch on with no extended file: the core file's extension is still drawn, in the core frame.
+    let alone = try require(RegionMapRules.compose(core: core, extended: nil, index: index, showExtensions: true))
+    try expectEqual(alone.regions.map(\.id), ["indus", "nusantara", "unlisted", "anatolia"])
+    try expectEqual(alone.regions.map(\.isExtension), [false, true, false, false])
+    try expectEqual(boxValues(alone.viewBox), [0, 0, 100, 80])
+
+    // The tier is the index's. The same shapes against an index that tiers nusantara core are all
+    // ordinary: shown with the switch off, not extensions, in the fill their data gives.
+    let retiered = try decode(ReceiverIndex.self, indexJSON.replacingOccurrences(of: "\"tier\":\"islamicate\"", with: "\"tier\":\"core\""))
+    try expectEqual(retiered.regions.first(where: { $0.id == "nusantara" })?.tier, "core", "the replacement did not apply")
+    let ordinary = try require(RegionMapRules.compose(core: core, extended: extended, index: retiered, showExtensions: false))
+    try expectEqual(ordinary.regions.map(\.id), ["indus", "nusantara", "unlisted", "anatolia"])
+    try expectEqual(ordinary.regions.map(\.isExtension), [false, false, false, false])
+    try expectEqual(ordinary.regions.map(\.fill), [.deep, .deep, .deep, .tint])
+}
+
+struct RealMapInputs {
+    let core: RegionShapes
+    let extended: RegionShapes
+    let index: ReceiverIndex
+    let rawCore: [String: Any]
+    let rawExtended: [String: Any]
+    let rawIndex: [String: Any]
+}
+
+/// The three real files, decoded for the app and again as raw JSON, so that expectations can be
+/// worked out from the raw side by a route that shares no code with the app's decoding.
+func realMapInputs() throws -> RealMapInputs {
+    let coreData = try realFile("data/region-shapes.json")
+    let extendedData = try realFile("data/region-shapes-extended.json")
+    let indexData = try realFile("data/open-frequencies/receiver-index.json")
+    func object(_ data: Data) throws -> [String: Any] {
+        try require(try JSONSerialization.jsonObject(with: data) as? [String: Any], "not a JSON object")
+    }
+    let decoder = JSONDecoder()
+    return RealMapInputs(core: try decoder.decode(RegionShapes.self, from: coreData),
+                         extended: try decoder.decode(RegionShapes.self, from: extendedData),
+                         index: try decoder.decode(ReceiverIndex.self, from: indexData),
+                         rawCore: try object(coreData), rawExtended: try object(extendedData), rawIndex: try object(indexData))
+}
+
+/// The real files write every path as space-separated "M x,y", "L x,y" and "Z" and nothing else,
+/// so they can be read by splitting, a route that shares no code with SVGPath.
+func polygonsBySplitting(_ d: String) throws -> [[MapPoint]] {
+    var polygons: [[MapPoint]] = []
+    var open: [MapPoint] = []
+    for token in d.split(separator: " ") {
+        if token == "Z" {
+            polygons.append(open)
+            open = []
+            continue
+        }
+        let pair = token.dropFirst().split(separator: ",").compactMap { Double($0) }
+        guard token.first == "M" || token.first == "L", pair.count == 2 else {
+            throw Failure(description: "the real path data holds a token this test does not read: \(token)")
+        }
+        if token.first == "M", !open.isEmpty { throw Failure(description: "an M inside an open polygon") }
+        open.append(mp(pair[0], pair[1]))
+    }
+    guard open.isEmpty else { throw Failure(description: "the path does not end in Z") }
+    return polygons.filter { $0.count >= 3 }
+}
+
+/// The kind and the tier of every region line in the raw receiver index, read without the app's
+/// decoder so that expectations can be worked out by a route that shares no code with it.
+func rawKindsAndTiers(_ rawIndex: [String: Any]) throws -> (kinds: [String: String], tiers: [String: String]) {
+    var kinds: [String: String] = [:], tiers: [String: String] = [:]
+    for line in try require(rawIndex["regions"] as? [[String: Any]], "no regions in the index") {
+        guard let id = line["id"] as? String else { continue }
+        if let kind = line["kind"] as? String { kinds[id] = kind }
+        if let tier = line["tier"] as? String { tiers[id] = tier }
+    }
+    return (kinds, tiers)
+}
+
+/// What the receiver index says about each region, recounted from the raw index: a people's
+/// region (kind), whether it opens channels (a regionFiles line) and its live count.
+func expectIndexSideMatches(_ regions: [MapRegion], rawIndex: [String: Any]) throws {
+    let (kinds, _) = try rawKindsAndTiers(rawIndex)
+    let rawFiles = try require(rawIndex["regionFiles"] as? [String: String])
+    let rawCounts = try require(rawIndex["regionCounts"] as? [String: [String: Any]])
+    for region in regions {
+        try expectEqual(region.isPeople, kinds[region.id] == "people", region.id)
+        try expectEqual(region.opensChannels, rawFiles[region.id] != nil, region.id)
+        try expectEqual(region.live, rawCounts[region.id]?["live"] as? Int, region.id)
+    }
+}
+
+func realRegionMapCoreOnly() throws {
+    let real = try realMapInputs()
+    let map = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: real.index, showExtensions: false))
+    let (_, tiers) = try rawKindsAndTiers(real.rawIndex)
+
+    // Which regions to expect: the raw file's ids in file order, less the umbrella and less the
+    // core shapes the raw index tiers islamicate, which are extensions and not on this map.
+    let rawShapes = try require(real.rawCore["regions"] as? [[String: Any]])
+    let expectedIds = rawShapes.compactMap { shape -> String? in
+        guard let id = shape["id"] as? String, (shape["role"] as? String) != "umbrella", tiers[id] != "islamicate" else { return nil }
+        return id
+    }
+    try expectEqual(map.regions.map(\.id), expectedIds)
+    try expectEqual(map.regions.count, 16, "measured 2026-10-05: 19 shapes less the mashriq umbrella and the two islamicate-tier doors")
+    try expect(!map.regions.contains { $0.id == "mashriq" }, "the umbrella is drawn by its members")
+    // The two Indian doors are core shapes the index tiers islamicate, so they are extensions and
+    // stay off the map until the switch is on. Their tier is checked first, so that a re-tiering
+    // in the data reads as that and not as a missing region.
+    for id in ["hindustan", "dakhan"] {
+        try expectEqual(tiers[id], "islamicate", "\(id) is no longer tiered islamicate in the index")
+        try expect(!map.regions.contains { $0.id == id }, "\(id) is on the core-only map")
+    }
+    try expectEqual(boxValues(map.viewBox), [0, 0, 1000, 700])
+    try expect(map.regions.allSatisfy { !$0.isExtension }, "an extension in the core-only map")
+
+    try expectIndexSideMatches(map.regions, rawIndex: real.rawIndex)
+    for id in ["kurdistan", "pashtunistan", "balochistan", "kashmir"] {
+        let region = try require(map.regions.first { $0.id == id }, id)
+        try expect(region.isPeople, "\(id) is not a people's region in the index")
+    }
+    let indus = try require(map.regions.first { $0.id == "indus" })
+    try expect(indus.opensChannels, "indus has no shard file")
+    try expect((indus.live ?? 0) > 0, "indus has no live channel")
+    try expect(!indus.isPeople)
+
+    // Geometry: every region has something to draw and a place inside the frame, and every point
+    // is the one the file wrote, checked against a parse that shares no code with SVGPath.
+    let shapes = Dictionary(uniqueKeysWithValues: real.core.regions.map { ($0.id, $0) })
+    var points = 0, tinted = 0, deep = 0
+    for region in map.regions {
+        let shape = try require(shapes[region.id], region.id)
+        try expect(!region.polygons.isEmpty && region.polygons.allSatisfy { $0.count >= 3 }, "\(region.id): polygons")
+        try expect(!region.outline.isEmpty && region.outline.allSatisfy { $0.count >= 3 }, "\(region.id): outline")
+        try expect(inside(region.centroid, map.viewBox), "\(region.id): centroid \(region.centroid) is outside the viewBox")
+        try expect(region.polygons == (try polygonsBySplitting(shape.path)), "\(region.id): path points differ from the file")
+        let refPath = try require(shape.refPath, "\(region.id) has no ref_path")
+        try expect(region.outline == (try polygonsBySplitting(refPath)), "\(region.id): ref_path points differ from the file")
+        points += region.polygons.reduce(0) { $0 + $1.count } + region.outline.reduce(0) { $0 + $1.count }
+        // The two colours the data uses, as DESIGN.md names them.
+        if shape.fillColor == "#050505" {
+            try expectEqual(region.fill, .tint, region.id)
+            tinted += 1
+        } else if shape.fillColor == "#006f00" {
+            try expectEqual(region.fill, .deep, region.id)
+            deep += 1
+        }
+    }
+    try expect(tinted > 0 && deep > 0, "expected both fills in the data: \(tinted) tint, \(deep) deep")
+    try expect(map.regions.contains { $0.outline != $0.polygons }, "no region draws a ref_path outline of its own")
+    print("      \(map.regions.count) core regions, \(points) points checked against the file, \(tinted) tint and \(deep) deep")
+}
+
+func realRegionMapWithExtensions() throws {
+    let real = try realMapInputs()
+    let coreOnly = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: real.index, showExtensions: false))
+    let map = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: real.index, showExtensions: true))
+    let (_, tiers) = try rawKindsAndTiers(real.rawIndex)
+
+    // From the raw files: the core file's ids in file order less the umbrella, which includes the
+    // two doors where the file has them, and then the extended file's ids that are not core ids.
+    func ids(_ raw: [String: Any]) throws -> [String] {
+        try require(raw["regions"] as? [[String: Any]], "no regions").compactMap { $0["id"] as? String }
+    }
+    let rawCoreShapes = try require(real.rawCore["regions"] as? [[String: Any]])
+    let coreFileIds = rawCoreShapes.filter { ($0["role"] as? String) != "umbrella" }.compactMap { $0["id"] as? String }
+    let coreIds = Set(try ids(real.rawCore))
+    let extensionIds = try ids(real.rawExtended).filter { !coreIds.contains($0) }
+    try expectEqual(map.regions.count, coreFileIds.count + extensionIds.count)
+    try expectEqual(map.regions.count, 55, "measured 2026-10-05: 18 core-file shapes, two of them doors, and 37 extended, no id in both")
+    // Core file order with the doors where they stand, then the extended file.
+    try expectEqual(map.regions.prefix(coreFileIds.count).map(\.id), coreFileIds)
+    try expectEqual(map.regions.dropFirst(coreFileIds.count).map(\.id), extensionIds)
+    try expectEqual(boxValues(map.viewBox), [-12, -12, 1444, 949.8])
+
+    // In the core file's part, a shape is an extension exactly when the raw index tiers it
+    // islamicate, and then it is drawn in the second green.
+    for region in map.regions.prefix(coreFileIds.count) {
+        let door = tiers[region.id] == "islamicate"
+        try expectEqual(region.isExtension, door, "\(region.id): isExtension should follow the index tier")
+        if door { try expectEqual(region.fill, .tint, region.id) }
+    }
+    // The two doors by name: present, extensions, the second green, before the extended file's
+    // shapes, at the place the core file gives them, with the core file's own geometry.
+    let coreShapes = Dictionary(uniqueKeysWithValues: real.core.regions.map { ($0.id, $0) })
+    for id in ["hindustan", "dakhan"] {
+        let at = try require(map.regions.firstIndex(where: { $0.id == id }), "\(id) is missing with the extensions on")
+        let region = map.regions[at]
+        try expect(region.isExtension, "\(id) is not an extension")
+        try expectEqual(region.fill, .tint, id)
+        try expectEqual(at, try require(coreFileIds.firstIndex(of: id)), "\(id) is not at its core-file position")
+        try expect(at < coreFileIds.count, "\(id) comes after the extended file's shapes")
+        let shape = try require(coreShapes[id], id)
+        try expect(region.polygons == (try polygonsBySplitting(shape.path)), "\(id): path points differ from the file")
+        try expect(region.outline == (try polygonsBySplitting(try require(shape.refPath, id))), "\(id): ref_path points differ from the file")
+    }
+    // The index side for all 55, the extended file's shapes included: some of those are people's
+    // regions (crimea, lipka, champa, hausaland), and the recount can only fail on that if one is
+    // really there.
+    try expectIndexSideMatches(map.regions, rawIndex: real.rawIndex)
+    try expect(map.regions.dropFirst(coreFileIds.count).contains { $0.isPeople }, "no extended region is a people's region in the index")
+    // Turning the switch off takes exactly the extensions away and changes nothing else.
+    let kept = map.regions.filter { !$0.isExtension }
+    try expectEqual(coreOnly.regions.map(\.id), kept.map(\.id))
+    try expect(coreOnly.regions.map(\.polygons) == kept.map(\.polygons), "the core-only map's shapes differ from the same shapes in the wide map")
+
+    let shapes = Dictionary(uniqueKeysWithValues: real.extended.regions.map { ($0.id, $0) })
+    for region in map.regions.dropFirst(coreFileIds.count) {
+        let shape = try require(shapes[region.id], region.id)
+        try expect(region.isExtension, "\(region.id) is an extension")
+        try expectEqual(region.fill, .tint, region.id)
+        try expect(!region.polygons.isEmpty && region.polygons.allSatisfy { $0.count >= 3 }, "\(region.id): polygons")
+        try expect(region.outline == region.polygons, "\(region.id): no ref_path, so the outline is the polygons")
+        try expect(inside(region.centroid, map.viewBox), "\(region.id): centroid \(region.centroid) is outside the viewBox")
+        try expect(region.polygons == (try polygonsBySplitting(shape.path)), "\(region.id): path points differ from the file")
+    }
+
+    // The switch alone shows the core file's extensions, as it does on the site when the
+    // extended file fails to load: with no extended file the doors are drawn in the core frame.
+    let missing = try require(RegionMapRules.compose(core: real.core, extended: nil, index: real.index, showExtensions: true))
+    try expectEqual(missing.regions.map(\.id), coreFileIds)
+    try expectEqual(missing.regions.map(\.isExtension), coreFileIds.map { tiers[$0] == "islamicate" })
+    try expectEqual(boxValues(missing.viewBox), [0, 0, 1000, 700])
+    // And with the switch off, a missing extended file changes nothing.
+    let offAndMissing = try require(RegionMapRules.compose(core: real.core, extended: nil, index: real.index, showExtensions: false))
+    try expectEqual(offAndMissing.regions.map(\.id), coreOnly.regions.map(\.id))
+    let doors = map.regions.prefix(coreFileIds.count).filter(\.isExtension).count
+    print("      \(map.regions.count) regions: \(coreOnly.regions.count) core, \(doors) core-file doors, \(extensionIds.count) extended; every extension tint, all inside the 1444-wide frame")
+}
+
+/// The map shows the receiver's own region names, the ones the website's receiver map shows.
+func realMapUsesReceiverNames() throws {
+    let real = try realMapInputs()
+    let map = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: real.index, showExtensions: true))
+    let rawRegions = try require(real.rawIndex["regions"] as? [[String: Any]])
+    var names: [String: String] = [:]
+    for line in rawRegions { if let id = line["id"] as? String, let label = line["label"] as? String { names[id] = label } }
+    var checked = 0
+    for region in map.regions {
+        if let name = names[region.id], !name.isEmpty { try expectEqual(region.label, name, region.id); checked += 1 }
+    }
+    try expect(checked >= 40, "only \(checked) regions carried a receiver name")
+    let byId = Dictionary(map.regions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    try expectEqual(byId["levant"]?.label, "Al-Sham")
+    try expectEqual(byId["arabia"]?.label, "Jazirat al-Arab")
+    try expectEqual(byId["horn"]?.label, "Horn")
+    print("      \(checked) regions named by the receiver index")
+}
+
+func realMapWithoutRegionFilesOpensNothing() throws {
+    let real = try realMapInputs()
+    // The control: with the real index some regions open channels.
+    let opening = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: real.index, showExtensions: true))
+    try expect(opening.regions.contains { $0.opensChannels }, "no region opens channels with the real index")
+
+    // The same index with its shard list emptied.
+    var raw = real.rawIndex
+    raw["regionFiles"] = [String: String]()
+    let bare = try JSONDecoder().decode(ReceiverIndex.self, from: try JSONSerialization.data(withJSONObject: raw))
+    try expectEqual(bare.regionFiles.count, 0)
+    let map = try require(RegionMapRules.compose(core: real.core, extended: real.extended, index: bare, showExtensions: true))
+    try expectEqual(map.regions.count, opening.regions.count)
+    try expect(map.regions.allSatisfy { !$0.opensChannels }, "a region opens channels with no regionFiles")
+    // opensChannels follows the shard list and nothing else: the live counts are untouched.
+    let indus = try require(map.regions.first { $0.id == "indus" })
+    try expect((indus.live ?? 0) > 0, "indus lost its live count with the shard list")
+}
+
 // MARK: - Runner
 
 let tests: [(String, () throws -> Void)] = [
@@ -1324,6 +1861,18 @@ let tests: [(String, () throws -> Void)] = [
     ("Every real region shard decodes", everyRealShardDecodes),
     ("Real programming decodes in every month", realProgrammingDecodesInEveryMonth),
     ("Real October schedule clock invariants", realProgrammingClockInvariants),
+    ("ViewBox parses and refuses", viewBoxParsesAndRefuses),
+    ("SVGPath: absolute subpaths and implicit lineto", svgPathAbsoluteSubpaths),
+    ("SVGPath: relative commands, H and V", svgPathRelativeCommands),
+    ("SVGPath: number syntax and separators", svgPathNumberSyntax),
+    ("SVGPath: short subpaths dropped, unreadable data stops", svgPathDropsShortSubpathsAndStopsOnTheUnreadable),
+    ("Map fill follows luminance", mapFillFollowsLuminance),
+    ("compose applies each rule on a hand-made map", composeAppliesEachRuleOnAHandMadeMap),
+    ("compose holds a core shape tiered islamicate behind the switch", composeHoldsACoreShapeTheIndexTiersIslamicateBehindTheSwitch),
+    ("Real core map composes, without the two doors", realRegionMapCoreOnly),
+    ("Real map with the extensions composes, doors in place", realRegionMapWithExtensions),
+    ("Real map with no regionFiles opens nothing", realMapWithoutRegionFilesOpensNothing),
+    ("Real map shows the receiver's region names", realMapUsesReceiverNames),
 ]
 
 var passed = 0, failed = 0, skipped = 0

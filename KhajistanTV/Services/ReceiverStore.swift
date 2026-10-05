@@ -26,8 +26,12 @@ enum ReceiverStoreError: LocalizedError {
 final class ReceiverStore {
     private(set) var index: ReceiverIndex?
     private(set) var indexError: String?
+    /// The core region shapes, kept once fetched: the map draws from them and a region page reads
+    /// its native name from them. Tracked, so a page that asked before they arrived draws again.
+    private(set) var coreShapes: RegionShapes?
     var isLoading = false
 
+    @ObservationIgnored private var extendedShapes: RegionShapes?
     @ObservationIgnored private var controls = Controls.empty
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
@@ -106,6 +110,51 @@ final class ReceiverStore {
         }
         await refreshControlsIfStale()
         return ReceiverRules.eligible(raw, controls: controls)
+    }
+
+    /// The shape files the map is drawn from. The extended file comes only when asked for. Both are
+    /// static, so each is fetched and decoded once and kept; a failed fetch is not kept and is
+    /// tried again by the next call.
+    func mapShapes(extended: Bool) async throws -> (core: RegionShapes, extended: RegionShapes?) {
+        let core: RegionShapes
+        if let cached = coreShapes {
+            core = cached
+        } else {
+            core = try await fetchShapes("region-shapes.json")
+            coreShapes = core
+        }
+        guard extended else { return (core, nil) }
+        let wide: RegionShapes
+        if let cached = extendedShapes {
+            wide = cached
+        } else {
+            wide = try await fetchShapes("region-shapes-extended.json")
+            extendedShapes = wide
+        }
+        return (core, wide)
+    }
+
+    /// The native-script name of a region, read from the core shape file. Nil until that file has
+    /// been fetched, and when it has no name for the region or the name only repeats the label.
+    func nativeName(for regionId: String) -> String? {
+        guard let shape = coreShapes?.regions.first(where: { $0.id == regionId }),
+              let native = shape.native?.trimmingCharacters(in: .whitespacesAndNewlines), !native.isEmpty,
+              native.caseInsensitiveCompare(shape.label.trimmingCharacters(in: .whitespacesAndNewlines)) != .orderedSame
+        else { return nil }
+        return native
+    }
+
+    private func fetchShapes(_ file: String) async throws -> RegionShapes {
+        let (data, response) = try await urlSession.data(from: KJConfig.site.appendingPathComponent("data/\(file)"))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw ReceiverStoreError.http(code) }
+        do {
+            return try await Task.detached(priority: .userInitiated) {
+                try JSONDecoder().decode(RegionShapes.self, from: data)
+            }.value
+        } catch {
+            throw ReceiverStoreError.unreadable
+        }
     }
 
     /// The carrier URL for a channel's live stream, asked for at the moment of tuning. The

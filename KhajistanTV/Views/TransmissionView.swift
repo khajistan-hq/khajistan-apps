@@ -1,284 +1,237 @@
 import SwiftUI
 
-/// Khajistan TV. A channel is tuned and the clock says what is on it; there is no list of
-/// programmes to choose from and no scrub bar. Up or down switches between the two channels.
+/// Khajistan Transmission, the station page. It names the two channels and what is on each, and
+/// opens one of them full screen. A channel is tuned and the clock says what is on it: there is
+/// no list of programmes to choose from and no scrub bar.
 struct TransmissionView: View {
     @Environment(AppModel.self) private var model
+    @State private var password = ""
     @State private var showSignIn = false
-    @State private var passwordDraft = ""
-    @State private var hasTuned = false
-    @State private var overlayVisible = true
-    @State private var hideTask: Task<Void, Never>?
+    /// The channel the viewer chose while signed out, and the one to open once the sign-in sheet
+    /// has closed. A cover cannot open over a sheet that is still on its way down.
+    @State private var chosen: Int?
+    @State private var openAfterSignIn: Int?
+    @State private var playing: ChannelChoice?
+
+    private struct ChannelChoice: Identifiable {
+        let number: Int
+        var id: Int { number }
+    }
+
+    private var store: TransmissionStore { model.transmission }
 
     var body: some View {
-        let palette = Palette(model.skin)
-        ZStack {
-            palette.ground.ignoresSafeArea()
-            content(palette)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 40) {
+                Text("Khajistan Transmission")
+                    .kjDisplay()
+                    .accessibilityAddTraits(.isHeader)
+                meta
+                scheduleBlock
+            }
+            // Buttons take the platform's text style unless told otherwise; the house scale decides.
+            .kjBody()
+            .padding(KJLayout.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .foregroundStyle(palette.ink)
-        .onChange(of: model.transmission.phase) { wake() }
-        .onChange(of: model.transmission.player.state) { wake() }
         .task {
-            hasTuned = true
-            wake()
-            await model.transmission.load()
+            await store.loadSchedule()
+            // A page left open as the month turns takes the new month's schedule. A schedule
+            // held for the current month answers at once, so this costs nothing most of the time.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                if store.schedule == .ready { await store.loadSchedule() }
+            }
         }
-        .onDisappear {
-            // Leaving the tab ends the transmission; coming back tunes it afresh by the clock.
-            hasTuned = false
-            hideTask?.cancel()
-            model.transmission.stop()
+        .sheet(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+            SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
-        .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { await model.transmission.load() })
+        .fullScreenCover(item: $playing) { choice in
+            TransmissionPlayerView(channel: choice.number)
         }
     }
 
-    // MARK: - Phases
+    // MARK: - The page
+
+    /// The count is known once the schedule is held. In that state this line is the page's state
+    /// line, since a Text inside a card's button label is merged into the button and cannot be
+    /// found as a static text.
+    @ViewBuilder
+    private var meta: some View {
+        if case .ready = store.schedule {
+            Text(metaText)
+                .kjBody()
+                .transmissionState("Ready")
+        } else {
+            Text(metaText)
+                .kjBody()
+        }
+    }
+
+    private var metaText: String {
+        let tail = "two scheduled channels \u{00B7} Pakistan time (UTC+5)"
+        guard case .ready = store.schedule, let count = store.programmeCount else { return tail }
+        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
+    }
 
     @ViewBuilder
-    private func content(_ palette: Palette) -> some View {
-        switch model.transmission.phase {
-        case .idle:
-            if hasTuned {
-                statusBlock(marker: "Stopped", line: "Stopped.") {
-                    Button("Tune in") {
-                        Task { await model.transmission.load() }
-                    }
-                    .buttonStyle(PlateButtonStyle(palette: palette))
-                    .frame(maxWidth: 500, alignment: .leading)
-                }
-            } else {
-                loadingBlock
-            }
-        case .loading:
-            loadingBlock
+    private var scheduleBlock: some View {
+        switch store.schedule {
+        case .idle, .loading:
+            TuningLoader("Tuning Khajistan Transmission\u{2026}")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Tuning Khajistan Transmission")
+                .accessibilityAddTraits(.isStaticText)
+                .transmissionState("Loading")
         case .needsPreviewPassword(let message):
-            statusBlock(marker: "Preview password", line: "The schedule is behind the preview password until launch.") {
+            VStack(alignment: .leading, spacing: 28) {
+                Text("The schedule is behind the preview password until launch.")
+                    .kjBody()
+                    .transmissionState("Preview password")
                 if let message {
-                    Text(message)
-                        .font(KJFont.body())
+                    Text(message).kjBody()
                 }
-                SecureField("Password", text: $passwordDraft)
+                HouseInputField("Password") {
+                    SecureField("", text: $password)
+                }
                 Button("Continue") {
                     submitPassword()
                 }
-                .buttonStyle(PlateButtonStyle(palette: palette))
-                .frame(maxWidth: 500, alignment: .leading)
-                .disabled(passwordDraft.isEmpty)
+                .buttonStyle(HouseButtonStyle())
+                .disabled(password.isEmpty)
+                .opacity(password.isEmpty ? 0.5 : 1)
             }
         case .noSchedule:
-            statusBlock(marker: "No schedule", line: "The schedule for this month has not been published.") {
-                Button("Try again") {
-                    Task { await model.transmission.load() }
-                }
-                .buttonStyle(PlateButtonStyle(palette: palette))
-                .frame(maxWidth: 500, alignment: .leading)
+            VStack(alignment: .leading, spacing: 28) {
+                Text("The schedule for this month has not been published.")
+                    .kjBody()
+                    .transmissionState("No schedule")
+                tryAgain
             }
-        case .needsSignIn:
-            statusBlock(marker: "Sign in", line: "Sign in to watch Khajistan TV.") {
-                Button("Sign in") {
-                    showSignIn = true
-                }
-                .buttonStyle(PlateButtonStyle(palette: palette))
-                .frame(maxWidth: 500, alignment: .leading)
-            }
-        case .offAir(channelName: let channelName, returns: let returns):
-            remote(offAirView(channelName: channelName, returns: returns))
         case .failed(let message):
-            statusBlock(marker: "Failed", line: message) {
-                Button("Try again") {
-                    Task { await model.transmission.load() }
+            VStack(alignment: .leading, spacing: 28) {
+                Text(message)
+                    .kjBody()
+                    .transmissionState("Failed")
+                tryAgain
+            }
+        case .ready:
+            VStack(alignment: .leading, spacing: 48) {
+                // The cards read the clock, so they are drawn again every half minute.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    HStack(alignment: .top, spacing: 40) {
+                        ForEach([1, 2], id: \.self) { number in
+                            card(number, at: context.date)
+                        }
+                    }
                 }
-                .buttonStyle(PlateButtonStyle(palette: palette))
-                .frame(maxWidth: 500, alignment: .leading)
+                if !model.auth.isSignedIn {
+                    VStack(alignment: .leading, spacing: 24) {
+                        Text("Sign in to watch Khajistan Transmission.")
+                            .kjBody()
+                        Button("Sign in") {
+                            chosen = nil
+                            showSignIn = true
+                        }
+                        .buttonStyle(HouseButtonStyle())
+                    }
+                }
             }
-        case .onAir(let air):
-            remote(onAirView(palette, air))
         }
     }
 
-    private var loadingBlock: some View {
-        statusBlock(marker: "Loading", line: "Tuning Khajistan TV\u{2026}") {
-            EmptyView()
+    private var tryAgain: some View {
+        Button("Try again") {
+            Task { await store.loadSchedule() }
         }
+        .buttonStyle(HouseButtonStyle())
     }
 
-    /// What a phase has to say: its sentence, then whatever it offers. The one-word marker is
-    /// the sentence's accessibility value, read by the UI tests and never drawn.
-    private func statusBlock<Extra: View>(marker: String, line: String, @ViewBuilder _ extra: () -> Extra) -> some View {
-        VStack(alignment: .leading, spacing: 28) {
-            Text(line)
-                .font(KJFont.body())
-                .accessibilityIdentifier("transmissionState")
-                .accessibilityValue(marker)
-            extra()
-        }
-        .frame(maxWidth: 1000, alignment: .leading)
-        .padding(80)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func offAirView(channelName: String, returns: String?) -> some View {
-        ZStack {
-            statusBlock(marker: "Off air", line: offAirLine(channelName: channelName, returns: returns)) {
-                Text("Up or down switches channel.")
-                    .font(KJFont.caption())
-            }
-            focusTarget
-        }
-    }
-
-    private func offAirLine(channelName: String, returns: String?) -> String {
-        guard let returns, !returns.isEmpty else { return "Off air." }
-        return "Off air. \(channelName) returns at \(returns) \(StationClock.tzLabel)."
-    }
-
-    private func onAirView(_ palette: Palette, _ air: OnAir) -> some View {
-        let player = model.transmission.player
-        let audioOnly = air.programme?.audio_only == true
-        return ZStack {
-            if audioOnly {
-                Text(headline(for: air))
-                    .font(KJFont.title())
-                    .multilineTextAlignment(.center)
-                    .padding(120)
-            } else {
-                PlayerLayerView(player: player.player)
-                    .ignoresSafeArea()
-            }
-            VStack {
-                Spacer()
-                infoPlate(palette, air: air, player: player)
-            }
-            .opacity(overlayVisible ? 1 : 0)
-            .animation(.easeOut(duration: 0.25), value: overlayVisible)
-            focusTarget
-        }
-    }
-
-    private func infoPlate(_ palette: Palette, air: OnAir, player: PlayerController) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(lineOne(for: air))
-                .font(KJFont.body())
-                .accessibilityIdentifier("transmissionState")
-                .accessibilityValue("On air")
-            let title = air.programme?.title ?? ""
-            if !title.isEmpty {
-                Text(title)
-                    .font(KJFont.bodyBold())
-            }
-            if let custodian = air.programme?.custodian, !custodian.isEmpty {
-                Text(custodian)
-                    .font(KJFont.caption())
-            }
-            if let transfer = air.programme?.transfer, !transfer.isEmpty {
-                Text(transfer)
-                    .font(KJFont.caption())
-            }
-            Text(stateText(player.state))
-                .font(KJFont.caption())
-                .accessibilityIdentifier("playerState")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 80)
-        .padding(.vertical, 60)
-        .background(palette.ground)
-    }
-
-    // MARK: - Words
-
-    /// The channel, the show and the hours, joined by middle dots. The show is left out when
-    /// the schedule names none.
-    private func lineOne(for air: OnAir) -> String {
-        var parts = [channelLabel(for: air)]
-        if let show = air.show?.name, !show.isEmpty { parts.append(show) }
-        parts.append("\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
-        return parts.joined(separator: " \u{00B7} ")
-    }
-
-    private func channelLabel(for air: OnAir) -> String {
-        if let info = model.transmission.programming?._meta.channels.first(where: { $0.id == air.channelId }) {
-            return info.name
-        }
-        return model.transmission.channelName(model.transmission.channelNumber)
-    }
-
-    /// What an audio-only transmission shows in place of a picture. Five vinyl transfers carry
-    /// no title, and for those the show name stands in.
-    private func headline(for air: OnAir) -> String {
-        let title = air.programme?.title ?? ""
-        if !title.isEmpty { return title }
-        if let show = air.show?.name, !show.isEmpty { return show }
-        return channelLabel(for: air)
-    }
-
-    private func stateText(_ state: PlayerController.State) -> String {
-        switch state {
-        case .idle: return ""
-        case .tuning: return "Tuning\u{2026}"
-        case .playing: return "Playing"
-        case .paused: return "Paused"
-        case .failed(let message): return message
-        }
-    }
-
-    // MARK: - The remote
-
-    /// Holds focus on a full-screen phase so the remote's presses reach `remote(_:)`, and wakes
-    /// the overlay on a click. It draws nothing.
-    private var focusTarget: some View {
+    private func card(_ number: Int, at date: Date) -> some View {
         Button {
-            wake()
+            choose(number)
         } label: {
-            Color.clear
+            ChannelCardLabel(
+                number: number,
+                line: store.channelLine(number),
+                onAir: store.nowOn(channel: number, at: date),
+                returns: store.returnTime(channel: number, at: date)
+            )
         }
-        .buttonStyle(SurfaceButtonStyle())
+        .buttonStyle(HouseButtonStyle())
+        .accessibilityIdentifier("transmission-channel-\(number)")
     }
 
-    /// Up or down switches channel, play/pause pauses (or rejoins the channel live when it is
-    /// not playing), and the menu button stops the transmission. The view stays; the tab is
-    /// the container.
-    private func remote<Surface: View>(_ surface: Surface) -> some View {
-        surface
-            .onMoveCommand { direction in
-                wake()
-                if direction == .up || direction == .down {
-                    Task { await model.transmission.switchChannel() }
-                }
-            }
-            .onPlayPauseCommand {
-                wake()
-                if model.transmission.player.state == .playing {
-                    model.transmission.player.pause()
-                } else {
-                    Task { await model.transmission.rejoinLive() }
-                }
-            }
-            .onExitCommand {
-                model.transmission.stop()
-            }
+    // MARK: - Choosing
+
+    /// A signed-in viewer opens the channel. A signed-out one signs in first, and the channel
+    /// opens when the sheet has closed.
+    private func choose(_ number: Int) {
+        if model.auth.isSignedIn {
+            playing = ChannelChoice(number: number)
+        } else {
+            chosen = number
+            showSignIn = true
+        }
+    }
+
+    private func openChosen() {
+        if let number = openAfterSignIn {
+            playing = ChannelChoice(number: number)
+        }
+        openAfterSignIn = nil
+        chosen = nil
     }
 
     private func submitPassword() {
-        let entered = passwordDraft
-        passwordDraft = ""
+        let entered = password
+        password = ""
         Task {
             model.auth.setPreviewPassword(entered)
-            await model.transmission.load()
+            await store.loadSchedule()
         }
     }
+}
 
-    /// Shows the overlay. Once the programme is playing it hides again after 2.6 seconds
-    /// without a press; while tuning, paused or failed it stays.
-    private func wake() {
-        overlayVisible = true
-        hideTask?.cancel()
-        guard model.transmission.player.state == .playing else { return }
-        hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
-            if !Task.isCancelled { overlayVisible = false }
+/// One channel's card: its number, whether it is on air, its own line from the schedule, and
+/// what is on it now or when it returns. It sits inside a button's plate, so every colour comes
+/// from the palette the plate sets for it, through the kicker and the inherited ink.
+private struct ChannelCardLabel: View {
+    let number: Int
+    let line: String?
+    let onAir: OnAir?
+    let returns: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 20) {
+                Kicker("Channel \(number)")
+                Kicker(onAir == nil ? "Off air" : "\u{25CF} On air")
+            }
+            if let line, !line.isEmpty {
+                Text(line).kjBody()
+            }
+            if let air = onAir {
+                if let show = air.show?.name, !show.isEmpty {
+                    Text(show).kjName()
+                }
+                if let title = air.programme?.title, !title.isEmpty {
+                    Text(title).kjBody()
+                }
+                Kicker("\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
+            } else if let returns, !returns.isEmpty {
+                Text("Returns at \(returns) \(StationClock.tzLabel)").kjBody()
+            }
         }
+        .frame(maxWidth: .infinity, minHeight: 360, alignment: .topLeading)
+    }
+}
+
+private extension View {
+    /// The page's state, as the accessibility value of its state line. The UI tests read it and it
+    /// is never drawn.
+    func transmissionState(_ marker: String) -> some View {
+        accessibilityIdentifier("transmissionState")
+            .accessibilityValue(marker)
     }
 }

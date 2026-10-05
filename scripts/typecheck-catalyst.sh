@@ -6,8 +6,9 @@
 # Two stand-ins, both only in a temporary copy of the sources:
 #   - @State is a macro in the SDK whose plugin ships with Xcode, not the CLT, so it is
 #     swapped for a plain property wrapper;
-#   - onMoveCommand / onExitCommand / onPlayPauseCommand are tvOS-only (unavailable on
-#     iOS, hence Catalyst), so no-op versions are added.
+#   - onMoveCommand / onExitCommand / onPlayPauseCommand / focusSection / focusScope /
+#     prefersDefaultFocus are tvOS-only (unavailable on iOS, hence Catalyst), so no-op
+#     versions are added. Another tvOS-only SwiftUI member needs one more line here.
 # It does not build for tvOS. An API that exists on iOS but not tvOS passes here; check
 # those by name. The UI tests are not checked (XCTest is not in the CLT).
 set -eu
@@ -36,6 +37,9 @@ extension View {
     func onMoveCommand(perform action: ((MoveCommandDirection) -> Void)?) -> some View { self }
     func onExitCommand(perform action: (() -> Void)?) -> some View { self }
     func onPlayPauseCommand(perform action: (() -> Void)?) -> some View { self }
+    func focusSection() -> some View { self }
+    func focusScope(_ namespace: Namespace.ID) -> some View { self }
+    func prefersDefaultFocus(_ prefersDefaultFocus: Bool = true, in namespace: Namespace.ID) -> some View { self }
 }
 SHIM
 cd "$OUT"

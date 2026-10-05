@@ -1,32 +1,32 @@
 import SwiftUI
 
+/// The top bar over one of the three root screens. There is no TabView: tvOS paints a focused tab
+/// as a white pill, and the house allows no white.
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var selected: Tab = .receiver
-    @State private var startApplied = false
 
     var body: some View {
         let palette = Palette(model.skin)
-        TabView(selection: $selected) {
-            ReceiverView()
-                .tabItem { Text("Receiver") }
-                .tag(Tab.receiver)
-            TransmissionView()
-                .tabItem { Text("Khajistan TV") }
-                .tag(Tab.transmission)
-            AccountView()
-                .tabItem { Text("Account") }
-                .tag(Tab.account)
+        VStack(spacing: 0) {
+            TopBar(current: model.section, select: { model.section = $0 })
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .focusSection()
         }
-        .tint(palette.ink)
-        .foregroundStyle(palette.ink)
         .background(palette.ground.ignoresSafeArea())
+        .environment(\.palette, palette)
+        .foregroundStyle(palette.ink)
+        .tint(palette.accent)
+        // The colour scheme steers what tvOS draws itself, the text fields and the keyboard.
         .preferredColorScheme(model.skin == .day ? .light : .dark)
-        .task {
-            // The start tab is applied once; later changes belong to the viewer.
-            guard !startApplied else { return }
-            startApplied = true
-            selected = model.startTab
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.section {
+        case .receiver: ReceiverView()
+        case .transmission: TransmissionView()
+        case .account: AccountView()
         }
     }
 }

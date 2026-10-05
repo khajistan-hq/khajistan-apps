@@ -123,6 +123,29 @@ func skinColours() throws {
     try expectEqual(try JSONDecoder().decode([Skin].self, from: encoded), [.grove])
 }
 
+func skinChoiceResolvesAutomaticAndFixed() throws {
+    try expectEqual(SkinChoice.allCases.map(\.label), ["Automatic", "Day", "Grove", "Smut"])
+    // Stored values: absent, empty, the retired skins and a wrong case all read as Automatic.
+    for stored in [nil, "", "night", "dawn", "Grove", "auto", "DAY"] as [String?] {
+        try expectEqual(SkinChoice(stored: stored), .automatic, String(describing: stored))
+    }
+    for choice in SkinChoice.allCases { try expectEqual(SkinChoice(stored: choice.rawValue), choice) }
+    // Automatic is the hour's skin, at each band.
+    let hours: [(Int, Skin)] = [(0, .grove), (5, .smut), (8, .day), (12, .day), (16, .day), (17, .smut), (20, .grove), (23, .grove)]
+    for (hour, skin) in hours {
+        try expectEqual(SkinChoice.automatic.skin(at: pkt(2026, 10, 5, hour, 30), calendar: karachi), skin, "automatic at \(hour)")
+    }
+    // A fixed choice holds through every hour of the day, whatever the sky says.
+    for choice in [SkinChoice.day, .grove, .smut] {
+        let want = Skin(rawValue: choice.rawValue)
+        for hour in 0..<24 {
+            try expectEqual(choice.skin(at: pkt(2026, 10, 5, hour, 0), calendar: karachi), want, "\(choice) at \(hour)")
+        }
+    }
+    // The negative case: a fixed choice is not Automatic in disguise. Grove at noon is not the noon skin.
+    try expect(SkinChoice.grove.skin(at: pkt(2026, 10, 5, 12, 0), calendar: karachi) != SkinChoice.automatic.skin(at: pkt(2026, 10, 5, 12, 0), calendar: karachi))
+}
+
 // MARK: - Receiver index
 
 let indexJSON = #"""
@@ -897,6 +920,86 @@ func followingWalksTheRosterAndHandsBackToTheClock() throws {
     try expectEqual(StationClock.following(current, in: p, at: nextDay)?.date, "2026-10-11")
     // Off air after the slot: nil.
     try expectEqual(StationClock.following(current, in: p, at: pkt(2026, 10, 10, 8, 30, 0)), nil)
+}
+
+func upcomingListsTheNextStripsInOrder() throws {
+    let p = try syntheticSchedule()
+    func labels(_ strips: [ScheduleStrip]) -> [String] { strips.map { "\($0.date) \($0.startLabel)-\($0.endLabel) \($0.show?.slug ?? "-")" } }
+    // On air at 06:12:30: the rest of the day, then across midnight into the last day held.
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 6, 12, 30), count: 3)),
+                    ["2026-10-10 07:00-08:00 b", "2026-10-10 23:00-00:00 a", "2026-10-11 00:00-00:00 -"])
+    // The first strip up next is the one OnAir already names, everywhere on the hand-made day.
+    var t = pkt(2026, 10, 10, 0, 0, 0)
+    while t < pkt(2026, 10, 11, 0, 0, 0) {
+        defer { t = t.addingTimeInterval(397) }
+        let first = StationClock.upcoming(p, channelId: "transfers", at: t, count: 1).first
+        if let air = StationClock.onAir(p, channelId: "transfers", at: t) {
+            try expectEqual(first?.startLabel, air.nextStart)
+            try expectEqual(first?.show?.slug, air.nextShow?.slug)
+        } else {
+            try expectEqual(first?.startLabel, StationClock.returnTime(p, channelId: "transfers", at: t))
+        }
+    }
+    // Off air between strips: up next is the strip it returns with.
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 8, 0, 0), count: 1)),
+                    ["2026-10-10 23:00-00:00 a"])
+    // The last strip of the day hands over to the first of the next day...
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 23, 30, 0), count: 5)),
+                    ["2026-10-11 00:00-00:00 -"])
+    // ...and the last strip of the grid has nothing after it, however many are asked for.
+    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 11, 12, 0, 0), count: 5).count, 0)
+    // Month and year boundaries the grid holds are crossed; the day after them is not invented.
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 4, 30, 12, 0, 0), count: 3)),
+                    ["2026-05-01 00:00-00:00 b"])
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 12, 31, 12, 0, 0), count: 3)),
+                    ["2027-01-01 00:00-00:00 b"])
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 2, 28, 12, 0, 0), count: 2)),
+                    ["2028-02-29 00:00-00:00 b", "2028-03-01 00:00-00:00 a"])
+    // Nothing for a count of zero, an unknown channel, or a day the schedule does not hold.
+    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 6, 0, 0), count: 0).count, 0)
+    try expectEqual(StationClock.upcoming(p, channelId: "nope", at: pkt(2026, 10, 10, 6, 0, 0), count: 3).count, 0)
+    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 9, 6, 0, 0), count: 3).count, 0)
+    // Channel 2 airs one strip and then nothing: off air with no return, and no list.
+    try expectEqual(StationClock.upcoming(p, channelId: "audio", at: pkt(2026, 10, 10, 6, 10, 0), count: 3).count, 0)
+}
+
+func secondsLeftCountsDownToTheSlotEnd() throws {
+    let p = try syntheticSchedule()
+    let air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 6, 12, 30)))
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 6, 12, 30)), 47 * 60 + 30)
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 6, 59, 59)), 1)
+    // The moment the slot ends the clock has left it, and so before it began, and on another day.
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 7, 0, 0)), nil)
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 5, 59, 59)), nil)
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 11, 6, 12, 30)), nil)
+    // And at that moment the clock has the next strip on air: now is never the slot just gone.
+    try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 7, 0, 0))?.startLabel, "07:00")
+    // The last strip of the day ends at midnight.
+    let late = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 23, 59, 0)))
+    try expectEqual(StationClock.secondsLeft(in: late, at: pkt(2026, 10, 10, 23, 59, 59)), 1)
+    try expectEqual(StationClock.secondsLeft(in: late, at: pkt(2026, 10, 11, 0, 0, 0)), nil)
+}
+
+func realUpcomingAgreesWithOnAir() throws {
+    let p = try realProgramming("2026-10")
+    var checked = 0
+    for number in [1, 2] {
+        let id = try require(StationClock.channelId(p, number: number))
+        var t = pkt(2026, 10, 1, 0, 0, 0)
+        while t <= pkt(2026, 10, 31, 23, 59, 59) {
+            defer { t = t.addingTimeInterval(3517) }
+            let strips = StationClock.upcoming(p, channelId: id, at: t, count: 4)
+            let expectedFirst = StationClock.onAir(p, channelId: id, at: t)?.nextStart ?? StationClock.returnTime(p, channelId: id, at: t)
+            try expectEqual(strips.first?.startLabel, expectedFirst)
+            // Soonest first, and every strip starts after now.
+            let now = StationClock.stationNow(t)
+            let keys = strips.map { "\($0.date) \(StationClock.clockLabel($0.slot.start_minute))" }
+            try expectEqual(keys, keys.sorted())
+            try expect(strips.allSatisfy { $0.date > now.iso || $0.slot.start_minute > now.minutes })
+            checked += 1
+        }
+    }
+    print("      \(checked) instants across October")
 }
 
 // MARK: - Station clock: differential against the site's own JS
@@ -1820,6 +1923,7 @@ func realMapWithoutRegionFilesOpensNothing() throws {
 let tests: [(String, () throws -> Void)] = [
     ("Skin hours at the boundaries", skinHoursAtBoundaries),
     ("Skin hex triples", skinColours),
+    ("Skin choice: Automatic follows the hour, a fixed choice holds", skinChoiceResolvesAutomaticAndFixed),
     ("ReceiverIndex regions, URLs and medium lines", receiverIndexRegionsAndLines),
     ("ReceiverIndex without cameraFiles", receiverIndexWithoutCameraFiles),
     ("Channel decoding and active stream", channelDecodesAndFindsItsActiveStream),
@@ -1852,6 +1956,9 @@ let tests: [(String, () throws -> Void)] = [
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
+    ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
+    ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
+    ("Real October: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),

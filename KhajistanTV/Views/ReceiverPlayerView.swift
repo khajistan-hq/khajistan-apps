@@ -86,7 +86,17 @@ struct ReceiverPlayerView: View {
             overlay(palette)
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
-            PigeonOverlayLayer(overlay: model.pigeon)
+            // The full screen, past the safe area: the bird flies edge to edge (owner, 2026-10-06:
+            // it showed "smaller than the full frame").
+            // Only in the tree while a flight is on: a UIKit view laid over the screen otherwise
+            // kept the remote's presses from the focus target under it (the Captions control
+            // stopped answering, 2026-10-06).
+            if model.pigeon.showing {
+                PigeonOverlayLayer(overlay: model.pigeon)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .focusable(false)
+            }
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
@@ -336,6 +346,9 @@ struct ReceiverPlayerView: View {
     /// The hard cut: the new signal's layer shows in the same frame the old one goes, the old
     /// stops, and the new one's sound comes up.
     private func cut(to target: Channel, from outgoing: PlayerController, into next: PlayerController, tookSince started: ContinuousClock.Instant) {
+        #if DEBUG
+        print("KJCUT \(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
+        #endif
         if next.state == .playing {
             let took = ContinuousClock.now - started
             TuneTimes.record(target.id, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)

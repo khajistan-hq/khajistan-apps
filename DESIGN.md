@@ -179,14 +179,33 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 Only the content moves: the pigeon mark, and the pigeon at a changeover (owner ruling
 2026-10-04 on the Higgsfield pigeon: loading states and transitions only).
 
-**A channel change is the website's own wing wipe** (owner, 2026-10-06: "bring back the very
-first iteration, hard cut no need to fade video, only fade audio"): the pigeon flies up into the
-lens until its wing covers the screen (1.6 s) and holds there while the old sound fades and the
-new channel tunes behind it; the wing pulls away (0.9 s); the picture cuts in and only its sound
-eases up (0.5 s). The clips are `wing-wipe-in.mp4` and `wing-wipe-out.mp4`, 720p H.264 on black,
-exactly as the website plays them. The Transmission sign-on is the same wipe once per launch;
-the grooming ident is not in the apps. The flights generated on 2026-10-05/06 were all set aside
-by that ruling; their record, and what each taught, is `scripts/flights/FLIGHTS.json`.
+**A channel change in the Receiver is the pigeon over the live picture, and a hard cut**
+(owner, 2026-10-06: "hard cut is ok from one channel to next ... and the pigeon transition on it",
+with the flights they starred in Higgsfield). The next channel tunes on a second player, out of
+sight and silent, while the old one keeps playing and its sound fades. The bird flies over the
+old picture; the channel cuts behind it at the moment it covers the most of the screen (where it
+covers half or more: Across, and the closing wing of Swerve and Loop), or the moment the new
+channel plays if that is later, and the bird flies on over the new one. Only the sound eases up.
+If a flight ends before the channel plays, another short one follows.
+
+| flight | length | | cut |
+|---|---|---|---|
+| Across | 3.7 s | into the lens, a wing over 70% of the screen | behind the wing |
+| Swerve | 4.0 s | from a wing filling the screen, banks round, back into the lens | behind the closing wing |
+| Hover | 4.7 s | hangs on its wings, then lifts away | when the channel plays |
+| Lift | 4.5 s | hangs, claps its wings, lifts away | when the channel plays |
+| Loop | 8.0 s | loops and rolls between two full-screen wings; for slow channels | behind the closing wing |
+| Twirl | 9.5 s | loops and a barrel roll across; for slow channels | when the channel plays |
+
+The long two fly only for a channel that took 8 s or more to tune here before (`TuneTimes`, kept
+per channel on the device). Each flight is two ordinary H.264 videos, the bird's colour at 1080
+and its matte at 540, decoded in hardware and composited on the GPU on a display link of its own
+thread (`PigeonOverlay`, `PigeonRenderer`). HEVC with alpha was tried first: the Apple TV HD decodes
+it in software and lost a third to two-thirds of the frames while the next channel started.
+Measured on the owner's Apple TV HD with the pair: 97-113 frames per flight, at most 2 skipped.
+
+Transmission and its sign-on keep the website's own wing wipe (`wing-wipe-in/out.mp4`): the wing
+covers the screen, the programme tunes behind it, the wing leaves, hard cut, sound fades.
 
 **The dancer**: while he dances, what would sit behind him (the station's name on radio, the
 programme on a sound-only transmission) moves to the top right, smaller and at full strength,

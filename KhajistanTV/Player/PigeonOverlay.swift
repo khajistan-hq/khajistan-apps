@@ -1,4 +1,6 @@
 import AVFoundation
+import Metal
+import QuartzCore
 import Observation
 import SwiftUI
 import UIKit
@@ -15,7 +17,8 @@ import UIKit
 final class PigeonOverlay {
     struct Flight: Equatable {
         let name: String
-        let url: URL
+        let colour: URL
+        let matte: URL
         let length: Double
         let cut: Double
         /// How much of the screen the bird covers at `cut`. Under half, there is nothing to hide the
@@ -34,7 +37,12 @@ final class PigeonOverlay {
     private(set) var showing = false
     /// The flight on screen, or the last one.
     private(set) var current: Flight?
-    let player = AVPlayer()
+
+    /// The bird's picture and its matte, two ordinary H.264 videos the Apple TV decodes in
+    /// hardware, played in step and drawn together by `PigeonRenderer`.
+    let colourPlayer = AVPlayer()
+    let mattePlayer = AVPlayer()
+    let renderer = PigeonRenderer()
 
     @ObservationIgnored private var flights: [String: Flight] = [:]
     @ObservationIgnored private var turn = 0
@@ -43,11 +51,12 @@ final class PigeonOverlay {
     @ObservationIgnored private var ended: Signal?
 
     init() {
-        // A flight must never take the audio session from the signal under it.
-        player.isMuted = true
-        player.preventsDisplaySleepDuringVideoPlayback = false
-        player.automaticallyWaitsToMinimizeStalling = false
-        player.actionAtItemEnd = .pause
+        for player in [colourPlayer, mattePlayer] {
+            player.isMuted = true
+            player.preventsDisplaySleepDuringVideoPlayback = false
+            player.automaticallyWaitsToMinimizeStalling = false
+            player.actionAtItemEnd = .pause
+        }
         for name in Self.short + Self.long { if let flight = Self.load(name) { flights[name] = flight } }
     }
 
@@ -56,29 +65,35 @@ final class PigeonOverlay {
     func pick(expected: Double) -> Flight? {
         let pool = (expected >= Self.slowChannel ? Self.long : Self.short).compactMap { flights[$0] }
         let options = pool.filter { $0.name != last }
-        guard !options.isEmpty || !pool.isEmpty else { return nil }
-        turn += 1
         let list = options.isEmpty ? pool : options
+        guard !list.isEmpty else { return nil }
+        turn += 1
         return list[turn % list.count]
     }
 
-    /// Loads a flight at its first frame, paused, decoder warmed, so it starts the instant it is
-    /// asked for.
+    /// Loads a flight's two videos at their first frame, decoders warmed.
     func arm(_ flight: Flight) async {
-        if armed == flight, player.currentTime() == .zero { return }
-        let item = AVPlayerItem(url: flight.url)
-        player.replaceCurrentItem(with: item)
-        while item.status == .unknown { try? await Task.sleep(for: .milliseconds(20)) }
-        guard item.status == .readyToPlay else { armed = nil; return }
-        _ = await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-        _ = await player.preroll(atRate: 1)
-        if player.currentItem === item { armed = flight }
+        if armed == flight { return }
+        armed = nil
+        let colour = AVPlayerItem(url: flight.colour), matte = AVPlayerItem(url: flight.matte)
+        renderer.attach(colour: colour, matte: matte)
+        colourPlayer.replaceCurrentItem(with: colour)
+        mattePlayer.replaceCurrentItem(with: matte)
+        while colour.status == .unknown || matte.status == .unknown { try? await Task.sleep(for: .milliseconds(20)) }
+        guard colour.status == .readyToPlay, matte.status == .readyToPlay else { return }
+        async let a: Bool = colourPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        async let b: Bool = mattePlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+        _ = await (a, b)
+        async let c: Bool = colourPlayer.preroll(atRate: 1)
+        async let d: Bool = mattePlayer.preroll(atRate: 1)
+        _ = await (c, d)
+        if colourPlayer.currentItem === colour { armed = flight }
     }
 
-    /// Plays the armed flight over the picture. Returns at once; `waitForEnd` returns when the
-    /// bird has gone.
+    /// Plays the armed flight over the picture, both videos started on the same host time.
+    /// Returns at once; `waitForEnd` returns when the bird has gone.
     func start() {
-        guard let flight = armed, let item = player.currentItem else { return }
+        guard let flight = armed, let item = colourPlayer.currentItem else { return }
         last = flight.name
         current = flight
         armed = nil
@@ -99,25 +114,30 @@ final class PigeonOverlay {
             timeout.cancel()
             tokens.forEach(NotificationCenter.default.removeObserver)
             guard let self, self.ended === done else { return }
+            self.renderer.stop()
             self.showing = false
-            self.player.pause()
+            self.colourPlayer.pause()
+            self.mattePlayer.pause()
         }
+        let host = CMTimeAdd(CMClockGetTime(CMClockGetHostTimeClock()), CMTime(value: 1, timescale: 20))
+        colourPlayer.setRate(1, time: .zero, atHostTime: host)
+        mattePlayer.setRate(1, time: .zero, atHostTime: host)
+        renderer.start()
         var cut = Transaction()
         cut.disablesAnimations = true
         withTransaction(cut) { showing = true }
-        player.play()
         #if DEBUG
-        let probe = VideoProbe(item: item), began = ContinuousClock.now
+        let began = ContinuousClock.now
         Task { @MainActor in
             await done.wait()
-            print("KJFLIGHT \(flight.name) len=\(String(format: "%.2f", flight.length)) wall=\(ContinuousClock.now - began) \(probe.finish())")
+            print("KJFLIGHT \(flight.name) len=\(String(format: "%.2f", flight.length)) wall=\(ContinuousClock.now - began) \(self.renderer.report())")
         }
         #endif
     }
 
     /// Seconds into the flight on screen.
     var elapsed: Double {
-        let t = player.currentTime().seconds
+        let t = colourPlayer.currentTime().seconds
         return t.isFinite ? t : 0
     }
 
@@ -131,26 +151,20 @@ final class PigeonOverlay {
     func clear() {
         ended?.fire()
         ended = nil
+        renderer.stop()
         showing = false
-        player.pause()
+        colourPlayer.pause()
+        mattePlayer.pause()
     }
 
     private static func load(_ name: String) -> Flight? {
-        let tiers = Self.tierOrder
-        guard let url = tiers.lazy.compactMap({ Bundle.main.url(forResource: "flight-\(name)-alpha-\($0)", withExtension: "mov") }).first,
+        guard let colour = Bundle.main.url(forResource: "flight-\(name)-rgb-1080", withExtension: "mp4"),
+              let matte = Bundle.main.url(forResource: "flight-\(name)-matte-540", withExtension: "mp4"),
               let meta = Bundle.main.url(forResource: "flight-\(name)", withExtension: "json"),
               let data = try? Data(contentsOf: meta),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Double],
               let length = json["length"], let cut = json["cut"] else { return nil }
-        return Flight(name: name, url: url, length: length, cut: cut, cutCover: json["cutCover"] ?? 0)
-    }
-
-    /// 1080 where the box decodes it in time, 720 on the Apple TV HD unless measured otherwise.
-    private static var tierOrder: [String] {
-        #if DEBUG
-        if let forced = UserDefaults.standard.string(forKey: "kjflighttier") { return [forced, "1080", "720"] }
-        #endif
-        return ["1080", "720"]
+        return Flight(name: name, colour: colour, matte: matte, length: length, cut: cut, cutCover: json["cutCover"] ?? 0)
     }
 }
 
@@ -192,34 +206,91 @@ final class Signal {
 }
 
 /// The pigeon over everything beneath it, while a flight is on screen.
-struct PigeonOverlayLayer: View {
+struct PigeonOverlayLayer: UIViewRepresentable {
     let overlay: PigeonOverlay
 
-    var body: some View {
-        // Always in the tree, so the flight's first frame is drawn before it is shown.
-        PlayerLayerView(player: overlay.player, gravity: .resizeAspectFill)
-            .ignoresSafeArea()
-            .opacity(overlay.showing ? 1 : 0)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+    func makeUIView(context: Context) -> UIView {
+        let view = overlay.renderer.view
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        uiView.isHidden = !overlay.showing
     }
 }
 
-#if DEBUG
-/// For on-device measurement: which video frames of a flight were ready on time, sampled on a
-/// display link of its own thread, so a busy main thread cannot hide or fake a skip.
-final class VideoProbe: NSObject, @unchecked Sendable {
-    private let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
-    private let item: AVPlayerItem
+/// Draws the flight: on every display refresh, on a thread of its own (the main thread runs at
+/// about 30 Hz on the Apple TV HD), it takes the colour frame due on screen and the matte frame
+/// for the same time from the two players' outputs and composites them, premultiplied, into a
+/// transparent Metal layer over the live picture.
+final class PigeonRenderer: NSObject, @unchecked Sendable {
+    let view: UIView
+    private let layer = CAMetalLayer()
+    private let device: MTLDevice?
+    private let queue: MTLCommandQueue?
+    private var pipeline: MTLRenderPipelineState?
+    private var cache: CVMetalTextureCache?
     private let lock = NSLock()
+    private var colourOut: AVPlayerItemVideoOutput?
+    private var matteOut: AVPlayerItemVideoOutput?
+    private var colourItem: AVPlayerItem?, matteItem: AVPlayerItem?
+    private var colourTex: CVMetalTexture?, matteTex: CVMetalTexture?
     private var link: CADisplayLink?
     private var thread: Thread?
+    private var running = false
     private var lastPTS = -1.0, frames = 0, skipped = 0
 
-    init(item: AVPlayerItem) {
-        self.item = item
+    override init() {
+        device = MTLCreateSystemDefaultDevice()
+        queue = device?.makeCommandQueue()
+        view = MetalHostView(layer: layer)
         super.init()
-        item.add(output)
+        guard let device else { return }
+        layer.device = device
+        layer.pixelFormat = .bgra8Unorm
+        layer.isOpaque = false
+        layer.framebufferOnly = true
+        layer.contentsScale = 1
+        CVMetalTextureCacheCreate(nil, nil, device, nil, &cache)
+        let source = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct V { float4 p [[position]]; float2 uv; };
+        vertex V v(uint id [[vertex_id]]) {
+            float2 xy = float2((id << 1) & 2, id & 2);
+            V o; o.p = float4(xy * 2.0 - 1.0, 0, 1); o.uv = float2(xy.x, 1.0 - xy.y); return o;
+        }
+        fragment float4 f(V in [[stage_in]], texture2d<float> colour [[texture(0)]], texture2d<float> matte [[texture(1)]]) {
+            constexpr sampler s(filter::linear, address::clamp_to_edge);
+            float a = matte.sample(s, in.uv).r;
+            return float4(colour.sample(s, in.uv).rgb * a, a);
+        }
+        """
+        guard let library = try? device.makeLibrary(source: source, options: nil) else { return }
+        let desc = MTLRenderPipelineDescriptor()
+        desc.vertexFunction = library.makeFunction(name: "v")
+        desc.fragmentFunction = library.makeFunction(name: "f")
+        desc.colorAttachments[0].pixelFormat = .bgra8Unorm
+        pipeline = try? device.makeRenderPipelineState(descriptor: desc)
+    }
+
+    /// New items for the next flight; their outputs are read from the render thread.
+    func attach(colour: AVPlayerItem, matte: AVPlayerItem) {
+        let c = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferMetalCompatibilityKey as String: true])
+        let m = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, kCVPixelBufferMetalCompatibilityKey as String: true])
+        colour.add(c)
+        matte.add(m)
+        lock.withLock {
+            colourOut = c; matteOut = m; colourItem = colour; matteItem = matte
+            colourTex = nil; matteTex = nil
+        }
+    }
+
+    func start() {
+        lock.withLock { lastPTS = -1; frames = 0; skipped = 0; running = true }
+        guard thread == nil else { return }
         let thread = Thread { [weak self] in
             guard let self else { return }
             let link = CADisplayLink(target: self, selector: #selector(self.tick(_:)))
@@ -232,21 +303,92 @@ final class VideoProbe: NSObject, @unchecked Sendable {
         thread.start()
     }
 
-    @objc private func tick(_ l: CADisplayLink) {
-        lock.lock(); defer { lock.unlock() }
-        let t = output.itemTime(forHostTime: l.targetTimestamp)
-        guard output.hasNewPixelBuffer(forItemTime: t), output.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) != nil else { return }
+    /// Stops drawing and leaves the layer clear.
+    func stop() {
+        lock.withLock { running = false }
+        clear()
+    }
+
+    func report() -> String {
+        lock.withLock { "frames=\(frames) skipped=\(skipped)" }
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard running, let colourOut, let matteOut else { return }
+        let t = colourOut.itemTime(forHostTime: link.targetTimestamp)
+        guard colourOut.hasNewPixelBuffer(forItemTime: t),
+              let colour = colourOut.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) else { return }
+        if let matte = matteOut.copyPixelBuffer(forItemTime: t, itemTimeForDisplay: nil) {
+            matteTex = texture(matte, plane: 0, format: .r8Unorm)
+        }
+        colourTex = texture(colour, plane: -1, format: .bgra8Unorm)
         let pts = t.seconds
         if lastPTS >= 0, pts - lastPTS > 1.5 / 24 { skipped += Int(((pts - lastPTS) * 24).rounded()) - 1 }
         frames += 1
         lastPTS = pts
+        draw()
     }
 
-    func finish() -> String {
-        lock.lock(); link?.invalidate(); let r = "video=\(frames) skipped=\(skipped)"; lock.unlock()
-        thread?.cancel()
-        item.remove(output)
-        return r
+    private func texture(_ buffer: CVPixelBuffer, plane: Int, format: MTLPixelFormat) -> CVMetalTexture? {
+        guard let cache else { return nil }
+        let w = plane < 0 ? CVPixelBufferGetWidth(buffer) : CVPixelBufferGetWidthOfPlane(buffer, plane)
+        let h = plane < 0 ? CVPixelBufferGetHeight(buffer) : CVPixelBufferGetHeightOfPlane(buffer, plane)
+        var out: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(nil, cache, buffer, nil, format, w, h, max(plane, 0), &out)
+        return out
+    }
+
+    private func draw() {
+        guard let pipeline, let queue, let colourTex, let matteTex,
+              let c = CVMetalTextureGetTexture(colourTex), let m = CVMetalTextureGetTexture(matteTex),
+              let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        guard let enc = buffer.makeRenderCommandEncoder(descriptor: pass) else { return }
+        enc.setRenderPipelineState(pipeline)
+        enc.setFragmentTexture(c, index: 0)
+        enc.setFragmentTexture(m, index: 1)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        enc.endEncoding()
+        buffer.present(drawable)
+        buffer.commit()
+    }
+
+    private func clear() {
+        guard let queue, let drawable = layer.nextDrawable(), let buffer = queue.makeCommandBuffer() else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = drawable.texture
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        buffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
+        buffer.present(drawable)
+        buffer.commit()
     }
 }
-#endif
+
+/// A view whose layer is the renderer's Metal layer, kept the size of the screen.
+private final class MetalHostView: UIView {
+    private let metal: CAMetalLayer
+
+    init(layer metal: CAMetalLayer) {
+        self.metal = metal
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        layer.addSublayer(metal)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        metal.frame = bounds
+        let scale = window?.screen.nativeScale ?? 1
+        metal.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+    }
+}

@@ -13,8 +13,8 @@ struct PicsVidsView: View {
 
     private var store: PicsVidsStore { model.pnv }
     private let columnCount = 4
-    /// The plates' padding is pulled back so tile images sit on the page margin.
-    private let tilePadding: CGFloat = 10
+    /// The gap between tiles, in both directions: room for a focused tile's lift.
+    private let gap: CGFloat = 32
 
     var body: some View {
         ScrollView {
@@ -162,9 +162,9 @@ struct PicsVidsView: View {
     private var columns: some View {
         let layout = PnvLayout.columns(store.items, count: columnCount)
         let nearEnd = Set(store.items.suffix(12).map(\.id))
-        return HStack(alignment: .top, spacing: 12) {
+        return HStack(alignment: .top, spacing: gap) {
             ForEach(Array(layout.enumerated()), id: \.offset) { _, column in
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: gap) {
                     ForEach(column) { row in
                         tile(row)
                             .onAppear {
@@ -175,7 +175,6 @@ struct PicsVidsView: View {
                 .frame(maxWidth: .infinity, alignment: .top)
             }
         }
-        .padding(.horizontal, -tilePadding)
         // The count of tiles drawn so far, for the UI test that walks the paging.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pnvStream")
@@ -186,8 +185,9 @@ struct PicsVidsView: View {
         Button {
             viewing = row
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, maxPixel: 900)
+                    .kjCardArt()
                 HStack(spacing: 12) {
                     if row.isVideo { Kicker("\u{25B6} Video") }
                     Text("@" + store.accountHandle(for: row))
@@ -196,7 +196,7 @@ struct PicsVidsView: View {
                 }
             }
         }
-        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: tilePadding, leading: tilePadding, bottom: tilePadding, trailing: tilePadding)))
+        .buttonStyle(HouseCardStyle())
         .accessibilityIdentifier("tile-\(row.media_key)")
         .accessibilityLabel("\(row.isVideo ? "Video" : "Picture") from @\(store.accountHandle(for: row))")
     }
@@ -251,8 +251,9 @@ struct PnvPicture: View {
             .fill(palette.lift)
             .aspectRatio(ratio, contentMode: .fit)
             .overlay {
-                if let image {
-                    Image(uiImage: image)
+                // Fades in over the plate that held its space.
+                FadeIn(shown: image != nil) {
+                    Image(uiImage: image ?? UIImage())
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                 }

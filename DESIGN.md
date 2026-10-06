@@ -27,7 +27,7 @@ in the app comes from this table and nowhere else.
 | mapDeep | map region fill | `#006F00` | `#7E9B45` | `#006F00` |
 | mapTint | map region fill, second | `#7E9B45` | `#7E9B45` | `#7E9B45` |
 
-Never white, never grey, never a third hue. No shadows. No borders, frames or boxes; spacing
+Never white, never grey, never a third hue. No shadows except the one under a focused card (Cards and shelves, below). No borders, frames or boxes; spacing
 separates things. One exception: a text field keeps a 2pt ink rule along its bottom, because a
 viewer must see where to aim. tvOS draws its own text field as a pill that turns white under
 focus, so the system field is kept at 2% opacity under a cover in the plate's colour and the
@@ -63,6 +63,30 @@ On the website a hovered nav item, a selected suggestion and the current page al
 on the ground in `ink`. The current section in the top bar is underlined (3pt, the accent), the
 way the website marks the brand link.
 
+## Cards and shelves
+
+Owner, 2026-10-06: *"the app should behave like apple tv native films/tv app, similar rows and
+movement and clarity and smoothness."* Everything that is browsed is a **shelf**: a title in name
+type (38pt) with its count in small type, over a row of fixed-size cards that scrolls sideways.
+The page scrolls up and down; a press up or down moves to the nearest card of the next shelf
+(each shelf is a focus section); a press left or right walks along one. The row runs past the page
+margin to the screen's edge, and a page scrolled under the top bar fades out there (28pt).
+
+- **Card motion** (`HouseCardStyle`): focus lifts the card to 1.08 on a spring (response .34,
+  damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
+  at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
+  lettering. System card styles are not used: tvOS draws them as white platters.
+- **Text cards** (channels, mixes, the two Transmission channels) sit on a `CardPlate`: the lift
+  plate at rest, the band plate with onBand text under focus. Square, no border. Channel and mix
+  cards are 420x190 and 440x220, so a shelf is the same height from its first card to its last.
+- **Picture cards** (films, Pics/Vids): the picture lifts and casts the shadow; the title and
+  lines under it keep the ground's ink. A film poster is 420pt high at its own width, never
+  cropped; its text box has a fixed height and takes the poster's width, so a long title wraps
+  under its own poster. Until a picture arrives a lift plate holds its place and the picture
+  fades in over it (0.35s).
+- **Pics/Vids stays a grid.** It is an unbounded stream of real-shaped tiles under two filters,
+  which is what the website's `place()` lays out; the tiles take the card motion and a 32pt gap.
+
 ## Chrome
 
 - **Top bar**, on every root screen: the animated pigeon (72pt) and **KHAJISTAN** (40pt black,
@@ -88,12 +112,13 @@ way the website marks the brand link.
   and its label sits on a yellow plate with black text. Select opens the region. (Until
   2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
   on the owner's TV focus stuck on one region.)
-- **Khajistan Radio** is the last row of the map area, under the strip: *KHAJISTAN RADIO · 22 mixes*,
-  as wide as the map so that a press down from any region lands on it. It appears once the public
-  register (`/data/radio/mixtapes.json`) has loaded with a mix that plays. Select opens the mixes:
-  crumb RECEIVER → KHAJISTAN RADIO, the name (display), *22 mixes*, then four columns of cards in the
-  register's own order, each the mix's title, the programme block it aired in as a kicker, and
-  *place · language* in small type. A mix is a finished recording Khajistan made, not a live signal,
+- **Shelves under the front.** The sidebar, the map and its strip are the first screen; the page
+  scrolls to two full-width shelves under it, as the TV app lays its rows, each peeking at the
+  bottom of the first screen. **Khajistan Radio · 22 mixes** appears once the public register
+  (`/data/radio/mixtapes.json`) has loaded with a mix that plays: cards in the register's own
+  order, each the programme block it aired in as a kicker, the mix's title, and *place · language*
+  in small type. Select plays the mix. (The page of mixes that once opened from a row here is
+  gone; the shelf holds all of them.) A mix is a finished recording Khajistan made, not a live signal,
   so its player has no LIVE: the band reads KHAJISTAN RECEIVER · the block, and *Khajistan Radio mix*
   at right. The name is display type on the ground, as radio's is; under it the state, the register's
   line for the mix, *place · language · decade*, the position (*12:04 / 1:24:13*) and the attribution
@@ -101,9 +126,11 @@ way the website marks the brand link.
   A recording has a position: left and right move thirty seconds, up and down move to the
   neighbouring mix, and a mix that ends rolls on to the next, stopping at the last.
 - **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
-  faint), the region's figures, the medium switch (TELEVISION 39 · RADIO 40 · CAMERAS 19 as
-  focusable kickers, the current one underlined), then the channel grid: four columns, each card
-  the name, the place as a kicker, the broadcaster in small type when it differs.
+  faint), then one shelf for each medium the region carries: Television 39, Radio 40, Cameras 19
+  and On Demand (the films filed to it), in that order. Each card is the place as a kicker, the
+  name, the broadcaster in small type when it differs. Up and down in the player surf the shelf
+  the channel came from. The cameras are fetched on their own and the shelf holds its place with
+  the index's count until they land.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
   (state kicker, the name as headline, the place, the attribution line in small type). The
@@ -123,7 +150,7 @@ way the website marks the brand link.
   the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
   next three strips, time then show, the first set large. Off air the headline is *Off air*,
   then the site's line *Back at 23:00 PKT with The Feature.* and LATER. Show names only:
-  programme titles are file names (owner, 2026-09-06). The cards redraw on the minute. Select
+  programme titles are file names (owner, 2026-09-06). The two cards are text cards (a lift plate, band under focus), 64pt apart for their lift. The cards redraw on the minute. Select
   tunes. The preview-password and sign-in steps live on this page.
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
@@ -138,10 +165,10 @@ way the website marks the brand link.
 
 ## The Screening Room
 
-- **Shelf**: crumb RECEIVER → THE SCREENING ROOM, the name (display), *On Demand · 32 films in the
-  Screening Room*, then five columns of poster cards in vod.json's order: the poster whole at its own
-  ratio (a lift plate holds a 2:3 space until it arrives), the title in name type at 28pt, the offer
-  line as a kicker, and runtime · languages · country in small type. A region's **On Demand** tab
+- **Shelf**: **The Screening Room · 32 films on demand**, under Khajistan Radio on the Receiver's
+  front: poster cards in vod.json's order, the poster whole at its own ratio and 420pt high (a
+  lift plate holds a 2:3 space until it arrives), the title in name type at 28pt, the offer line
+  as a kicker, and runtime · languages · country in small type. A region's **On Demand** shelf
   shows the same cards for the films it files.
 - **Player**: the preview full screen, on black where it does not fill the screen. The band reads
   KHAJISTAN RECEIVER · ON DEMAND with FILM (or THE FULL FILM) at right; the panel carries the state,
@@ -163,7 +190,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   The current tab is underlined; focus is the band plate. Under them the exact count of what the
   filters leave, then the stream.
 - **Stream**: four columns, the shortest column taking the next tile (the site's `place()`), each
-  tile the object's own shape inside a house-lift plate, never cropped. A video's tile carries
+  tile the object's own shape on a house-lift plate that holds its place until the picture fades
+  in, never cropped; the tile lifts under focus like any card. A video's tile carries
   *▶ Video*, every tile the account as `@name` in small type. Select opens the viewer; the next page
   of 60 loads as the end comes into view; the last line is the site's *N objects · that is all of it*.
 - **Notice**: first thing on the page for anyone who has not dismissed it, in the policy file's

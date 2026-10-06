@@ -38,13 +38,6 @@ struct TransmissionPlayerView: View {
                 focusTarget
             }
             StationClipLayer(clips: model.clips)
-            // Only in the tree while a flight is on, past the safe area (see ReceiverPlayerView).
-            if model.pigeon.showing {
-                PigeonOverlayLayer(overlay: model.pigeon)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .focusable(false)
-            }
         }
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in

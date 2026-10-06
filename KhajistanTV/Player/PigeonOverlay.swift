@@ -122,6 +122,7 @@ final class PigeonOverlay {
         let host = CMTimeAdd(CMClockGetTime(CMClockGetHostTimeClock()), CMTime(value: 1, timescale: 20))
         colourPlayer.setRate(1, time: .zero, atHostTime: host)
         mattePlayer.setRate(1, time: .zero, atHostTime: host)
+        renderer.mount()
         renderer.start()
         var cut = Transaction()
         cut.disablesAnimations = true
@@ -205,28 +206,14 @@ final class Signal {
     }
 }
 
-/// The pigeon over everything beneath it, while a flight is on screen.
-struct PigeonOverlayLayer: UIViewRepresentable {
-    let overlay: PigeonOverlay
-
-    func makeUIView(context: Context) -> UIView {
-        let view = overlay.renderer.view
-        view.isUserInteractionEnabled = false
-        view.accessibilityElementsHidden = true
-        return view
-    }
-
-    func updateUIView(_ uiView: UIView, context: Context) {
-        uiView.isHidden = !overlay.showing
-    }
-}
-
 /// Draws the flight: on every display refresh, on a thread of its own (the main thread runs at
 /// about 30 Hz on the Apple TV HD), it takes the colour frame due on screen and the matte frame
 /// for the same time from the two players' outputs and composites them, premultiplied, into a
 /// transparent Metal layer over the live picture.
 final class PigeonRenderer: NSObject, @unchecked Sendable {
-    let view: UIView
+    /// Drawn on a layer of the window itself, above every view, and not in a SwiftUI view: a UIKit
+    /// view laid over the screen kept the remote's presses from reaching the focused control, so
+    /// a press during a flight was lost (2026-10-06). A bare layer takes no part in focus.
     private let layer = CAMetalLayer()
     private let device: MTLDevice?
     private let queue: MTLCommandQueue?
@@ -245,8 +232,9 @@ final class PigeonRenderer: NSObject, @unchecked Sendable {
     override init() {
         device = MTLCreateSystemDefaultDevice()
         queue = device?.makeCommandQueue()
-        view = MetalHostView(layer: layer)
         super.init()
+        layer.isHidden = true
+        layer.zPosition = 10_000
         guard let device else { return }
         layer.device = device
         layer.pixelFormat = .bgra8Unorm
@@ -303,10 +291,34 @@ final class PigeonRenderer: NSObject, @unchecked Sendable {
         thread.start()
     }
 
-    /// Stops drawing and leaves the layer clear.
+    /// Puts the layer on the key window, full screen, the first time, and shows it.
+    @MainActor func mount() {
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+        guard let window else { return }
+        if layer.superlayer !== window.layer {
+            layer.removeFromSuperlayer()
+            window.layer.addSublayer(layer)
+        }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.frame = window.bounds
+        layer.drawableSize = CGSize(width: window.bounds.width * window.screen.nativeScale,
+                                    height: window.bounds.height * window.screen.nativeScale)
+        layer.isHidden = false
+        CATransaction.commit()
+    }
+
+    /// Stops drawing and hides the layer.
     func stop() {
         lock.withLock { running = false }
         clear()
+        DispatchQueue.main.async { [layer] in
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.isHidden = true
+            CATransaction.commit()
+        }
     }
 
     func report() -> String {
@@ -369,26 +381,5 @@ final class PigeonRenderer: NSObject, @unchecked Sendable {
         buffer.makeRenderCommandEncoder(descriptor: pass)?.endEncoding()
         buffer.present(drawable)
         buffer.commit()
-    }
-}
-
-/// A view whose layer is the renderer's Metal layer, kept the size of the screen.
-private final class MetalHostView: UIView {
-    private let metal: CAMetalLayer
-
-    init(layer metal: CAMetalLayer) {
-        self.metal = metal
-        super.init(frame: .zero)
-        backgroundColor = .clear
-        layer.addSublayer(metal)
-    }
-
-    required init?(coder: NSCoder) { fatalError("not used") }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        metal.frame = bounds
-        let scale = window?.screen.nativeScale ?? 1
-        metal.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
     }
 }

@@ -38,6 +38,30 @@ final class ChannelChangeUITests: XCTestCase {
         }
     }
 
+    /// A press while the pigeon is still flying must not be lost: down, and down again 0.6 s
+    /// later, lands two channels on, not one (2026-10-06: a view laid over the screen during a
+    /// flight kept presses from the player).
+    func testAPressDuringAFlightIsNotLost() {
+        openChannel()
+        let current = app.staticTexts["currentChannel"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        let start = current.label
+        XCUIRemote.shared.press(.down)
+        Thread.sleep(forTimeInterval: 12)
+        let one = current.label
+        XCTAssertNotEqual(one, start, "one press moves one channel")
+        XCUIRemote.shared.press(.up)
+        Thread.sleep(forTimeInterval: 12)
+        XCTAssertEqual(current.label, start, "up comes back")
+        XCUIRemote.shared.press(.down)
+        Thread.sleep(forTimeInterval: 0.6)
+        shot("mid-flight", app)
+        XCUIRemote.shared.press(.down)
+        Thread.sleep(forTimeInterval: 14)
+        XCTAssertNotEqual(current.label, one, "the second press, made mid-flight, moved on a second channel")
+        XCTAssertNotEqual(current.label, start)
+    }
+
     private let app = XCUIApplication()
 
     private func openChannel() {

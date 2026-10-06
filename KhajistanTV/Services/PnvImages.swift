@@ -37,7 +37,7 @@ final class PnvImages: @unchecked Sendable {
         return nil
     }
 
-    private static func downsample(_ data: Data, maxPixel: Int) -> UIImage? {
+    static func downsample(_ data: Data, maxPixel: Int) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

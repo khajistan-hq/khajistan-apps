@@ -718,6 +718,7 @@ struct TuningLoader: View {
 enum Section: String, CaseIterable, Identifiable {
     case receiver
     case transmission
+    case reading
     case picsvids
     case account
 
@@ -727,6 +728,8 @@ enum Section: String, CaseIterable, Identifiable {
         switch self {
         case .receiver: return "Receiver"
         case .transmission: return "Transmission"
+        // The website's own nav label (kj-chrome.js, door `read`: READING ROOM).
+        case .reading: return "Reading Room"
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
         case .account: return "Account"

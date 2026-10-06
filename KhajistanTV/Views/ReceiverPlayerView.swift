@@ -86,17 +86,6 @@ struct ReceiverPlayerView: View {
             overlay(palette)
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
-            // The full screen, past the safe area: the bird flies edge to edge (owner, 2026-10-06:
-            // it showed "smaller than the full frame").
-            // Only in the tree while a flight is on: a UIKit view laid over the screen otherwise
-            // kept the remote's presses from the focus target under it (the Captions control
-            // stopped answering, 2026-10-06).
-            if model.pigeon.showing {
-                PigeonOverlayLayer(overlay: model.pigeon)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-                    .focusable(false)
-            }
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
@@ -165,6 +154,13 @@ struct ReceiverPlayerView: View {
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("playerState")
+                .overlay {
+                    // Which channel is on screen, for the UI tests.
+                    Text(current.id)
+                        .font(.system(size: 1))
+                        .opacity(0.01)
+                        .accessibilityIdentifier("currentChannel")
+                }
         }
     }
 
@@ -321,7 +317,8 @@ struct ReceiverPlayerView: View {
         }
         async let quiet: Void = outgoing.fadeOut()
         tune(target, behind: true)
-        destination = nil
+        // `destination` stays set until the cut: the channel on screen changes only then, and a
+        // press before it must step on from the channel asked for, not the one still showing.
         while !Task.isCancelled {
             switch next.state {
             case .playing, .failed:
@@ -359,6 +356,7 @@ struct ReceiverPlayerView: View {
             aIsFront.toggle()
             current = target
         }
+        if destination?.id == target.id { destination = nil }
         outgoing.stop()
         next.releaseSound()
         model.captions.attach(target, player: next)

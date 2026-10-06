@@ -80,8 +80,16 @@ final class PicsVidsStore {
             roster = try await fetch([PnvAccount].self, PnvAPI.accountsRequest())
         } catch {
             if Task.isCancelled { phase = .idle; return }
-            phase = .failed("The archive did not answer.")
-            return
+            // One quiet second try: a cold launch sometimes loses the first request, and the page
+            // should not open on an error the viewer then has to clear (QA, 2026-10-06).
+            try? await Task.sleep(for: .seconds(1))
+            do {
+                roster = try await fetch([PnvAccount].self, PnvAPI.accountsRequest())
+            } catch {
+                if Task.isCancelled { phase = .idle; return }
+                phase = .failed("The archive did not answer.")
+                return
+            }
         }
         accountsByKey = Dictionary(roster.map { ($0.account_key, $0) }, uniquingKeysWith: { first, _ in first })
         regions = PnvRegions.ordered(Set(PnvRegions.accountKeysByRegion(roster).keys))

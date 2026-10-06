@@ -19,6 +19,8 @@ final class AppModel {
     let receiver: ReceiverStore
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
+    /// Likes and saves, on the account (`passport_saves`), shared with the website and the dashboard.
+    let saves: SavesStore
     /// The Reading Room: the shelf feed, the page server and the reader's pages.
     let reading: ReadingStore
     /// The Receiver's open region, if any. Held here rather than in the view so Back from the
@@ -70,6 +72,7 @@ final class AppModel {
         self.receiver = ReceiverStore()
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
+        self.saves = SavesStore(auth: auth)
         let films = FilmStore(auth: auth)
         self.films = films
         // The shelf's module index sits behind the site password like vod.json, so it is read from the same origin.

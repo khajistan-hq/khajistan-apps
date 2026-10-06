@@ -11,6 +11,7 @@ struct ReadingTitleView: View {
     @Environment(\.palette) private var palette
     @State private var reading: RRIssue?
     @State private var showProvenance = false
+    @State private var saveNote: String?
 
     private var store: ReadingStore { model.reading }
     private var held: Bool { store.isRights(title) }
@@ -58,15 +59,23 @@ struct ReadingTitleView: View {
                 .kjBody()
                 .accessibilityIdentifier("rrTitleSummary")
             let lines = store.provenanceLines(for: title)
-            if !lines.isEmpty {
-                Button {
-                    showProvenance.toggle()
-                } label: {
-                    Text("Provenance").kjKicker()
+            HStack(spacing: 12) {
+                saveButton
+                if !lines.isEmpty {
+                    Button {
+                        showProvenance.toggle()
+                    } label: {
+                        Text("Provenance").kjKicker()
+                    }
+                    .buttonStyle(HouseButtonStyle())
+                    .accessibilityIdentifier("rrProvenance")
                 }
-                .buttonStyle(HouseButtonStyle())
-                .padding(.leading, -26)
-                .accessibilityIdentifier("rrProvenance")
+            }
+            .padding(.leading, -26)
+            if let saveNote {
+                Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("rrSaveNote")
+            }
+            if !lines.isEmpty {
                 if showProvenance {
                     ForEach(lines, id: \.self) { line in
                         Text(line).kjSmall(faint: true)
@@ -74,6 +83,28 @@ struct ReadingTitleView: View {
                 }
             }
         }
+    }
+
+    /// Save, as the website's Save control: on the account, so the title is on the dashboard and on
+    /// every device signed in to it.
+    private var saveButton: some View {
+        let saved = model.saves.isSaved(title)
+        return Button {
+            guard model.saves.canSave else {
+                saveNote = "Sign in under Account to save titles."
+                return
+            }
+            Task {
+                await model.saves.load()
+                saveNote = await model.saves.toggle(title) ? nil : "That did not save. Try again."
+            }
+        } label: {
+            Text(saved ? "Saved" : "Save").kjKicker()
+        }
+        .buttonStyle(HouseButtonStyle())
+        .accessibilityIdentifier("rrSave")
+        .accessibilityValue(saved ? "On" : "Off")
+        .task { await model.saves.load() }
     }
 
     /// "Mashriq · 12 issues · 1,480 pages": the byline, then the run's own figures, totalled from the issues drawn below.

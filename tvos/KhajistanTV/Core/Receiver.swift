@@ -63,6 +63,10 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     }
 
     let id: String
+    /// The website's name for the channel in links and saves (`channel:<slug>`), and the names it
+    /// answered to before a rename. Both are in the region shards.
+    let slug: String?
+    let legacyIds: [String]?
     let name: String
     let nativeName: String?
     let mediaType: String

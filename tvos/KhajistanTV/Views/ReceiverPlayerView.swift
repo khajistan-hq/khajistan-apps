@@ -29,7 +29,12 @@ struct ReceiverPlayerView: View {
     @State private var changeTask: Task<Void, Never>?
     /// The Captions control takes focus only when the viewer moves right to it, so the focus engine
     /// never lands on it from an up or down press, which change channel.
-    @State private var captionArmed = false
+    /// The strip control the remote has lit: Right lights Captions (when offered) then Like, Left
+    /// lets go, Select works it. Focus never leaves the surface (see below).
+    @State private var armed: Chip?
+    @State private var likeNote: String?
+    private enum Chip { case captions, like }
+    private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
 
@@ -73,10 +78,10 @@ struct ReceiverPlayerView: View {
             // focus onto a control as it appears did not take on a real Apple TV, so Select fell
             // through to here and captions could not be turned on (owner, 2026-10-06).
             Button {
-                if captionArmed {
-                    model.captions.toggle()
-                } else {
-                    wake()
+                switch armed {
+                case .captions: model.captions.toggle()
+                case .like: like()
+                case nil: wake()
                 }
             } label: {
                 Color.clear
@@ -92,10 +97,10 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             wake()
             switch direction {
-            case .up: captionArmed = false; step(by: -1)
-            case .down: captionArmed = false; step(by: 1)
-            case .right: moveToCaptions()
-            case .left: leaveCaptions()
+            case .up: armed = nil; step(by: -1)
+            case .down: armed = nil; step(by: 1)
+            case .right: moveRight()
+            case .left: moveLeft()
             default: break
             }
         }
@@ -126,6 +131,7 @@ struct ReceiverPlayerView: View {
             }
             #endif
         }
+        .task { await model.saves.load() }
         .onDisappear { stopEverything() }
     }
 
@@ -141,7 +147,7 @@ struct ReceiverPlayerView: View {
                 detail: stripDetail,
                 attribution: current.attributionText,
                 trailing: stripTrailing,
-                accessory: model.captions.offered && !controller.state.isFailed ? AnyView(captionsControl) : nil
+                accessory: controller.state.isFailed ? nil : AnyView(stripControls)
             )
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
@@ -179,6 +185,7 @@ struct ReceiverPlayerView: View {
         case .failed(let message): return message + " Press Down for the next channel."
         case .paused: return "Paused"
         default:
+            if let likeNote { return likeNote }
             if !model.captions.note.isEmpty { return model.captions.note }
             return current.place.isEmpty ? nil : current.place
         }
@@ -195,16 +202,60 @@ struct ReceiverPlayerView: View {
             .accessibilityValue(model.captions.isOn ? "On" : "Off")
     }
 
-    private func moveToCaptions() {
-        guard model.captions.offered, stripShown else { return }
-        hideTask?.cancel()
-        captionArmed = true
+    private var stripControls: some View {
+        HStack(spacing: 14) {
+            if model.captions.offered { captionsControl }
+            likeControl
+        }
     }
 
-    private func leaveCaptions() {
-        guard captionArmed else { return }
-        captionArmed = false
-        wake()
+    /// Like: saved on the account, so it is on the dashboard and every device signed in to it.
+    private var likeControl: some View {
+        let liked = model.saves.isSaved(current)
+        return StripChipStyle.face(Text(liked ? "Liked" : "Like"), isOn: liked, selected: armed == .like)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("likeControl")
+            .accessibilityAddTraits(armed == .like ? .isSelected : [])
+            .accessibilityValue(liked ? "On" : "Off")
+    }
+
+    private func moveRight() {
+        guard stripShown else { return }
+        hideTask?.cancel()
+        switch armed {
+        case nil: armed = model.captions.offered ? .captions : .like
+        case .captions: armed = .like
+        case .like: break
+        }
+    }
+
+    private func moveLeft() {
+        switch armed {
+        case .like: armed = model.captions.offered ? .captions : nil
+        case .captions: armed = nil
+        case nil: return
+        }
+        if armed == nil { wake() }
+    }
+
+    private func like() {
+        guard model.saves.canSave else {
+            say("Sign in under Account to like channels.")
+            return
+        }
+        let channel = current
+        Task {
+            await model.saves.load()
+            if !(await model.saves.toggle(channel)) { say("That did not save. Try again.") }
+        }
+    }
+
+    private func say(_ line: String) {
+        likeNote = line
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if likeNote == line { likeNote = nil }
+        }
     }
 
     /// The medium only: the place is already beside the name, and one thing is said once.
@@ -382,9 +433,8 @@ struct ReceiverPlayerView: View {
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
             // The strip stays while the viewer is on its Captions control.
-            if !Task.isCancelled, !captionArmed {
+            if !Task.isCancelled, armed == nil {
                 overlayVisible = false
-                captionArmed = false
             }
         }
     }

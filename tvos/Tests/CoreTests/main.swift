@@ -3426,6 +3426,42 @@ func readingRequests() throws {
     try expect(warned.contains("collection_slug=eq.a%26hide%3Deq.true"), warned)
 }
 
+func passportSaveRefs() throws {
+    // The website writes channel:<slug> first, and an unlike removes every name the channel answers to.
+    try expectEqual(PassportSaves.channelRefs(slug: "7tv-cadiz", id: "radio-es-7tv-cadiz", legacyIds: ["old-7tv"]),
+                    ["channel:7tv-cadiz", "channel:radio-es-7tv-cadiz", "channel:old-7tv"])
+    // No slug: the id stands in. A name the table would refuse is left out, never sent.
+    try expectEqual(PassportSaves.channelRefs(slug: nil, id: "ktv-channel-1", legacyIds: nil), ["channel:ktv-channel-1"])
+    try expectEqual(PassportSaves.channelRefs(slug: "a b", id: "ok-id", legacyIds: ["x;drop"]), ["channel:ok-id"])
+    try expectEqual(PassportSaves.titleRef(slug: "abkari"), "reading-room:abkari")
+    try expect(PassportSaves.titleRef(slug: "a&b") == nil, "a slug the table refuses gives no ref")
+    try expectEqual(PassportSaves.titleHref(slug: "abkari"), "/reading-room.html?m=abkari")
+    try expectEqual(PassportSaves.channelHref(slug: "7tv-cadiz", id: "x"), "/open-frequencies?channel=7tv-cadiz")
+}
+
+func passportSaveRequests() throws {
+    let user = "0f2b6a1e-1111-4c4c-9a9a-0123456789ab"
+    guard let insert = PassportSaves.insertRequest(userId: user, ref: "channel:7tv-cadiz", wing: "receiver", title: "7TV", href: "/open-frequencies?channel=7tv-cadiz", accessToken: "T") else {
+        throw Failure(description: "an insert for a good row must be built")
+    }
+    try expectEqual(insert.httpMethod, "POST")
+    try expectEqual(insert.url?.path, "/rest/v1/passport_saves")
+    try expectEqual(insert.value(forHTTPHeaderField: "Authorization"), "Bearer T")
+    let row = (try JSONSerialization.jsonObject(with: insert.httpBody ?? Data())) as? [String: String] ?? [:]
+    try expectEqual(row["object_ref"], "channel:7tv-cadiz")
+    try expectEqual(row["user_id"], user)
+    try expectEqual(row["wing"], "receiver")
+    // The delete names the account and every ref, and nothing else.
+    let delete = PassportSaves.deleteRequest(userId: user, refs: ["channel:a", "channel:b"], accessToken: "T")
+    try expectEqual(delete?.httpMethod, "DELETE")
+    let query = delete?.url?.query?.removingPercentEncoding ?? ""
+    try expect(query.contains("user_id=eq.\(user)") && query.contains("object_ref=in.(\"channel:a\",\"channel:b\")"), query)
+    // Negative: a malformed account id or an unsafe ref builds no request at all.
+    try expect(PassportSaves.listRequest(userId: "x&select=*", accessToken: "T") == nil, "an unsafe user id must not reach the query")
+    try expect(PassportSaves.deleteRequest(userId: user, refs: ["channel:a),or(1.eq.1"], accessToken: "T") == nil, "an unsafe ref must not reach the query")
+    try expect(PassportSaves.deleteRequest(userId: user, refs: [], accessToken: "T") == nil, "an empty delete is never sent")
+}
+
 func readingPageMap() throws {
     // 1...N changes nothing.
     let same = RRPageMap.resolve([1, 2, 3, 4], declared: 4)
@@ -3672,6 +3708,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: content warnings", readingContentWarnings),
     ("Reading Room: shelves, tabs and figures", readingShelves),
     ("Reading Room: the site's words", readingWords),
+    ("Saves: the refs the website writes", passportSaveRefs),
+    ("Saves: requests, and refusals", passportSaveRequests),
     ("Reading Room: provenance", readingProvenance),
 ]
 

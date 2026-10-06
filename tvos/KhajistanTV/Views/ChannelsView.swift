@@ -57,6 +57,7 @@ struct ChannelsView: View {
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
+        .task { await model.saves.load() }
         .task { await model.films.load() }
         .fullScreenCover(item: $playing) { choice in
             ReceiverPlayerView(channel: choice.channel, list: choice.list)
@@ -130,9 +131,17 @@ struct ChannelsView: View {
                 Button {
                     playing = Playing(channel: channel, list: list)
                 } label: {
-                    ChannelCard(channel: channel)
+                    ChannelCard(channel: channel, liked: model.saves.isSaved(channel))
                 }
                 .buttonStyle(HouseCardStyle())
+                // Holding Select offers Like, as the TV app offers its own actions on a card.
+                .contextMenu {
+                    if model.saves.canSave {
+                        Button(model.saves.isSaved(channel) ? "Unlike" : "Like") {
+                            Task { await model.saves.toggle(channel) }
+                        }
+                    }
+                }
                 .accessibilityIdentifier("channel-\(channel.id)")
             }
         }
@@ -224,13 +233,21 @@ struct ChannelCard: View {
     static let height: CGFloat = 190
 
     let channel: Channel
+    var liked = false
 
     var body: some View {
         CardPlate(width: Self.width, height: Self.height) {
             VStack(alignment: .leading, spacing: 10) {
-                if !channel.place.isEmpty {
-                    Kicker(channel.place)
-                        .lineLimit(1)
+                HStack(spacing: 10) {
+                    if liked {
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .accessibilityLabel("Liked")
+                    }
+                    if !channel.place.isEmpty {
+                        Kicker(channel.place)
+                            .lineLimit(1)
+                    }
                 }
                 Text(channel.name)
                     .kjName()

@@ -1,21 +1,27 @@
 import SwiftUI
 
-/// One region: television, radio and, where the region has them, cameras. The switch carries the counts.
+/// One region, laid out as the TV app lays a page: the name, then a shelf for each medium it
+/// carries, television first, then radio, cameras and the films filed to it. Up and down move
+/// between shelves; left and right along one.
 struct ChannelsView: View {
     let region: ReceiverIndex.Region
 
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
-    @State private var medium = "tv"
     @State private var channels: [Channel] = []
     @State private var cameraChannels: [Channel] = []
     @State private var mainLoaded = false
     @State private var camerasLoaded = false
-    @State private var loading = true
+    @State private var cameraError: String?
     @State private var errorText: String?
-    @State private var playing: Channel?
+    @State private var playing: Playing?
 
-    private let columns: [GridItem] = Array(repeating: GridItem(.flexible(), spacing: 28), count: 4)
+    /// A channel chosen, and the shelf it came from: up and down in the player surf that shelf.
+    private struct Playing: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        var id: String { channel.id }
+    }
 
     private var hasCameras: Bool {
         model.receiver.index?.cameraURL(regionId: region.id) != nil
@@ -26,7 +32,7 @@ struct ChannelsView: View {
         model.films.films(in: region.id, known: Set(model.receiver.index?.regions.map(\.id) ?? []))
     }
 
-    /// The media this region carries, in switch order. A medium with nothing in it is not offered.
+    /// The media this region carries, in shelf order. A medium with nothing in it has no shelf.
     private var media: [String] {
         var found: [String] = []
         if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
@@ -36,30 +42,24 @@ struct ChannelsView: View {
         return found
     }
 
-    /// What the grid shows for the chosen medium. The camera shard is its own list.
-    private var shown: [Channel] {
-        medium == "camera" ? cameraChannels : channels.filter { $0.mediaType == medium }
-    }
-
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 12) {
                 header
-                if mainLoaded && media.count > 1 {
-                    mediumSwitch
-                }
+                    .padding(.bottom, 24)
                 results
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, KJLayout.inset)
             .padding(.vertical, 40)
         }
+        .kjTopFade()
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
         .task { await model.films.load() }
-        .fullScreenCover(item: $playing) { channel in
-            ReceiverPlayerView(channel: channel, list: shown)
+        .fullScreenCover(item: $playing) { choice in
+            ReceiverPlayerView(channel: choice.channel, list: choice.list)
         }
     }
 
@@ -80,47 +80,7 @@ struct ChannelsView: View {
         }
     }
 
-    // MARK: - Medium switch
-
-    private var mediumSwitch: some View {
-        HStack(spacing: 12) {
-            ForEach(media, id: \.self) { kind in
-                Button {
-                    choose(kind)
-                } label: {
-                    Text(switchTitle(kind)).kjKicker()
-                }
-                .buttonStyle(HouseTabStyle(isCurrent: medium == kind))
-                .accessibilityIdentifier("medium-\(kind)")
-            }
-        }
-        // The tab's plate padding is pulled back so its text sits on the page margin.
-        .padding(.leading, -22)
-    }
-
-    /// "Television 39". A medium counts what the receiver may offer, so the camera shard, which is
-    /// fetched only when asked for, shows the index's own count until it has arrived.
-    private func switchTitle(_ kind: String) -> String {
-        // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
-        if kind == "vod" { return "On Demand \(films.count)" }
-        let title = ReceiverRules.mediumLabel(kind)
-        let count: Int?
-        if kind == "camera" {
-            count = camerasLoaded ? cameraChannels.count : model.receiver.index?.regionCounts[region.id]?.byMedium["camera"]
-        } else {
-            count = channels.filter { $0.mediaType == kind }.count
-        }
-        return count.map { "\(title) \($0)" } ?? title
-    }
-
-    private func choose(_ kind: String) {
-        medium = kind
-        if kind == "camera" && !camerasLoaded {
-            Task { await loadCameras() }
-        }
-    }
-
-    // MARK: - Channels
+    // MARK: - Shelves
 
     @ViewBuilder
     private var results: some View {
@@ -135,108 +95,153 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
-        } else if medium == "vod" {
-            FilmGrid(films: films)
-        } else if loading {
+        } else if !mainLoaded {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
-        } else if shown.isEmpty {
-            Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) here right now.")
+        } else if media.isEmpty {
+            Text("No channels here right now.")
                 .kjBody()
         } else {
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 28) {
-                ForEach(shown) { channel in
-                    Button {
-                        playing = channel
-                    } label: {
-                        card(channel)
-                    }
-                    .buttonStyle(HouseButtonStyle())
-                    .accessibilityIdentifier("channel-\(channel.id)")
-                }
+            ForEach(media, id: \.self) { kind in
+                shelf(kind)
             }
-            // The cards' plate padding is pulled back so their text sits on the page margin.
-            .padding(.horizontal, -26)
         }
     }
 
-    /// The label of a channel's button. It styles itself through the palette in its own
-    /// environment, which the button re-skins under focus, so nothing here names a colour.
-    private func card(_ channel: Channel) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(channel.name)
-                .kjName()
-                .lineLimit(2)
-            if !channel.place.isEmpty {
-                Kicker(channel.place)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
-                Text(broadcaster)
-                    .kjSmall(faint: true)
-                    .lineLimit(1)
+    @ViewBuilder
+    private func shelf(_ kind: String) -> some View {
+        switch kind {
+        case "vod":
+            // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
+            FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films)
+                .accessibilityIdentifier("shelf-vod")
+        case "camera":
+            cameraShelf
+        default:
+            let list = channels.filter { $0.mediaType == kind }
+            channelShelf(kind, list)
+        }
+    }
+
+    private func channelShelf(_ kind: String, _ list: [Channel]) -> some View {
+        Shelf(ReceiverRules.mediumLabel(kind), count: "\(list.count)") {
+            ForEach(list) { channel in
+                Button {
+                    playing = Playing(channel: channel, list: list)
+                } label: {
+                    ChannelCard(channel: channel)
+                }
+                .buttonStyle(HouseCardStyle())
+                .accessibilityIdentifier("channel-\(channel.id)")
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
+        .accessibilityIdentifier("shelf-\(kind)")
+    }
+
+    /// The camera shard is its own list, fetched on its own. Until it lands the shelf holds its
+    /// place with the index's own count.
+    @ViewBuilder
+    private var cameraShelf: some View {
+        if camerasLoaded {
+            channelShelf("camera", cameraChannels)
+        } else {
+            let count = model.receiver.index?.regionCounts[region.id]?.byMedium["camera"]
+            Shelf(ReceiverRules.mediumLabel("camera"), count: count.map { "\($0)" }) {
+                if let cameraError {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(cameraError).kjBody().lineLimit(2)
+                        Button {
+                            Task { await loadCameras() }
+                        } label: {
+                            Text("Try again").kjKicker()
+                        }
+                        .buttonStyle(HouseButtonStyle())
+                    }
+                    .frame(width: 900, height: ChannelCard.height, alignment: .leading)
+                } else {
+                    TuningLoader("Loading\u{2026}")
+                        .frame(width: ChannelCard.width, height: ChannelCard.height, alignment: .leading)
+                }
+            }
+            .accessibilityIdentifier("shelf-camera")
+        }
     }
 
     // MARK: - Loading
 
-    /// Loads the television and radio shard, then the camera shard when that is where the
-    /// region opens. Safe to run again: each step skips what it already has.
+    /// Loads the television and radio shard, then the camera shard where the region has one.
+    /// Safe to run again: each step skips what it already has.
     private func start() async {
         await loadMain()
         #if DEBUG
         // With `-kjautochange`, a region link opens straight onto its first channel (see
         // ReceiverPlayerView), for measuring the flights on a device.
-        if UserDefaults.standard.integer(forKey: "kjautochange") > 0, playing == nil { playing = shown.first }
+        if UserDefaults.standard.integer(forKey: "kjautochange") > 0, playing == nil {
+            let tv = channels.filter { $0.mediaType == "tv" }
+            if let first = tv.first ?? channels.first { playing = Playing(channel: first, list: tv.isEmpty ? channels : tv) }
+        }
         #endif
-        if mainLoaded && medium == "camera" && !camerasLoaded && errorText == nil {
+        if mainLoaded && hasCameras && !camerasLoaded && cameraError == nil {
             await loadCameras()
         }
     }
 
     private func loadMain() async {
         guard !mainLoaded else { return }
-        loading = true
         errorText = nil
         do {
-            let list = try await model.receiver.channels(regionId: region.id, cameras: false)
-            channels = list
+            channels = try await model.receiver.channels(regionId: region.id, cameras: false)
             mainLoaded = true
-            if list.contains(where: { $0.mediaType == "tv" }) {
-                medium = "tv"
-            } else if list.contains(where: { $0.mediaType == "radio" }) {
-                medium = "radio"
-            } else {
-                // A region with neither opens on its cameras when it has any.
-                medium = hasCameras ? "camera" : "radio"
-            }
         } catch {
             if Task.isCancelled { return }
             errorText = error.localizedDescription
         }
-        if medium != "camera" || errorText != nil { loading = false }
     }
 
     private func loadCameras() async {
         guard !camerasLoaded else { return }
-        loading = true
-        errorText = nil
+        cameraError = nil
         do {
             cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
             camerasLoaded = true
         } catch {
             if Task.isCancelled { return }
-            errorText = error.localizedDescription
+            cameraError = error.localizedDescription
         }
-        loading = false
     }
 
     private func retry() async {
         errorText = nil
         await start()
+    }
+}
+
+/// A channel's card: the place as a kicker, the name, the broadcaster where it differs. It sits
+/// on a plate, so it names no colour: the plate sets the palette its text reads.
+struct ChannelCard: View {
+    static let width: CGFloat = 420
+    static let height: CGFloat = 190
+
+    let channel: Channel
+
+    var body: some View {
+        CardPlate(width: Self.width, height: Self.height) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !channel.place.isEmpty {
+                    Kicker(channel.place)
+                        .lineLimit(1)
+                }
+                Text(channel.name)
+                    .kjName()
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+                if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
+                    Text(broadcaster)
+                        .kjSmall(faint: true)
+                        .lineLimit(1)
+                }
+            }
+        }
     }
 }

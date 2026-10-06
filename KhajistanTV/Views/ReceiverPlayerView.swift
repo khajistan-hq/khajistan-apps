@@ -55,10 +55,16 @@ struct ReceiverPlayerView: View {
                 }
             }
             // The focus target. It draws nothing; its job is to hold focus so the remote's
-            // presses reach the handlers below, and a click on it wakes the overlay. It sits under
-            // the strip, so the Captions control above it can take focus.
+            // presses reach the handlers below. A click works the Captions control when the viewer
+            // has moved to it, and otherwise wakes the overlay. Focus never leaves it: moving
+            // focus onto a control as it appears did not take on a real Apple TV, so Select fell
+            // through to here and captions could not be turned on (owner, 2026-10-06).
             Button {
-                wake()
+                if captionArmed {
+                    model.captions.toggle()
+                } else {
+                    wake()
+                }
             } label: {
                 Color.clear
             }
@@ -73,8 +79,8 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             wake()
             switch direction {
-            case .up: step(by: -1)
-            case .down: step(by: 1)
+            case .up: captionArmed = false; step(by: -1)
+            case .down: captionArmed = false; step(by: 1)
             case .right: moveToCaptions()
             case .left: leaveCaptions()
             default: break
@@ -157,28 +163,15 @@ struct ReceiverPlayerView: View {
         }
     }
 
-    /// The site's Captions button: its label says what is on and what is left.
-    /// A button only once the viewer has moved to it, and focused as it appears; until then the
-    /// same label drawn plain, so no up or down press can land on it.
-    @ViewBuilder
+    /// The site's Captions button: its label says what is on and what is left. Right lights it,
+    /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        if captionArmed {
-            Button {
-                model.captions.toggle()
-            } label: {
-                Text(model.captions.label)
-            }
-            .buttonStyle(StripChipStyle(isOn: model.captions.isOn))
-            .focused($focus, equals: .captions)
-            .onAppear { focus = .captions }
+        StripChipStyle.face(Text(model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("captionsControl")
+            // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
+            .accessibilityAddTraits(captionArmed ? .isSelected : [])
             .accessibilityValue(model.captions.isOn ? "On" : "Off")
-        } else {
-            StripChipStyle.face(Text(model.captions.label), isOn: model.captions.isOn)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("captionsControl")
-                .accessibilityValue(model.captions.isOn ? "On" : "Off")
-        }
     }
 
     private func moveToCaptions() {
@@ -190,7 +183,6 @@ struct ReceiverPlayerView: View {
     private func leaveCaptions() {
         guard captionArmed else { return }
         captionArmed = false
-        focus = .surface
         wake()
     }
 
@@ -281,7 +273,7 @@ struct ReceiverPlayerView: View {
         tune(current)
         await controller.settled()
         guard !Task.isCancelled else { return }
-        model.clips.uncover(fade: true)
+        model.clips.uncover()
     }
 
     /// The old sound fades as the pigeon flies in over the skin's ground; the new channel starts
@@ -289,16 +281,7 @@ struct ReceiverPlayerView: View {
     /// with the channel's name until the picture plays, and fades off it as its sound fades in.
     private func change(to target: Channel) async {
         async let quiet: Void = controller.fadeOut()
-        await model.clips.flyThrough(caption: target.name) {
-            // A newer press has moved on: that press tunes its own channel.
-            guard destination?.id == target.id else { return }
-            tune(target)
-            destination = nil
-        }
-        await quiet
-        guard !Task.isCancelled else { return }
-        // A slow signal: the long flights cross the held ground until it plays.
-        await model.clips.holdUntil {
+        let ready: @MainActor () async -> Void = {
             #if DEBUG
             // `-kjslowtune 9` holds every change for that many seconds, so a UI test can watch
             // the wait flights over a signal that would otherwise arrive too fast.
@@ -307,6 +290,18 @@ struct ReceiverPlayerView: View {
             #endif
             await controller.settled()
         }
+        // The flight is fitted to how long this channel took to tune last time; a channel never
+        // tuned here is guessed by medium (measured on the Apple TV HD: 1.2-2.3 s).
+        await model.clips.flyThrough(caption: target.name, key: target.id, fallback: target.mediaType == "radio" ? 1.5 : 2, covered: {
+            // A newer press has moved on: that press tunes its own channel.
+            guard destination?.id == target.id else { return }
+            tune(target)
+            destination = nil
+        }, ready: ready)
+        await quiet
+        guard !Task.isCancelled else { return }
+        // A slow signal: the long flights cross the held ground until it plays.
+        await model.clips.holdUntil(ready)
         guard !Task.isCancelled else { return }
         model.clips.uncover()
     }
@@ -330,7 +325,7 @@ struct ReceiverPlayerView: View {
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
             // The strip stays while the viewer is on its Captions control.
-            if !Task.isCancelled, focus != .captions {
+            if !Task.isCancelled, !captionArmed {
                 overlayVisible = false
                 captionArmed = false
             }

@@ -247,6 +247,9 @@ struct TransmissionPlayerView: View {
         Button {
             if model.clips.showing {
                 model.clips.skip()
+            } else if captionArmed {
+                // Focus never leaves this button: see ReceiverPlayerView's surface (2026-10-06).
+                subtitles.cycle()
             } else {
                 wake()
             }
@@ -258,24 +261,13 @@ struct TransmissionPlayerView: View {
         .accessibilityLabel("Show details")
     }
 
-    /// A button only once the viewer has moved to it, and focused as it appears.
-    @ViewBuilder
+    /// Right lights it, Select on the picture works it, left lets it go.
     private var subtitlesControl: some View {
-        if captionArmed {
-            Button {
-                subtitles.cycle()
-            } label: {
-                Text(subtitles.label)
-            }
-            .buttonStyle(StripChipStyle(isOn: subtitles.current != nil))
-            .focused($focus, equals: .captions)
-            .onAppear { focus = .captions }
+        StripChipStyle.face(Text(subtitles.label), isOn: subtitles.current != nil, selected: captionArmed)
+            .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("subtitlesControl")
-        } else {
-            StripChipStyle.face(Text(subtitles.label), isOn: subtitles.current != nil)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("subtitlesControl")
-        }
+            // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
+            .accessibilityAddTraits(captionArmed ? .isSelected : [])
     }
 
     // MARK: - Subtitles
@@ -349,11 +341,11 @@ struct TransmissionPlayerView: View {
         }
         if direction == .left, captionArmed {
             captionArmed = false
-            focus = .surface
             wake()
             return
         }
         guard direction == .up || direction == .down else { return }
+        captionArmed = false
         if model.clips.showing {
             model.clips.skip()
             return
@@ -364,9 +356,12 @@ struct TransmissionPlayerView: View {
             let next = store.channelNumber == 1 ? 2 : 1
             async let quiet: Void = store.player.fadeOut()
             var retune: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(next)) {
+            await model.clips.flyThrough(caption: store.channelName(next), key: "transmission-\(next)", covered: {
                 if !left { retune = Task { await store.switchChannel() } }
-            }
+            }, ready: {
+                await retune?.value
+                await store.player.settled()
+            })
             await quiet
             await retune?.value
             if !left { await model.clips.holdUntil { await store.player.settled() } }
@@ -395,14 +390,17 @@ struct TransmissionPlayerView: View {
     /// name. Either way the ground fades off as the picture arrives. Every step checks that the
     /// viewer is still here: a flight must not start after the screen has gone.
     private func start() async {
-        // After a flight the picture cuts in; on a screen that opens with nothing flying it fades.
+        // Either way the ground dissolves off the arriving picture.
         let flies = !model.clips.signOnPlayed
         if flies {
             model.clips.signOnPlayed = true
             var tuning: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(channel)) {
+            await model.clips.flyThrough(caption: store.channelName(channel), key: "transmission-\(channel)", covered: {
                 if !gone { tuning = Task { await store.tune(channel: channel) } }
-            }
+            }, ready: {
+                await tuning?.value
+                await store.player.settled()
+            })
             await tuning?.value
             if !gone { await model.clips.holdUntil { await store.player.settled() } }
         } else {
@@ -410,7 +408,7 @@ struct TransmissionPlayerView: View {
             if !gone { await store.tune(channel: channel) }
         }
         if !gone { await store.player.settled() }
-        if !gone { model.clips.uncover(fade: !flies) }
+        if !gone { model.clips.uncover() }
     }
 
     private var gone: Bool {
@@ -435,7 +433,7 @@ struct TransmissionPlayerView: View {
         hideTask = Task {
             try? await Task.sleep(for: .seconds(2.6))
             // The strip stays while the viewer is on its Subtitles control.
-            if !Task.isCancelled, focus != .captions {
+            if !Task.isCancelled, !captionArmed {
                 overlayVisible = false
                 captionArmed = false
             }

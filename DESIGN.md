@@ -177,29 +177,40 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 ## Motion
 
 Only the content moves: the pigeon mark, and the pigeon in flight at a changeover (owner ruling
-2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One mascot, seven
-flights, the same bird in each** (owner, 2026-10-05: "our mascot needs to be consistent in look";
-"you can have 5-7 transitions ... lean more in to the flamboyance"; "real pigeon movements like
-twirling in air and pigeon showmanship"). The grooming loop and the sign-on ident, which opens on
-it and is on black, are not in the apps.
+2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One mascot, six
+flights, the same bird in each, every frame at the speed it was generated** (owner, 2026-10-06:
+"the speed is unrealistic, it needs to be more like the original"). The grooming loop and the
+sign-on ident, which opens on it and is on black, are not in the apps.
 
-| flight | role | length | source |
-|---|---|---|---|
-| Across | change | 3.4 s | the website's wing wipe, remade: diagonally across and into the lens, a wing fills the frame. Kling 3.0, native 4K |
-| Approach | change | 3.1 s | straight at the camera, passes over it. Kling 3.0, native 4K |
-| Rise | change | 3.7 s | climbs away from us, wings clapped over the back in a raised V, as a pigeon's display climb. Kling 3.0, native 4K |
-| Twirl | wait | 9.5 s | loops and a barrel roll, left to right. Seedance 2.5, 1080p |
-| Roller | wait | 6.8 s | a roller pigeon's backward somersaults, tumbling like a spinning ball, then away. Seedance 2.5, 1080p |
-| Spiral | wait | 6.0 s | a banking climb out of the top. Seedance 2.5, 1080p |
-| Display | wait | 5.8 s | the display flight: slow exaggerated wing-claps over the back, a hover, tail fanned. Seedance 2.5, 1080p |
+| flight | length | what the pigeon does |
+|---|---|---|
+| Across | 4.3 s | the website's wing wipe, remade: diagonally across and toward the lens |
+| Wing | 5.0 s | across and into the lens until its wing fills the screen; the channel cuts in behind the wing |
+| Display | 5.8 s | the display flight: wing-claps over the back, a hover, tail fanned |
+| Spiral | 6.0 s | a banking climb out of the top |
+| Roller | 6.8 s | a roller pigeon's backward somersaults, tumbling like a ball |
+| Twirl | 9.5 s | loops and a barrel roll |
 
-Swoop (a low glide right to left) was removed: "looks like it's swimming and seems 2D" (owner,
-2026-10-05).
+Removed by the owner: Swoop ("swimming", 2D), Rise (the back, going up), Approach (the feet,
+head-on). A set that opened and closed on a still image of the wing, with the short flights sped
+up, was refused the night it shipped. Records, prompts, job ids and the refused takes:
+`scripts/flights/FLIGHTS.json`.
 
-Every flight starts from a 4K frame drawn from the house reference photograph and ends on the
-empty backdrop, so the bird leaves the shot inside one take: no jump cut, no repeated frame (the
-website's wipe had both). The Seedance bird is colour-matched to the Kling bird. Records,
-prompts, job ids and the refused takes: `scripts/flights/FLIGHTS.json`.
+**A channel change.** Only the skin's colour fades, never the pigeon (owner, 2026-10-06). The
+old sound fades (0.45 s) as the colour rises alone over the picture (0.6 s); the channel tunes
+behind it; then the flight plays on it, solid from its first frame. The flight is the shortest
+that outlasts how long this channel took to tune last time on this device (`TuneTimes`; never
+tuned here, 2 s, radio 1.5 s), turning among those within a second of it, so a quick channel gets
+Across or Wing and a slow one the long flights. When the bird has left, the colour fades off the
+new picture (0.8 s) and its sound eases up (0.5 s); after Wing the picture cuts in behind the
+wing. If the signal is still tuning, the colour holds with TUNING and the name, and after 0.6 s
+the long flights cross it in turn until the picture plays. Reduced Motion keeps the colour and
+leaves the bird out. Measured on the owner's Apple TV HD (2026-10-06): channels tuned in 1.2–2.0
+s and every frame of every flight was on time.
+
+Each flight is ordinary opaque video laid on each skin's ground, one file per skin, H.264 1080,
+hardware-decoded on every Apple TV (HEVC with alpha was dropped: the Apple TV HD decodes it in
+software and lost frames while a channel tuned).
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
 along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
@@ -217,23 +228,6 @@ on onBand), which reads on the band in every skin.
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.
 
-A channel change: the old sound fades to nothing (0.45 s, eased) while the skin's ground comes up
-(0.35 s); the next change flight in rotation crosses it, and the new channel starts tuning as
-soon as the ground hides the old picture (0.38 s). If the signal is still tuning when the bird
-has gone, the ground holds with TUNING and the name, and after 0.6 s the wait flights cross it
-in turn until the picture plays; then the bird comes off and the picture CUTS in, with only the
-sound easing up (0.5 s). Reduced Motion keeps the fades and leaves the bird out.
-
-Each flight ships as ordinary video already laid on each skin's ground, one file per skin:
-H.264 at 1080, and HEVC at 2160 where the flight has a 4K source, which a 4K box on a 4K screen
-plays. Both decode in hardware on every Apple TV. HEVC with alpha was dropped on 2026-10-05:
-the Apple TV HD decodes it in software, and while a channel tuned the bird lost frames and was
-a 720p file stretched to 1080 ("glitchy", "blurry when it gets close"). Measured on the owner's
-box after the change: every frame of every flight on time. The renderer also plays the
-generator's slow opening at up to three times speed (Approach crawled for two seconds, Rise
-held a frozen pose) and the out-of-focus pass at the lens at three times, as a real pigeon
-crosses a lens in a fifth of a second. Two players, one per role, each prerolled before it is
-needed.
 Overlays hide 2.6 seconds into playback.
 
 ## The dancer

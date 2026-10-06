@@ -3234,7 +3234,26 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
+    ("Flights: the length fits the tune time", flightChoiceFitsTheTuneTime),
 ]
+
+// MARK: - Flights
+
+func flightChoiceFitsTheTuneTime() throws {
+    let L = ["dartA": 2.1, "dartB": 2.2, "roll": 4.0, "roller": 6.0, "loop": 8.0, "display": 10.0]
+    let all = ["dartA", "dartB", "roll", "roller", "loop", "display"]
+    // A channel that tunes in 1.5 s gets a dart, either of the two by turn.
+    try expectEqual(FlightChoice.pick(all, lengths: L, want: 1.5, exclude: nil, turn: 0), "dartA")
+    try expectEqual(FlightChoice.pick(all, lengths: L, want: 1.5, exclude: nil, turn: 1), "dartB")
+    // Five seconds: the 6-second flight, not the 10.
+    try expectEqual(FlightChoice.pick(all, lengths: L, want: 5, exclude: nil, turn: 0), "roller")
+    // Longer than any flight: the longest, and they chain.
+    try expectEqual(FlightChoice.pick(all, lengths: L, want: 30, exclude: nil, turn: 0), "display")
+    // Overdue: the shortest, and never the one that just flew.
+    try expectEqual(FlightChoice.pick(all, lengths: L, want: -2, exclude: "dartA", turn: 0), "dartB")
+    try expectEqual(FlightChoice.pick(["roll"], lengths: L, want: 1, exclude: "roll", turn: 0), "roll")
+}
+
 
 var passed = 0, failed = 0, skipped = 0
 for (name, body) in tests {

@@ -58,12 +58,14 @@ struct StripChipStyle: ButtonStyle {
     let isOn: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        StripChip(label: configuration.label, isOn: isOn, isPressed: configuration.isPressed)
+        StripChip(label: configuration.label, isOn: isOn, isPressed: configuration.isPressed, selected: false)
     }
 
-    /// The control's face when it is not a button yet: the same look, unfocused.
-    static func face<Label: View>(_ label: Label, isOn: Bool) -> some View {
-        StripChip(label: label, isOn: isOn, isPressed: false)
+    /// The control's face drawn without a button. `selected` lights it as focus would: the
+    /// players light it when the viewer has moved to it with the remote, and Select on the
+    /// picture then works it (owner, 2026-10-06: "they arent being selected on apple tv").
+    static func face<Label: View>(_ label: Label, isOn: Bool, selected: Bool = false) -> some View {
+        StripChip(label: label, isOn: isOn, isPressed: false, selected: selected)
     }
 }
 
@@ -71,7 +73,9 @@ private struct StripChip<Label: View>: View {
     let label: Label
     let isOn: Bool
     let isPressed: Bool
-    @Environment(\.isFocused) private var isFocused
+    let selected: Bool
+    @Environment(\.isFocused) private var focused
+    private var isFocused: Bool { focused || selected }
     @Environment(\.palette) private var palette
 
     var body: some View {

@@ -67,8 +67,7 @@ final class SubtitlesUITests: XCTestCase {
             XCUIRemote.shared.press(.right)    // to the control
             kjPause(0.6)
             kjScreenshot("subs-\(skin)-2b-transmission-control-focused", app: app)
-            if !control.hasFocus { print("FOCUSDUMP " + app.debugDescription) }
-            XCTAssertTrue(control.hasFocus, "right reaches the Subtitles control")
+            XCTAssertTrue(control.isSelected, "right lights the Subtitles control")
             XCUIRemote.shared.press(.select)   // off
             kjPause(0.6)
             XCTAssertEqual(control.label, "Subtitles · Off")
@@ -111,7 +110,7 @@ final class SubtitlesUITests: XCTestCase {
         kjPause(0.8)
         let control = app.buttons["captionsControl"]
         XCTAssertTrue(control.exists, "a live channel in a language the recogniser takes offers captions")
-        XCTAssertTrue(control.hasFocus, "right reaches the Captions control")
+        XCTAssertTrue(control.isSelected, "right lights the Captions control")
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)

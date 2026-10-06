@@ -439,7 +439,7 @@ struct TransmissionPlayerView: View {
             model.clips.signOnPlayed = true
             model.clips.cover(caption: store.channelName(channel))
             let pigeon = model.pigeon
-            if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: 2.5) {
+            if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected("transmission-\(channel)", fallback: 2.5)) {
                 await pigeon.arm(pick)
                 if !gone { pigeon.start() }
             }

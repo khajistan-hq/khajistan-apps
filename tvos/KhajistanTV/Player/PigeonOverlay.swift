@@ -27,11 +27,13 @@ final class PigeonOverlay {
         var waitsForCover: Bool { cutCover >= 0.5 }
     }
 
-    /// Short flights carry an ordinary change; the long ones only a channel that took 8 s or
-    /// more to tune here before.
+    /// The flights, short and long. A change gets the shortest flight that lasts as long as the
+    /// channel has taken to tune on this device (owner, 2026-10-06: "use appropriate timed
+    /// transitions where needed"), so the bird is still in the air when the picture arrives.
     static let short = ["across", "swerve", "hover", "lift"]
     static let long = ["loop", "twirl"]
-    static let slowChannel = 8.0
+    /// Seconds the flight should outlast the expected tune, so the cut lands under the bird.
+    static let margin = 0.5
 
     /// A flight is on screen.
     private(set) var showing = false
@@ -60,15 +62,24 @@ final class PigeonOverlay {
         for name in Self.short + Self.long { if let flight = Self.load(name) { flights[name] = flight } }
     }
 
-    /// The flight for a channel expected to take `expected` seconds, turning through its pool and
-    /// never the one that flew last.
+    /// The flight for a channel expected to take `expected` seconds: of the flights long enough
+    /// to cover it, those within a second of the shortest; when none is, the longest. Turns
+    /// through that pool and never repeats the one that flew last.
     func pick(expected: Double) -> Flight? {
-        let pool = (expected >= Self.slowChannel ? Self.long : Self.short).compactMap { flights[$0] }
+        let pool = Self.pool(from: Array(flights.values), expected: expected)
         let options = pool.filter { $0.name != last }
         let list = options.isEmpty ? pool : options
         guard !list.isEmpty else { return nil }
         turn += 1
         return list[turn % list.count]
+    }
+
+    static func pool(from all: [Flight], expected: Double) -> [Flight] {
+        let fits = all.filter { $0.length >= expected + margin }
+        guard let shortest = fits.map(\.length).min() else {
+            return all.sorted { $0.length > $1.length }.prefix(1).map { $0 }
+        }
+        return fits.filter { $0.length <= shortest + 1.0 }.sorted { $0.name < $1.name }
     }
 
     /// Loads a flight's two videos at their first frame, decoders warmed.

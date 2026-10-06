@@ -34,6 +34,9 @@ final class PlayerController {
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
+    #if DEBUG
+    @ObservationIgnored private var attachedAt = ContinuousClock.now
+    #endif
 
     init() {
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -53,6 +56,9 @@ final class PlayerController {
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
         generation += 1
         let gen = generation
+        #if DEBUG
+        attachedAt = .now
+        #endif
         state = .tuning
         signal = nil
         timeoutTask?.cancel()
@@ -337,6 +343,9 @@ final class PlayerController {
     /// Seeks a ready item to where the transmission has got to, then plays. An item with no
     /// start offset was already told to play in `attach`.
     private func begin(at start: Double?, generation gen: Int) {
+        #if DEBUG
+        print("KJTUNE ready after=\(ContinuousClock.now - attachedAt) seekTo=\(start.map { String(format: "%.0f", $0) } ?? "-")")
+        #endif
         guard let start else { return }
         // Up to two seconds early is allowed, so the seek lands on a keyframe instead of decoding
         // forward to the exact frame: joining a transmission does not need frame accuracy, and
@@ -344,6 +353,9 @@ final class PlayerController {
         player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: CMTime(seconds: 2, preferredTimescale: 600), toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
+                #if DEBUG
+                print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
+                #endif
                 self.player.play()
             }
         }
@@ -356,6 +368,9 @@ final class PlayerController {
         switch player.timeControlStatus {
         case .playing:
             timeoutTask?.cancel()
+            #if DEBUG
+            if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }
+            #endif
             state = .playing
             if fadeInPending, !holdsSound {
                 fadeInPending = false

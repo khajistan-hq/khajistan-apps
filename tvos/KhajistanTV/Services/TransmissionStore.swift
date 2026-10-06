@@ -74,6 +74,10 @@ final class TransmissionStore {
     /// Bumped by every tune, handover and stop. An answer that arrives under an older number
     /// belongs to a tuning the viewer has already left, and is dropped.
     @ObservationIgnored private var generation = 0
+    /// Signed addresses already asked for, by route and viewer, so a switch back within ten
+    /// minutes skips the signing round trip (1.4-1.8 s for a Dropbox-held programme, measured).
+    @ObservationIgnored private var signed: [String: (url: URL, until: Date)] = [:]
+    private static let signedLife: TimeInterval = 10 * 60
     @ObservationIgnored private var offAirWatch: Task<Void, Never>?
     /// Waits for the slot on air to end, then hands over to the next strip, as the website's
     /// once-a-minute tuneToNow does. Without it a file that runs past its slot kept the old
@@ -298,6 +302,7 @@ final class TransmissionStore {
         player.releaseSound()
         phase = .onAir(pending.air)
         watchSlotEnd(pending.air, generation: gen)
+        warmOtherChannel()
     }
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
@@ -349,6 +354,27 @@ final class TransmissionStore {
                       listen: Self.dancerMayListen(air, channel: channelNumber))
         phase = .onAir(air)
         watchSlotEnd(air, generation: gen)
+        warmOtherChannel()
+    }
+
+    /// Signs the other channel's programme in the background, so a switch to it starts with its
+    /// address in hand. Quiet: a failure here changes nothing on screen.
+    func warmOtherChannel() {
+        let target = channelNumber == 1 ? 2 : 1
+        guard schedule == .ready, let p = programming,
+              let air = StationClock.onAir(p, channel: target, at: Self.now()),
+              let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return }
+        if case .direct = route { return }
+        Task {
+            guard let token = try? await auth.validAccessToken(), let viewer = auth.session?.userId else { return }
+            let key = "\(route)|\(viewer)"
+            if let held = signed[key], held.until > Date() { return }
+            guard let request = Transmission.request(for: route, accessToken: token),
+                  let reply = try? await send(request, refusingRedirects: true), reply.status == 200,
+                  let url = try? Transmission.carrier(from: reply.data, route: route),
+                  auth.session?.userId == viewer else { return }
+            signed[key] = (url, Date().addingTimeInterval(Self.signedLife))
+        }
     }
 
     /// The file ended: the next programme of the same channel starts at its own beginning,
@@ -452,11 +478,21 @@ final class TransmissionStore {
         guard gen == generation else { return nil }
         let viewer = auth.session?.userId
         if case .direct(let url) = route { return url }
+        if let viewer, let held = signed["\(route)|\(viewer)"], held.until > Date() {
+            #if DEBUG
+            print("KJTUNE carrier held")
+            #endif
+            return held.url
+        }
         guard let request = Transmission.request(for: route, accessToken: token) else {
             phase = .failed("This programme has no playable source.")
             return nil
         }
         let reply: Reply
+        #if DEBUG
+        let signStart = ContinuousClock.now
+        defer { print("KJTUNE sign took=\(ContinuousClock.now - signStart)") }
+        #endif
         do {
             // A signer that redirects is refused, as the website's fetch does with redirect: 'error'.
             reply = try await send(request, refusingRedirects: true)
@@ -480,6 +516,10 @@ final class TransmissionStore {
             phase = .needsSignIn
             return nil
         }
+        #if DEBUG
+        print("KJTUNE carrier host=\(url.host ?? "-") ext=\(url.pathExtension)")
+        #endif
+        if let viewer { signed["\(route)|\(viewer)"] = (url, Date().addingTimeInterval(Self.signedLife)) }
         return url
     }
 

@@ -9,9 +9,12 @@ The Reading Room sells All Access through `scripts/kj-join.js`: a signed-in read
 their account server-side by `stripe-checkout` and pays in an embedded Stripe sheet. A link to
 `/reading-room.html?join=monthly` (or `annual`) resumes that checkout after sign-in.
 
-- **iPhone:** a Subscribe control opens that URL in the in-app browser.
-- **Apple TV:** tvOS has no browser, so the TV shows a QR code for the same URL; the viewer
-  pays on their phone, and the TV sees the membership on its next check.
+- **iPhone (built):** the Home tab's "Become a member" buttons open that URL in the in-app
+  browser (`JoinPlan` in `ios/Khajistan/Core/ArchiveDestination.swift`, used by `HomeView.swift`).
+- **Apple TV (not built):** tvOS has no browser, so the plan is a QR code for the same URL; the
+  viewer pays on their phone, and the TV sees the membership on its next check. The only QR code
+  in the TV app today is the one on a film's player page, which points at the film's own web page
+  (`QRCode` in `FilmPlayerView.swift`). No Subscribe screen uses it yet.
 
 Prices are not written into either app. The site states them (All Access $49/month ·
 $480/year, `reading-room.html`, measured 2026-10-05) and `kj_invariants.py` already guards that
@@ -22,7 +25,11 @@ App Store note: pointing to an outside purchase is allowed on the US storefront 
 elsewhere Apple requires its own purchase or the External Purchase Link entitlement. For an App
 Store release outside the US, the QR/link is hidden on those storefronts and §2 is the route.
 
-## 2. Apple in-app purchase (built in the app; live only after the owner's steps)
+## 2. Apple in-app purchase (designed, NOT built)
+
+**Corrected 2026-10-06.** This heading said "built in the app" until then. No branch of either
+app imports StoreKit — checked on `app/tvos-reading`, `app/tvos-pigeon`, `app/tvos-native` and
+the iOS branch `codex/ios-app-20260914`. What follows is the design, not a description of code.
 
 Auto-renewable subscriptions in one group, **All Access**:
 
@@ -31,8 +38,8 @@ Auto-renewable subscriptions in one group, **All Access**:
 | `com.khajistan.allaccess.monthly` | 1 month |
 | `com.khajistan.allaccess.annual` | 1 year |
 
-Client (StoreKit 2): the purchase carries `appAccountToken` = the signed-in Supabase user id, so
-a renewal can always be tied back to the account. After a verified transaction the app posts the
+Client (StoreKit 2, to build): the purchase will carry `appAccountToken` = the signed-in Supabase user id, so
+a renewal can always be tied back to the account. After a verified transaction the app will post the
 signed transaction to the server; access is granted by the server, never by the app.
 
 Server (lane **Bazaar**, which owns `stripe-checkout` / `stripe-webhook`; not built here, not

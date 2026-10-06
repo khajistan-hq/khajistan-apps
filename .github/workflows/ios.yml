@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: ios-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: true
+  # Cancel a superseded run only for pull requests. On main two lanes push minutes apart,
+  # and cancelling the run in flight each time meant no run on main ever finished (2026-10-06).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   simulator:

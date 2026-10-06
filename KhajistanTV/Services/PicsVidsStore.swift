@@ -15,9 +15,25 @@ enum PnvPlaybackError: LocalizedError {
     }
 }
 
+/// One region's shelf: its own stream, paged on its own.
+struct PnvFeed: Equatable {
+    var items: [PnvRow] = []
+    /// The exact count for the current kind filter, once the first page has said.
+    var total: Int?
+    var isDone = false
+    var isLoading = false
+    var error: String?
+    var offset = 0
+    var seen = Set<String>()
+
+    /// True before the first page has been asked for.
+    var isUntouched: Bool { offset == 0 && !isLoading && !isDone && error == nil }
+}
+
 /// The Born Digital stream, read as /browse-archive.html reads it (see Core/PicsVids.swift): the
-/// roster of vetted accounts first, then pages of `pnv_media` for those accounts only. The filters
-/// are the page's own, and picking one starts the stream over.
+/// roster of vetted accounts first, then pages of `pnv_media` for those accounts only. The page is
+/// one shelf per region the roster carries, each with its own paging (`feeds`); the kind filter
+/// is the page's own and applies to every shelf, and picking one starts every shelf over.
 @MainActor @Observable
 final class PicsVidsStore {
     enum Phase: Equatable {
@@ -29,21 +45,14 @@ final class PicsVidsStore {
     /// Region tokens that have accounts, west to east.
     private(set) var regions: [String] = []
     private(set) var summary: String?
-    private(set) var items: [PnvRow] = []
-    /// The exact count for the current filters, once the first page has said.
-    private(set) var total: Int?
-    private(set) var isDone = false
-    private(set) var isLoadingMore = false
-    private(set) var pageError: String?
+    /// Each region's shelf, by region token. A shelf with no entry has not been asked for.
+    private(set) var feeds: [String: PnvFeed] = [:]
     private(set) var kind: PnvKind?
-    private(set) var region: String?
     private(set) var noticeVisible = false
 
     @ObservationIgnored private var roster: [PnvAccount] = []
     @ObservationIgnored private var accountsByKey: [String: PnvAccount] = [:]
     @ObservationIgnored private var generation = 0
-    @ObservationIgnored private var offset = 0
-    @ObservationIgnored private var seen = Set<String>()
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
@@ -79,9 +88,9 @@ final class PicsVidsStore {
         summary = PnvAPI.summary(roster: roster, facets: nil)
         noticeVisible = await shouldShowNotice()
         phase = .ready
-        // The counts are a nicety; the stream stands without them.
+        // The counts are a nicety; the stream stands without them. Each shelf asks for its own
+        // first page when it comes on screen (`loadMore(region:)`).
         Task { [weak self] in await self?.loadFacets() }
-        await reload()
     }
 
     private func loadFacets() async {
@@ -91,52 +100,47 @@ final class PicsVidsStore {
 
     // MARK: - Filters
 
-    func select(kind: PnvKind?) async {
+    /// Starts every shelf over under the new kind. The shelves on screen ask for their first
+    /// pages again themselves.
+    func select(kind: PnvKind?) {
         guard kind != self.kind else { return }
         self.kind = kind
-        await reload()
-    }
-
-    func select(region: String?) async {
-        guard region != self.region else { return }
-        self.region = region
-        await reload()
-    }
-
-    private func reload() async {
         generation += 1
-        items = []
-        seen = []
-        total = nil
-        offset = 0
-        isDone = false
-        isLoadingMore = false
-        pageError = nil
-        await loadMore()
+        feeds = [:]
     }
 
+    func feed(_ region: String) -> PnvFeed {
+        feeds[region] ?? PnvFeed()
+    }
+
+    /// Clears a shelf's error so it asks again.
     func retry() async {
-        if case .failed = phase {
-            await start()
-        } else {
-            pageError = nil
-            await loadMore()
-        }
+        if case .failed = phase { await start() }
+    }
+
+    func retry(region: String) async {
+        feeds[region]?.error = nil
+        await loadMore(region: region)
     }
 
     // MARK: - Paging
 
-    func loadMore() async {
-        guard phase == .ready, !isLoadingMore, !isDone else { return }
+    /// The next page of one region's shelf: the first when it has none yet. Safe to call as often
+    /// as focus nears the end; a page in flight or a finished shelf is left alone.
+    func loadMore(region: String) async {
+        guard phase == .ready else { return }
+        var feed = feeds[region] ?? PnvFeed()
+        guard !feed.isLoading, !feed.isDone, feed.error == nil else { return }
         let gen = generation
         // No roster, or a region nobody is filed under: nothing to ask for.
         guard let keys = PnvAPI.accountKeys(roster: roster, region: region) else {
-            isDone = true
+            feed.isDone = true
+            feeds[region] = feed
             return
         }
-        isLoadingMore = true
-        pageError = nil
-        let request = PnvAPI.pageRequest(keys: keys, kind: kind, offset: offset, wantCount: total == nil)
+        feed.isLoading = true
+        feeds[region] = feed
+        let request = PnvAPI.pageRequest(keys: keys, kind: kind, offset: feed.offset, wantCount: feed.total == nil)
         do {
             let (data, response) = try await urlSession.data(for: request)
             guard gen == generation else { return }
@@ -146,15 +150,21 @@ final class PicsVidsStore {
                 try JSONDecoder().decode([PnvRow].self, from: data)
             }.value
             guard gen == generation else { return }
-            if let counted = PnvAPI.total(fromContentRange: http?.value(forHTTPHeaderField: "Content-Range")) { total = counted }
-            for row in rows where seen.insert(row.media_key).inserted { items.append(row) }
-            offset += rows.count
-            if rows.count < PnvAPI.pageSize { isDone = true }
-            isLoadingMore = false
+            var next = feeds[region] ?? PnvFeed()
+            if let counted = PnvAPI.total(fromContentRange: http?.value(forHTTPHeaderField: "Content-Range")) { next.total = counted }
+            for row in rows where next.seen.insert(row.media_key).inserted { next.items.append(row) }
+            next.offset += rows.count
+            if rows.count < PnvAPI.pageSize { next.isDone = true }
+            next.isLoading = false
+            feeds[region] = next
         } catch {
-            guard gen == generation, !Task.isCancelled else { return }
-            isLoadingMore = false
-            pageError = "The archive did not answer."
+            guard gen == generation, !Task.isCancelled else {
+                // A cancelled request leaves the shelf free to ask again.
+                if gen == generation { feeds[region]?.isLoading = false }
+                return
+            }
+            feeds[region]?.isLoading = false
+            feeds[region]?.error = "The archive did not answer."
         }
     }
 

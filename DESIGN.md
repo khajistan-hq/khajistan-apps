@@ -67,7 +67,7 @@ way the website marks the brand link.
 
 - **Top bar**, on every root screen: the animated pigeon (72pt) and **KHAJISTAN** (40pt black,
   −0.03 em) with *Media of the Middle World* (small, faint) at left; RECEIVER · TRANSMISSION ·
-  PICS/VIDS · ACCOUNT as kickers at right (PICS/VIDS is the website's own nav label). Select moves between sections. No system tab bar: tvOS paints
+  READING ROOM · PICS/VIDS · ACCOUNT as kickers at right (READING ROOM and PICS/VIDS are the website's own nav labels). Select moves between sections. No system tab bar: tvOS paints
   its focused tab as a white pill.
 - **Status band**: a full-width `band` strip, kickers in `onBand`, leading text and trailing
   text. It heads every player, as the website's console bar does.
@@ -151,6 +151,33 @@ way the website marks the brand link.
   (ink modules on the ground) with its address. The panel stays while that answer is on screen.
   A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
   seconds in the full film.
+
+## The Reading Room
+
+The website's READING ROOM door, `/reading-room.html`, read on 2026-10-06 off
+`scripts/reading-room-app.js`. The app asks what the site asks and shows what the site shows to the
+same visitor.
+
+- **Shelf.** Heading *Reading Room* and the site's line *Magazines, books and printed matter from
+  the Middle World, page by page.* A tab per language and a row per shelf inside it, in the
+  module index's own order (`data/rr-modules.json`, behind the site password, so it comes with the
+  preview password); without it, one tab of every title and a row per region. Each tab states
+  the room's three figures with rights-held titles named beside them, as `rrDepthLine` does.
+- **Card.** The real scanned cover (never a product photo), the title, *region · N issues*, and
+  the access line in the shelf's words: *Free — read in full*, *Free — sign in to read*, *Members*,
+  *Rights pending*. The access line is the page server's own answer to an anonymous request for a
+  page past the free preview; the app keeps no list of free titles.
+- **Title.** Its issues as covers, with *N issues · M pages*. A rights-held title shows the
+  *Preserved · not published* banner, its covers inert, and a code for the page where researchers
+  ask for supervised access.
+- **Reader.** One page at a time, full screen on the ground. Right turns to the next page, left to
+  the one before, Select zooms to 2x and the remote moves the page, Select or Menu zooms out, Menu
+  leaves. The next page is fetched while this one is read. The band (title, issue, `p. 3 / 76`) hides
+  after 2.6 seconds.
+- **Refusals**, in the site's words, with a code for the title's page on the website and no purchase
+  in the app: *Membership required* (paid, from page 3), *Free to read — sign in to continue*
+  (account-open, with the sign-in sheet), *Preserved · not published* (451), a content warning
+  (*This page shows …*) held until the viewer asks, and *Page N unavailable — not yet in the archive*.
 
 ## Pics/Vids
 

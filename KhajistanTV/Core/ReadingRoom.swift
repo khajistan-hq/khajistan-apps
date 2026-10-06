@@ -446,10 +446,12 @@ enum RRPath {
         endpoint(issue, page: issue.index == 0 ? title.coverPage : 1, extra: extra)
     }
 
-    /// A page past the free preview, to ask what an anonymous visitor may read: three, or one past a declared cover.
-    /// A title with no issue long enough has none, and its access line is left out rather than guessed.
-    static func probeEndpoint(_ title: RRTitle, extra: Set<String> = []) -> String? {
-        let page = max(title.coverPage, 2) + 1
+    /// A page past the free preview, to ask what an anonymous visitor may read: three, or one past a declared
+    /// cover. `skipping` asks for a later page, for the title whose page 3 is not on the shelf (a page taken
+    /// off it answers 404 before any gate is consulted). A title with no issue long enough has none, and its
+    /// access line is left out rather than guessed.
+    static func probeEndpoint(_ title: RRTitle, skipping: Int = 0, extra: Set<String> = []) -> String? {
+        let page = max(title.coverPage, 2) + 1 + skipping
         guard let issue = title.issues.first(where: { $0.pages >= page }) else { return nil }
         return endpoint(issue, page: page, extra: extra)
     }

@@ -3317,6 +3317,12 @@ func readingPaths() throws {
     let tiny = RRTitle(slug: "al-kawakib", name: "A", native: "", region: "indus", memberSlugs: [],
                        issues: [RRIssue(slug: "al-kawakib", id: "", label: "L", pages: 2, index: 0)])
     try expectEqual(RRPath.probeEndpoint(tiny), nil, "a two-leaf issue has no page past the preview")
+    // A probe page the shelf does not hold is asked again further on, while the issue is long enough.
+    try expectEqual(RRPath.probeEndpoint(ordinary, skipping: 2), "al-kawakib/al-kawakib-1960-01-26-p005")
+    try expectEqual(RRPath.probeEndpoint(tiny, skipping: 1), nil)
+    let shortRun = RRTitle(slug: "al-kawakib", name: "A", native: "", region: "indus", memberSlugs: [],
+                           issues: [RRIssue(slug: "al-kawakib", id: "", label: "L", pages: 3, index: 0)])
+    try expectEqual(RRPath.probeEndpoint(shortRun, skipping: 1), nil, "no page 4 in a three-page issue")
     // An issue's own cover: the title's cover page for the first, page 1 for the rest.
     let second = RRIssue(slug: "tilism-e-hoshruba", id: "b", label: "L", pages: 30, index: 1)
     let two = RRTitle(slug: "tilism-e-hoshruba", name: "T", native: "", region: "indus", memberSlugs: [], issues: [long, second])

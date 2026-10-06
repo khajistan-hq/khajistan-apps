@@ -2954,7 +2954,7 @@ func liveCaptionLanguageOrder() throws {
 // MARK: - Live captions: the server's answers
 
 func liveCaptionServerAnswers() throws {
-    try expectEqual(CaptionRules.startRefusal("sign_in_required"), "Sign in from the top of the page to use live captions.")
+    try expectEqual(CaptionRules.startRefusal("sign_in_required"), "Sign in under Account to use live captions.")
     try expectEqual(CaptionRules.startRefusal("credits_exhausted"), "Your free caption minutes are used up. The channel keeps playing.")
     try expectEqual(CaptionRules.startRefusal("email_unverified"), "Verify your email address to use your caption allowance.")
     try expectEqual(CaptionRules.startRefusal("not_live"), "Live captions are for live television and radio. This channel carries its own subtitles.")
@@ -3424,8 +3424,6 @@ func readingRequests() throws {
     let warned = RRAPI.sensitiveRequest(collection: "a&hide=eq.true").url?.absoluteString ?? ""
     try expect(warned.contains("hide=eq.false") && warned.contains("visibility_state=eq.public_warning"), warned)
     try expect(warned.contains("collection_slug=eq.a%26hide%3Deq.true"), warned)
-    try expectEqual(RRSite.titleURL(RRTitle(slug: "a b", name: "", native: "", region: "", memberSlugs: [], issues: [])).absoluteString,
-                    "\(KJConfig.site.absoluteString)/reading-room.html?m=a%20b")
 }
 
 func readingPageMap() throws {

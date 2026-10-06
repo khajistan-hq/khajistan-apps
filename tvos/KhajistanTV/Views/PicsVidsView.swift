@@ -11,7 +11,7 @@ struct PicsVidsView: View {
     @State private var dontAskAgain = false
     @FocusState private var focus: Focus?
 
-    private enum Focus: Hashable { case firstTab }
+    private enum Focus: Hashable { case noticeOK, firstTab }
 
     /// An object chosen, and the shelf it was chosen from.
     private struct Viewing: Identifiable {
@@ -37,6 +37,8 @@ struct PicsVidsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .kjTopFade()
+        // Down from the top bar lands on the first control, never on the tile under the bar item.
+        .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         .task { await store.start() }
         .fullScreenCover(item: $viewing) { choice in
             PnvViewerView(row: choice.row, region: choice.region)
@@ -61,6 +63,7 @@ struct PicsVidsView: View {
                     Text(AdultNotice.ok).kjKicker()
                 }
                 .buttonStyle(HouseButtonStyle())
+                .focused($focus, equals: .noticeOK)
                 .accessibilityIdentifier("adultNoticeOK")
                 HouseSwitch(title: AdultNotice.dontAskAgain, detail: nil, isOn: $dontAskAgain)
                     .accessibilityIdentifier("adultNoticeDontAsk")

@@ -744,7 +744,7 @@ struct TopBar: View {
             .accessibilityLabel("Khajistan")
             Spacer(minLength: 0)
             HStack(spacing: 12) {
-                ForEach(Section.allCases) { section in
+                ForEach(Section.available) { section in
                     Button {
                         select(section)
                     } label: {

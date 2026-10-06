@@ -92,12 +92,7 @@ struct FilmPlayerView: View {
         VStack(spacing: 0) {
             StatusBand(leading: ["Khajistan Receiver", "On Demand"], trailing: [full == nil ? "Film" : "The full film"])
             Spacer(minLength: 0)
-            HStack(alignment: .bottom, spacing: 60) {
-                panel
-                if let refusal, refusal == 401 || refusal == 403 {
-                    pageCode(palette)
-                }
-            }
+            panel
             .padding(.horizontal, KJLayout.inset)
             .padding(.vertical, 40)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -178,26 +173,6 @@ struct FilmPlayerView: View {
                 .buttonStyle(HouseButtonStyle())
                 .accessibilityIdentifier("filmSignIn")
             }
-        }
-    }
-
-    /// The film's own page, as a code a phone can open: ink on the ground, the address under it.
-    private func pageCode(_ palette: Palette) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let code = QRCode.image(for: Films.pageURL(film).absoluteString, ink: model.skin.inkHex, ground: model.skin.groundHex) {
-                Image(decorative: code, scale: 1)
-                    .interpolation(.none)
-                    .resizable()
-                    .frame(width: 280, height: 280)
-                    .accessibilityElement()
-                    .accessibilityLabel("Code for this film's own page")
-                    .accessibilityIdentifier("filmPageCode")
-            }
-            Kicker("This film's own page")
-            Text("khajistan-archive.pages.dev/film/\(film.handle)")
-                .kjSmall(faint: true)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(width: 280, alignment: .leading)
         }
     }
 
@@ -324,24 +299,5 @@ struct FilmPlayerView: View {
             try? await Task.sleep(for: .seconds(2.6))
             if !Task.isCancelled { withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false } }
         }
-    }
-}
-
-/// A QR code drawn in two of the skin's colours: ink modules on the ground, no white anywhere.
-enum QRCode {
-    static func image(for text: String, ink: UInt32, ground: UInt32) -> CGImage? {
-        guard let generator = CIFilter(name: "CIQRCodeGenerator") else { return nil }
-        generator.setValue(Data(text.utf8), forKey: "inputMessage")
-        generator.setValue("M", forKey: "inputCorrectionLevel")
-        guard let modules = generator.outputImage, let colour = CIFilter(name: "CIFalseColor") else { return nil }
-        colour.setValue(modules, forKey: kCIInputImageKey)
-        colour.setValue(ciColor(ink), forKey: "inputColor0")
-        colour.setValue(ciColor(ground), forKey: "inputColor1")
-        guard let output = colour.outputImage else { return nil }
-        return CIContext().createCGImage(output, from: output.extent)
-    }
-
-    private static func ciColor(_ hex: UInt32) -> CIColor {
-        CIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255)
     }
 }

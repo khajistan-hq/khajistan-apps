@@ -318,7 +318,8 @@ enum CaptionRules {
     /// billingReason(), for the reasons that are not a residency terminal's (the app is never one).
     static func billingReason(_ reason: String?) -> String? {
         switch reason {
-        case "sign_in_required": return "Sign in from the top of the page to use live captions."
+        // The site says "from the top of the page"; the app has no page, and sign-in is under Account.
+        case "sign_in_required": return "Sign in under Account to use live captions."
         case "email_unverified": return "Verify your email address to use your caption allowance."
         case "credits_exhausted": return "Your free caption minutes are used up. The channel keeps playing."
         case "not_live": return "Live captions are for live television and radio. This channel carries its own subtitles."

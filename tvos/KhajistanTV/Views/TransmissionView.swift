@@ -12,6 +12,7 @@ struct TransmissionView: View {
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
     @State private var playing: ChannelChoice?
+    @FocusState private var focusedCard: Int?
 
     private struct ChannelChoice: Identifiable {
         let number: Int
@@ -34,6 +35,8 @@ struct TransmissionView: View {
             .padding(KJLayout.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Down from the top bar lands on Channel 1, not on whichever card sits under the bar item.
+        .defaultFocus($focusedCard, 1, priority: .userInitiated)
         .task {
             await store.loadSchedule()
             // A page left open as the month turns takes the new month's schedule. A schedule
@@ -176,6 +179,7 @@ struct TransmissionView: View {
             )
         }
         .buttonStyle(HouseCardStyle())
+        .focused($focusedCard, equals: number)
         .accessibilityIdentifier("transmission-channel-\(number)")
     }
 

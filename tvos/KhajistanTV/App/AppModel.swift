@@ -22,6 +22,9 @@ final class AppModel {
     /// The Reading Room: the shelf feed, the page server and the reader's pages.
     let reading: ReadingStore
     let mixes = MixesStore()
+    /// The Receiver's open region, if any. Held here rather than in the view so Back from the
+    /// top bar, which sits outside the Receiver's stack, pops the region instead of leaving the app.
+    var receiverPath: [ReceiverIndex.Region] = []
     /// Where a Top Shelf link asked to go. The screen it names reads it and clears it.
     var link: DeepLink?
     /// The Screening Room's films, read from vod.json with the preview password.
@@ -82,7 +85,7 @@ final class AppModel {
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
         case "reading": self.section = .reading
-        case "picsvids": self.section = .picsvids
+        case "picsvids" where StoreBuild.includes(.picsvids): self.section = .picsvids
         case "account": self.section = .account
         default: self.section = .receiver
         }

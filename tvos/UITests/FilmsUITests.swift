@@ -82,7 +82,7 @@ final class FilmsUITests: XCTestCase {
         let note = app.staticTexts["filmNote"]
         XCTAssertTrue(note.waitForExistence(timeout: 20), "A signed-out viewer must be told why")
         XCTAssertEqual(note.label, "Sign in to the Khajistan account that holds this film, then press Watch the full film again.")
-        XCTAssertTrue(app.descendants(matching: .any)["filmPageCode"].exists, "The film's own page must be offered as a code")
+        XCTAssertFalse(app.descendants(matching: .any)["filmPageCode"].exists, "No code sends a viewer out of the app")
         XCTAssertTrue(app.buttons["filmSignIn"].exists, "Sign in must be offered")
         kjScreenshot("vod-06-full-film-signed-out", app: app)
 

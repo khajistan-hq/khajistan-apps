@@ -141,7 +141,7 @@ struct ReceiverPlayerView: View {
                 detail: stripDetail,
                 attribution: current.attributionText,
                 trailing: stripTrailing,
-                accessory: model.captions.offered ? AnyView(captionsControl) : nil
+                accessory: model.captions.offered && !controller.state.isFailed ? AnyView(captionsControl) : nil
             )
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
@@ -176,7 +176,7 @@ struct ReceiverPlayerView: View {
     /// What follows the name: a failure's reason, Paused, the captions' note, or the place.
     private var stripDetail: String? {
         switch controller.state {
-        case .failed(let message): return message
+        case .failed(let message): return message + " Press Down for the next channel."
         case .paused: return "Paused"
         default:
             if !model.captions.note.isEmpty { return model.captions.note }
@@ -209,7 +209,7 @@ struct ReceiverPlayerView: View {
 
     /// The medium only: the place is already beside the name, and one thing is said once.
     private var stripTrailing: [String] {
-        ["\u{25CF} \(liveLabel)"]
+        controller.state.isFailed ? ["Off the air"] : ["\u{25CF} \(liveLabel)"]
     }
 
     private var liveLabel: String {
@@ -267,7 +267,7 @@ struct ReceiverPlayerView: View {
                 if !behind { model.captions.attach(target, player: player) }
             } catch {
                 if Task.isCancelled { return }
-                player.state = .failed(error.localizedDescription)
+                player.state = .failed(PlayerController.unreachable)
             }
         }
     }

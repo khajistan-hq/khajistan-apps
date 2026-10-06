@@ -6,7 +6,7 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 
 ## What v1 carries
 
-**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, PICS/VIDS and ACCOUNT beside them. There is no system tab bar.
+**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, READING ROOM, PICS/VIDS and ACCOUNT beside them. There is no system tab bar. The App Store build (`KJ_APP_STORE`, set only when archiving for the store) leaves PICS/VIDS out: part of its feed has never been screened for adult material.
 
 **The skin.** Account offers Automatic, Day, Grove and Smut. Day, Grove and Smut are the names on the website's switch; Automatic follows the hour and is the default. The choice is kept on the Apple TV and applies at once.
 

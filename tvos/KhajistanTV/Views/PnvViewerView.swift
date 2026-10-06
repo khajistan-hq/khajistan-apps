@@ -36,7 +36,8 @@ struct PnvViewerView: View {
     var body: some View {
         let palette = Palette(model.skin)
         ZStack {
-            palette.ground.ignoresSafeArea()
+            // Moving pictures letterbox on black (owner, 2026-10-05); a still keeps the ground.
+            (current.isVideo ? Color.black : palette.ground).ignoresSafeArea()
             // The poster stands in until the video is playing, then gives way to it: the two
             // frames need not have the same edges.
             if let picture, !(current.isVideo && controller.state == .playing) {

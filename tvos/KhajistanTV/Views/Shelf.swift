@@ -49,6 +49,9 @@ extension View {
                     .frame(height: 28)
                 Rectangle()
             }
+            // A mask lays out inside the safe area unless told otherwise, and would cut a page
+            // that runs to the screen's edge flat at the line.
+            .ignoresSafeArea(.container, edges: .bottom)
         }
     }
 }

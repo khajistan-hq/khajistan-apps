@@ -40,8 +40,11 @@ struct RootView: View {
         .preferredColorScheme(model.skin == .day ? .light : .dark)
         // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
         // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
-        // what tvOS does: a region pops back to the map, and the map leaves the app.
-        .modifier(BackToAtlas(active: model.section != .receiver) { model.section = .receiver })
+        // what tvOS does: a region pops back to the map, and the map leaves the app. The pop is
+        // done here as well, because Back pressed in the top bar never reaches the Receiver's stack.
+        .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
+            if model.section != .receiver { model.section = .receiver } else { model.receiverPath.removeLast() }
+        })
     }
 
     @ViewBuilder

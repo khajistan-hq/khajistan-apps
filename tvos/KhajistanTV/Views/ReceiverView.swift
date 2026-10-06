@@ -6,7 +6,6 @@ import SwiftUI
 struct ReceiverView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
-    @State private var path: [ReceiverIndex.Region] = []
     @State private var composed: ComposedMap?
     @State private var mapError: String?
     @State private var playingMix: Mix?
@@ -14,7 +13,8 @@ struct ReceiverView: View {
     @State private var shuffling = false
 
     var body: some View {
-        NavigationStack(path: $path) {
+        @Bindable var model = model
+        return NavigationStack(path: $model.receiverPath) {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(palette.ground.ignoresSafeArea())
@@ -23,6 +23,8 @@ struct ReceiverView: View {
                     ChannelsView(region: region)
                 }
         }
+        // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
+        .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list)
         }
@@ -48,11 +50,11 @@ struct ReceiverView: View {
     private func follow(_ link: DeepLink?) {
         switch link {
         case .receiver:
-            path = []
+            model.receiverPath = []
             model.link = nil
         case .region(let id):
             guard let index = model.receiver.index else { return }
-            path = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
+            model.receiverPath = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
             model.link = nil
         default:
             break
@@ -78,8 +80,11 @@ struct ReceiverView: View {
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
-                .padding(.bottom, 20)
+                .padding(.bottom, KJLayout.inset)
             }
+            // The page runs to the screen's edge, so the first shelf peeks under the front
+            // instead of being cut flat at the safe-area line.
+            .ignoresSafeArea(.container, edges: .bottom)
             .kjTopFade()
         } else if let message = model.receiver.indexError {
             failure(message)
@@ -239,7 +244,7 @@ struct ReceiverView: View {
                 kind: mapRegion.isPeople ? "people" : "state",
                 tier: mapRegion.isExtension ? "islamicate" : "core"
             )
-        path.append(region)
+        model.receiverPath.append(region)
     }
 
     // MARK: - Loading

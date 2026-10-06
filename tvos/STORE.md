@@ -14,8 +14,8 @@ their account server-side by `stripe-checkout` and pays in an embedded Stripe sh
 - **Apple TV: sells nothing, in the app or through it.** Owner, 2026-10-06, to the Apple TV
   session: *"dont allow people to get reading room subscription on the apple tv app, make them go
   to our site for that"*. The TV's members' gate shows no plans and no prices, only that
-  membership is on khajistan.com. The QR code on a film's player page
-  points at the film's own web page (`QRCode` in `FilmPlayerView.swift`); that one was not part of this ruling.
+  membership is on khajistan.com. The Apple TV app has no QR codes (removed 2026-10-06: they
+  pointed at the password-gated host and carried the same review risk).
   - **Ruled 2026-10-06: plain text, no QR code.** Under App Review Guidelines 3.1.1 and 3.1.3,
     sending readers to buy outside the app, a QR code included, can be rejected. So the members'
     gate says membership is on khajistan.com, with no code and no call to action (owner, taking

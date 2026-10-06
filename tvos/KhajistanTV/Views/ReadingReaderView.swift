@@ -215,7 +215,7 @@ struct ReadingReaderView: View {
                         }
                         backToPreview
                     }
-                    pageCode
+                    siteLine
                 }
             }
         case .closed:
@@ -260,20 +260,10 @@ struct ReadingReaderView: View {
         .accessibilityIdentifier("rrBackToPreview")
     }
 
-    /// The title's own page on the website, as a code a phone can open: ink on the ground.
-    private var pageCode: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let code = QRCode.image(for: RRSite.titleURL(title).absoluteString, ink: model.skin.inkHex, ground: model.skin.groundHex) {
-                Image(decorative: code, scale: 1)
-                    .interpolation(.none)
-                    .resizable()
-                    .frame(width: 260, height: 260)
-                    .accessibilityElement()
-                    .accessibilityLabel("Code for this title's own page")
-                    .accessibilityIdentifier("rrTitleCode")
-            }
-            Kicker("khajistan.com")
-        }
+    /// Where membership is taken, named in plain text. No code and no link: on the TV a reader
+    /// app may not send a viewer out to buy (owner, 2026-10-06).
+    private var siteLine: some View {
+        Kicker("khajistan.com").accessibilityIdentifier("rrSiteLine")
     }
 
     /// Where the reader stands, for the UI test that turns pages: "3/76|page", with "|zoom" while zoomed.

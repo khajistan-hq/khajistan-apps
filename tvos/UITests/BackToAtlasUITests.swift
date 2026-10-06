@@ -20,4 +20,24 @@ final class BackToAtlasUITests: XCTestCase {
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "Back from \\(section) must return to the atlas")
         }
     }
+
+    /// Back pressed in the top bar while a region is open pops to the map. The top bar sits
+    /// outside the Receiver's stack, and this press used to leave the app (QA, 2026-10-06).
+    func testBackFromTheTopBarOverARegionPopsToTheMap() {
+        let app = XCUIApplication()
+        app.launch()
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
+        let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<10 where !focused.exists { XCUIRemote.shared.press(.down) }
+        XCTAssertTrue(focused.exists, "a region must take focus in the strip")
+        XCUIRemote.shared.press(.select)
+        XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 5), "the region page must replace the map")
+        for _ in 0..<8 { XCUIRemote.shared.press(.up) }
+        XCTAssertTrue(app.buttons["Receiver"].hasFocus || app.buttons.matching(NSPredicate(format: "hasFocus == true AND label ==[c] 'Receiver'")).firstMatch.exists,
+                      "focus must reach the top bar")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "Back must pop to the map")
+        XCTAssertEqual(app.state, .runningForeground, "and must not leave the app")
+    }
 }

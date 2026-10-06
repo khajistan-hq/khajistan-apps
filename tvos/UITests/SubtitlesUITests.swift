@@ -115,7 +115,7 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)
-        let sentence = app.staticTexts["Sign in from the top of the page to use live captions."]
+        let sentence = app.staticTexts["Sign in under Account to use live captions."]
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "signed out, the site's sentence and no request")
         XCTAssertEqual(control.label, "Captions", "nothing was turned on")
         kjScreenshot("live-2-signed-out-sentence", app: app)

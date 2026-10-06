@@ -9,6 +9,8 @@ import Observation
 final class PlayerController {
     enum State: Equatable {
         case idle, tuning, playing, paused, failed(String)
+
+        var isFailed: Bool { if case .failed = self { return true } else { return false } }
     }
 
     let player = AVPlayer()
@@ -87,11 +89,10 @@ final class PlayerController {
 
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] observed, _ in
             let status = observed.status
-            let message = observed.error?.localizedDescription ?? "This signal could not be played."
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
                 switch status {
-                case .failed: self.state = .failed(message)
+                case .failed: self.state = .failed(Self.unreachable)
                 case .readyToPlay: self.begin(at: start, generation: gen)
                 default: break
                 }
@@ -108,11 +109,9 @@ final class PlayerController {
         failObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
         ) { [weak self] notification in
-            let cause = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
-            let message = cause?.localizedDescription ?? "The signal stopped."
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
-                self.state = .failed(message)
+                self.state = .failed(Self.unreachable)
             }
         }
 
@@ -125,11 +124,15 @@ final class PlayerController {
         if start == nil { player.play() }
     }
 
+    /// The one thing a viewer is told when a signal fails. The system's own error ("A TLS error
+    /// caused the secure connection to fail") names a cause the viewer can do nothing about.
+    static let unreachable = "This signal is not reaching us right now."
+
     private func startTimeout(_ gen: Int) {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
-            self.state = .failed("The signal did not start.")
+            self.state = .failed(Self.unreachable)
         }
     }
 

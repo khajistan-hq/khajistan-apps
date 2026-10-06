@@ -9,6 +9,7 @@ struct ReadingView: View {
     @Environment(\.palette) private var palette
     @State private var tabID: String?
     @State private var opened: RRTitle?
+    @FocusState private var focusedTab: String?
 
     private var store: ReadingStore { model.reading }
 
@@ -36,6 +37,8 @@ struct ReadingView: View {
             .padding(KJLayout.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Down from the top bar lands on the tab on show, not on the one under the bar item.
+        .defaultFocus($focusedTab, tab?.id, priority: .userInitiated)
         .task { await store.start() }
         .fullScreenCover(item: $opened) { title in
             ReadingTitleView(title: title)
@@ -62,6 +65,7 @@ struct ReadingView: View {
                     Text(item.name).kjKicker()
                 }
                 .buttonStyle(HouseTabStyle(isCurrent: item.id == tab?.id))
+                .focused($focusedTab, equals: item.id)
                 .accessibilityIdentifier("rr-tab-\(item.id)")
             }
         }

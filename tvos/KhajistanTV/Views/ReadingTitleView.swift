@@ -93,14 +93,6 @@ struct ReadingTitleView: View {
             }
             .frame(maxWidth: 1000, alignment: .leading)
             VStack(alignment: .leading, spacing: 12) {
-                if let code = QRCode.image(for: RRSite.researchURL.absoluteString, ink: model.skin.inkHex, ground: model.skin.groundHex) {
-                    Image(decorative: code, scale: 1)
-                        .interpolation(.none)
-                        .resizable()
-                        .frame(width: 220, height: 220)
-                        .accessibilityElement()
-                        .accessibilityLabel("Code for the page where researchers request supervised access")
-                }
                 Text(RRWords.researchersAsk)
                     .kjSmall(faint: true)
                     .frame(width: 280, alignment: .leading)

@@ -953,14 +953,6 @@ enum RRWords {
 // MARK: - The site's addresses
 
 enum RRSite {
-    /// A title's own page on the website: the shelf's deep link (`?m=<slug>`), which opens the title.
-    static func titleURL(_ title: RRTitle) -> URL {
-        URL(string: KJConfig.site.absoluteString + "/reading-room.html?m=" + KJURL.encodeQueryValue(title.slug))!
-    }
-
-    /// Where a researcher asks for supervised access to rights-held material.
-    static let researchURL = URL(string: KJConfig.site.absoluteString + "/collection.html#inq-form")!
-
     static func modulesURL(origin: URL) -> URL {
         origin.appendingPathComponent("data/rr-modules.json")
     }

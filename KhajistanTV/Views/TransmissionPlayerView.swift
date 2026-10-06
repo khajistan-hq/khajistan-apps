@@ -364,12 +364,9 @@ struct TransmissionPlayerView: View {
             let next = store.channelNumber == 1 ? 2 : 1
             async let quiet: Void = store.player.fadeOut()
             var retune: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(next), key: "transmission-\(next)", covered: {
+            await model.clips.flyThrough(caption: store.channelName(next)) {
                 if !left { retune = Task { await store.switchChannel() } }
-            }, ready: {
-                await retune?.value
-                await store.player.settled()
-            })
+            }
             await quiet
             await retune?.value
             if !left { await model.clips.holdUntil { await store.player.settled() } }
@@ -403,12 +400,9 @@ struct TransmissionPlayerView: View {
         if flies {
             model.clips.signOnPlayed = true
             var tuning: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(channel), key: "transmission-\(channel)", covered: {
+            await model.clips.flyThrough(caption: store.channelName(channel)) {
                 if !gone { tuning = Task { await store.tune(channel: channel) } }
-            }, ready: {
-                await tuning?.value
-                await store.player.settled()
-            })
+            }
             await tuning?.value
             if !gone { await model.clips.holdUntil { await store.player.settled() } }
         } else {

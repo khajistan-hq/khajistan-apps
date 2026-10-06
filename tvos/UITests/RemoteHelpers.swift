@@ -14,6 +14,19 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
+    /// From the top bar to the Receiver's region strip: Down onto the front (it lands on its first
+    /// control, Shuffle, or on the strip), then Right off the sidebar onto the strip. Never presses
+    /// Select, so nothing on the way is switched.
+    @discardableResult
+    func kjFocusStrip(_ app: XCUIApplication) -> Bool {
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        let shuffle = app.buttons["shuffle"]
+        for _ in 0..<4 where !focused.exists && !shuffle.hasFocus { XCUIRemote.shared.press(.down); kjPause(0.3) }
+        for _ in 0..<6 where !focused.exists { XCUIRemote.shared.press(.right); kjPause(0.3) }
+        return focused.exists
+    }
+
     /// Presses toward `element` until it has focus, steering by where it sits against the focused
     /// control. Returns whether it got there.
     @discardableResult

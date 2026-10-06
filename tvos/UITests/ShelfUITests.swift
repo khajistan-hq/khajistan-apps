@@ -54,7 +54,7 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "\(skin): the front must draw its regions")
             kjPause(4)
             // Focus starts on the top bar's tab; down reaches the strip.
-            for _ in 0..<6 where !focusedID(app).hasPrefix("region-") { press(.down, app: app) }
+            kjFocusStrip(app)
             XCTAssertTrue(focusedID(app).hasPrefix("region-"), "\(skin): down from the top bar reaches the strip")
             for _ in 0..<30 where focusedID(app) != "region-indus" { press(.right, app: app) }
             XCTAssertEqual(focusedID(app), "region-indus", "\(skin): the walk east along the strip reaches Indus")
@@ -83,7 +83,7 @@ final class ShelfUITests: XCTestCase {
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
             kjPause(3)
-            for _ in 0..<6 where !focusedID(app).hasPrefix("region-") { press(.down, app: app) }
+            kjFocusStrip(app)
             for _ in 0..<30 where focusedID(app) != "region-indus" { press(.right, app: app) }
             XCTAssertEqual(focusedID(app), "region-indus")
             XCUIRemote.shared.press(.select)

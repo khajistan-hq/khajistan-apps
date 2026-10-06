@@ -130,7 +130,7 @@ final class AppModel {
     /// A door from the website's menu: a room the app draws itself switches tab, the rest is web.
     func open(_ destination: ArchiveDestination) {
         // A link into a room this build leaves out (StoreBuild) goes nowhere, web included.
-        guard StoreBuild.includes(destination.nativeRoom) else {
+        guard StoreBuild.includes(destination) else {
             message = "\(destination.title) is not in this edition of the app."
             return
         }

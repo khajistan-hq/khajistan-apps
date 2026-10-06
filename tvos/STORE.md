@@ -14,12 +14,12 @@ their account server-side by `stripe-checkout` and pays in an embedded Stripe sh
 - **Apple TV: sells nothing, in the app or through it.** Owner, 2026-10-06, to the Apple TV
   session: *"dont allow people to get reading room subscription on the apple tv app, make them go
   to our site for that"*. The TV's members' gate shows no plans and no prices, only that
-  membership is on khajistan.com, with a QR code to the site. The QR code on a film's player page
-  points at the film's own web page (`QRCode` in `FilmPlayerView.swift`).
-  - **Open, for the owner:** under App Review Guidelines 3.1.1 and 3.1.3, sending readers to buy
-    outside the app, a QR code included, can be rejected unless the app qualifies as a reader app
-    with Apple's external-link entitlement. The Apple TV session recommends dropping the QR code
-    and keeping plain text with no call to action.
+  membership is on khajistan.com. The QR code on a film's player page
+  points at the film's own web page (`QRCode` in `FilmPlayerView.swift`); that one was not part of this ruling.
+  - **Ruled 2026-10-06: plain text, no QR code.** Under App Review Guidelines 3.1.1 and 3.1.3,
+    sending readers to buy outside the app, a QR code included, can be rejected. So the members'
+    gate says membership is on khajistan.com, with no code and no call to action (owner, taking
+    the Apple TV session's recommendation).
 
 Prices are not written into either app. The site states them (All Access $49/month ·
 $480/year, `reading-room.html`, measured 2026-10-05) and `kj_invariants.py` already guards that

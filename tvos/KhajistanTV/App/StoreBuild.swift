@@ -11,7 +11,9 @@ enum StoreBuild {
     #endif
 
     static func includes(_ section: Section) -> Bool {
-        !(isOn && section == .picsvids)
+        // Chat too, until a server-side word filter and a room block exist (owner, 2026-10-06:
+        // App Review 1.2).
+        !(isOn && (section == .picsvids || section == .chat))
     }
 }
 

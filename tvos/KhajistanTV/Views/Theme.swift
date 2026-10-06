@@ -701,6 +701,7 @@ enum Section: String, CaseIterable, Identifiable {
     case transmission
     case reading
     case picsvids
+    case chat
     case account
 
     var id: String { rawValue }
@@ -713,6 +714,7 @@ enum Section: String, CaseIterable, Identifiable {
         case .reading: return "Reading Room"
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
+        case .chat: return "Chat"
         case .account: return "Account"
         }
     }
@@ -737,20 +739,21 @@ struct TopBar: View {
                 PigeonMark(size: 72)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("KHAJISTAN").kjName(40)
-                    Text("Media of the Middle World").kjSmall(faint: true)
+                    Text("Media of the Middle World").kjSmall(faint: true).lineLimit(1).fixedSize()
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Khajistan")
             Spacer(minLength: 0)
-            HStack(spacing: 12) {
+            HStack(spacing: 4) {
                 ForEach(Section.available) { section in
                     Button {
                         select(section)
                     } label: {
                         // The tab style sets this kicker's colour: accent for the current
                         // section, ink for the others, onBand under focus.
-                        Text(section.title).kjKicker()
+                        // One line always: six sections fill the bar, and a name never wraps.
+                        Text(section.title).kjKicker().lineLimit(1).fixedSize()
                     }
                     .buttonStyle(HouseTabStyle(isCurrent: section == current))
                     .focused($focused, equals: section)

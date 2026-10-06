@@ -3462,6 +3462,53 @@ func passportSaveRequests() throws {
     try expect(PassportSaves.deleteRequest(userId: user, refs: [], accessToken: "T") == nil, "an empty delete is never sent")
 }
 
+func chatRoomsGrouped() throws {
+    func room(_ slug: String, region: String?, kind: String = "atlas", category: String = "public", adult: Bool = false, status: String = "approved") -> ChatRoom {
+        ChatRoom(slug: slug, label: slug, kind: kind, region: region, country: nil, category: category, adult: adult, description: nil, status: status, slow_mode_seconds: 0)
+    }
+    let rooms = [
+        room("indus-visitor-a", region: "indus", kind: "visitor"),
+        room("indus-fashion", region: "indus"),
+        room("indus-daily-feelings", region: "indus"),
+        room("indus-partners", region: "indus", category: "partners", adult: true),
+        room("khajistan", region: nil, kind: "house"),
+        room("maghreb-food", region: "maghreb"),
+        room("persia-pending", region: "persia", status: "pending"),
+    ]
+    let groups = ChatRules.grouped(rooms)
+    try expectEqual(groups.map(\.title), ["Khajistan", "Maghreb", "Indus"])
+    try expectEqual(groups[2].rooms.map(\.slug), ["indus-daily-feelings", "indus-fashion", "indus-visitor-a"])
+    // Never offered: a Partners or adult room, or one the desk has not approved.
+    let all = groups.flatMap(\.rooms).map(\.slug)
+    try expect(!all.contains("indus-partners") && !all.contains("persia-pending"), "\(all)")
+}
+
+func chatRequestsAndRefusals() throws {
+    let user = "0f2b6a1e-1111-4c4c-9a9a-0123456789ab"
+    try expect(ChatRules.cleaned("   ") == nil, "an empty line is not sent")
+    try expect(ChatRules.cleaned(String(repeating: "a", count: 2001)) == nil, "over 2,000 characters is not sent")
+    try expectEqual(ChatRules.cleaned("  salaam \n"), "salaam")
+    guard let post = ChatAPI.postRequest(room: "khajistan", body: " hello ", userId: user, handle: "omar", token: "T") else {
+        throw Failure(description: "a good line must build a request")
+    }
+    let row = (try JSONSerialization.jsonObject(with: post.httpBody ?? Data())) as? [String: String] ?? [:]
+    try expectEqual(row["body"], "hello")
+    try expectEqual(row["kind"], "text")
+    try expectEqual(post.value(forHTTPHeaderField: "Authorization"), "Bearer T")
+    // Negative: a room or user id that could break out of the query builds no request.
+    try expect(ChatAPI.historyRequest(room: "khajistan&select=*", before: nil, token: nil) == nil, "unsafe room slug")
+    try expect(ChatAPI.postRequest(room: "khajistan", body: "x", userId: "x),or(1.eq.1", handle: "h", token: "T") == nil, "unsafe user id")
+    try expect(ChatAPI.claimHandleRequest(want: "Omar!", token: "T") == nil, "a handle the site refuses is not asked for")
+    try expectEqual(ChatAPI.historyRequest(room: "khajistan", before: 120, token: nil)?.url?.query?.contains("id=lt.120"), true)
+    // A line the desk hid, or one past its clock, is not shown.
+    let hidden = ChatMessage(id: 1, room_slug: "khajistan", author_id: nil, author_handle: nil, body: "x", kind: "text", created_at: "2026-10-06T10:00:00Z", hidden_at: "2026-10-06T10:01:00Z", removed_at: nil, expires_at: nil)
+    let expired = ChatMessage(id: 2, room_slug: "khajistan", author_id: nil, author_handle: "a", body: "x", kind: "text", created_at: "2026-10-06T10:00:00Z", hidden_at: nil, removed_at: nil, expires_at: "2026-10-06T11:00:00.000Z")
+    try expect(!hidden.isVisible(), "hidden")
+    try expect(!expired.isVisible(now: ChatClock.date("2026-10-06T12:00:00Z")!), "expired")
+    try expect(expired.isVisible(now: ChatClock.date("2026-10-06T10:30:00Z")!), "not yet expired")
+    try expectEqual(hidden.who, "a closed account")
+}
+
 func readingPageMap() throws {
     // 1...N changes nothing.
     let same = RRPageMap.resolve([1, 2, 3, 4], declared: 4)
@@ -3709,6 +3756,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: shelves, tabs and figures", readingShelves),
     ("Reading Room: the site's words", readingWords),
     ("Saves: the refs the website writes", passportSaveRefs),
+    ("Chat: rooms grouped as the site groups them", chatRoomsGrouped),
+    ("Chat: requests, refusals, what is shown", chatRequestsAndRefusals),
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Reading Room: provenance", readingProvenance),
 ]

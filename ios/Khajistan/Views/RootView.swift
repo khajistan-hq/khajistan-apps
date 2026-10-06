@@ -11,7 +11,7 @@ struct RootView: View {
         let palette = Palette(model.skin)
         VStack(spacing: 0) {
             ZStack {
-                ForEach(AppTab.allCases) { tab in
+                ForEach(AppTab.available) { tab in
                     if mounted.contains(tab) || tab == model.tab {
                         page(tab)
                             .opacity(tab == model.tab ? 1 : 0)
@@ -72,7 +72,7 @@ struct HouseTabBar: View {
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {
-                ForEach(AppTab.allCases) { tab in
+                ForEach(AppTab.available) { tab in
                     Button {
                         select(tab)
                     } label: {

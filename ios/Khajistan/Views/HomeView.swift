@@ -18,7 +18,7 @@ struct HomeView: View {
                     .padding(.bottom, 32)
                 JoinBlock()
                     .padding(.bottom, 36)
-                ForEach(ArchiveDestination.doors, id: \.door) { group in
+                ForEach(ArchiveDestination.doorsInThisBuild, id: \.door) { group in
                     door(group.door, rooms: group.rooms)
                 }
             }

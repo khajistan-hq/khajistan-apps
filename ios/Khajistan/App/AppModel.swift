@@ -64,7 +64,7 @@ final class AppModel {
         pnv = PicsVidsStore(auth: auth)
         let defaults = UserDefaults.standard
         forcedSkin = defaults.string(forKey: "kjskin").flatMap(Skin.init(rawValue:))
-        tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)) ?? .home
+        tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)).flatMap { AppTab.available.contains($0) ? $0 : nil } ?? .home
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
@@ -130,6 +130,11 @@ final class AppModel {
 
     /// A door from the website's menu: a room the app draws itself switches tab, the rest is web.
     func open(_ destination: ArchiveDestination) {
+        // A link into a room this build leaves out (StoreBuild) goes nowhere, web included.
+        guard StoreBuild.includes(destination.nativeRoom) else {
+            message = "\(destination.title) is not in this edition of the app."
+            return
+        }
         if let room = destination.nativeRoom {
             withAnimation(.kj) { tab = AppTab(room) }
         } else {

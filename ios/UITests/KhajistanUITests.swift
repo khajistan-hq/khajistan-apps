@@ -180,6 +180,30 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.
+    /// App Store builds (KJ_APP_STORE, owner ruling 2026-10-06) leave Pics/Vids out: no tab, no
+    /// Home door, and a stored Pics/Vids tab opens Home instead. Builds for our own devices keep
+    /// both. The same test runs in both builds and asserts the opposite in each.
+    func testPicsVidsIsLeftOutOfStoreBuildsOnly() {
+        let app = launch(skin: "day", tab: "picsVids")
+        waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
+        let tab = app.buttons["tab-picsVids"]
+        let door = app.buttons["destination-picsnvids"]
+        let chat = app.buttons["destination-chat"]
+#if KJ_APP_STORE
+        XCTAssertFalse(tab.exists, "a store build has no Pics/Vids tab")
+        waitFor(app.textFields["archiveSearch"], 10, "a stored Pics/Vids tab opens Home in a store build")
+        for _ in 0..<8 where !chat.exists { app.swipeUp() }
+        XCTAssertTrue(chat.exists, "Home scrolled past where the Pics/Vids door stood")
+        XCTAssertFalse(door.exists, "a store build has no Pics/Vids door on Home")
+        shot("store-build-home", app)
+#else
+        XCTAssertTrue(tab.exists, "builds for our own devices keep the Pics/Vids tab")
+        app.buttons["tab-home"].tap()
+        for _ in 0..<8 where !door.exists { app.swipeUp() }
+        XCTAssertTrue(door.exists, "builds for our own devices keep the Pics/Vids door on Home")
+#endif
+    }
+
     /// The region filter reads its own feed: a region shows fewer objects than All, and All
     /// comes back to the full count. (The store pages one feed per region since 2026-10-06.)
     func testPicsVidsRegionFilter() {

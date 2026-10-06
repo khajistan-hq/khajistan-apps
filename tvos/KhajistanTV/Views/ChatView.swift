@@ -10,7 +10,6 @@ struct ChatView: View {
     @Environment(\.palette) private var palette
     @State private var room: ChatRoom?
     @State private var feed: ChatFeed?
-    @State private var lines: [ChatMessage] = []
     @State private var draft = ""
     @State private var wantHandle = ""
     @State private var note: String?
@@ -103,14 +102,16 @@ struct ChatView: View {
     }
 
     private var shown: [ChatMessage] {
-        lines.filter { !ignored.contains($0.author_handle ?? "") }
+        (feed?.lines ?? []).filter { !ignored.contains($0.author_handle ?? "") }
     }
 
     private var lineList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
-                    if shown.isEmpty {
+                    if let error = feed?.error {
+                        Text(error).kjSmall(faint: true)
+                    } else if shown.isEmpty {
                         Text("No lines in the last 48 hours.").kjSmall(faint: true)
                     }
                     ForEach(shown) { line in
@@ -204,20 +205,17 @@ struct ChatView: View {
         }
     }
 
-    /// Opens a room's feed and follows it until the room changes or the screen goes.
+    /// Opens a room's feed and keeps it polling until the room changes or the screen goes.
     private func follow(_ room: ChatRoom?) async {
         feed?.stop()
-        lines = []
         note = nil
         guard let room else { feed = nil; return }
         let store = store
-        let opened = ChatFeed(room: room, account: { await store.account() })
+        let opened = feed?.room == room ? feed! : ChatFeed(room: room, account: { await store.account() })
         feed = opened
         opened.start()
-        for await batch in opened.lines {
-            if Task.isCancelled { break }
-            lines = batch
-        }
+        // Held until the task is cancelled: a new room, or the section closing.
+        while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
         opened.stop()
     }
 

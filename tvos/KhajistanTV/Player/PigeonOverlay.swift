@@ -30,7 +30,9 @@ final class PigeonOverlay {
     /// The flights, short and long. A change gets the shortest flight that lasts as long as the
     /// channel has taken to tune on this device (owner, 2026-10-06: "use appropriate timed
     /// transitions where needed"), so the bird is still in the air when the picture arrives.
-    static let short = ["across", "swerve", "hover", "lift"]
+    /// Across and Lift retired, owner 2026-10-06: Across's darker bird broke the one mascot, and
+    /// Lift repeated Hover's front-facing hover.
+    static let short = ["swerve", "hover"]
     static let long = ["loop", "twirl"]
     /// Seconds the flight should outlast the expected tune, so the cut lands under the bird.
     static let margin = 0.5

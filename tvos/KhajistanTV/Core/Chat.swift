@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 // Live chat, against the website's own rooms (archive/chat.html, scripts/kj-chat.js;
 // supabase/migrations/20260907_chat_rooms.sql). Foundation only: the Apple TV and the phone both
@@ -248,24 +249,30 @@ enum ChatAPI {
 // MARK: - A room, live
 
 /// One room's lines, kept current. Reads need no account; posting and reporting need one. Asks
-/// for new lines and moderation changes every three seconds while open.
+/// for new lines and moderation changes every three seconds between `start()` and `stop()`.
+/// Observable, so any number of views read `lines` and a view that comes back finds them there.
 /// ponytail: polling; a Supabase Realtime socket can replace `poll()` without changing `lines`.
-@MainActor
+@MainActor @Observable
 final class ChatFeed {
     let room: ChatRoom
-    /// The account's token and id, or nil signed out. Each app passes its own sign-in store's.
-    private let account: () async -> (token: String, userId: String)?
-    private let session: URLSession
-    private var all: [Int64: ChatMessage] = [:]
-    private var newest: Int64 = 0
-    private var oldest: Int64?
-    private var statesSince = Date()
-    private var pollTask: Task<Void, Never>?
-    private var continuation: AsyncStream<[ChatMessage]>.Continuation?
+    /// The room's visible lines, oldest first.
+    private(set) var lines: [ChatMessage] = []
+    private(set) var isLoadingOlder = false
+    /// Every line the room still holds has been read; there is nothing older to ask for.
     private(set) var reachedStart = false
+    /// Why the room could not be read, in plain words; nil while it reads.
+    private(set) var error: String?
 
-    /// The room's visible lines, oldest first, each time they change.
-    let lines: AsyncStream<[ChatMessage]>
+    /// The account's token and id, or nil signed out. Each app passes its own sign-in store's.
+    @ObservationIgnored private let account: () async -> (token: String, userId: String)?
+    @ObservationIgnored private let session: URLSession
+    @ObservationIgnored private var all: [Int64: ChatMessage] = [:]
+    @ObservationIgnored private var newest: Int64 = 0
+    @ObservationIgnored private var oldest: Int64?
+    @ObservationIgnored private var statesSince = Date()
+    @ObservationIgnored private var pollTask: Task<Void, Never>?
+
+    var hasOlder: Bool { !reachedStart }
 
     init(room: ChatRoom, account: @escaping () async -> (token: String, userId: String)?) {
         self.room = room
@@ -273,16 +280,13 @@ final class ChatFeed {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
         session = URLSession(configuration: config)
-        var held: AsyncStream<[ChatMessage]>.Continuation?
-        lines = AsyncStream { held = $0 }
-        continuation = held
     }
 
-    /// The newest lines, then a check every three seconds until `stop()`.
+    /// The newest lines, then a check every three seconds until `stop()`. Safe to call again.
     func start() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
-            await self?.loadOlder()
+            if self?.all.isEmpty == true { await self?.loadOlder() }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3))
                 await self?.poll()
@@ -297,10 +301,16 @@ final class ChatFeed {
 
     /// Sixty lines older than the oldest on screen.
     func loadOlder() async {
-        guard !reachedStart else { return }
+        guard !reachedStart, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
         let token = await account()?.token
         guard let request = ChatAPI.historyRequest(room: room.slug, before: oldest, token: token),
-              let rows: [ChatMessage] = await fetch(request) else { return }
+              let rows: [ChatMessage] = await fetch(request) else {
+            error = "The room did not answer."
+            return
+        }
+        error = nil
         if rows.count < ChatAPI.historyLimit { reachedStart = true }
         for row in rows { all[row.id] = row }
         oldest = all.keys.min()
@@ -367,7 +377,7 @@ final class ChatFeed {
 
     private func publish() {
         let now = Date()
-        continuation?.yield(all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id })
+        lines = all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id }
     }
 
     private func fetch<T: Decodable>(_ request: URLRequest) async -> T? {

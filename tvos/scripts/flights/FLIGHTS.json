@@ -1,0 +1,119 @@
+{
+  "_what": "The seven channel-change flights of the house pigeon, generated in Higgsfield on 2026-10-05 at the owner's instruction (\"use higgsfield to make a 4k better pigeon flying transition\"; \"4-5 is good of varying lengths but our mascot needs to be consistent in look\"; \"you can have 5-7 transitions ... lean more in to the flamboyance\"; \"real pigeon movements like twirling in air and pigeon showmanship\"). Masters, start frames and the empty end frame are owner-local under output/Higgsfield Assets/Khajistan Flights 2026-10-05/. Every start frame was made with gpt_image_2_5 (4K, quality high) from the house reference Pigeon-Reference-4K.jpg on a flat grey (RGB 140) backdrop; every flight ends on the empty grey frame so the bird must leave the shot.",
+  "reference_media": "0043a45a-0e03-4df0-a3ad-b729d20a69a0",
+  "end_frame_media": "82d3cdfb-e889-4f06-9ffa-39165a1f9c25",
+  "flights": {
+    "across": {
+      "role": "change",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "47ca24bd-fa1e-4744-872e-3249a51dfb2b",
+      "start_frame_job": "585677f4-caef-4309-9eb8-d26fba4abc26",
+      "source": "1920x1080 24fps 5.0s",
+      "note": "the website's wing wipe, remade: diagonally across and into the lens, a wing fills the frame, exits top right",
+      "colour_matched": true
+    },
+    "twirl": {
+      "role": "change (fitted to the tune time) and wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "6a175d43-f64a-4be1-bd3f-32b5699a37c1",
+      "start_frame_job": "a69e2715-246e-4e00-949e-e264f2311b3a",
+      "source": "1920x1080 24fps 10.0s",
+      "colour_matched": true,
+      "note": "the owner's flamboyant swirling crossing, for a long tune"
+    },
+    "roller": {
+      "role": "change (fitted to the tune time) and wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "6146c9d3-4509-4abb-86ef-d36dba580362",
+      "source": "1920x1080 24fps 8.0s",
+      "colour_matched": true,
+      "note": "a Birmingham roller's backward somersaults, wings raised, tumbling like a spinning ball, then away"
+    },
+    "spiral": {
+      "role": "change (fitted to the tune time) and wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "2e9c6cca-ae57-4ef8-9d08-54321f4c3944",
+      "start_frame_job": "f40c7f6d-7d2b-4a38-949f-bc7897521ea0",
+      "source": "1920x1080 24fps 6.0s",
+      "colour_matched": true
+    },
+    "display": {
+      "role": "change (fitted to the tune time) and wait",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "ba529ee5-325d-4933-98cd-73d9ff16e7f6",
+      "start_frame_media": "e0e858fb-e6b4-40eb-b037-43f890ddb80d",
+      "source": "1920x1080 24fps 6.0s",
+      "colour_matched": true,
+      "note": "display flight: slow exaggerated wing-claps over the back, a hover with the tail fanned, then across"
+    },
+    "wing": {
+      "role": "change",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "008f8a3a-4137-4499-97c8-7d24f44ae730",
+      "start_frame_job": "585677f4-caef-4309-9eb8-d26fba4abc26",
+      "source": "1920x1080 24fps 5.0s",
+      "colour_matched": true,
+      "note": "Across's start frame; flies into the lens and ends with the wing over 97% of the frame. The channel cuts in behind it (rendered with 'covered': nothing trimmed or faded, a backdrop plate per frame). Owner, 2026-10-05: 'a wing covering the full screen'. The pink feet show for about four frames near the lens."
+    }
+  },
+  "refused": {
+    "kling3_0 4k twirl fd6cc694, swoop 5ae403aa, spiral 18dddd7f": "smoke-like smears behind the wings, a bird frozen in place for 1.5 s, and a body twisted into an S (spiral). Kling 3.0 renders straight flight well and acrobatics badly.",
+    "kling3_0 4k across af0ec211, approach 65ecd863": "wings held still through most of the shot; the kept takes beat.",
+    "kling3_0 4k roller 62dc5723-1e07-4795-8622-93352c480634": "frozen for its first four frames, then the 'roll' is a smear of the wings on a bird that keeps its side-on pose.",
+    "kling3_0 4k display be25ae06-e810-450f-8966-fa87e0d5c3d8": "ghosted, doubled wings in its third and fourth seconds.",
+    "seedance_2_5 roller 536c8539-3d87-4be9-ad4d-f93193ae6677": "a sound roll but the second take (kept) tumbles in place, as a roller does; this one is not refused for a defect and is the spare.",
+    "kling3_0 4k approach 17459310-82fa-4034-b7bd-b6c2a242863c, 468d722e-1ce8-4236-83c8-c62f400312cb": "asked for a sharp close pass over the lens; both hover and fly up and away, never coming nearer than 10% of the frame.",
+    "kling3_0 4k across b0ec2b84, approach c92a76d2 (shipped until 2026-10-05 late)": "out of focus whenever the bird is near the lens: bird sharpness fell from ~250 to ~5 over the last 1.5 s of each. Owner: 'the feathers get pixelated and blurry'. Remade in Seedance, which keeps feather barbs at its closest.",
+    "seedance_2_5 across 44d10e93-ca0c-4297-9030-b2b27683f005": "never comes nearer than 11% of the frame: not the 'into us' flight.",
+    "seedance_2_5 approach 49abda56-b528-4569-a27b-806d8a112de7": "fills two-thirds of the frame and lingers there."
+  },
+  "credits": "1726.75 in all, measured off the Higgsfield balance: 1821.5 at the start; 154.75 after the refused cover flights; 94.75 after the Wing take (2026-10-06).",
+  "pipeline": "render_flight.py: per-pixel backdrop plate (whichever of end-frames median and flight median is closer to neutral grey), alpha = (C-B).(F-B)/|F-B|^2 with F spread from the solid bird, colourless shadows dropped, colour premultiplied, Seedance plumage Lab-matched to the Kling bird (colour.json, gain capped 1.5); the generator's slow opening retimed to half the clip's median pace (at most 3x) and a close pass over the lens (bird over 60% of the frame, out of focus) at 3x; tail cut where the bird stops moving, a still-on-edge ending faded over 6 frames. Laid on each skin's ground and encoded opaque: H.264 1080 for every flight, HEVC 2160 from a 4K source. HEVC with alpha was dropped 2026-10-05: the Apple TV HD decodes it in software and lost frames while a channel tuned.",
+  "removed": {
+    "swoop": {
+      "role": "change",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "2ff122ef-24fe-480c-9f1e-3ea488c49208",
+      "start_frame_job": "6dee172b-0f64-4b19-9192-5b19a8b466cd",
+      "source": "1920x1080 24fps 4.0s",
+      "colour_matched": true,
+      "why": "owner, 2026-10-05: \"looks like it's swimming and seems 2d\""
+    },
+    "rise": {
+      "role": "change",
+      "model": "kling3_0 mode 4k",
+      "job": "a05c03b6-0e0a-4a43-8538-20fa2ea5cb9c",
+      "start_frame_media": "e7937e0b-803f-4a7a-b098-231cb5863bd6",
+      "source": "3840x2160 24fps 5.0s",
+      "note": "climbs away from the camera, wings clapped over the back in a raised V: a pigeon's display climb",
+      "why": "owner, 2026-10-05: \"i dont like the one that is showing the back and going up\""
+    },
+    "approach": {
+      "role": "change",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "d6e220b8-4396-47c9-92b5-0fb873f4de18",
+      "start_frame_job": "0586ec17-9a64-4855-a2b2-8b975f0a826c",
+      "source": "1920x1080 24fps 5.0s",
+      "note": "straight at the camera, passes over it",
+      "colour_matched": true,
+      "why": "owner, 2026-10-06: the feet, head-on toward the camera, 'too ugly'"
+    }
+  },
+  "refused_cover_flights": {
+    "what": "seven Seedance flights that opened and closed on one 4K image of the wing filling the frame (cover image 4a5d0fce-baa2-4517-b339-12c36ef844e1), chained wing to wing and fitted to each channel's tune time. Shipped to the TV as ff8c79b88 on 2026-10-06 and reverted the same night.",
+    "owner": "'this most recent one is bad': the full-screen wing looked fake/static; the bird too small and far once it pulled back; glitchy; 'the speed is unrealistic, it needs to be more like the original' (the two darts played at 1.8x).",
+    "jobs": {
+      "dart": "a5206204-477e-4c27-8990-d548e147a5e3",
+      "swerve": "c9f5f9b9-202a-4958-9086-f19a2c7e23fc",
+      "circle": "63a27969-5be6-4ca8-acf8-284e7939c0d9",
+      "roll": "62f3e8ed-71e2-4cf9-ad8f-be69596a4b47",
+      "roller": "8c8cf88f-1319-4b32-9488-329550e0a7cf",
+      "loop": "e57e39d7-ac33-462b-906c-b8c706a9bac2",
+      "display": "44c28d7c-e3bb-41b2-8786-dd295f7cbbf6"
+    },
+    "lesson": "do not speed a generated flight up to fit a time: the wingbeat speeds up with it and reads as fake. A generated still image as the cover frame reads as a still, not as the bird.",
+    "credits": "488.5 (balance 643.25 -> 154.75)"
+  },
+  "playback": "Every frame at the speed it was generated (owner, 2026-10-06: 'the speed is unrealistic'). The change flight is the shortest that outlasts the channel's expected tune time (TuneTimes, measured per channel on the device), turning among those within a second of it.",
+  "status": "2026-10-06 late: the Receiver's channel change flies six flights the owner starred in Higgsfield over the live picture (across b0ec2b84, swerve c9f5f9b9, hover 17459310, lift 468d722e, loop e57e39d7, twirl 6a175d43), rendered with KJ_OVERLAY=2 as colour + matte H.264 pairs and a sidecar giving each flight's cut moment. Transmission keeps the website's wing wipe. Earlier states below are the record."
+}

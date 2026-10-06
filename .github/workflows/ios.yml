@@ -19,10 +19,11 @@ concurrency:
 
 jobs:
   simulator:
-    runs-on: macos-15
+    # macos-26 (Xcode 26.6 default, iOS 26 runtimes). macos-15 arm64 runners left a run queued
+    # for an hour on 2026-10-06 and hung in simctl boot on the runs that did start; the tvOS job
+    # on macos-26 started within minutes all day.
+    runs-on: macos-26
     timeout-minutes: 35
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:

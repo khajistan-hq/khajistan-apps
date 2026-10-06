@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Render a generated pigeon flight (grey backdrop, ends empty) onto each skin's ground, as
 ordinary opaque video: H.264 at 1080 and, from a 4K source, HEVC at 2160. Usage:
-render_flight.py <src.mp4> <out_dir> <name>  ->  flight-<name>-<skin>-<tier>.mp4
+render_flight.py <src.mp4> <out_dir> <name> [cover.png]  ->  flight-<name>-<skin>-<tier>.mp4
+
+With a cover image, the flight is a cover flight (owner, 2026-10-05: "a wing covering the full
+screen"): it opens and closes on the pigeon's wing filling the frame, the channel cuts behind
+that wing, and flights chain end to start. Nothing is trimmed or faded, and the first and last
+three frames are blended onto the exact cover image so every cover flight starts and ends on
+the same frame.
 
 Opaque, not HEVC with alpha (2026-10-05): the Apple TV HD has no hardware for HEVC with
 alpha, decodes it in software, and measured on the owner's box delivered 37-99 of 90-116
@@ -41,8 +47,41 @@ def matcher(name):
         return F2 * 255.0 * a[..., None]
     return apply
 
-def main(src, out_dir, name):
-    match = matcher(name)
+def frame_plate(C):
+    """The backdrop under one frame, for a cover flight. Seedance relights its grey as the bird
+    pulls back from the lens, so one plate for the whole flight drew grey arcs where the
+    vignette moved (2026-10-05). The backdrop is smooth and colourless and the bird is warm,
+    so each frame's own colourless pixels are spread under the bird by normalised blur."""
+    h, w = C.shape[:2]
+    s = cv2.resize(C, (w // 16, h // 16), interpolation=cv2.INTER_AREA).astype(np.float32)
+    c = np.linalg.norm(s - s.mean(axis=2, keepdims=True), axis=2)
+    lum = s.mean(axis=2)
+    m = c < 14
+    if m.sum() < 20: return None
+    # The cream head and pale breast are colourless too, and brighter than the backdrop. A
+    # vignette darkens the corners (Loop) and a lit floor brightens the bottom (Roller), so a
+    # region is refused only when it is both bright and small: the head is a patch, the floor
+    # a band (2026-10-05).
+    ref = np.median(lum[m])
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+    keep = np.zeros(n, bool)
+    for i in range(1, n):
+        region = labels == i
+        keep[i] = lum[region].mean() - ref < 35 or stats[i, cv2.CC_STAT_AREA] > 0.05 * m.size
+    m = keep[labels].astype(np.float32)
+    if m.sum() < 20: return None
+    k = (0, 0)
+    sig = max(s.shape) / 8
+    num = cv2.GaussianBlur(s * m[..., None], k, sig)
+    den = cv2.GaussianBlur(m, k, sig)[..., None]
+    fill = num / np.maximum(den, 1e-3)
+    s = np.where(m[..., None] > 0, s, fill)
+    return cv2.resize(cv2.GaussianBlur(s, k, 1.0), (w, h), interpolation=cv2.INTER_CUBIC)
+
+def main(src, out_dir, name, cover_path=None, speed=None):
+    # Cover flights all grow out of one start image, so they share a bird already; the colour
+    # table belongs to the crossing flights, whose names some cover flights reuse.
+    match = None if cover_path else matcher(name)
     w, h = probe(src)
     # Pass 1, small: the plate (the last frames, empty by construction) and where the bird ends.
     sw, sh = w // 8, h // 8
@@ -90,6 +129,22 @@ def main(src, out_dir, name):
     # sliver at the edge as it leaves does not count — fading on that turned Across's closing
     # wing, half the screen, into a ghost (2026-10-05).
     stuck = float((np.linalg.norm(small[keep[-1]] - bs, axis=2) > 25).mean()) > 0.01
+    if cover_path:
+        # A cover flight's ends ARE the wing, not an empty backdrop. Only a still wing is cut —
+        # a generator holds its end frame for half a second — down to the frame either side of
+        # the bird's first and last movement.
+        dd = [float(np.abs(small[i] - small[i - 1]).mean()) for i in range(1, len(small))]
+        pace = float(np.median(dd))
+        move = [k for k, x in enumerate(dd) if x >= 0.1 * float(np.percentile(dd, 90))]
+        keep = list(range(max(0, move[0] - 1), min(len(small), move[-1] + 3))) if move else list(range(len(small)))
+        stuck = False
+        if speed and float(speed) > 1:
+            # A quick flight for a channel that tunes in a second or two: every n-th frame, so
+            # it plays faster at the same 24 fps, and still ends on the wing.
+            f = float(speed)
+            quick = [keep[min(len(keep) - 1, round(i * f))] for i in range(int((len(keep) - 1) / f) + 1)]
+            quick[-1] = keep[-1]
+            keep = quick
     total = len(small); del small
     # The plate. Two candidates, each wrong somewhere: the last frames (wrong where a flight
     # has not left by its end) and each pixel's median over the flight (wrong where the bird
@@ -104,7 +159,19 @@ def main(src, out_dir, name):
     end = np.median(np.stack(lasts), axis=0).astype(np.float32)
     def chroma(c): return np.linalg.norm(c - c.mean(axis=2, keepdims=True), axis=2)
     B = np.where((chroma(end) <= chroma(med))[..., None], end, med)
+    if cover_path:
+        # Its last frames are the wing, and where the bird spends most of the flight the median
+        # is bird too: wherever neither candidate is grey, the plate is the flight's own grey.
+        stack = np.stack(picks).reshape(-1, 3).astype(np.float32)
+        grey = np.median(stack[chroma(stack[:, None, :])[:, 0] < 6], axis=0)
+        B = np.where((chroma(B) < 8)[..., None], B, grey).astype(np.float32)
+        del stack
     del picks, lasts
+    covers = {}
+    if cover_path:
+        cv = cv2.cvtColor(cv2.imread(cover_path), cv2.COLOR_BGR2RGB).astype(np.float32)
+        if match is not None: cv = match(cv, np.ones(cv.shape[:2], np.float32))
+        covers = {t: cv2.resize(cv, s, interpolation=cv2.INTER_AREA) for t, s in TIERS.items()}
     encs = {}
     tiers = {t: s for t, s in TIERS.items() if s[0] <= w}
     for tier, (tw, th) in tiers.items():
@@ -119,7 +186,8 @@ def main(src, out_dir, name):
     for i, C in enumerate(frames(src, w, h)):
         if i > keep[-1]: break
         if i not in order: continue
-        P, a = key(C, B)
+        Bf = frame_plate(C) if cover_path else None
+        P, a = key(C, B if Bf is None else Bf)
         if match is not None: P = match(P, a)
         if i % 20 == 0: print(f"  {name}: {i}/{last}", flush=True)
         # A flight that is still on the edge at its last frame fades over its last 6 frames.
@@ -135,10 +203,14 @@ def main(src, out_dir, name):
             for skin, g in grounds.items():
                 # P is premultiplied: the ground shows through by what the bird leaves uncovered.
                 img = Pt + g * (1 - at[..., None])
+                if covers:
+                    n = order[i]
+                    wgt = max(0.0, 1 - n / 3, 1 - (len(keep) - 1 - n) / 3)
+                    if wgt > 0: img = img * (1 - wgt) + covers[tier] * wgt
                 encs[tier, skin].stdin.write(np.clip(img + 0.5, 0, 255).astype(np.uint8).tobytes())
     for e in encs.values():
         e.stdin.close(); e.wait()
     print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {keep[-1] + 1 - len(keep)} dropped to quicken the opening and any soft stretch), {w}x{h} -> {', '.join(tiers)}", flush=True)
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:6])

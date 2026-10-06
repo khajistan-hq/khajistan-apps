@@ -289,24 +289,27 @@ struct ReceiverPlayerView: View {
     /// with the channel's name until the picture plays, and fades off it as its sound fades in.
     private func change(to target: Channel) async {
         async let quiet: Void = controller.fadeOut()
-        await model.clips.flyThrough(caption: target.name) {
-            // A newer press has moved on: that press tunes its own channel.
-            guard destination?.id == target.id else { return }
-            tune(target)
-            destination = nil
-        }
-        await quiet
-        guard !Task.isCancelled else { return }
-        // A slow signal: the long flights cross the held ground until it plays.
-        await model.clips.holdUntil {
+        let ready: @MainActor () async -> Void = {
             #if DEBUG
             // `-kjslowtune 9` holds every change for that many seconds, so a UI test can watch
-            // the wait flights over a signal that would otherwise arrive too fast.
+            // the flights chain over a signal that would otherwise arrive too fast.
             let slow = UserDefaults.standard.integer(forKey: "kjslowtune")
             if slow > 0 { try? await Task.sleep(for: .seconds(slow)) }
             #endif
             await controller.settled()
         }
+        // The flight is fitted to how long this channel took to tune last time; a channel never
+        // tuned here is guessed by medium.
+        await model.clips.flyThrough(caption: target.name, key: target.id, fallback: target.mediaType == "radio" ? 1.5 : 2, covered: {
+            // A newer press has moved on: that press tunes its own channel.
+            guard destination?.id == target.id else { return }
+            tune(target)
+            destination = nil
+        }, ready: ready)
+        await quiet
+        guard !Task.isCancelled else { return }
+        // A slow signal: more flights, wing to wing, until it plays.
+        await model.clips.holdUntil(ready)
         guard !Task.isCancelled else { return }
         model.clips.uncover()
     }

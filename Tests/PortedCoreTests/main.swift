@@ -675,7 +675,7 @@ func clockLabels() throws {
 func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil, cleanStart: Double? = nil, cleanEnd: Double? = nil) -> Programming.Programme {
     Programming.Programme(id: id, title: id, seconds: seconds, nominal_minutes: nominal, clean_start: cleanStart, clean_end: cleanEnd,
                           show: nil, channel: 1, play_url: nil, audio_only: nil, custodian: nil, transfer: nil,
-                          work_kind: nil, country: nil, description: nil)
+                          work_kind: nil, country: nil, description: nil, subtitle_url: nil)
 }
 
 func runSecondsRules() throws {

@@ -46,6 +46,36 @@ xcodebuild -project Khajistan.xcodeproj -scheme Khajistan \
 
 The app uses `com.khajistan.archive` as its default bundle identifier. Change it if the owner's team already uses another identifier.
 
+## Code shared with the Apple TV app
+
+Since 2026-10-06 the two apps compile **one copy** of the files they had in common. Eleven
+files under `Khajistan/` are links to the Apple TV app's own files under
+`tvos/KhajistanTV/`, so a fix made for either app reaches both:
+
+- `Core/`: Auth, Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
+- `Services/`: MixesStore, PicsVidsStore
+- `Player/`: PlayerLayerView
+
+The two copies had drifted apart. The TV station clock carried 38 lines the phone lacked (up
+next, seconds left), and the TV's Programming and Receiver had fields the phone could not
+decode. In each case the TV copy was the same code plus additions, so the TV copy became the
+shared one. `scripts/test-core.sh` refuses to run if any of these links has been replaced by a
+file.
+
+**Edit these files under `tvos/`.** The links mean an edit there also changes the phone app,
+so build both apps after one.
+
+Still two copies, and why:
+
+- **Config** says which app it is: the user agent and the keychain service name. Each app keeps its own.
+- **Sky** is two designs. The phone follows the sun's elevation, the way the website does
+  (`kj-theme-boot.js` KJSky). The TV uses fixed hour bands and carries the extra colour tokens
+  and `SkinChoice`. Merging them changes how the TV picks its skin, so it waits for the Apple TV
+  session.
+- **Services and Player** (AuthStore, Keychain, PnvImages, ReceiverStore, TransmissionStore,
+  PlayerController, StationClips): each app's copy has grown its own behaviour. Sharing them is
+  a merge, not a link.
+
 ## Verify without Xcode
 
 ```sh

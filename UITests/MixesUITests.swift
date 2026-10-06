@@ -1,7 +1,7 @@
 import XCTest
 
-/// Khajistan Radio, from the Receiver's front: open the mixes, walk the grid with the remote, play
-/// one, scrub it, step to the next, and back out. Strict about the app's own elements and loose
+/// Khajistan Radio, on the Receiver's front: walk the row of mixes with the remote, play one,
+/// scrub it, step to the next, and back out. Strict about the app's own elements and loose
 /// about what the network answers on the day.
 final class MixesUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -20,33 +20,28 @@ final class MixesUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
 
-        let entry = app.buttons["khajistanRadioMixes"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 60), "The Receiver must offer the Khajistan Radio mixes once the register has loaded")
+        // The mixes lie in full on the Receiver's front, on a row under the regions.
+        let firstMix = mixes(app).firstMatch
+        XCTAssertTrue(firstMix.waitForExistence(timeout: 60), "The Receiver must lay out the Khajistan Radio mixes once the register has loaded")
         kjPause(3)
         kjScreenshot("mx-00-receiver", app: app)
-        XCTAssertTrue(kjFocus(entry, app: app), "The mixes entry must take focus")
-        kjScreenshot("mx-01-receiver-with-mixes", app: app)
-        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(kjFocus(firstMix, app: app), "The first mix must take focus")
+        kjScreenshot("mx-01-receiver-mixes-row", app: app)
+        // The row is lazy: only the cards on screen exist, so the walk below is the real count.
+        XCTAssertGreaterThanOrEqual(mixes(app).count, 3, "the row must show several mixes")
 
-        XCTAssertTrue(mixes(app).firstMatch.waitForExistence(timeout: 30), "The mixes must list")
-        kjPause(1)
-        kjScreenshot("mx-02-mixes", app: app)
-        XCTAssertGreaterThanOrEqual(mixes(app).count, 8, "the first screen must hold several mixes")
-
-        // Down into the grid, then a walk that must reach at least five mixes.
-        for _ in 0..<6 where !focusedMix(app).exists { XCUIRemote.shared.press(.down); kjPause(0.5) }
-        XCTAssertTrue(focusedMix(app).exists, "A mix must take focus")
+        // Along the row: a walk right must reach five mixes.
         var seen = Set([focusedMix(app).identifier])
         var log: [String] = []
-        for press in [XCUIRemote.Button.right, .right, .down, .left, .down, .right, .right, .down, .left] {
-            XCUIRemote.shared.press(press)
+        for _ in 0..<5 {
+            XCUIRemote.shared.press(.right)
             kjPause(0.7)
-            let id = focusedMix(app).exists ? focusedMix(app).identifier : "(off the grid)"
+            let id = focusedMix(app).exists ? focusedMix(app).identifier : "(off the row)"
             seen.insert(id)
-            log.append("\(press == .left ? "L" : press == .right ? "R" : "D")->\(id)")
+            log.append("R->\(id)")
         }
         print("MIXWALK " + log.joined(separator: " "))
-        seen.remove("(off the grid)")
+        seen.remove("(off the row)")
         XCTAssertGreaterThanOrEqual(seen.count, 5, "the walk must reach five mixes; walk: \(log)")
         kjScreenshot("mx-03-walked", app: app)
 
@@ -77,8 +72,6 @@ final class MixesUITests: XCTestCase {
         XCTAssertGreaterThan(title, 0)
 
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(mixes(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the mixes")
-        XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(entry.waitForExistence(timeout: 20), "Menu again must come back to the Receiver")
+        XCTAssertTrue(mixes(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the Receiver and its mixes")
     }
 }

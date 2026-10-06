@@ -114,5 +114,6 @@
     "lesson": "do not speed a generated flight up to fit a time: the wingbeat speeds up with it and reads as fake. A generated still image as the cover frame reads as a still, not as the bird.",
     "credits": "488.5 (balance 643.25 -> 154.75)"
   },
-  "playback": "Every frame at the speed it was generated (owner, 2026-10-06: 'the speed is unrealistic'). The change flight is the shortest that outlasts the channel's expected tune time (TuneTimes, measured per channel on the device), turning among those within a second of it."
+  "playback": "Every frame at the speed it was generated (owner, 2026-10-06: 'the speed is unrealistic'). The change flight is the shortest that outlasts the channel's expected tune time (TuneTimes, measured per channel on the device), turning among those within a second of it.",
+  "status": "SET ASIDE 2026-10-06. Owner: 'bring back the very first iteration, hard cut no need to fade video, only fade audio, i dont like any of the new you made all day today.' The apps play the website's wing wipe (wing-wipe-in/out.mp4) again. Everything below is the record of what was generated and why each was refused; nothing here ships."
 }

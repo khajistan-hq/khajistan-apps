@@ -276,34 +276,17 @@ struct ReceiverPlayerView: View {
         model.clips.uncover()
     }
 
-    /// The old sound fades as the pigeon flies in over the skin's ground; the new channel starts
-    /// tuning the moment the wing covers the screen, while the bird flies on out; the ground holds
-    /// with the channel's name until the picture plays, and fades off it as its sound fades in.
+    /// The wing crosses and holds while the old sound fades, the new channel is tuned behind it,
+    /// the wing leaves, and the picture cuts in as its sound fades up. The video never fades.
     private func change(to target: Channel) async {
         async let quiet: Void = controller.fadeOut()
-        let ready: @MainActor () async -> Void = {
-            #if DEBUG
-            // `-kjslowtune 9` holds every change for that many seconds, so a UI test can watch
-            // the wait flights over a signal that would otherwise arrive too fast.
-            let slow = UserDefaults.standard.integer(forKey: "kjslowtune")
-            if slow > 0 { try? await Task.sleep(for: .seconds(slow)) }
-            #endif
-            await controller.settled()
-        }
-        // The flight is fitted to how long this channel took to tune last time; a channel never
-        // tuned here is guessed by medium (measured on the Apple TV HD: 1.2-2.3 s).
-        await model.clips.flyThrough(caption: target.name, key: target.id, fallback: target.mediaType == "radio" ? 1.5 : 2, covered: {
-            // A newer press has moved on: that press tunes its own channel.
-            guard destination?.id == target.id else { return }
-            tune(target)
-            destination = nil
-        }, ready: ready)
+        await model.clips.play(.wingIn, holdLastFrame: true)
         await quiet
+        // A newer press, or leaving, cancelled this one while the wing was crossing.
         guard !Task.isCancelled else { return }
-        // A slow signal: the long flights cross the held ground until it plays.
-        await model.clips.holdUntil(ready)
-        guard !Task.isCancelled else { return }
-        model.clips.uncover()
+        tune(target)
+        destination = nil
+        await model.clips.play(.wingOut)
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.

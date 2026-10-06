@@ -3234,26 +3234,20 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
-    ("Flights: the length fits the tune time", flightChoiceFitsTheTuneTime),
+    ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
 ]
 
-// MARK: - Flights
+// MARK: - Shuffle
 
-func flightChoiceFitsTheTuneTime() throws {
-    let L = ["dartA": 2.1, "dartB": 2.2, "roll": 4.0, "roller": 6.0, "loop": 8.0, "display": 10.0]
-    let all = ["dartA", "dartB", "roll", "roller", "loop", "display"]
-    // A channel that tunes in 1.5 s gets a dart, either of the two by turn.
-    try expectEqual(FlightChoice.pick(all, lengths: L, want: 1.5, exclude: nil, turn: 0), "dartA")
-    try expectEqual(FlightChoice.pick(all, lengths: L, want: 1.5, exclude: nil, turn: 1), "dartB")
-    // Five seconds: the 6-second flight, not the 10.
-    try expectEqual(FlightChoice.pick(all, lengths: L, want: 5, exclude: nil, turn: 0), "roller")
-    // Longer than any flight: the longest, and they chain.
-    try expectEqual(FlightChoice.pick(all, lengths: L, want: 30, exclude: nil, turn: 0), "display")
-    // Overdue: the shortest, and never the one that just flew.
-    try expectEqual(FlightChoice.pick(all, lengths: L, want: -2, exclude: "dartA", turn: 0), "dartB")
-    try expectEqual(FlightChoice.pick(["roll"], lengths: L, want: 1, exclude: "roll", turn: 0), "roll")
+func shuffleDrawsRegionsByLiveCount() throws {
+    let w = [("indus", 30), ("persia", 0), ("khorasan", 10)]
+    try expectEqual(ShufflePick.region(w, roll: { _ in 0 }), "indus")
+    try expectEqual(ShufflePick.region(w, roll: { _ in 29 }), "indus")
+    // A region with nothing live is never drawn: the roll after Indus lands on Khorasan.
+    try expectEqual(ShufflePick.region(w, roll: { _ in 30 }), "khorasan")
+    try expectEqual(ShufflePick.region(w, roll: { $0 - 1 }), "khorasan")
+    try expectEqual(ShufflePick.region([("persia", 0)]), nil)
 }
-
 
 var passed = 0, failed = 0, skipped = 0
 for (name, body) in tests {

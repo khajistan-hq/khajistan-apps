@@ -34,29 +34,24 @@ final class FilmsUITests: XCTestCase {
     func testShelfWalkPreviewAndFullFilmSignedOut() throws {
         let app = try launch()
 
-        let entry = app.buttons["screeningRoom"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 60), "The Receiver must offer the Screening Room once vod.json has loaded")
-        XCTAssertTrue(kjFocus(entry, app: app), "The Screening Room row must take focus")
-        kjScreenshot("vod-01-receiver-row", app: app)
-        XCUIRemote.shared.press(.select)
-
-        XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 30), "The shelf must list films")
+        // The Screening Room lies in full on the Receiver's front, on a row of posters.
+        let first = films(app).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 60), "The Receiver must lay out the Screening Room once vod.json has loaded")
         kjPause(4)   // the posters arrive
-        kjScreenshot("vod-02-shelf", app: app)
+        XCTAssertTrue(kjFocus(first, app: app), "The first film must take focus")
+        kjScreenshot("vod-01-receiver-row", app: app)
 
-        for _ in 0..<6 where !focusedFilm(app).exists { XCUIRemote.shared.press(.down); kjPause(0.5) }
-        XCTAssertTrue(focusedFilm(app).exists, "A film must take focus")
         var seen = Set([focusedFilm(app).identifier])
         var log: [String] = []
-        for press in [XCUIRemote.Button.right, .right, .right, .down, .left, .left, .down, .right] {
-            XCUIRemote.shared.press(press)
+        for _ in 0..<5 {
+            XCUIRemote.shared.press(.right)
             kjPause(0.8)
-            let id = focusedFilm(app).exists ? focusedFilm(app).identifier : "(off the grid)"
+            let id = focusedFilm(app).exists ? focusedFilm(app).identifier : "(off the row)"
             seen.insert(id)
-            log.append("\(press == .left ? "L" : press == .right ? "R" : "D")->\(id)")
+            log.append("R->\(id)")
         }
         print("FILMWALK " + log.joined(separator: " "))
-        seen.remove("(off the grid)")
+        seen.remove("(off the row)")
         XCTAssertGreaterThanOrEqual(seen.count, 5, "the walk must reach five films; walk: \(log)")
         kjScreenshot("vod-03-walked", app: app)
 
@@ -95,7 +90,7 @@ final class FilmsUITests: XCTestCase {
 
     func testRegionCarriesItsFilmsOnDemand() throws {
         let app = try launch()
-        XCTAssertTrue(app.buttons["screeningRoom"].waitForExistence(timeout: 60), "vod.json must load")
+        XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 60), "vod.json must load")
         // Down onto the region strip, then east along it to Indus.
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch

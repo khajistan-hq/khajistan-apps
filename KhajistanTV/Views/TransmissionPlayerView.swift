@@ -159,7 +159,6 @@ struct TransmissionPlayerView: View {
                 Text(transfer).kjSmall(faint: true)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, KJLayout.inset)
     }
 
@@ -245,7 +244,7 @@ struct TransmissionPlayerView: View {
     /// button of the screen's own (Sign in, Try again) is the thing to focus.
     private var focusTarget: some View {
         Button {
-            if model.clips.showing {
+            if model.clips.showing != nil {
                 model.clips.skip()
             } else if captionArmed {
                 // Focus never leaves this button: see ReceiverPlayerView's surface (2026-10-06).
@@ -346,26 +345,18 @@ struct TransmissionPlayerView: View {
         }
         guard direction == .up || direction == .down else { return }
         captionArmed = false
-        if model.clips.showing {
+        if model.clips.showing != nil {
             model.clips.skip()
             return
         }
         guard holdsFocus, !switching else { return }
         switching = true
         Task {
-            let next = store.channelNumber == 1 ? 2 : 1
             async let quiet: Void = store.player.fadeOut()
-            var retune: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(next), key: "transmission-\(next)", covered: {
-                if !left { retune = Task { await store.switchChannel() } }
-            }, ready: {
-                await retune?.value
-                await store.player.settled()
-            })
+            await model.clips.play(.wingIn, holdLastFrame: true)
             await quiet
-            await retune?.value
-            if !left { await model.clips.holdUntil { await store.player.settled() } }
-            if !left { model.clips.uncover() }
+            if !left { await store.switchChannel() }
+            if !left { await model.clips.play(.wingOut) }
             switching = false
         }
     }
@@ -374,7 +365,7 @@ struct TransmissionPlayerView: View {
     /// transmission is not the transmission any more.
     private func playPause() {
         wake()
-        if model.clips.showing {
+        if model.clips.showing != nil {
             model.clips.skip()
         } else if store.player.state == .playing {
             store.player.pause()
@@ -385,30 +376,19 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Coming and going
 
-    /// The sign-on, once per launch: the pigeon flies through and the programme (joined where
-    /// the clock has reached) tunes behind it. Later visits open on the ground with the channel's
-    /// name. Either way the ground fades off as the picture arrives. Every step checks that the
-    /// viewer is still here: a flight must not start after the screen has gone.
+    /// The sign-on once per launch, then the channel. Every step checks that the viewer is still
+    /// here: a clip must not start after the screen has gone.
     private func start() async {
-        // Either way the ground dissolves off the arriving picture.
-        let flies = !model.clips.signOnPlayed
-        if flies {
+        // The sign-on, once per launch: the wing crosses, the programme tunes behind it, the
+        // wing leaves. The grooming ident is out (owner, 2026-10-05: flying pigeon only).
+        if !model.clips.signOnPlayed {
             model.clips.signOnPlayed = true
-            var tuning: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(channel), key: "transmission-\(channel)", covered: {
-                if !gone { tuning = Task { await store.tune(channel: channel) } }
-            }, ready: {
-                await tuning?.value
-                await store.player.settled()
-            })
-            await tuning?.value
-            if !gone { await model.clips.holdUntil { await store.player.settled() } }
-        } else {
-            model.clips.cover(caption: store.channelName(channel), animated: false)
+            await model.clips.play(.wingIn, holdLastFrame: true)
             if !gone { await store.tune(channel: channel) }
+            if !gone { await model.clips.play(.wingOut) }
+            return
         }
-        if !gone { await store.player.settled() }
-        if !gone { model.clips.uncover() }
+        if !gone { await store.tune(channel: channel) }
     }
 
     private var gone: Bool {

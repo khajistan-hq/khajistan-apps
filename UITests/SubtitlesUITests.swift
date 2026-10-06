@@ -145,10 +145,6 @@ final class SubtitlesUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-kjfilms", origin, "-kjskin", "day"]
         app.launch()
-        let entry = app.buttons["screeningRoom"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 60))
-        XCTAssertTrue(kjFocus(entry, app: app))
-        XCUIRemote.shared.press(.select)
         // Filmfarsi Trailers vol. 1: its public preview announces an English track.
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
         XCTAssertTrue(film.waitForExistence(timeout: 30))

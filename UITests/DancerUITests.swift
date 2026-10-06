@@ -99,7 +99,10 @@ final class DancerUITests: XCTestCase {
         guard radio.waitForExistence(timeout: 60) else { shot("nav-no-radio", app); return nil }
         print("DANCER nav channels: \(focused(app))")
         // Focus lands on the medium switch; up from it would leave for the top bar.
-        for _ in 0..<6 where !focused(app).hasPrefix("medium-") { XCUIRemote.shared.press(.up) }
+        // Focus can also land in the top bar above it; then the switch is down, not up.
+        for _ in 0..<6 where !focused(app).hasPrefix("medium-") {
+            XCUIRemote.shared.press(focused(app).hasPrefix("nav-") ? .down : .up)
+        }
         for _ in 0..<4 where !radio.hasFocus { XCUIRemote.shared.press(.right) }
         print("DANCER nav medium: \(focused(app))")
         XCUIRemote.shared.press(.select)

@@ -176,41 +176,21 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 
 ## Motion
 
-Only the content moves: the pigeon mark, and the pigeon in flight at a changeover (owner ruling
-2026-10-04 on the Higgsfield pigeon: loading states and transitions only). **One mascot, six
-flights, the same bird in each, every frame at the speed it was generated** (owner, 2026-10-06:
-"the speed is unrealistic, it needs to be more like the original"). The grooming loop and the
-sign-on ident, which opens on it and is on black, are not in the apps.
+Only the content moves: the pigeon mark, and the pigeon at a changeover (owner ruling
+2026-10-04 on the Higgsfield pigeon: loading states and transitions only).
 
-| flight | length | what the pigeon does |
-|---|---|---|
-| Across | 4.3 s | the website's wing wipe, remade: diagonally across and toward the lens |
-| Wing | 5.0 s | across and into the lens until its wing fills the screen; the channel cuts in behind the wing |
-| Display | 5.8 s | the display flight: wing-claps over the back, a hover, tail fanned |
-| Spiral | 6.0 s | a banking climb out of the top |
-| Roller | 6.8 s | a roller pigeon's backward somersaults, tumbling like a ball |
-| Twirl | 9.5 s | loops and a barrel roll |
+**A channel change is the website's own wing wipe** (owner, 2026-10-06: "bring back the very
+first iteration, hard cut no need to fade video, only fade audio"): the pigeon flies up into the
+lens until its wing covers the screen (1.6 s) and holds there while the old sound fades and the
+new channel tunes behind it; the wing pulls away (0.9 s); the picture cuts in and only its sound
+eases up (0.5 s). The clips are `wing-wipe-in.mp4` and `wing-wipe-out.mp4`, 720p H.264 on black,
+exactly as the website plays them. The Transmission sign-on is the same wipe once per launch;
+the grooming ident is not in the apps. The flights generated on 2026-10-05/06 were all set aside
+by that ruling; their record, and what each taught, is `scripts/flights/FLIGHTS.json`.
 
-Removed by the owner: Swoop ("swimming", 2D), Rise (the back, going up), Approach (the feet,
-head-on). A set that opened and closed on a still image of the wing, with the short flights sped
-up, was refused the night it shipped. Records, prompts, job ids and the refused takes:
-`scripts/flights/FLIGHTS.json`.
-
-**A channel change.** Only the skin's colour fades, never the pigeon (owner, 2026-10-06). The
-old sound fades (0.45 s) as the colour rises alone over the picture (0.6 s); the channel tunes
-behind it; then the flight plays on it, solid from its first frame. The flight is the shortest
-that outlasts how long this channel took to tune last time on this device (`TuneTimes`; never
-tuned here, 2 s, radio 1.5 s), turning among those within a second of it, so a quick channel gets
-Across or Wing and a slow one the long flights. When the bird has left, the colour fades off the
-new picture (0.8 s) and its sound eases up (0.5 s); after Wing the picture cuts in behind the
-wing. If the signal is still tuning, the colour holds with TUNING and the name, and after 0.6 s
-the long flights cross it in turn until the picture plays. Reduced Motion keeps the colour and
-leaves the bird out. Measured on the owner's Apple TV HD (2026-10-06): channels tuned in 1.2–2.0
-s and every frame of every flight was on time.
-
-Each flight is ordinary opaque video laid on each skin's ground, one file per skin, H.264 1080,
-hardware-decoded on every Apple TV (HEVC with alpha was dropped: the Apple TV HD decodes it in
-software and lost frames while a channel tuned).
+**The dancer**: while he dances, what would sit behind him (the station's name on radio, the
+programme on a sound-only transmission) moves to the top right, smaller and at full strength,
+and back to the centre when he stops (owner, 2026-10-06).
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
 along the bottom in the band colour, the name (30pt black), the place or the slot beside it,

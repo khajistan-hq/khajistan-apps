@@ -60,7 +60,7 @@ struct MixesView: View {
                     Button {
                         playing = mix
                     } label: {
-                        card(mix)
+                        MixCard(mix: mix)
                     }
                     .buttonStyle(HouseButtonStyle())
                     .accessibilityIdentifier("mix-\(mix.id)")
@@ -70,9 +70,14 @@ struct MixesView: View {
             .padding(.horizontal, -26)
         }
     }
+}
 
-    /// The mix's name, the programme block it aired in, and where it is from and in what language.
-    private func card(_ mix: Mix) -> some View {
+/// A mix's card: its name, the programme block it aired in, and where it is from and in what
+/// language. On the Khajistan Radio page and on the Receiver's front.
+struct MixCard: View {
+    let mix: Mix
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(mix.name)
                 .kjName()

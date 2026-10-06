@@ -9,8 +9,10 @@ struct ReceiverView: View {
     @State private var path: [ReceiverIndex.Region] = []
     @State private var composed: ComposedMap?
     @State private var mapError: String?
-    @State private var showMixes = false
-    @State private var showFilms = false
+    @State private var playingMix: Mix?
+    @State private var playingFilm: Film?
+    @State private var shuffled: ShufflePick?
+    @State private var shuffling = false
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -22,12 +24,15 @@ struct ReceiverView: View {
                 .navigationDestination(for: ReceiverIndex.Region.self) { region in
                     ChannelsView(region: region)
                 }
-                .navigationDestination(isPresented: $showMixes) {
-                    MixesView()
-                }
-                .navigationDestination(isPresented: $showFilms) {
-                    FilmsView()
-                }
+        }
+        .fullScreenCover(item: $shuffled) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+        }
+        .fullScreenCover(item: $playingMix) { mix in
+            MixPlayerView(mix: mix, list: model.mixes.mixes)
+        }
+        .fullScreenCover(item: $playingFilm) { film in
+            FilmPlayerView(film: film)
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
@@ -84,6 +89,7 @@ struct ReceiverView: View {
                 .kjDisplay()
             Text("Live television, live radio and public cameras from the Middle World.")
                 .kjBody()
+            shuffleButton
             Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
                 GridRow {
                     Figure(label: "Live now", value: figure(index.totals.live))
@@ -125,11 +131,21 @@ struct ReceiverView: View {
             if let mapError {
                 failure(mapError)
             } else if let composed {
-                VStack(alignment: .leading, spacing: 24) {
-                    RegionMapView(map: composed, highlighted: focusedRegion)
-                    regionStrip(composed)
-                    mixesEntry
-                    filmsEntry
+                // The map and its strip first; under them the Khajistan Radio mixes and the
+                // Screening Room laid out in full (owner, 2026-10-06: they "should expand into
+                // their contents on home page"). A press down from the strip scrolls to them.
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 24) {
+                        RegionMapView(map: composed, highlighted: focusedRegion)
+                            .frame(height: 600)
+                        regionStrip(composed)
+                        mixesRow
+                        filmsRow
+                    }
+                    .padding(.bottom, 60)
+                    // Room for a focused plate's lift at the top edge; the column clips, so the
+                    // map scrolls under nothing.
+                    .padding(.top, 8)
                 }
             } else {
                 TuningLoader("Loading the receiver\u{2026}")
@@ -172,49 +188,104 @@ struct ReceiverView: View {
         .frame(height: 96)
     }
 
-    /// The Khajistan Radio mixes. The website's receiver took them in as one of its media (owner,
-    /// 2026-08-16: television, radio and the mixes are one door), so they open from here, on a row
-    /// of their own under the regions. The row spans the map's width so that a press down from any
-    /// region lands on it. Offered only once the register has loaded and holds a mix that plays.
-    @ViewBuilder
-    private var mixesEntry: some View {
-        let count = model.mixes.mixes.count
-        if count > 0 {
-            Button {
-                showMixes = true
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Kicker("Khajistan Radio")
-                    Text("\(count) \(count == 1 ? "mix" : "mixes")").kjSmall(faint: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+    // MARK: - Shuffle
+
+    /// A channel at random, one press from the front (owner, 2026-10-06: "easily accessible
+    /// channel shuffle button in the home page"). The region is drawn by how much it has live,
+    /// as the map shows it (so it follows "Beyond the atlas"); the channel at random from that
+    /// region's television and radio; up and down then surf that region.
+    private var shuffleButton: some View {
+        Button {
+            Task { await shuffle() }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(shuffling ? "Shuffling\u{2026}" : "Shuffle").kjKicker()
+                Text("A live channel at random").kjSmall(faint: true)
             }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
-            .accessibilityIdentifier("khajistanRadioMixes")
-            // The plate's padding is pulled back so the label sits on the map's margin.
-            .padding(.horizontal, -22)
+        }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
+        .accessibilityIdentifier("shuffle")
+        // The plate's padding is pulled back so the label sits on the page margin.
+        .padding(.leading, -26)
+        .disabled(shuffling || composed == nil)
+    }
+
+    private func shuffle() async {
+        guard let composed, !shuffling else { return }
+        shuffling = true
+        defer { shuffling = false }
+        let regions = composed.regions.filter { $0.opensChannels && ($0.live ?? 0) > 0 }
+        // Up to three regions, in case one's list will not load.
+        for _ in 0..<3 {
+            guard let region = ShufflePick.region(regions.map { ($0.id, $0.live ?? 0) }) else { return }
+            guard let list = try? await model.receiver.channels(regionId: region, cameras: false) else { continue }
+            let pool = list.filter { $0.mediaType == "tv" || $0.mediaType == "radio" }
+            if let channel = pool.randomElement() {
+                shuffled = ShufflePick(channel: channel, list: pool)
+                return
+            }
         }
     }
 
-    /// The Screening Room: every film, as the site's On Demand carries them. Offered once vod.json
-    /// has loaded with a film in it, and spanning the map's width like the mixes row above it.
+    // MARK: - Khajistan Radio and the Screening Room
+
+    /// The Khajistan Radio mixes, in full, on a row under the regions. The website's receiver took
+    /// them in as one of its media (owner, 2026-08-16). Offered once the register has a mix.
     @ViewBuilder
-    private var filmsEntry: some View {
-        let count = model.films.films.count
-        if count > 0 {
-            Button {
-                showFilms = true
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Kicker("The Screening Room")
-                    Text("\(count) \(count == 1 ? "film" : "films") on demand").kjSmall(faint: true)
+    private var mixesRow: some View {
+        let mixes = model.mixes.mixes
+        if !mixes.isEmpty {
+            row(title: "Khajistan Radio", count: "\(mixes.count) \(mixes.count == 1 ? "mix" : "mixes")") {
+                ForEach(mixes) { mix in
+                    Button {
+                        playingMix = mix
+                    } label: {
+                        MixCard(mix: mix).frame(width: 420)
+                    }
+                    .buttonStyle(HouseButtonStyle())
+                    .accessibilityIdentifier("mix-\(mix.id)")
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
-            .accessibilityIdentifier("screeningRoom")
-            .padding(.horizontal, -22)
+            .accessibilityIdentifier("khajistanRadioMixes")
         }
+    }
+
+    /// The Screening Room, every film as the site's On Demand carries them, on a row of posters.
+    @ViewBuilder
+    private var filmsRow: some View {
+        let films = model.films.films
+        if !films.isEmpty {
+            row(title: "The Screening Room", count: "\(films.count) \(films.count == 1 ? "film" : "films") on demand") {
+                ForEach(films) { film in
+                    Button {
+                        playingFilm = film
+                    } label: {
+                        FilmCard(film: film).frame(width: 260)
+                    }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)))
+                    .accessibilityIdentifier("film-\(film.handle)")
+                    .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
+                }
+            }
+            .accessibilityIdentifier("screeningRoom")
+        }
+    }
+
+    private func row<Content: View>(title: String, count: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Kicker(title)
+                Text(count).kjSmall(faint: true)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 24, content: content)
+                    // The plates' padding is pulled back so the first card sits on the margin.
+                    .padding(.horizontal, -22)
+                    .padding(.vertical, 12)
+            }
+            .scrollClipDisabled()
+        }
+        .focusSection()
     }
 
     private func failure(_ message: String) -> some View {

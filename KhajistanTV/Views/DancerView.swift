@@ -33,8 +33,17 @@ struct DancerLayer<Behind: View>: View {
                 wall: timeline.date.timeIntervalSinceReferenceDate * 1000
             )
             ZStack {
+                // What the dancer would cover moves out of his way while he dances: to the top
+                // right, smaller and at full strength, and back to the centre when he stops
+                // (owner, 2026-10-06: the faded text behind him "should appear somewhere else and
+                // maybe in full"). The strip and captions hold the bottom, so the top it is.
                 behind()
-                    .opacity(render.drawing ? 0.26 : 1)
+                    .scaleEffect(render.drawing ? 0.45 : 1, anchor: .topTrailing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity,
+                           alignment: render.drawing ? .topTrailing : .center)
+                    .padding(.top, render.drawing ? 64 : 0)
+                    .padding(.trailing, render.drawing ? KJLayout.inset : 0)
+                    .animation(.smooth(duration: 0.6), value: render.drawing)
                 Canvas { ctx, size in
                     scope.paint(render, in: ctx, size: size, colours: Pen.Colours(green: palette.band, ink: palette.ink))
                 }

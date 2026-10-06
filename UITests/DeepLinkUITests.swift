@@ -17,7 +17,8 @@ final class DeepLinkUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the receiver must load")
 
         app.open(try XCTUnwrap(URL(string: "khajistan://receiver/indus")))
-        let tv = app.buttons["medium-tv"]
+        // A region page is shelves of channels: its first card is what marks it open.
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
         XCTAssertTrue(tv.waitForExistence(timeout: 60), "khajistan://receiver/indus must open a region page")
         XCTAssertTrue(app.staticTexts["Indus"].exists, "the region page must be Indus")
         screenshot("link-receiver-indus", app: app)

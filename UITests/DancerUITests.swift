@@ -95,31 +95,30 @@ final class DancerUITests: XCTestCase {
         print("DANCER nav region: \(focused(app))")
         XCUIRemote.shared.press(.select)
 
-        let radio = app.buttons["medium-radio"]
-        guard radio.waitForExistence(timeout: 60) else { shot("nav-no-radio", app); return nil }
+        let shelf = app.descendants(matching: .any)["shelf-radio"]
+        guard shelf.waitForExistence(timeout: 60) else { shot("nav-no-radio", app); return nil }
         print("DANCER nav channels: \(focused(app))")
-        // Focus lands on the medium switch; up from it would leave for the top bar.
-        // Focus can also land in the top bar above it; then the switch is down, not up.
-        for _ in 0..<6 where !focused(app).hasPrefix("medium-") {
-            XCUIRemote.shared.press(focused(app).hasPrefix("nav-") ? .down : .up)
-        }
-        for _ in 0..<4 where !radio.hasFocus { XCUIRemote.shared.press(.right) }
-        print("DANCER nav medium: \(focused(app))")
-        XCUIRemote.shared.press(.select)
-        // The grid is lazy: a card far down the list does not exist until focus brings it on
-        // screen, so the walk reads the focused identifier rather than looking the card up.
+        // A region is shelves, television above radio. Focus may start in the top bar; down enters
+        // the first shelf. Each shelf is lazy: a card far along does not exist until focus brings
+        // it on screen, so the walk reads the focused identifier rather than looking the card up.
+        // It goes right along a shelf to its end, down to the next, and back left along that.
         let wanted = Set(ids.map { "channel-\($0)" })
-        XCUIRemote.shared.press(.down)
+        for _ in 0..<3 where !focused(app).hasPrefix("channel-") { XCUIRemote.shared.press(.down); kjPause(0.5) }
         var found: String?
-        walk: for row in 0..<40 {
-            for _ in 0..<4 {
+        var press: XCUIRemote.Button = .right
+        walk: for _ in 0..<4 {
+            var last = ""
+            for _ in 0..<80 {
                 let now = focused(app)
                 if wanted.contains(now) { found = now; break walk }
-                XCUIRemote.shared.press(row % 2 == 0 ? .right : .left)
+                if now == last { break }
+                last = now
+                XCUIRemote.shared.press(press)
+                kjPause(0.45)
             }
-            let now = focused(app)
-            if wanted.contains(now) { found = now; break }
             XCUIRemote.shared.press(.down)
+            kjPause(0.6)
+            press = press == .right ? .left : .right
         }
         guard let hit = found else { print("DANCER nav lost at \(focused(app))"); shot("nav-lost", app); return nil }
         let id = String(hit.dropFirst("channel-".count))

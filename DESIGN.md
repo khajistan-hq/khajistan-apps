@@ -84,8 +84,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   cropped; its text box has a fixed height and takes the poster's width, so a long title wraps
   under its own poster. Until a picture arrives a lift plate holds its place and the picture
   fades in over it (0.35s).
-- **Pics/Vids stays a grid.** It is an unbounded stream of real-shaped tiles under two filters,
-  which is what the website's `place()` lays out; the tiles take the card motion and a 32pt gap.
+- **Pics/Vids is shelves by region** (owner, 2026-10-06; see Pics/Vids below). Its tiles are
+  picture cards at a fixed 300pt height.
 
 ## Chrome
 
@@ -212,21 +212,26 @@ The website's PICS/VIDS door, `/browse-archive.html` ("Born Digital Media"), rea
 off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 
 - **Page**: BORN DIGITAL MEDIA (headline), the site's summary line (*99,474 pictures and videos ·
-  81 accounts · 6 regions*), then two rows of tabs: Everything / Pictures / Videos, and All plus the
-  regions the roster carries, west to east (Maghreb, Mashriq, Anatolia, Persia, Khorasan, Indus).
-  The current tab is underlined; focus is the band plate. Under them the exact count of what the
-  filters leave, then the stream.
-- **Stream**: four columns, the shortest column taking the next tile (the site's `place()`), each
-  tile the object's own shape on a house-lift plate that holds its place until the picture fades
-  in, never cropped; the tile lifts under focus like any card. A video's tile carries
-  *▶ Video*, every tile the account as `@name` in small type. Select opens the viewer; the next page
-  of 60 loads as the end comes into view; the last line is the site's *N objects · that is all of it*.
+  81 accounts · 6 regions*), then one row of tabs, Everything / Pictures / Videos, the page's one
+  control: the current one is underlined, focus is the band plate, and the choice applies to every
+  shelf below. The website's region tabs are gone; the shelves are the regions.
+- **Shelves** (owner, 2026-10-06: "Pics/Vids as shelves, grouped by region"): one for each region
+  the roster carries, west to east (Maghreb, Mashriq, Anatolia, Persia, Khorasan, Indus), titled
+  with the region and its exact count under the current filter. Each is its own stream
+  (`PicsVidsStore.feeds`): it asks for its first page of 60 when it comes on screen, and for the
+  next when focus is within eight cards of its end. A region with nothing under the filter has no
+  shelf. Picking a filter starts every shelf over.
+- **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own
+  dimensions, so nothing moves when the picture arrives), on a house-lift plate that holds its
+  place until the picture fades in, never cropped; lifts under focus like any card. A video's
+  card carries *▶ Video*, every card the account as `@name`, cut to the card's width. Select
+  opens the viewer.
 - **Notice**: first thing on the page for anyone who has not dismissed it, in the policy file's
-  words, with OK and a *Don't ask again* switch. It blocks nothing; the stream loads under it.
+  words, with OK and a *Don't ask again* switch. It blocks nothing; the shelves load under it.
 - **Viewer**: the picture fitted whole on the ground, or the video in AVPlayer. Over it, while waking,
   the status band (KHAJISTAN PICS/VIDS · @account · PICTURE or VIDEO) and a ground panel with the
   site's meta line (kind · region · date · size) and the caption. Left and right move through the
-  stream; a clip loops; a Khajistan TV row opens on its poster and says *Sign in to watch Khajistan
+  shelf it came from (loading that shelf's next page at its end); a clip loops; a Khajistan TV row opens on its poster and says *Sign in to watch Khajistan
   Transmission.*, and Select opens the sign-in sheet.
 
 ## Motion

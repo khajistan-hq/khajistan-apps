@@ -1,7 +1,7 @@
 import XCTest
 
-/// Walks Pics/Vids with the Siri Remote: the notice, the stream, a filter, a picture, a video and
-/// a Khajistan TV row (signed out), and keeps a screenshot of each stop. Strict about the app's own
+/// Walks Pics/Vids with the Siri Remote: the notice, the shelves (one per region), the kind filter,
+/// a picture, a video and a Khajistan TV row (signed out), and keeps a screenshot of each stop. Strict about the app's own
 /// elements and loose about what the network answers on the day.
 final class PicsVidsUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -23,6 +23,28 @@ final class PicsVidsUITests: XCTestCase {
         tiles(app).matching(NSPredicate(format: "hasFocus == true")).firstMatch
     }
 
+    /// One element per region shelf; its value is the number of objects drawn so far.
+    private func shelves(_ app: XCUIApplication) -> XCUIElementQuery {
+        app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH 'pnv-shelf-'"))
+    }
+
+    /// The shelf that holds the focused tile, by its identifier, or nil.
+    private func focusedShelf(_ app: XCUIApplication) -> String? {
+        for index in 0..<shelves(app).count {
+            let shelf = shelves(app).element(boundBy: index)
+            if shelf.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists { return shelf.identifier }
+        }
+        return nil
+    }
+
+    /// The shelves' headings, as one line: region and count, west to east.
+    private func headings(_ app: XCUIApplication) -> String {
+        let names = ["Maghreb", "Mashriq", "Anatolia", "Persia", "Khorasan", "Indus"]
+        let format = names.map { "label BEGINSWITH '\($0)'" }.joined(separator: " OR ")
+        let texts = app.staticTexts.matching(NSPredicate(format: format))
+        return (0..<texts.count).map { texts.element(boundBy: $0).label }.joined(separator: " | ")
+    }
+
     /// The notice is the first thing under the top bar: reach OK, press it once.
     private func dismissNotice(_ app: XCUIApplication) {
         let ok = app.buttons["adultNoticeOK"]
@@ -33,7 +55,7 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertFalse(ok.exists, "OK must dismiss the notice")
     }
 
-    func testNoticeThenTheStreamIsWalkable() {
+    func testNoticeThenTheShelvesAreWalkable() {
         let app = launch()
         let ok = app.buttons["adultNoticeOK"]
         XCTAssertTrue(ok.waitForExistence(timeout: 60), "The adult notice must be the first thing on Pics/Vids")
@@ -43,28 +65,35 @@ final class PicsVidsUITests: XCTestCase {
         kjScreenshot("pv-01-notice", app: app)
         dismissNotice(app)
 
-        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60), "The stream must show tiles")
+        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60), "The shelves must show tiles")
         kjPause(6)
-        XCTAssertTrue(app.buttons["pnvkind-all"].exists, "Filters must follow the notice")
-        kjScreenshot("pv-02-stream", app: app)
+        XCTAssertTrue(app.buttons["pnvkind-all"].exists, "The filter must follow the notice")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-'")).firstMatch.exists, "the shelves replace the region tabs")
+        kjScreenshot("pv-02-shelves", app: app)
+        print("PNVHEADINGS " + headings(app))
 
-        // Down from the tabs into the stream, then a walk that must reach at least five tiles.
+        // Down from the filter into the first shelf, then a walk that must reach at least six
+        // tiles on at least two shelves.
         for _ in 0..<6 where !focusedTile(app).exists { XCUIRemote.shared.press(.down); kjPause(0.5) }
         XCTAssertTrue(focusedTile(app).exists, "A tile must take focus")
         var seen = Set<String>()
+        var onShelves = Set<String>()
         var log: [String] = []
-        let walk: [XCUIRemote.Button] = [.right, .down, .left, .down, .right, .right, .down, .left, .down, .right]
+        let walk: [XCUIRemote.Button] = [.right, .right, .right, .down, .right, .down, .left, .left, .down, .right]
         seen.insert(focusedTile(app).identifier)
+        if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
         for press in walk {
             XCUIRemote.shared.press(press)
-            kjPause(0.7)
-            let id = focusedTile(app).exists ? focusedTile(app).identifier : "(off the stream)"
+            kjPause(0.8)
+            let id = focusedTile(app).exists ? focusedTile(app).identifier : "(off the shelves)"
             seen.insert(id)
+            if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
             log.append("\(press == .left ? "L" : press == .right ? "R" : press == .up ? "U" : "D")->\(id)")
         }
-        print("PNVWALK " + log.joined(separator: " "))
-        seen.remove("(off the stream)")
-        XCTAssertGreaterThanOrEqual(seen.count, 5, "the walk must reach five tiles; walk: \(log)")
+        print("PNVWALK " + log.joined(separator: " ") + " shelves=" + onShelves.sorted().joined(separator: ","))
+        seen.remove("(off the shelves)")
+        XCTAssertGreaterThanOrEqual(seen.count, 6, "the walk must reach six tiles; walk: \(log)")
+        XCTAssertGreaterThanOrEqual(onShelves.count, 2, "down must move from one region's shelf to the next; shelves: \(onShelves)")
         kjScreenshot("pv-03-walked", app: app)
 
         // Open the focused one, move on with right, back out.
@@ -79,26 +108,31 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(6)
         kjScreenshot("pv-05-viewer-next", app: app)
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the stream")
+        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelves")
         XCTAssertFalse(surface.exists)
     }
 
-    /// Holding down in the stream reaches the end of the first page and the next one arrives.
+    /// Walking right along a shelf to its end reaches the next page of that shelf.
     func testScrollingLoadsTheNextPage() {
         let app = launch()
         dismissNotice(app)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60))
-        let stream = app.otherElements["pnvStream"]
-        XCTAssertTrue(stream.waitForExistence(timeout: 30))
-        kjPause(3)
-        let first = Int(stream.value as? String ?? "") ?? 0
-        XCTAssertEqual(first, 60, "the first page is 60 rows")
-        for _ in 0..<6 where !focusedTile(app).exists { XCUIRemote.shared.press(.down); kjPause(0.5) }
+        kjPause(6)
+        // A shelf with a first page of 60 and more behind it: the first one that has.
+        var wanted: XCUIElement?
+        for index in 0..<shelves(app).count {
+            let shelf = shelves(app).element(boundBy: index)
+            if Int(shelf.value as? String ?? "") == 60 { wanted = shelf; break }
+        }
+        guard let shelf = wanted else { return XCTFail("a region with more than one page must be on the page") }
+        let first = Int(shelf.value as? String ?? "") ?? 0
+        let tile = shelf.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        XCTAssertTrue(kjFocus(tile, app: app), "a tile on the shelf must take focus")
         var loaded = first
-        for _ in 0..<80 {
-            XCUIRemote.shared.press(.down)
-            kjPause(0.35)
-            loaded = Int(stream.value as? String ?? "") ?? loaded
+        for _ in 0..<90 {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.3)
+            loaded = Int(shelf.value as? String ?? "") ?? loaded
             if loaded > first { break }
         }
         kjScreenshot("pv-11-paged", app: app)
@@ -106,28 +140,31 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(loaded % 60, 0, "pages come in 60s")
     }
 
-    func testFiltersNarrowTheStream() {
+    func testFiltersNarrowTheShelves() {
         let app = launch()
         dismissNotice(app)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60))
-        let count = app.staticTexts["pnvCount"]
-        XCTAssertTrue(count.waitForExistence(timeout: 30), "The count line must show")
-        let everything = count.label
+        kjPause(6)
+        let everything = headings(app)
+        XCTAssertFalse(everything.isEmpty, "the shelves must carry headings with their counts")
 
         let videos = app.buttons["pnvkind-video"]
         XCTAssertTrue(kjFocus(videos, app: app), "Videos must take focus")
         XCUIRemote.shared.press(.select)
-        kjPause(8)
-        XCTAssertNotEqual(count.label, everything, "Videos must narrow the count")
+        kjPause(10)
+        let narrowed = headings(app)
+        print("PNVHEADINGS everything=[\(everything)] videos=[\(narrowed)]")
+        XCTAssertNotEqual(narrowed, everything, "Videos must narrow every shelf's count")
+        XCTAssertTrue(tiles(app).firstMatch.exists, "the shelves still show tiles")
         kjScreenshot("pv-06-videos", app: app)
 
-        let region = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-' AND NOT identifier ENDSWITH '-all'")).firstMatch
-        XCTAssertTrue(region.exists, "A region tab must be offered")
-        XCTAssertTrue(kjFocus(region, app: app), "A region must take focus")
+        let pictures = app.buttons["pnvkind-image"]
+        XCTAssertTrue(pictures.exists, "Pictures is offered")
+        XCTAssertTrue(kjFocus(pictures, app: app), "Pictures must take focus")
         XCUIRemote.shared.press(.select)
-        kjPause(8)
-        kjScreenshot("pv-07-videos-in-region", app: app)
-        XCTAssertTrue(tiles(app).firstMatch.exists || app.staticTexts["Nothing filed under this yet."].exists)
+        kjPause(10)
+        XCTAssertNotEqual(headings(app), narrowed, "Pictures must differ from Videos")
+        kjScreenshot("pv-07-pictures", app: app)
     }
 
     /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and

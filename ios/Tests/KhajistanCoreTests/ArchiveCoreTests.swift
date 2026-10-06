@@ -181,7 +181,7 @@ func joinPlansOpenTheSitesCheckout() throws {
 
 func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     let native = Dictionary(uniqueKeysWithValues: ArchiveDestination.all.compactMap { d in d.nativeRoom.map { (d.id, $0) } })
-    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours])
+    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat])
     for destination in ArchiveDestination.all {
         try expect(ArchiveURL.isArchive(destination.url))
     }

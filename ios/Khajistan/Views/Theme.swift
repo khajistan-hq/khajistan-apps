@@ -518,74 +518,10 @@ struct TuningLoader: View {
 
 // MARK: - The pigeon
 
-/// An animated GIF from the app bundle, played by ImageIO. Reduce Motion, or a file ImageIO will
-/// not animate, shows the first frame.
-struct AnimatedImage: View {
-    let resource: String
-    let ext: String
-    @State private var currentFrame: CGImage?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Group {
-            if let currentFrame {
-                Image(decorative: currentFrame, scale: 1).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
-            } else {
-                Color.clear
-            }
-        }
-        .task(id: "\(resource).\(ext).\(reduceMotion)") { await run() }
-    }
-
-    private func run() async {
-        guard let url = Bundle.main.url(forResource: resource, withExtension: ext) else { return }
-        if reduceMotion {
-            currentFrame = Self.firstFrame(of: url)
-            return
-        }
-        let stopper = Stopper()
-        defer { stopper.stop() }
-        let status = CGAnimateImageAtURLWithBlock(url as CFURL, nil) { _, image, stop in
-            if stopper.isStopped { stop.pointee = true; return }
-            DispatchQueue.main.async { if !stopper.isStopped { currentFrame = image } }
-        }
-        if status != noErr {
-            currentFrame = Self.firstFrame(of: url)
-            return
-        }
-        while !Task.isCancelled { try? await Task.sleep(for: .seconds(3600)) }
-    }
-
-    private static func firstFrame(of url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceThumbnailMaxPixelSize: 240, kCGImageSourceCreateThumbnailFromImageAlways: true] as CFDictionary)
-    }
-}
-
-private final class Stopper: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stopped = false
-
-    var isStopped: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return stopped
-    }
-
-    func stop() {
-        lock.lock(); stopped = true; lock.unlock()
-    }
-}
-
-/// The Khajistan pigeon: the website's 1080px master GIF, still under Reduce Motion.
-struct PigeonMark: View {
-    let size: CGFloat
-
-    var body: some View {
-        AnimatedImage(resource: "pigeon", ext: "gif")
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
-    }
-}
+// PigeonMark lives in Views/PigeonMark.swift, the Apple TV app's file, linked: its frames are
+// decoded once at the screen's density and played by a UIImageView, with no main-thread work
+// per frame. The old player here pushed every full 1080px frame through SwiftUI state, which
+// kept the main thread busy and failed UI automation on a GPU-less CI runner (2026-10-06).
 
 /// A button's words, as the house sets them: a kicker, in the plate's accent.
 struct KickerLabel: View {

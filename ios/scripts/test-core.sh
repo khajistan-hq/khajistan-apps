@@ -13,7 +13,8 @@ mkdir -p .build
 # compile ONE copy. A copy in place of a link is how they drifted apart before (2026-10-06), so
 # the check refuses to run the tests if any link has been replaced by a file.
 SHARED="Core/Auth Core/Mixes Core/PicsVids Core/Programming Core/Receiver Core/RegionMap
-Core/StationClock Core/Transmission Services/PicsVidsStore Player/PlayerLayerView"
+Core/StationClock Core/Transmission Core/Chat Services/PicsVidsStore Services/ChatStore
+Player/PlayerLayerView Views/PigeonMark"
 for f in $SHARED; do
     if [ ! -L "Khajistan/$f.swift" ] || [ ! -f "Khajistan/$f.swift" ]; then
         echo "FAIL shared file Khajistan/$f.swift is not a working link to tvos/KhajistanTV/$f.swift" >&2

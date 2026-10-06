@@ -17,6 +17,7 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
         switch id {
         case "receiver": return .receiver
         case "picsnvids": return .picsVids
+        case "chat": return .chat
         case "passport": return .yours
         default: return nil
         }
@@ -54,7 +55,7 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
 
 /// A room of the website the app draws natively, and the bottom-bar door that holds it.
 enum NativeRoom: String, CaseIterable, Sendable {
-    case receiver, picsVids, yours
+    case receiver, picsVids, yours, chat
 }
 
 /// Reading Room All Access, sold by the website's own checkout (scripts/kj-join.js): a link with

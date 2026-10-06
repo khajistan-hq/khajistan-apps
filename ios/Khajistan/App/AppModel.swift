@@ -18,11 +18,13 @@ enum AppTab: String, CaseIterable, Identifiable {
         }
     }
 
-    init(_ room: NativeRoom) {
+    /// The tab a native room lives on; nil for a room that opens over the tabs (chat).
+    init?(_ room: NativeRoom) {
         switch room {
         case .receiver: self = .receiver
         case .picsVids: self = .picsVids
         case .yours: self = .yours
+        case .chat: return nil
         }
     }
 }
@@ -33,6 +35,8 @@ final class AppModel {
     /// A sentence for the house banner.
     var message: String?
     var isShowingBrowser = false
+    /// Chat opens over the tabs, as the browser does.
+    var isShowingChat = false
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions
@@ -50,6 +54,7 @@ final class AppModel {
     let pnv: PicsVidsStore
     /// The channel-change pigeon. One player for the life of the app.
     let clips = StationClips()
+    let chat: ChatStore
 
     private let libraryFile: LibraryFile
     private var libraryReadable = false
@@ -61,6 +66,7 @@ final class AppModel {
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
         pnv = PicsVidsStore(auth: auth)
+        chat = ChatStore(auth: auth)
         let defaults = UserDefaults.standard
         forcedSkin = defaults.string(forKey: "kjskin").flatMap(Skin.init(rawValue:))
         tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)).flatMap { AppTab.available.contains($0) ? $0 : nil } ?? .home
@@ -134,8 +140,10 @@ final class AppModel {
             message = "\(destination.title) is not in this edition of the app."
             return
         }
-        if let room = destination.nativeRoom {
-            withAnimation(.kj) { tab = AppTab(room) }
+        if destination.nativeRoom == .chat {
+            isShowingChat = true
+        } else if let room = destination.nativeRoom, let tab = AppTab(room) {
+            withAnimation(.kj) { self.tab = tab }
         } else {
             open(destination.url)
         }

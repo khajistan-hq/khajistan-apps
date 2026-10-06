@@ -48,6 +48,14 @@ struct RootView: View {
         .fullScreenCover(isPresented: $model.isShowingBrowser) {
             BrowserView(model: model)
         }
+        .fullScreenCover(isPresented: $model.isShowingChat) {
+            ChatScreen()
+                .environment(model)
+                .environment(\.palette, palette)
+                .foregroundStyle(palette.ink)
+                .tint(palette.accent)
+                .preferredColorScheme(model.skin == .day ? .light : .dark)
+        }
     }
 
     @ViewBuilder

@@ -199,6 +199,36 @@ final class KhajistanUITests: XCTestCase {
 #endif
     }
 
+    /// Chat (own builds only; App Store builds leave it out): HOME's Chat door opens the rooms,
+    /// a room shows its lines or says there are none, a signed-out reader is told to sign in to
+    /// write, and back and close return to HOME. Reads the live site's rooms.
+    func testChatOpensFromHomeAndShowsARoom() throws {
+#if KJ_APP_STORE
+        throw XCTSkip("App Store builds leave chat out")
+#else
+        let app = launch(skin: "grove")
+        let door = app.buttons["destination-chat"]
+        for _ in 0..<8 where !door.exists { app.swipeUp() }
+        door.tap()
+        let room = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch
+        waitFor(room, 30, "the rooms load")
+        shot("chat-rooms", app)
+        room.tap()
+        waitFor(app.staticTexts["chatRoomName"], 10, "the room opens")
+        let line = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'chat-line-'")).firstMatch
+        let none = app.staticTexts["No lines in the last 48 hours."]
+        let shown = NSPredicate { _, _ in line.exists || none.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 20), .completed,
+                       "the room shows its lines or says it has none")
+        XCTAssertTrue(app.staticTexts["Sign in under Account to write in a room."].exists, "a signed-out reader is told how to write")
+        shot("chat-room", app)
+        app.buttons["chatBack"].tap()
+        waitFor(room, 10, "back returns to the rooms")
+        app.buttons["closePlayer"].tap()
+        waitFor(app.buttons["tab-home"], 10, "closing chat returns to the app")
+#endif
+    }
+
     /// The region filter reads its own feed: a region shows fewer objects than All, and All
     /// comes back to the full count. (The store pages one feed per region since 2026-10-06.)
     func testPicsVidsRegionFilter() {

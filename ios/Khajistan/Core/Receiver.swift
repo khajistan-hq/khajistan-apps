@@ -1,0 +1,1 @@
+../../../tvos/KhajistanTV/Core/Receiver.swift

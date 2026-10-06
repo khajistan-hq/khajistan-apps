@@ -3510,12 +3510,15 @@ func readingShelves() throws {
 func readingWords() throws {
     let paid = RRWords.membersGate(titleName: "Filmart", issueLabel: "June 1962", pages: 80)
     try expectEqual(paid.heading, "Membership required")
-    try expect(paid.text.hasPrefix("You've read the free preview \u{2014} the first 2 pages of \u{201C}Filmart\u{201D} (June 1962). The full issue runs 80 pages."), paid.text)
+    try expect(paid.text.hasPrefix("You've read the free preview \u{2014} the first 2 pages of \u{201C}Filmart\u{201D} (June 1962). The full issue runs 80 pages"), paid.text)
     try expect(RRWords.membersGate(titleName: "Filmart", issueLabel: "unknown-1", pages: 3).text.contains("\u{201C}Filmart\u{201D}. The full"), "an unknown label is not printed")
+    // Membership is not sold on the TV (owner, 2026-10-06): the gate sends the viewer to the
+    // website and quotes no price.
+    try expect(paid.text.contains("khajistan.com"), paid.text)
+    try expect(!paid.text.contains("$") && !paid.text.contains("All Access"), paid.text)
     let account = RRWords.accountGate(titleName: "Censor", issueLabel: "", pages: 2)
     try expectEqual(account.heading, "Free to read \u{2014} sign in to continue")
     try expect(account.text.hasSuffix("All 2 pages are free \u{2014} a Khajistan account is all it takes. No Pass, no payment."), account.text)
-    try expectEqual(RRWords.doors, ["All Access \u{00B7} $49/mo", "Annual \u{00B7} $480/yr"])
     try expect(RRWords.rightsBody(issueCount: 3, khajistanScanned: true).hasPrefix("Khajistan has digitised and preserved all 3 issues of this title."))
     try expect(RRWords.rightsBody(issueCount: 1, khajistanScanned: true).hasPrefix("Khajistan has digitised and preserved the one issue of this title."))
     try expect(RRWords.rightsBody(issueCount: 3, khajistanScanned: false).hasPrefix("All 3 issues of this title are preserved."))
@@ -3657,6 +3660,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
+    ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
     ("Reading Room: titles group as the site groups them (sample, from the site's own code)", readingGroupingMatchesTheSite),
     ("Reading Room: titles group as the site groups them (full feed)", readingGroupingMatchesTheSiteOnTheFullFeed),
     ("Reading Room: title splitting and keys", readingTitleSplitting),
@@ -3683,6 +3687,23 @@ func shuffleDrawsRegionsByLiveCount() throws {
     try expectEqual(ShufflePick.region(w, roll: { _ in 30 }), "khorasan")
     try expectEqual(ShufflePick.region(w, roll: { $0 - 1 }), "khorasan")
     try expectEqual(ShufflePick.region([("persia", 0)]), nil)
+}
+
+// MARK: - Reading Room order
+
+func readingRoomRanksRareThenKhajistanThenRestThenStamped() throws {
+    func title(_ slug: String) -> RRTitle { RRTitle(slug: slug, name: slug, native: "", region: "", memberSlugs: [slug], issues: []) }
+    let prov: [String: RRProvenanceRow] = [
+        "kj-a": RRProvenanceRow(collection_slug: "kj-a", provenance_source: "Khajistan scan", source_upstream: nil),
+        "kj-received": RRProvenanceRow(collection_slug: "kj-received", provenance_source: "Khajistan scan", source_upstream: "archive.org/x"),
+        "rare-a": RRProvenanceRow(collection_slug: "rare-a", provenance_source: nil, source_upstream: nil, collection_tags: ["Rare"]),
+        "kandahar-majalla": RRProvenanceRow(collection_slug: "kandahar-majalla", provenance_source: "Khajistan scan", source_upstream: nil),
+    ]
+    let order = ["rest-1", "kj-a", "kandahar-majalla", "rest-2", "rare-a", "kj-received"].map(title)
+    let ranked = RRRank.ranked(order, provenance: prov).map(\.slug)
+    // Rare, then Khajistan's own scans, then the rest in the order they had (a received copy is
+    // not Khajistan's), and a stamped cover last even when Khajistan scanned it.
+    try expectEqual(ranked, ["rare-a", "kj-a", "rest-1", "rest-2", "kj-received", "kandahar-majalla"])
 }
 
 var passed = 0, failed = 0, skipped = 0

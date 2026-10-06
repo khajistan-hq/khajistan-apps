@@ -203,9 +203,6 @@ struct ReadingReaderView: View {
                 Text(words.text).accessibilityIdentifier("rrGateText")
                 HStack(alignment: .top, spacing: 60) {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(RRWords.doors, id: \.self) { door in
-                            Kicker(door)
-                        }
                         if !model.auth.isSignedIn {
                             Button {
                                 showSignIn = true
@@ -275,7 +272,7 @@ struct ReadingReaderView: View {
                     .accessibilityLabel("Code for this title's own page")
                     .accessibilityIdentifier("rrTitleCode")
             }
-            Kicker("This title's own page")
+            Kicker("khajistan.com")
         }
     }
 

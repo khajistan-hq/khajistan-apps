@@ -85,6 +85,7 @@ final class ReadingStore {
         async let feed = loadFeed()
         async let rightsHeld = loadRights()
         async let index = loadModules()
+        async let ranks = loadProvenance()
         guard let collections = await feed, !collections.isEmpty else {
             phase = .failed("The Reading Room did not answer.")
             return
@@ -93,9 +94,10 @@ final class ReadingStore {
         rights = await rightsHeld
         let built = RRCatalogue.titles(from: collections)
         titles = built
-        tabs = RRShelves.tabs(titles: built, index: await index, rights: rights)
+        // Ranked before the first paint, so a shelf never reorders under the viewer.
+        provenance = await ranks
+        tabs = RRRank.ranked(RRShelves.tabs(titles: built, index: await index, rights: rights), provenance: provenance)
         phase = .ready
-        Task { await loadProvenance() }
     }
 
     func retry() async {
@@ -136,14 +138,14 @@ final class ReadingStore {
         return RRModuleIndex.parse(data)
     }
 
-    private func loadProvenance() async {
+    private func loadProvenance() async -> [String: RRProvenanceRow] {
         var all: [String: RRProvenanceRow] = [:]
         for pageNo in 0..<16 {
             guard let rows = await fetch(RRAPI.provenanceRequest(offset: pageNo * RRAPI.feedPage), decode: RRProvenance.rows(from:)) else { break }
             for row in rows { all[row.collection_slug] = row }
             if rows.count < RRAPI.feedPage { break }
         }
-        provenance = all
+        return all
     }
 
     private func fetch<T>(_ request: URLRequest, decode: (Data) -> T?) async -> T? {

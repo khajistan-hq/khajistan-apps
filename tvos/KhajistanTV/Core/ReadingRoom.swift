@@ -598,8 +598,8 @@ enum RRAPI {
 
     /// Custodian lines, as the title view's Provenance control reads them (rrLoadProvenance :1608).
     static func provenanceRequest(offset: Int) -> URLRequest {
-        request("/rest/v1/digital_archive_collections?select=collection_slug,provenance_source,source_upstream"
-                + "&or=(provenance_source.not.is.null,source_upstream.not.is.null)"
+        request("/rest/v1/digital_archive_collections?select=collection_slug,provenance_source,source_upstream,collection_tags"
+                + "&or=(provenance_source.not.is.null,source_upstream.not.is.null,collection_tags.not.is.null)"
                 + "&order=collection_slug.asc&limit=\(feedPage)&offset=\(offset)")
     }
 
@@ -655,6 +655,49 @@ struct RRProvenanceRow: Decodable, Equatable, Sendable {
     let collection_slug: String
     let provenance_source: String?
     let source_upstream: String?
+    var collection_tags: [String]? = nil
+}
+
+/// The order of titles on a shelf, as the site ranks both shelves (owner, 2026-09-17: "the most
+/// rare and khajistan scanned items should be on top", "the stamped ones always in bottom of the
+/// lists"; reading-room-app.js rrRankKey :3104): tagged `rare` by the owner, then digitised by
+/// Khajistan, then the rest, then a card whose cover is a library's stamp, slip or a blank board.
+/// Each run keeps the order it had.
+enum RRRank {
+    /// RR_STAMPED (:1586), the site's hand-kept list.
+    static let stamped: Set<String> = [
+        "dar-al-islam", "dar-al-salam", "moslemin", "peykar",
+        "majmua-tilism-iskandar", "majmua-aqlam-ghariba",
+        "asrar-i-qasimi-khatti", "niru-ye-havayi-artesh-shahanshahi",
+        "kandahar-majalla", "al-jihad-peshawar", "subh-i-ummid",
+        "tilism-e-hoshruba",
+        "majma-al-daawat-121", "majma-al-daawat-129", "hamidiye-1059", "jami-al-daawat-kabir",
+        "dorushayi-az-maktab-eslam", "forugh-e-elm", "maaref", "peyk-e-cinema",
+        "raml-awfaq-ghariba", "raml-khatti", "masjed-e-azam", "khawass-al-hayawan", "sharh-dua-qaritha",
+    ]
+
+    /// 0 rare, 1 Khajistan scan, 2 the rest, 3 stamped. Stamped is the card's own slug, and
+    /// outranks everything; rare and Khajistan are the best of the title's members.
+    static func key(_ title: RRTitle, provenance: [String: RRProvenanceRow]) -> Int {
+        if stamped.contains(title.slug) { return 3 }
+        let rows = (title.memberSlugs.isEmpty ? [title.slug] : title.memberSlugs).compactMap { provenance[$0] }
+        if rows.contains(where: { ($0.collection_tags ?? []).contains { $0.lowercased() == "rare" } }) { return 0 }
+        if rows.contains(where: RRProvenance.isKhajistanScan) { return 1 }
+        return 2
+    }
+
+    static func ranked(_ titles: [RRTitle], provenance: [String: RRProvenanceRow]) -> [RRTitle] {
+        titles.enumerated()
+            .sorted { (key($0.element, provenance: provenance), $0.offset) < (key($1.element, provenance: provenance), $1.offset) }
+            .map(\.element)
+    }
+
+    static func ranked(_ tabs: [RRTab], provenance: [String: RRProvenanceRow]) -> [RRTab] {
+        tabs.map { tab in
+            RRTab(id: tab.id, name: tab.name, native: tab.native, depth: tab.depth,
+                  rows: tab.rows.map { RRRow(id: $0.id, name: $0.name, titles: ranked($0.titles, provenance: provenance)) })
+        }
+    }
 }
 
 enum RRProvenance {
@@ -862,15 +905,16 @@ enum RRWords {
     static let lede = "Magazines, books and printed matter from the Middle World, page by page."
 
     /// The gate the site draws for a paid title (:8180): the preview read, what the issue runs to, who can open it.
+    /// The gate on a members' title. Membership is not sold on the TV (owner, 2026-10-06: "dont
+    /// allow people to get reading room subscription on the apple tv app, make them go to our site
+    /// for that"): the gate says where it is, the code opens the title's page on a phone, and no
+    /// price is quoted here.
     static func membersGate(titleName: String, issueLabel: String, pages: Int) -> (heading: String, text: String) {
         let issue = (issueLabel.isEmpty || issueLabel.lowercased().hasPrefix("unknown")) ? "" : " (\(issueLabel))"
         return ("Membership required",
-                "You've read the free preview \u{2014} the first 2 pages of \u{201C}\(titleName)\u{201D}\(issue). The full issue runs \(pages) pages. "
-                + "All Access opens all of it \u{2014} and every other issue in the house; this wing's module opens it for less.")
+                "You've read the free preview \u{2014} the first 2 pages of \u{201C}\(titleName)\u{201D}\(issue). The full issue runs \(pages) pages and is open to members. "
+                + "Membership is taken on khajistan.com: scan the code with your phone.")
     }
-
-    /// The doors the site's gate offers, quoted as it quotes them (PRICE_MONTHLY, PRICE_ANNUAL :253).
-    static let doors = ["All Access \u{00B7} $49/mo", "Annual \u{00B7} $480/yr"]
 
     /// The gate for a free title that wants an account (:8170).
     static func accountGate(titleName: String, issueLabel: String, pages: Int) -> (heading: String, text: String) {

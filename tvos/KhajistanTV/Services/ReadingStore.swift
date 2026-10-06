@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 import UIKit
@@ -42,6 +43,10 @@ final class ReadingStore {
     @ObservationIgnored private var pad4: Set<String> = []
     @ObservationIgnored private var warned: [String: [String: [String]]] = [:]
     @ObservationIgnored private let pages = NSCache<NSString, UIImage>()
+    /// The server's answer per page and viewer, until it is asked again.
+    @ObservationIgnored private var answers: [String: (answer: RRPageAnswer, until: Date)] = [:]
+    /// A page on its way, so a turn that lands on a page being prefetched waits for it instead of fetching it twice.
+    @ObservationIgnored private var inflight: [String: Task<RRPageResult, Never>] = [:]
 
     private unowned let auth: AuthStore
     private let urlSession: URLSession
@@ -63,8 +68,9 @@ final class ReadingStore {
         config.timeoutIntervalForRequest = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         urlSession = URLSession(configuration: config)
-        // A page decodes to tens of megabytes; the current one, the next and the one behind.
-        pages.countLimit = 3
+        // Decoded pages, by their size in memory: about eight 2,000-pixel pages.
+        pages.totalCostLimit = 200 * 1024 * 1024
+        Task.detached(priority: .background) { RRPageDisk.trim() }
     }
 
     /// The preview gate's header when a password is held and the origin is the site.
@@ -311,32 +317,80 @@ final class ReadingStore {
         RRPath.endpoint(issue, page: page, extra: pad4)
     }
 
-    /// One page at reading size. The viewer's own token goes with the request when there is one; the
-    /// function decides, and its answer is what comes back.
+    /// One page at reading size. The page server decides what this viewer may read; its answer
+    /// is held for eight minutes (the website's own reuse window), and only a page it allowed is
+    /// shown. The image bytes come from the device's cache where they are already held.
     func page(_ issue: RRIssue, stored: Int) async -> RRPageResult {
         let token = try? await auth.validAccessToken()
         let path = endpoint(issue, page: stored)
-        let key = (path + (token == nil ? "|p" : "|a")) as NSString
-        if let held = pages.object(forKey: key) { return .image(held) }
-        var answer = await sign(path, token: token)
-        if answer?.status == 404, let twin = RRPath.fourDigitTwin(of: path), let retry = await sign(twin.path, token: token), retry.status == 200 {
-            pad4.insert(twin.slug)
-            answer = retry
+        let key = Self.pageKey(path, token: token)
+        if let running = inflight[key] { return await running.value }
+        let task = Task { await self.load(path: path, key: key, token: token) }
+        inflight[key] = task
+        let result = await task.value
+        inflight[key] = nil
+        return result
+    }
+
+    /// The page at once, when it was allowed to this viewer within the answer's lifetime and its
+    /// picture is in memory. Nothing is fetched.
+    func heldPage(_ issue: RRIssue, stored: Int) -> UIImage? {
+        let key = Self.pageKey(endpoint(issue, page: stored), token: auth.session?.accessToken)
+        guard let held = answers[key], held.until > Date(), case .page = RRPageOutcome.decide(held.answer) else { return nil }
+        return pages.object(forKey: key as NSString)
+    }
+
+    /// Asks the server about a stretch of pages in one call, so the turns that follow need no
+    /// round trip for their answer. Pages already answered are skipped.
+    func signAhead(_ issue: RRIssue, stored: [Int]) async {
+        let token = try? await auth.validAccessToken()
+        let now = Date()
+        let wanted = stored.map { endpoint(issue, page: $0) }
+            .filter { answers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
+        guard !wanted.isEmpty else { return }
+        guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: wanted, size: "full", accessToken: token)),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+        let until = Date().addingTimeInterval(Self.answerLife)
+        for (path, answer) in RRPageAnswer.parseBatch(data) where answer.status != 404 && answer.status < 500 {
+            answers[Self.pageKey(path, token: token)] = (answer, until)
+        }
+    }
+
+    /// Warms a page: answered, fetched and decoded into memory, nothing shown.
+    func prefetch(_ issue: RRIssue, stored: Int) async {
+        _ = await page(issue, stored: stored)
+    }
+
+    private static let answerLife: TimeInterval = 8 * 60
+
+    private static func pageKey(_ path: String, token: String?) -> String {
+        // The token's tail tells two viewers apart without keeping the whole token as a key.
+        path + "|" + (token.map { String($0.suffix(24)) } ?? "anon")
+    }
+
+    private func load(path: String, key: String, token: String?) async -> RRPageResult {
+        var answer: RRPageAnswer?
+        if let held = answers[key], held.until > Date() { answer = held.answer }
+        if answer == nil {
+            answer = await sign(path, token: token)
+            if answer?.status == 404, let twin = RRPath.fourDigitTwin(of: path), let retry = await sign(twin.path, token: token), retry.status == 200 {
+                pad4.insert(twin.slug)
+                answer = retry
+            }
+            if let answer, answer.status != 404, answer.status < 500 {
+                answers[key] = (answer, Date().addingTimeInterval(Self.answerLife))
+            }
         }
         guard let answer else { return .outcome(.unavailable) }
         switch RRPageOutcome.decide(answer) {
         case .page(let url):
-            guard let image = await download(url) else { return .outcome(.unavailable) }
-            pages.setObject(image, forKey: key)
+            if let held = pages.object(forKey: key as NSString) { return .image(held) }
+            guard let image = await picture(path: path, url: url) else { return .outcome(.unavailable) }
+            pages.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
             return .image(image)
         case let other:
             return .outcome(other)
         }
-    }
-
-    /// Warms the next page: signed and fetched into the cache, nothing shown.
-    func prefetch(_ issue: RRIssue, stored: Int) async {
-        _ = await page(issue, stored: stored)
     }
 
     private func sign(_ path: String, token: String?) async -> RRPageAnswer? {
@@ -345,10 +399,64 @@ final class ReadingStore {
         return RRPageAnswer.parse(status: code, body: data)
     }
 
-    /// A page is shrunk to what the screen can use at 2x: 4096 on its long side.
-    private func download(_ url: URL) async -> UIImage? {
-        guard let (data, response) = try? await urlSession.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return await Task.detached(priority: .userInitiated) { PnvImages.downsample(data, maxPixel: 4096) }.value
+    /// The page's picture at its stored size (up to 4096 on its long side, which no page reaches),
+    /// read and decoded off the main thread. Bytes come from the device's cache, else the network,
+    /// and a download is kept for next time.
+    private func picture(path: String, url: URL) async -> UIImage? {
+        let session = urlSession
+        return await Task.detached(priority: .userInitiated) {
+            if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 4096) { return image }
+            guard let (data, response) = try? await session.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let image = PnvImages.downsample(data, maxPixel: 4096) else { return nil }
+            RRPageDisk.write(data, path)
+            return image
+        }.value
+    }
+}
+
+/// Page images on the device, keyed by the page's storage path. Only bytes: whether a viewer may
+/// see a page is the server's answer every time, never the presence of a file here. Kept three
+/// days, so a re-cut page is fetched again, and trimmed to 400 MB, oldest first.
+enum RRPageDisk {
+    static let folder: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let folder = base.appendingPathComponent("ReadingRoomPages", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+    static let life: TimeInterval = 3 * 24 * 3600
+    static let budget = 400 * 1024 * 1024
+
+    static func file(_ path: String) -> URL {
+        let digest = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
+        return folder.appendingPathComponent(digest + ".jpg")
+    }
+
+    static func read(_ path: String) -> Data? {
+        let url = file(path)
+        guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+              Date().timeIntervalSince(date) < life else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    static func write(_ data: Data, _ path: String) {
+        try? data.write(to: file(path), options: .atomic)
+    }
+
+    /// Drops what is past its days, then the oldest until the folder fits the budget.
+    static func trim() {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
+        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? [])
+            .compactMap { url -> (URL, Date, Int)? in
+                guard let v = try? url.resourceValues(forKeys: Set(keys)), let d = v.contentModificationDate else { return nil }
+                return (url, d, v.fileSize ?? 0)
+            }
+            .sorted { $0.1 > $1.1 }
+        var total = 0
+        for (url, date, size) in files {
+            total += size
+            if Date().timeIntervalSince(date) >= life || total > budget { try? FileManager.default.removeItem(at: url) }
+        }
     }
 }

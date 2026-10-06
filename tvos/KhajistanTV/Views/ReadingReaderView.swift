@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// One issue, a page at a time, full screen on the house ground. Right turns to the next page and left
-/// to the one before; Select zooms to 2x and the remote moves the page under the screen; Select again
-/// zooms out, and Menu zooms out first and leaves second. The next page is fetched while this one is read.
+/// to the one before. Select zooms in a step at a time, 2x, 3x, 4x and 6x (the website's own ceiling),
+/// drawn from the page as stored; the arrows and a swipe move the page under the screen, and Menu
+/// steps back out before it leaves. The pages around this one are fetched while it is read.
 ///
 /// The page server decides what a viewer may read, and what it answers is what is shown: a page, a
 /// sign-in for a free title, the membership gate for a paid one, the rights-held note (451), or the
@@ -20,7 +21,7 @@ struct ReadingReaderView: View {
     @State private var position = 1
     @State private var shown: UIImage?
     @State private var phase: Phase = .loading
-    @State private var zoomed = false
+    @State private var zoom: CGFloat = 1
     @State private var pan: CGSize = .zero
     @State private var screen: CGSize = CGSize(width: 1920, height: 1080)
     @State private var flags: [String: [String]] = [:]
@@ -39,8 +40,8 @@ struct ReadingReaderView: View {
         case curtain([String])
     }
 
-    private static let zoomFactor: CGFloat = 2
-    private static let panStep: CGFloat = 240
+    private static let zoomLevels: [CGFloat] = [1, 2, 3, 4, 6]
+    private var zoomed: Bool { zoom > 1 }
 
     init(title: RRTitle, issue: RRIssue) {
         self.title = title
@@ -60,12 +61,13 @@ struct ReadingReaderView: View {
                     if let shown, phase == .page || phase == .loading {
                         Image(uiImage: shown)
                             .resizable()
+                            .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
                             .frame(width: geometry.size.width, height: geometry.size.height)
-                            .scaleEffect(zoomed ? Self.zoomFactor : 1)
+                            .scaleEffect(zoom)
                             .offset(pan)
-                            .animation(.easeOut(duration: 0.2), value: zoomed)
-                            .animation(.easeOut(duration: 0.15), value: pan)
+                            .animation(.easeOut(duration: 0.22), value: zoom)
+                            .animation(.easeOut(duration: 0.18), value: pan)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -105,7 +107,7 @@ struct ReadingReaderView: View {
         }
         .onExitCommand {
             if zoomed {
-                zoomOut()
+                setZoom(Self.zoomLevels.last { $0 < zoom } ?? 1)
             } else {
                 loadTask?.cancel()
                 hideTask?.cancel()
@@ -301,7 +303,7 @@ struct ReadingReaderView: View {
         if let blocked = blockedFrom, position >= blocked {
             return "Preview \u{2014} \(max(blocked - 1, 0)) of \(pages) pages"
         }
-        return (zoomed ? "2\u{00D7} \u{00B7} " : "") + "p. \(position) / \(pages)"
+        return (zoomed ? "\(Int(zoom))\u{00D7} \u{00B7} " : "") + "p. \(position) / \(pages)"
     }
 
     // MARK: - Opening and turning
@@ -320,8 +322,12 @@ struct ReadingReaderView: View {
     private func show(_ target: Int) {
         loadTask?.cancel()
         position = min(max(1, target), pages)
-        zoomed = false
-        pan = .zero
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            zoom = 1
+            pan = .zero
+        }
         let at = position
         let stored = RRPageMap.stored(at, map: map)
         if let warned = flags[store.endpoint(issue, page: stored)], !revealed {
@@ -329,6 +335,15 @@ struct ReadingReaderView: View {
             phase = .curtain(warned)
             return
         }
+        // A page already allowed and in memory is on screen in the same frame; any other turn
+        // clears the old page, so a number is never shown over the page before it.
+        if let held = store.heldPage(issue, stored: stored) {
+            shown = held
+            phase = .page
+            prefetchAround(at)
+            return
+        }
+        shown = nil
         phase = .loading
         loadTask = Task {
             let result = await store.page(issue, stored: stored)
@@ -338,7 +353,7 @@ struct ReadingReaderView: View {
                 shown = image
                 phase = .page
                 if let blocked = blockedFrom, at >= blocked { blockedFrom = nil }
-                prefetchNext(after: at)
+                prefetchAround(at)
             case .outcome(let outcome):
                 shown = nil
                 phase = .gate(outcome)
@@ -349,13 +364,19 @@ struct ReadingReaderView: View {
         }
     }
 
-    /// The next page is signed and fetched while this one is read, unless it is behind a gate or a curtain.
-    private func prefetchNext(after at: Int) {
-        let next = at + 1
-        guard next <= pages, blockedFrom.map({ next < $0 }) ?? true else { return }
-        let stored = RRPageMap.stored(next, map: map)
-        if flags[store.endpoint(issue, page: stored)] != nil && !revealed { return }
-        Task { await store.prefetch(issue, stored: stored) }
+    /// The server is asked about the next sixteen pages in one call, and the two pages ahead and
+    /// the one behind are fetched while this one is read; not past a gate, not behind a curtain.
+    private func prefetchAround(_ at: Int) {
+        let ahead = Array((at + 1)...min(at + 16, max(at + 1, pages))).filter { $0 <= pages }
+        let storedAhead = ahead.map { RRPageMap.stored($0, map: map) }
+        let near = [at + 1, at + 2, at - 1].filter { p in
+            p >= 1 && p <= pages && (blockedFrom.map { p < $0 } ?? true)
+                && (flags[store.endpoint(issue, page: RRPageMap.stored(p, map: map))] == nil || revealed)
+        }
+        Task {
+            await store.signAhead(issue, stored: storedAhead)
+            for p in near { await store.prefetch(issue, stored: RRPageMap.stored(p, map: map)) }
+        }
     }
 
     private func step(by delta: Int) {
@@ -373,30 +394,32 @@ struct ReadingReaderView: View {
 
     // MARK: - Zoom
 
+    /// Select zooms in a step; past the last step it returns to the whole page.
     private func select() {
         wake()
         guard phase == .page else { return }
-        if zoomed {
-            zoomOut()
-        } else {
-            zoomed = true
-            pan = .zero
-        }
+        setZoom(Self.zoomLevels.first { $0 > zoom } ?? 1)
     }
 
-    private func zoomOut() {
-        zoomed = false
-        pan = .zero
+    /// Changes the zoom about the middle of the screen: the point there stays there.
+    private func setZoom(_ next: CGFloat) {
+        let ratio = next / zoom
+        zoom = next
+        let limit = panLimit
+        pan = CGSize(width: min(max(pan.width * ratio, -limit.width), limit.width),
+                     height: min(max(pan.height * ratio, -limit.height), limit.height))
     }
 
-    /// The remote moves the page under the screen: right shows what lies to the right, and the page stops at its edge.
+    /// The remote moves the page under the screen by a third of the screen: right shows what lies
+    /// to the right, and the page stops at its edge.
     private func panBy(_ direction: MoveCommandDirection) {
         var next = pan
+        let stepX = screen.width / 3, stepY = screen.height / 3
         switch direction {
-        case .left: next.width += Self.panStep
-        case .right: next.width -= Self.panStep
-        case .up: next.height += Self.panStep
-        case .down: next.height -= Self.panStep
+        case .left: next.width += stepX
+        case .right: next.width -= stepX
+        case .up: next.height += stepY
+        case .down: next.height -= stepY
         @unknown default: return
         }
         let limit = panLimit
@@ -404,12 +427,12 @@ struct ReadingReaderView: View {
                      height: min(max(next.height, -limit.height), limit.height))
     }
 
-    /// How far the zoomed page may move: half of what its fitted size, doubled, leaves outside the screen.
+    /// How far the zoomed page may move: half of what its fitted size, zoomed, leaves outside the screen.
     private var panLimit: CGSize {
         guard let image = shown, image.size.width > 0, image.size.height > 0 else { return .zero }
         let fit = min(screen.width / image.size.width, screen.height / image.size.height)
-        let width = image.size.width * fit * Self.zoomFactor
-        let height = image.size.height * fit * Self.zoomFactor
+        let width = image.size.width * fit * zoom
+        let height = image.size.height * fit * zoom
         return CGSize(width: max(0, (width - screen.width) / 2), height: max(0, (height - screen.height) / 2))
     }
 

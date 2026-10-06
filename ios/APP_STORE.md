@@ -27,9 +27,9 @@ xcodebuild archive -project ios/Khajistan.xcodeproj -scheme Khajistan \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) KJ_APP_STORE'
 ```
 
-`KJ_APP_STORE` leaves the Pics/Vids section and Chat out (`ios/Khajistan/App/StoreBuild.swift`;
-the Apple TV app uses the same name). `testPicsVidsAndChatAreLeftOutOfStoreBuildsOnly` checks
-both builds.
+`KJ_APP_STORE` leaves the Pics/Vids section, Chat and the Wall out
+(`ios/Khajistan/App/StoreBuild.swift`; the Apple TV app uses the same name).
+`testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly` checks both builds.
 
 ## Screenshots
 

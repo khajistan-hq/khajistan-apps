@@ -3,8 +3,8 @@ import Foundation
 /// What an App Store build leaves out. Owner rulings 2026-10-06, the website keeps everything:
 /// - Pics/Vids: part of it comes from a social-media corpus that has never been screened for
 ///   adult material (App Review Guideline 1.1.4).
-/// - Chat: until the server has a word filter and a room-level block (Guideline 1.2). Our own
-///   builds carry it.
+/// - Chat and the Wall: until the server has a word filter and a block for both (Guideline 1.2).
+///   Our own builds carry them.
 ///
 /// Off in every build made for our own devices. The App Store archive turns it on:
 ///   xcodebuild archive ... SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) KJ_APP_STORE'
@@ -22,7 +22,7 @@ enum StoreBuild {
 
     /// Whether a door of the website's menu is in this build.
     static func includes(_ destination: ArchiveDestination) -> Bool {
-        includes(destination.nativeRoom) && !(isOn && destination.id == "chat")
+        includes(destination.nativeRoom) && !(isOn && ["chat", "wall"].contains(destination.id))
     }
 }
 

@@ -166,32 +166,36 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.
-    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids and Chat out: no
-    /// Pics/Vids tab, neither door on Home, and a stored Pics/Vids tab opens Home instead. Builds
-    /// for our own devices keep all three. The same test runs in both builds and asserts the
+    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids, Chat and the Wall
+    /// out: no Pics/Vids tab, none of their doors on Home, and a stored Pics/Vids tab opens Home
+    /// instead. Builds for our own devices keep all of them. The same test runs in both builds and asserts the
     /// opposite in each.
-    func testPicsVidsAndChatAreLeftOutOfStoreBuildsOnly() {
+    func testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly() {
         let app = launch(skin: "day", tab: "picsVids")
         waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
         let tab = app.buttons["tab-picsVids"]
         let pnvDoor = app.buttons["destination-picsnvids"]
         let chatDoor = app.buttons["destination-chat"]
-        // WALL follows CHAT in the menu in every build: reaching it means both doors were passed.
-        let wall = app.buttons["destination-wall"]
+        let wallDoor = app.buttons["destination-wall"]
+        // The first BAZAAR door follows WALL in the menu in every build: reaching it means the
+        // three doors above it were passed.
+        let marker = app.buttons["destination-toshakhana"]
 #if KJ_APP_STORE
         XCTAssertFalse(tab.exists, "a store build has no Pics/Vids tab")
         waitFor(app.textFields["archiveSearch"], 10, "a stored Pics/Vids tab opens Home in a store build")
-        for _ in 0..<8 where !wall.exists { app.swipeUp() }
-        XCTAssertTrue(wall.exists, "Home scrolled past where the Pics/Vids and Chat doors stood")
+        for _ in 0..<8 where !marker.exists { app.swipeUp() }
+        XCTAssertTrue(marker.exists, "Home scrolled past where the Pics/Vids, Chat and Wall doors stood")
         XCTAssertFalse(pnvDoor.exists, "a store build has no Pics/Vids door on Home")
         XCTAssertFalse(chatDoor.exists, "a store build has no Chat door on Home")
+        XCTAssertFalse(wallDoor.exists, "a store build has no Wall door on Home")
         shot("store-build-home", app)
 #else
         XCTAssertTrue(tab.exists, "builds for our own devices keep the Pics/Vids tab")
         app.buttons["tab-home"].tap()
-        for _ in 0..<8 where !wall.exists { app.swipeUp() }
+        for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids door on Home")
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door on Home")
+        XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door on Home")
 #endif
     }
 

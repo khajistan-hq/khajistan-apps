@@ -30,7 +30,23 @@ final class TransmissionStore {
     private(set) var phase: Phase = .idle
     private(set) var channelNumber = 1
     private(set) var programming: Programming?
-    let player = PlayerController()
+    /// Two signals, as in the Receiver: the programme on screen, and the other channel tuning out
+    /// of sight and silent behind it during a change, until the cut (`switchBehind`,
+    /// `commitSwitch`). Each keeps its own layer in the player screen.
+    let playerA = PlayerController()
+    let playerB = PlayerController()
+    private(set) var aIsFront = true
+    /// The signal on screen, which everything reads.
+    var player: PlayerController { aIsFront ? playerA : playerB }
+    /// The signal a channel change tunes, behind the one on screen.
+    var incoming: PlayerController { aIsFront ? playerB : playerA }
+
+    /// A channel tuning behind the one on screen, until `commitSwitch` puts it there.
+    struct PendingSwitch {
+        let channel: Int
+        let air: OnAir
+        fileprivate let generation: Int
+    }
 
     /// The station month `programming` was fetched for.
     @ObservationIgnored private var month: String?
@@ -213,6 +229,7 @@ final class TransmissionStore {
         channelNumber = channel
         let gen = beginTune()
         player.stop()
+        incoming.stop()
         phase = .tuning
         await loadSchedule()
         guard gen == generation else { return }
@@ -227,6 +244,46 @@ final class TransmissionStore {
         await tune(channel: channelNumber == 1 ? 2 : 1)
     }
 
+    /// Starts the other channel on the player behind the one on screen, silent, leaving the
+    /// programme on screen, the phase and the channel number as they are. Nil when the other
+    /// channel is off air, has no playable source, or needs a sign-in: the caller tunes it the
+    /// ordinary way and the phase says why.
+    func switchBehind() async -> PendingSwitch? {
+        let target = channelNumber == 1 ? 2 : 1
+        await loadSchedule()
+        guard schedule == .ready, let p = programming,
+              let air = StationClock.onAir(p, channel: target, at: Date()),
+              let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return nil }
+        let gen = generation
+        guard let url = await carrier(for: route, generation: gen), gen == generation else { return nil }
+        let next = incoming
+        next.stop()
+        next.holdsSound = true
+        next.attach(url: url, seekTo: air.seekTo, title: nowPlayingTitle(air), subtitle: air.show?.name,
+                    listen: Self.dancerMayListen(air, channel: target))
+        return PendingSwitch(channel: target, air: air, generation: gen)
+    }
+
+    /// The cut: the channel tuned behind comes on screen, the old one stops, and the new one's
+    /// sound comes up. A tune or a stop since `switchBehind` has made the pending switch stale.
+    func commitSwitch(_ pending: PendingSwitch) {
+        guard pending.generation == generation else { return }
+        let gen = beginTune()
+        let old = player
+        aIsFront.toggle()
+        channelNumber = pending.channel
+        old.onEnded = nil
+        old.stop()
+        player.onEnded = { [weak self] in
+            Task { @MainActor in
+                await self?.handover()
+            }
+        }
+        player.releaseSound()
+        phase = .onAir(pending.air)
+        watchSlotEnd(pending.air, generation: gen)
+    }
+
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
     func rejoinLive() async {
         await tune(channel: channelNumber)
@@ -234,7 +291,8 @@ final class TransmissionStore {
 
     func stop() {
         _ = beginTune()
-        player.stop()
+        playerA.stop()
+        playerB.stop()
         phase = .idle
     }
 

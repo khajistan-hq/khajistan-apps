@@ -20,11 +20,12 @@ final class SubtitlesUITests: XCTestCase {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     }
 
+    /// One month of the station's schedule carried with the tests, read with the clock pinned
+    /// inside it (`-kjnow`), so the tests need neither the archive's live month file nor the
+    /// date they run on.
     private var scheduleFile: String {
-        var karachi = Calendar(identifier: .gregorian)
-        karachi.timeZone = TimeZone(identifier: "Asia/Karachi")!
-        let c = karachi.dateComponents([.year, .month], from: Date())
-        return checkout.appendingPathComponent(String(format: "data/khajistan-tv/programming-%04d-%02d.json", c.year ?? 0, c.month ?? 0)).path
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-10.json").path
     }
 
     private var subtitleFile: String {
@@ -39,7 +40,7 @@ final class SubtitlesUITests: XCTestCase {
     func testTransmissionSubtitleOverAndUnderTheStrip() {
         for skin in ["day", "smut"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjsubtitlefile", subtitleFile]
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjsubtitlefile", subtitleFile]
             app.launch()
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))

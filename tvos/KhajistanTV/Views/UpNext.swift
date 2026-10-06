@@ -58,7 +58,7 @@ struct HandoverNotice: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            let left = StationClock.secondsLeft(in: air, at: context.date)
+            let left = StationClock.secondsLeft(in: air, at: TransmissionStore.now(context.date))
             let showing = !overlayVisible && next != nil && (left.map { $0 <= Self.lead } ?? false)
             ZStack(alignment: .bottomTrailing) {
                 Color.clear

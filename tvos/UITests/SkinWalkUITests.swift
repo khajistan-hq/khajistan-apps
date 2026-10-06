@@ -24,14 +24,12 @@ final class SkinWalkUITests: XCTestCase {
     }
 
     /// The station month's schedule in this checkout: tvos/UITests/<file> -> <checkout>/data/…
+    /// One month of the station's schedule carried with the tests, read with the clock pinned
+    /// inside it (`-kjnow`), so the tests need neither the archive's live month file nor the
+    /// date they run on.
     private var scheduleFile: String {
-        var karachi = Calendar(identifier: .gregorian)
-        karachi.timeZone = TimeZone(identifier: "Asia/Karachi")!
-        let c = karachi.dateComponents([.year, .month], from: Date())
-        let month = String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
-        return URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("data/khajistan-tv/programming-\(month).json").path
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-10.json").path
     }
 
     private func launch(_ arguments: [String]) -> XCUIApplication {
@@ -82,7 +80,7 @@ final class SkinWalkUITests: XCTestCase {
             app.terminate()
 
             // The station page, a channel card in focus, and the channel's player.
-            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile])
+            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00"])
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))
             wait(upTo: 20) { (page.value as? String) == "Ready" }
@@ -166,7 +164,7 @@ final class SkinWalkUITests: XCTestCase {
     /// goes when the overlay is woken, so the line is never on screen twice. The lead is stretched
     /// to a day so the slot on air is always inside it.
     func testHandoverNoticeOnlyWhileTheOverlayIsHidden() {
-        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjhandoverlead", "86400"])
+        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjhandoverlead", "86400"])
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
         wait(upTo: 20) { (page.value as? String) == "Ready" }

@@ -119,19 +119,17 @@ final class ShelfUITests: XCTestCase {
         }
     }
 
+    /// One month of the station's schedule carried with the tests, read with the clock pinned
+    /// inside it (`-kjnow`), so the tests need neither the archive's live month file nor the
+    /// date they run on.
     private var scheduleFile: String {
-        var karachi = Calendar(identifier: .gregorian)
-        karachi.timeZone = TimeZone(identifier: "Asia/Karachi")!
-        let c = karachi.dateComponents([.year, .month], from: Date())
-        let month = String(format: "%04d-%02d", c.year ?? 0, c.month ?? 0)
-        return URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("data/khajistan-tv/programming-\(month).json").path
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-10.json").path
     }
 
     func testTransmissionCards() {
         for skin in skins {
-            let app = launch(skin, tab: "transmission", extra: ["-kjschedulefile", scheduleFile])
+            let app = launch(skin, tab: "transmission", extra: ["-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00"])
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))
             for _ in 0..<20 where (page.value as? String) != "Ready" { kjPause(1) }

@@ -136,7 +136,7 @@ struct TransmissionView: View {
                 TimelineView(.everyMinute) { context in
                     HStack(alignment: .top, spacing: 64) {
                         ForEach([1, 2], id: \.self) { number in
-                            card(number, at: context.date)
+                            card(number, at: TransmissionStore.now(context.date))
                         }
                     }
                 }

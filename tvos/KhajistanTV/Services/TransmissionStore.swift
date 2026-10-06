@@ -30,6 +30,22 @@ final class TransmissionStore {
     private(set) var phase: Phase = .idle
     private(set) var channelNumber = 1
     private(set) var programming: Programming?
+    /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
+    /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
+    /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
+    /// which is not in this repository.
+    static func now(_ real: Date = Date()) -> Date {
+        #if DEBUG
+        if let pinned = pinnedStart { return pinned.addingTimeInterval(real.timeIntervalSince(launched)) }
+        #endif
+        return real
+    }
+
+    #if DEBUG
+    private static let launched = Date()
+    private static let pinnedStart: Date? = UserDefaults.standard.string(forKey: "kjnow").flatMap { ISO8601DateFormatter().date(from: $0) }
+    #endif
+
     /// Two signals, as in the Receiver: the programme on screen, and the other channel tuning out
     /// of sight and silent behind it during a change, until the cut (`switchBehind`,
     /// `commitSwitch`). Each keeps its own layer in the player screen.
@@ -129,7 +145,7 @@ final class TransmissionStore {
     /// not downloaded again, so coming back to the page, signing in or trying again costs nothing.
     /// A second call while a fetch is in flight waits for that fetch.
     func loadSchedule() async {
-        let monthKey = StationClock.stationMonth(Date())
+        let monthKey = StationClock.stationMonth(Self.now())
         if schedule == .ready, month == monthKey { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
@@ -252,7 +268,7 @@ final class TransmissionStore {
         let target = channelNumber == 1 ? 2 : 1
         await loadSchedule()
         guard schedule == .ready, let p = programming,
-              let air = StationClock.onAir(p, channel: target, at: Date()),
+              let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return nil }
         let gen = generation
         guard let url = await carrier(for: route, generation: gen), gen == generation else { return nil }
@@ -301,7 +317,7 @@ final class TransmissionStore {
             phase = .failed("The schedule has not loaded.")
             return
         }
-        let now = Date()
+        let now = Self.now()
         guard let air = StationClock.onAir(p, channel: channelNumber, at: now) else {
             goOffAir(p, channelId: StationClock.channelId(p, number: channelNumber), at: now, generation: gen)
             return
@@ -339,7 +355,7 @@ final class TransmissionStore {
     /// as it does on air. With nothing following, the channel is off air until it returns.
     func handover() async {
         guard case .onAir(let current) = phase, let p = programming else { return }
-        let now = Date()
+        let now = Self.now()
         if let month, month != StationClock.stationMonth(now) {
             await tune(channel: channelNumber)
             return
@@ -357,7 +373,7 @@ final class TransmissionStore {
     /// a stop in the meantime replaces this watch.
     private func watchSlotEnd(_ air: OnAir, generation gen: Int) {
         slotWatch?.cancel()
-        guard let left = StationClock.secondsLeft(in: air, at: Date()) else { return }
+        guard let left = StationClock.secondsLeft(in: air, at: Self.now()) else { return }
         slotWatch = Task { [weak self] in
             // A second past the end, so the clock has the next strip by the time it is asked.
             try? await Task.sleep(for: .seconds(left + 1))
@@ -387,7 +403,7 @@ final class TransmissionStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
                 guard let self, !Task.isCancelled, gen == self.generation, case .offAir = self.phase else { return }
-                let now = Date()
+                let now = Self.now()
                 let due: Bool
                 if let p = self.programming, StationClock.stationMonth(now) == self.month {
                     due = StationClock.onAir(p, channel: self.channelNumber, at: now) != nil

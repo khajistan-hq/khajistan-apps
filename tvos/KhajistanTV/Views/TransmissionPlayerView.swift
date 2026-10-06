@@ -143,7 +143,7 @@ struct TransmissionPlayerView: View {
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             HandoverNotice(
                 air: air,
-                next: store.upcoming(channel: store.channelNumber, at: Date(), count: 1).first,
+                next: store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(), count: 1).first,
                 overlayVisible: overlayVisible
             )
         }
@@ -178,7 +178,7 @@ struct TransmissionPlayerView: View {
             Spacer(minLength: 0)
             // Redrawn on the minute, so what is up next moves on at a handover.
             TimelineView(.everyMinute) { context in
-                let next = store.upcoming(channel: store.channelNumber, at: context.date, count: 1).first
+                let next = store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(context.date), count: 1).first
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),

@@ -174,8 +174,8 @@ final class ReadingRoomUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             waitForShelf(app)
-            // The account-open titles are Urdu's: the received print acquisition and the jantris.
-            let urdu = app.buttons["rr-tab-urdu"]
+            // The account-open titles are the received print acquisition, which the module index has not filed yet.
+            let urdu = app.buttons["rr-tab-unfiled"]
             if urdu.exists, kjFocus(urdu, app: app) {
                 XCUIRemote.shared.press(.select)
                 kjPause(6)

@@ -44,6 +44,7 @@ struct RootView: View {
         switch model.section {
         case .receiver: ReceiverView()
         case .transmission: TransmissionView()
+        case .reading: ReadingView()
         case .picsvids: PicsVidsView()
         case .account: AccountView()
         }

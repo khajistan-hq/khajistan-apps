@@ -2,8 +2,8 @@ import SwiftUI
 
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
-/// sign-in sheet takes in place. Left and right move through the stream the viewer came from
-/// (loading the next page at its end); play/pause pauses a video; menu goes back.
+/// sign-in sheet takes in place. Left and right move through the shelf the viewer came from
+/// (loading its next page at its end); play/pause pauses a video; menu goes back.
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -23,8 +23,12 @@ struct PnvViewerView: View {
         case failed(String)
     }
 
-    init(row: PnvRow) {
+    /// The shelf the object was chosen from: left and right step through its region's stream.
+    private let region: String
+
+    init(row: PnvRow, region: String) {
         _current = State(initialValue: row)
+        self.region = region
     }
 
     private var store: PicsVidsStore { model.pnv }
@@ -212,11 +216,12 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         stepTask?.cancel()
         stepTask = Task {
-            guard var index = store.items.firstIndex(where: { $0.id == current.id }) else { return }
+            guard var index = store.feed(region).items.firstIndex(where: { $0.id == current.id }) else { return }
             index += delta
-            if index >= store.items.count && !store.isDone { await store.loadMore() }
-            guard !Task.isCancelled, store.items.indices.contains(index) else { return }
-            show(store.items[index])
+            if index >= store.feed(region).items.count { await store.loadMore(region: region) }
+            let items = store.feed(region).items
+            guard !Task.isCancelled, items.indices.contains(index) else { return }
+            show(items[index])
         }
     }
 

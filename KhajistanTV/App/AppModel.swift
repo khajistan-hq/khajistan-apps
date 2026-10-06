@@ -19,6 +19,8 @@ final class AppModel {
     let receiver: ReceiverStore
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
+    /// The Reading Room: the shelf feed, the page server and the reader's pages.
+    let reading: ReadingStore
     let mixes = MixesStore()
     /// Where a Top Shelf link asked to go. The screen it names reads it and clears it.
     var link: DeepLink?
@@ -66,7 +68,10 @@ final class AppModel {
         self.receiver = ReceiverStore()
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
-        self.films = FilmStore(auth: auth)
+        let films = FilmStore(auth: auth)
+        self.films = films
+        // The shelf's module index sits behind the site password like vod.json, so it is read from the same origin.
+        self.reading = ReadingStore(auth: auth, origin: films.origin)
         self.captions = LiveCaptionSession(auth: auth)
         if let launched = UserDefaults.standard.string(forKey: DefaultsKey.launchSkin) {
             UserDefaults.standard.set(SkinChoice(stored: launched).rawValue, forKey: DefaultsKey.skinChoice)
@@ -76,6 +81,7 @@ final class AppModel {
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
+        case "reading": self.section = .reading
         case "picsvids": self.section = .picsvids
         case "account": self.section = .account
         default: self.section = .receiver

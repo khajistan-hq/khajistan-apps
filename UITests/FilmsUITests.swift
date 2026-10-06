@@ -55,9 +55,11 @@ final class FilmsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(seen.count, 5, "the walk must reach five films; walk: \(log)")
         kjScreenshot("vod-03-walked", app: app)
 
-        // Back up the two rows the walk went down, and left to the first film, which has a preview.
-        for _ in 0..<2 { XCUIRemote.shared.press(.up); kjPause(0.6) }
-        for _ in 0..<4 { XCUIRemote.shared.press(.left); kjPause(0.5) }
+        // Back along the shelf to the first film, which has a preview.
+        for _ in 0..<15 where focusedFilm(app).identifier != "film-showgirls-of-pakistan-2021-khajistan" {
+            XCUIRemote.shared.press(.left)
+            kjPause(0.6)
+        }
         let chosen = focusedFilm(app).identifier
         XCTAssertEqual(chosen, "film-showgirls-of-pakistan-2021-khajistan")
         print("FILMCHOSEN \(chosen)")
@@ -102,14 +104,16 @@ final class FilmsUITests: XCTestCase {
         XCTAssertEqual(focusedRegion.identifier, "region-indus", "Indus must take focus")
         XCUIRemote.shared.press(.select)
 
-        let onDemand = app.buttons["medium-vod"]
+        // The region's films are a shelf of their own, headed On Demand, under television and radio.
+        let onDemand = app.descendants(matching: .any)["shelf-vod"]
         XCTAssertTrue(onDemand.waitForExistence(timeout: 60), "Indus must offer its films On Demand")
-        XCTAssertEqual(onDemand.label, "On Demand 11")
-        XCTAssertTrue(kjFocus(onDemand, app: app), "On Demand must take focus")
-        XCUIRemote.shared.press(.select)
+        let heading = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'On Demand'")).firstMatch
+        XCTAssertTrue(heading.exists, "the shelf is headed On Demand")
+        XCTAssertTrue(heading.label.contains("11 films"), "Indus files 11 films; the heading reads \(heading.label)")
         XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 10), "The region's films must list")
+        XCTAssertTrue(kjFocus(films(app).firstMatch, app: app), "the first film must take focus")
         kjPause(4)
-        XCTAssertGreaterThanOrEqual(films(app).count, 5, "the first rows of the region's films are on screen")
+        XCTAssertGreaterThanOrEqual(films(app).count, 5, "the shelf's first films are on screen")
         kjScreenshot("vod-07-indus-on-demand", app: app)
     }
 }

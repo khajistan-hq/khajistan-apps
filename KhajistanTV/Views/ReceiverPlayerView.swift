@@ -86,7 +86,6 @@ struct ReceiverPlayerView: View {
             overlay(palette)
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
-            PigeonOverlayLayer(overlay: model.pigeon)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
@@ -155,6 +154,13 @@ struct ReceiverPlayerView: View {
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("playerState")
+                .overlay {
+                    // Which channel is on screen, for the UI tests.
+                    Text(current.id)
+                        .font(.system(size: 1))
+                        .opacity(0.01)
+                        .accessibilityIdentifier("currentChannel")
+                }
         }
     }
 
@@ -311,7 +317,8 @@ struct ReceiverPlayerView: View {
         }
         async let quiet: Void = outgoing.fadeOut()
         tune(target, behind: true)
-        destination = nil
+        // `destination` stays set until the cut: the channel on screen changes only then, and a
+        // press before it must step on from the channel asked for, not the one still showing.
         while !Task.isCancelled {
             switch next.state {
             case .playing, .failed:
@@ -336,6 +343,9 @@ struct ReceiverPlayerView: View {
     /// The hard cut: the new signal's layer shows in the same frame the old one goes, the old
     /// stops, and the new one's sound comes up.
     private func cut(to target: Channel, from outgoing: PlayerController, into next: PlayerController, tookSince started: ContinuousClock.Instant) {
+        #if DEBUG
+        print("KJCUT \(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
+        #endif
         if next.state == .playing {
             let took = ContinuousClock.now - started
             TuneTimes.record(target.id, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
@@ -346,6 +356,7 @@ struct ReceiverPlayerView: View {
             aIsFront.toggle()
             current = target
         }
+        if destination?.id == target.id { destination = nil }
         outgoing.stop()
         next.releaseSound()
         model.captions.attach(target, player: next)

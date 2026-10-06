@@ -119,9 +119,23 @@ def main(src, out_dir, name, ending=None):
     # while the channel cuts behind it (owner, 2026-10-06: "hard cut ... and the pigeon
     # transition on it"); plus flight-<name>.json with its length and the frame where the bird
     # covers the most of the screen, which is where the app cuts.
-    overlay = os.environ.get("KJ_OVERLAY") == "1"
-    tiers = {t: s for t, s in (OVERLAY_TIERS if overlay else TIERS).items() if s[0] <= w}
-    for tier, (tw, th) in tiers.items():
+    overlay = os.environ.get("KJ_OVERLAY") in ("1", "2")
+    # KJ_OVERLAY=2: the same bird as two ordinary H.264 videos the Apple TV HD decodes in
+    # hardware — flight-<name>-rgb-1080.mp4, its colour carried past its edge so a soft matte
+    # leaves no fringe, and flight-<name>-matte-540.mp4, its alpha as luma, full range. The app
+    # composites the pair on the GPU (HEVC with alpha is software-decoded there and dropped a
+    # third to two-thirds of its frames while a channel tuned, measured 2026-10-06).
+    pair = os.environ.get("KJ_OVERLAY") == "2"
+    if pair:
+        tiers = {"1080": (1920, 1080)}
+        base = ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-r", "24"]
+        h264 = ["-c:v", "libx264", "-preset", "slow", "-profile:v", "high", "-level", "4.2", "-movflags", "+faststart", "-an"]
+        encs["1080", "rgb"] = subprocess.Popen(base + ["-pix_fmt", "rgb24", "-s", "1920x1080", "-i", "-", *h264, "-crf", "14",
+            "-pix_fmt", "yuv420p", "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
+            os.path.join(out_dir, f"flight-{name}-rgb-1080.mp4")], stdin=subprocess.PIPE)
+        encs["1080", "matte"] = subprocess.Popen(base + ["-pix_fmt", "gray", "-s", "960x540", "-i", "-", *h264, "-crf", "10",
+            "-pix_fmt", "yuvj420p", "-color_range", "pc", os.path.join(out_dir, f"flight-{name}-matte-540.mp4")], stdin=subprocess.PIPE)
+    for tier, (tw, th) in ({} if pair else tiers).items():
         if overlay:
             path = os.path.join(out_dir, f"flight-{name}-alpha-{tier}.mov")
             encs[tier, "alpha"] = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
@@ -170,6 +184,18 @@ def main(src, out_dir, name, ending=None):
             else:
                 Pt = cv2.resize(P.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
                 at = cv2.resize(a.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
+            if pair:
+                # Colour with the bird's own colour spread past its edge (normalised blur of the
+                # premultiplied picture), so where the matte is soft the edge is still the bird.
+                spread_p = cv2.GaussianBlur(Pt.astype(np.float32), (0, 0), 6)
+                spread_a = cv2.GaussianBlur(at.astype(np.float32), (0, 0), 6)[..., None]
+                inside = Pt / np.maximum(at[..., None], 1e-3)
+                outside = spread_p / np.maximum(spread_a, 1e-3)
+                rgb = np.where(at[..., None] > 0.5, inside, np.where(spread_a > 0.002, outside, 0))
+                encs["1080", "rgb"].stdin.write(np.clip(rgb + 0.5, 0, 255).astype(np.uint8).tobytes())
+                matte = cv2.resize(at.astype(np.float32), (960, 540), interpolation=cv2.INTER_AREA)
+                encs["1080", "matte"].stdin.write(np.clip(matte * 255 + 0.5, 0, 255).astype(np.uint8).tobytes())
+                continue
             if overlay:
                 rgba = np.dstack([Pt, at * 255])
                 encs[tier, "alpha"].stdin.write(np.clip(rgba + 0.5, 0, 255).astype(np.uint8).tobytes())

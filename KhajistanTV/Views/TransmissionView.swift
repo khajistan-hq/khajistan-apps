@@ -134,13 +134,11 @@ struct TransmissionView: View {
                 // The cards read the clock. Slots start on the minute, so they are drawn again on
                 // every minute and "now" is never the slot that has just ended.
                 TimelineView(.everyMinute) { context in
-                    HStack(alignment: .top, spacing: 40) {
+                    HStack(alignment: .top, spacing: 64) {
                         ForEach([1, 2], id: \.self) { number in
                             card(number, at: context.date)
                         }
                     }
-                    // The plates' padding is pulled back so the cards' text sits on the page margin.
-                    .padding(.horizontal, -26)
                 }
                 if !model.auth.isSignedIn && !store.isScheduleFile {
                     VStack(alignment: .leading, spacing: 24) {
@@ -177,7 +175,7 @@ struct TransmissionView: View {
                 upcoming: store.upcoming(channel: number, at: date)
             )
         }
-        .buttonStyle(HouseButtonStyle())
+        .buttonStyle(HouseCardStyle())
         .accessibilityIdentifier("transmission-channel-\(number)")
     }
 
@@ -224,6 +222,10 @@ private struct ChannelCardLabel: View {
     let upcoming: [ScheduleStrip]
 
     var body: some View {
+        CardPlate(height: 460) { card }
+    }
+
+    private var card: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 20) {
                 Kicker("Channel \(number)")
@@ -252,7 +254,7 @@ private struct ChannelCardLabel: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 420, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     /// The website's off-air line: "Back at 23:00 PKT with The Feature."

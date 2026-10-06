@@ -202,6 +202,116 @@ struct HouseButtonStyle: ButtonStyle {
     }
 }
 
+/// A card in a shelf, moved as the TV app moves one: focus lifts it to 1.08 on a spring, a soft
+/// shadow in the band colour opens under its art or plate, and a press settles it back a little.
+/// The style draws no colour of its own. A card with text only sits on a `CardPlate`; one with a
+/// picture wears `kjCardArt()` on the picture, so the shadow is the picture's and never the
+/// lettering's.
+struct HouseCardStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        CardControl(label: configuration.label, isPressed: configuration.isPressed)
+    }
+}
+
+private enum CardMotion {
+    static let lift: CGFloat = 1.08
+    static let spring = Animation.spring(response: 0.34, dampingFraction: 0.74)
+}
+
+private struct CardControl<Face: View>: View {
+    let label: Face
+    let isPressed: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        label
+            .scaleEffect(isPressed ? 1.03 : (isFocused ? CardMotion.lift : 1))
+            .animation(CardMotion.spring, value: isFocused)
+            .animation(.easeOut(duration: 0.1), value: isPressed)
+    }
+}
+
+/// The soft shadow under a focused card's picture or plate: the band colour, so it stays inside
+/// the palette on every skin.
+private struct CardShadow: ViewModifier {
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.palette) private var palette
+
+    func body(content: Content) -> some View {
+        content
+            .shadow(color: palette.band.opacity(isFocused ? 0.55 : 0), radius: isFocused ? 30 : 0, x: 0, y: isFocused ? 20 : 0)
+            .animation(CardMotion.spring, value: isFocused)
+    }
+}
+
+extension View {
+    /// For the picture of a card inside a `HouseCardStyle` button.
+    func kjCardArt() -> some View {
+        modifier(CardShadow())
+    }
+}
+
+/// The plate of a card that is text alone: the lift plate at rest, the band plate under focus,
+/// with the palette its text reads re-skinned for whichever it is on. In a shelf the size is
+/// fixed, so the shelf never changes height as its cards arrive. With no width the plate takes
+/// the width it is offered and `height` is its least.
+struct CardPlate<Content: View>: View {
+    let width: CGFloat?
+    let height: CGFloat
+    let content: Content
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.palette) private var palette
+
+    init(width: CGFloat? = nil, height: CGFloat, @ViewBuilder content: () -> Content) {
+        self.width = width
+        self.height = height
+        self.content = content()
+    }
+
+    var body: some View {
+        let look = isFocused ? palette.onFocusPlate : palette
+        content
+            .multilineTextAlignment(.leading)
+            .padding(28)
+            .modifier(PlateSize(width: width, height: height))
+            .environment(\.palette, look)
+            .foregroundStyle(look.ink)
+            .background(isFocused ? palette.band : palette.lift)
+            .kjCardArt()
+            .animation(.easeOut(duration: 0.15), value: isFocused)
+    }
+}
+
+private struct PlateSize: ViewModifier {
+    let width: CGFloat?
+    let height: CGFloat
+
+    func body(content: Content) -> some View {
+        if let width {
+            content.frame(width: width, height: height, alignment: .topLeading)
+        } else {
+            content.frame(maxWidth: .infinity, minHeight: height, alignment: .topLeading)
+        }
+    }
+}
+
+/// A picture that arrives by fading in, so a card never pops.
+struct FadeIn<Content: View>: View {
+    let shown: Bool
+    let content: Content
+
+    init(shown: Bool, @ViewBuilder content: () -> Content) {
+        self.shown = shown
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .animation(.easeOut(duration: 0.35), value: shown)
+    }
+}
+
 /// A navigation or medium switch: a kicker that is plain ink, the current one in the accent with a
 /// 3pt rule under it. Focused, it takes the band plate like any other control.
 struct HouseTabStyle: ButtonStyle {
@@ -608,6 +718,7 @@ struct TuningLoader: View {
 enum Section: String, CaseIterable, Identifiable {
     case receiver
     case transmission
+    case reading
     case picsvids
     case account
 
@@ -617,6 +728,8 @@ enum Section: String, CaseIterable, Identifiable {
         switch self {
         case .receiver: return "Receiver"
         case .transmission: return "Transmission"
+        // The website's own nav label (kj-chrome.js, door `read`: READING ROOM).
+        case .reading: return "Reading Room"
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
         case .account: return "Account"

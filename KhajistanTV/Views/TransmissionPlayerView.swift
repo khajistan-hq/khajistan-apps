@@ -125,8 +125,13 @@ struct TransmissionPlayerView: View {
             } else {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
                 Color.black.ignoresSafeArea()
-                PlayerLayerView(player: store.player.player)
+                // Both signals keep a layer of their own; the cut is which one shows.
+                PlayerLayerView(player: store.playerA.player)
                     .ignoresSafeArea()
+                    .opacity(store.aIsFront ? 1 : 0)
+                PlayerLayerView(player: store.playerB.player)
+                    .ignoresSafeArea()
+                    .opacity(store.aIsFront ? 0 : 1)
             }
             if store.player.state == .tuning {
                 // The ground covers the picture while the signal is on its way; the loader itself
@@ -240,13 +245,11 @@ struct TransmissionPlayerView: View {
     // MARK: - The remote
 
     /// A full-screen button that draws nothing. It holds focus so the remote's presses reach the
-    /// handlers above, and a click skips a clip or wakes the overlay. It is left out while a
+    /// handlers above, and a click wakes the overlay. It is left out while a
     /// button of the screen's own (Sign in, Try again) is the thing to focus.
     private var focusTarget: some View {
         Button {
-            if model.clips.showing != nil {
-                model.clips.skip()
-            } else if captionArmed {
+            if captionArmed {
                 // Focus never leaves this button: see ReceiverPlayerView's surface (2026-10-06).
                 subtitles.cycle()
             } else {
@@ -345,29 +348,63 @@ struct TransmissionPlayerView: View {
         }
         guard direction == .up || direction == .down else { return }
         captionArmed = false
-        if model.clips.showing != nil {
-            model.clips.skip()
-            return
-        }
         guard holdsFocus, !switching else { return }
         switching = true
         Task {
-            async let quiet: Void = store.player.fadeOut()
-            await model.clips.play(.wingIn, holdLastFrame: true)
-            await quiet
-            if !left { await store.switchChannel() }
-            if !left { await model.clips.play(.wingOut) }
+            await switchUnderThePigeon()
             switching = false
         }
+    }
+
+    /// The other channel tunes behind the programme on screen while the pigeon flies over it, and
+    /// cuts in behind the bird, as in the Receiver (owner, 2026-10-06): at the moment the bird
+    /// covers the most of the screen where it covers half or more, or when the channel plays.
+    /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
+    private func switchUnderThePigeon() async {
+        let pigeon = model.pigeon
+        let key = "transmission-\(store.channelNumber == 1 ? 2 : 1)"
+        var flight: PigeonOverlay.Flight?
+        if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
+            await pigeon.arm(pick)
+            pigeon.start()
+            flight = pick
+        }
+        async let quiet: Void = store.player.fadeOut()
+        let started = ContinuousClock.now
+        if let pending = await store.switchBehind(), !left {
+            let next = store.incoming
+            while !left, !Task.isCancelled {
+                let ready = next.state == .playing || { if case .failed = next.state { return true }; return false }()
+                if ready {
+                    if let flight, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut {
+                        try? await Task.sleep(for: .milliseconds(30))
+                        continue
+                    }
+                    if next.state == .playing {
+                        let took = ContinuousClock.now - started
+                        TuneTimes.record(key, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
+                    }
+                    store.commitSwitch(pending)
+                    break
+                }
+                if !pigeon.isFlying, !UIAccessibility.isReduceMotionEnabled, let more = pigeon.pick(expected: 0) {
+                    await pigeon.arm(more)
+                    pigeon.start()
+                    flight = more
+                }
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        } else if !left {
+            await store.switchChannel()
+        }
+        await quiet
     }
 
     /// Pauses a picture that is playing. Anything else joins the channel again, live: a paused
     /// transmission is not the transmission any more.
     private func playPause() {
         wake()
-        if model.clips.showing != nil {
-            model.clips.skip()
-        } else if store.player.state == .playing {
+        if store.player.state == .playing {
             store.player.pause()
         } else {
             Task { await store.rejoinLive() }
@@ -379,13 +416,22 @@ struct TransmissionPlayerView: View {
     /// The sign-on once per launch, then the channel. Every step checks that the viewer is still
     /// here: a clip must not start after the screen has gone.
     private func start() async {
-        // The sign-on, once per launch: the wing crosses, the programme tunes behind it, the
-        // wing leaves. The grooming ident is out (owner, 2026-10-05: flying pigeon only).
+        // The sign-on, once per launch: the skin's colour with the channel's name, a pigeon
+        // flying over it while the programme tunes behind, and the cut to the picture.
         if !model.clips.signOnPlayed {
             model.clips.signOnPlayed = true
-            await model.clips.play(.wingIn, holdLastFrame: true)
+            model.clips.cover(caption: store.channelName(channel))
+            let pigeon = model.pigeon
+            if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: 2.5) {
+                await pigeon.arm(pick)
+                if !gone { pigeon.start() }
+            }
             if !gone { await store.tune(channel: channel) }
-            if !gone { await model.clips.play(.wingOut) }
+            if !gone { await store.player.settled() }
+            while !gone, let flight = pigeon.current, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut {
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+            if !gone { model.clips.uncover() }
             return
         }
         if !gone { await store.tune(channel: channel) }

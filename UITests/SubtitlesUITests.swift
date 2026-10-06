@@ -147,8 +147,16 @@ final class SubtitlesUITests: XCTestCase {
         app.launch()
         // Filmfarsi Trailers vol. 1: its public preview announces an English track.
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
-        XCTAssertTrue(film.waitForExistence(timeout: 30))
-        XCTAssertTrue(kjFocus(film, app: app, limit: 60), "the film must take focus")
+        // The films are a shelf, and a lazy one: a card far along does not exist until focus
+        // brings it near. Onto the shelf by its first card, then along it to the one wanted.
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCTAssertTrue(film.exists && film.hasFocus, "the film must take focus")
         XCUIRemote.shared.press(.select)
 
         let control = app.buttons["subtitlesControl"]

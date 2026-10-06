@@ -180,6 +180,33 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.
+    /// The region filter reads its own feed: a region shows fewer objects than All, and All
+    /// comes back to the full count. (The store pages one feed per region since 2026-10-06.)
+    func testPicsVidsRegionFilter() {
+        let app = launch(skin: "day", tab: "picsVids")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        if app.buttons["adultNoticeOK"].exists { app.buttons["adultNoticeOK"].tap() }
+        let count = app.staticTexts["pnvCount"]
+        func objects() -> Int {
+            let text = count.label.filter(\.isNumber)
+            return Int(text) ?? 0
+        }
+        let settled = { (test: @escaping (Int) -> Bool) -> Bool in
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in test(objects()) }, object: nil)], timeout: 40) == .completed
+        }
+        XCTAssertTrue(settled { $0 > 0 }, "All states a count")
+        let all = objects()
+        let region = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-' AND identifier != 'pnvregion-all'")).firstMatch
+        waitFor(region, 10, "a region filter is offered")
+        region.tap()
+        XCTAssertTrue(settled { $0 > 0 && $0 < all }, "a region shows fewer objects than All (\(all))")
+        waitFor(tile, 40, "the region's stream draws tiles")
+        shot("pnv-region", app)
+        app.buttons["pnvregion-all"].tap()
+        XCTAssertTrue(settled { $0 == all }, "All returns to its full count")
+    }
+
     func testPicsVidsViewer() {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch

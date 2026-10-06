@@ -33,6 +33,9 @@ final class AppModel {
     /// A sentence for the house banner.
     var message: String?
     var isShowingBrowser = false
+    /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
+    /// The phone draws one grid under a region filter; the store keeps one feed per key.
+    var pnvRegion = PicsVidsStore.allRegions
     var tab: AppTab
     /// The skin on screen: the sky's, or the reader's pick while the sky is in the band it was
     /// made under (Sky.resolve, the website's rule).

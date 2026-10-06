@@ -188,11 +188,13 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         stepTask?.cancel()
         stepTask = Task {
-            guard var index = store.items.firstIndex(where: { $0.id == current.id }) else { return }
+            let region = model.pnvRegion
+            guard var index = store.feed(region).items.firstIndex(where: { $0.id == current.id }) else { return }
             index += delta
-            if index >= store.items.count && !store.isDone { await store.loadMore() }
-            guard !Task.isCancelled, store.items.indices.contains(index) else { return }
-            show(store.items[index])
+            if index >= store.feed(region).items.count && !store.feed(region).isDone { await store.loadMore(region: region) }
+            let items = store.feed(region).items
+            guard !Task.isCancelled, items.indices.contains(index) else { return }
+            show(items[index])
         }
     }
 

@@ -62,6 +62,12 @@ decode. In each case the TV copy was the same code plus additions, so the TV cop
 shared one. `scripts/test-core.sh` refuses to run if any of these links has been replaced by a
 file.
 
+Since the TV app's `a5e90c7fb`, `PicsVidsStore` pages one feed per region (the TV draws a shelf
+for each). The phone draws one grid under a region filter: the filter lives in
+`AppModel.pnvRegion`, and "All" asks for `PicsVidsStore.allRegions`, the one feed spanning every
+region. `testPicsVidsRegionFilter` checks a region shows fewer objects than All and that All
+comes back.
+
 **Edit these files under `tvos/`.** The links mean an edit there also changes the phone app,
 so build both apps after one.
 

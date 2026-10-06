@@ -11,6 +11,8 @@ struct PicsVidsView: View {
     @State private var dontAskAgain = false
 
     private var store: PicsVidsStore { model.pnv }
+    /// The feed under the region filter.
+    private var feed: PnvFeed { store.feed(model.pnvRegion) }
     private var columnCount: Int { sizeClass == .regular ? 4 : 2 }
 
     var body: some View {
@@ -27,6 +29,11 @@ struct PicsVidsView: View {
             .animation(.kj, value: store.noticeVisible)
         }
         .task { await store.start() }
+        // The store pages each feed only when asked; ask for the first page whenever the region,
+        // the kind or the store's readiness changes and that feed has none yet.
+        .task(id: "\(model.pnvRegion)|\(store.kind?.rawValue ?? "all")|\(store.phase == .ready)") {
+            if store.phase == .ready, feed.isUntouched { await store.loadMore(region: model.pnvRegion) }
+        }
         .fullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row)
         }
@@ -65,23 +72,23 @@ struct PicsVidsView: View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    tab("Everything", current: store.kind == nil, id: "pnvkind-all") { await store.select(kind: nil) }
+                    tab("Everything", current: store.kind == nil, id: "pnvkind-all") { store.select(kind: nil) }
                     ForEach(PnvKind.allCases, id: \.self) { kind in
-                        tab(kind.label, current: store.kind == kind, id: "pnvkind-\(kind.rawValue)") { await store.select(kind: kind) }
+                        tab(kind.label, current: store.kind == kind, id: "pnvkind-\(kind.rawValue)") { store.select(kind: kind) }
                     }
                 }
             }
             if !store.regions.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
-                        tab("All", current: store.region == nil, id: "pnvregion-all") { await store.select(region: nil) }
+                        tab("All", current: model.pnvRegion == PicsVidsStore.allRegions, id: "pnvregion-all") { model.pnvRegion = PicsVidsStore.allRegions }
                         ForEach(store.regions, id: \.self) { token in
-                            tab(PnvRegions.label(token), current: store.region == token, id: "pnvregion-\(token)") { await store.select(region: token) }
+                            tab(PnvRegions.label(token), current: model.pnvRegion == token, id: "pnvregion-\(token)") { model.pnvRegion = token }
                         }
                     }
                 }
             }
-            Text(store.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
+            Text(feed.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
                 .kjSmall(faint: true)
                 .padding(.leading, 12)
                 .padding(.top, 6)
@@ -90,9 +97,9 @@ struct PicsVidsView: View {
         .padding(.horizontal, -12)
     }
 
-    private func tab(_ title: String, current: Bool, id: String, action: @escaping () async -> Void) -> some View {
+    private func tab(_ title: String, current: Bool, id: String, action: @escaping () -> Void) -> some View {
         Button {
-            Task { await action() }
+            action()
         } label: {
             Text(title).kjKicker()
         }
@@ -110,10 +117,10 @@ struct PicsVidsView: View {
         case .failed(let message):
             problem(message)
         case .ready:
-            if store.items.isEmpty {
-                if let error = store.pageError {
+            if feed.items.isEmpty {
+                if let error = feed.error {
                     problem(error)
-                } else if store.isDone {
+                } else if feed.isDone {
                     Text("Nothing filed under this yet.").kjBody()
                 } else {
                     TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity, minHeight: 200)
@@ -126,15 +133,15 @@ struct PicsVidsView: View {
     }
 
     private var columns: some View {
-        let layout = PnvLayout.columns(store.items, count: columnCount)
-        let nearEnd = Set(store.items.suffix(12).map(\.id))
+        let layout = PnvLayout.columns(feed.items, count: columnCount)
+        let nearEnd = Set(feed.items.suffix(12).map(\.id))
         return HStack(alignment: .top, spacing: 8) {
             ForEach(Array(layout.enumerated()), id: \.offset) { _, column in
                 LazyVStack(alignment: .leading, spacing: 14) {
                     ForEach(column) { row in
                         tile(row)
                             .onAppear {
-                                if nearEnd.contains(row.id) { Task { await store.loadMore() } }
+                                if nearEnd.contains(row.id) { Task { await store.loadMore(region: model.pnvRegion) } }
                             }
                     }
                 }
@@ -143,7 +150,7 @@ struct PicsVidsView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pnvStream")
-        .accessibilityValue(String(store.items.count))
+        .accessibilityValue(String(feed.items.count))
     }
 
     private func tile(_ row: PnvRow) -> some View {
@@ -165,10 +172,10 @@ struct PicsVidsView: View {
 
     @ViewBuilder
     private var footer: some View {
-        if let error = store.pageError {
+        if let error = feed.error {
             problem(error)
-        } else if store.isDone {
-            Text("\(store.items.count.formatted()) \(store.items.count == 1 ? "object" : "objects") \u{00B7} that is all of it")
+        } else if feed.isDone {
+            Text("\(feed.items.count.formatted()) \(feed.items.count == 1 ? "object" : "objects") \u{00B7} that is all of it")
                 .kjSmall(faint: true)
         } else {
             TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity, minHeight: 80)
@@ -178,7 +185,11 @@ struct PicsVidsView: View {
     private func problem(_ message: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(message).kjBody()
-            Button { Task { await store.retry() } } label: { Text("Try again").kjKicker() }
+            Button {
+                Task {
+                    if case .failed = store.phase { await store.retry() } else { await store.retry(region: model.pnvRegion) }
+                }
+            } label: { Text("Try again").kjKicker() }
                 .buttonStyle(HouseButtonStyle(solid: true))
                 .accessibilityIdentifier("pnvRetry")
         }

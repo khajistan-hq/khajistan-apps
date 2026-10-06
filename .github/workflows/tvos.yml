@@ -1,0 +1,94 @@
+name: tvOS app
+
+on:
+  push:
+    branches: [main, 'app/tvos-*']
+    paths: ['tvos/**', '.github/workflows/tvos.yml']
+  pull_request:
+    paths: ['tvos/**', '.github/workflows/tvos.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tvos-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tvos
+          lfs: false
+      - name: Core behavior tests
+        run: sh tvos/scripts/test-core.sh
+      - name: Select an Apple TV simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          mkdir -p tvos/.ci
+          pick() {
+            xcrun simctl list devices available --json > tvos/.ci/devices.json
+            python3 - <<'PY'
+          import json
+          data = json.load(open('tvos/.ci/devices.json'))
+          for runtime, devices in data['devices'].items():
+              if 'tvOS' not in runtime:
+                  continue
+              for device in devices:
+                  if device['name'].startswith('Apple TV') and device['isAvailable']:
+                      print(device['udid'])
+                      raise SystemExit
+          PY
+          }
+          udid=$(pick)
+          if [ -z "$udid" ]; then
+            echo 'No tvOS simulator runtime installed; downloading one'
+            xcodebuild -downloadPlatform tvOS
+            udid=$(pick)
+          fi
+          if [ -z "$udid" ]; then
+            echo 'No Apple TV simulator available after the tvOS runtime download' >&2
+            exit 1
+          fi
+          echo "Selected $udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
+          xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
+      - name: Build and test tvOS app
+        run: |
+          set -euo pipefail
+          xcodebuild test -project tvos/KhajistanTV.xcodeproj -scheme KhajistanTV \
+            -configuration Debug -destination "platform=tvOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath tvos/.ci/DerivedData -resultBundlePath tvos/.ci/TestResults.xcresult \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee tvos/.ci/xcodebuild.log
+      - name: Export screenshots and simulator app
+        if: always()
+        run: |
+          mkdir -p tvos/.ci/screenshots
+          if [ -d tvos/.ci/TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path tvos/.ci/TestResults.xcresult \
+              --output-path tvos/.ci/screenshots || true
+          fi
+          if [ -d tvos/.ci/DerivedData/Build/Products/Debug-appletvsimulator/KhajistanTV.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent \
+              tvos/.ci/DerivedData/Build/Products/Debug-appletvsimulator/KhajistanTV.app \
+              tvos/.ci/KhajistanTV-Simulator.zip
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: khajistan-tvos-simulator
+          retention-days: 14
+          path: |
+            tvos/.ci/xcodebuild.log
+            tvos/.ci/screenshots
+            tvos/.ci/KhajistanTV-Simulator.zip
+            tvos/.ci/TestResults.xcresult

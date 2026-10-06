@@ -1,0 +1,84 @@
+name: iOS app
+
+on:
+  push:
+    branches: [main, 'codex/ios-*']
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: ios
+          lfs: false
+      - name: Core behavior tests
+        run: ios/scripts/test-core.sh
+      - name: Select an available iPhone simulator
+        id: simulator
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          mkdir -p ios/.ci
+          xcrun simctl list devices available --json > ios/.ci/devices.json
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('ios/.ci/devices.json'))
+          candidates = [device for runtime, devices in data['devices'].items()
+                        if 'iOS-26' in runtime for device in devices
+                        if device['name'].startswith('iPhone') and device['isAvailable']]
+          if not candidates:
+              raise SystemExit('No installed iOS 26 iPhone simulator runtime')
+          device = candidates[0]
+          print('Selected', device['name'], device['udid'])
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('udid=' + device['udid'] + '\n')
+          PY
+      - name: Boot simulator before UI automation
+        run: |
+          xcrun simctl boot '${{ steps.simulator.outputs.udid }}'
+          xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
+      - name: Build and test iOS app
+        run: |
+          set -euo pipefail
+          xcodebuild test -project ios/Khajistan.xcodeproj -scheme Khajistan \
+            -configuration Debug -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
+            -derivedDataPath ios/.ci/DerivedData -resultBundlePath ios/.ci/TestResults.xcresult \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios/.ci/xcodebuild.log
+      - name: Export screenshots and simulator app
+        if: always()
+        run: |
+          mkdir -p ios/.ci/screenshots
+          if [ -d ios/.ci/TestResults.xcresult ]; then
+            xcrun xcresulttool export attachments --path ios/.ci/TestResults.xcresult \
+              --output-path ios/.ci/screenshots || true
+          fi
+          if [ -d ios/.ci/DerivedData/Build/Products/Debug-iphonesimulator/Khajistan.app ]; then
+            ditto -c -k --sequesterRsrc --keepParent \
+              ios/.ci/DerivedData/Build/Products/Debug-iphonesimulator/Khajistan.app \
+              ios/.ci/Khajistan-Simulator.zip
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: khajistan-ios-simulator
+          retention-days: 14
+          path: |
+            ios/.ci/xcodebuild.log
+            ios/.ci/screenshots
+            ios/.ci/Khajistan-Simulator.zip
+            ios/.ci/TestResults.xcresult

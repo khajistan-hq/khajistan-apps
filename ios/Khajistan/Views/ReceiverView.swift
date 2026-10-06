@@ -1,18 +1,17 @@
 import SwiftUI
 
 /// RECEIVER, the website's /open-frequencies on a phone: live television, radio and public cameras
-/// by region on the map, Khajistan Transmission's two channels, and the Khajistan Radio mixes, as
-/// the site carries all three in one receiver. Everything is read from the public files the
+/// by region on the map, and Khajistan Transmission's two channels. The Khajistan Radio mixes are
+/// not a section here (owner, 2026-10-06): they play on Transmission's channel 2. Everything is read from the public files the
 /// website reads (Core/Receiver.swift, Services/ReceiverStore.swift).
 struct ReceiverView: View {
     enum Part: String, CaseIterable, Identifiable {
-        case live, transmission, radio
+        case live, transmission
         var id: String { rawValue }
         var title: String {
             switch self {
             case .live: return "Live"
             case .transmission: return "Transmission"
-            case .radio: return "Khajistan Radio"
             }
         }
     }
@@ -30,7 +29,6 @@ struct ReceiverView: View {
                 switch part {
                 case .live: LiveSection()
                 case .transmission: TransmissionSection()
-                case .radio: MixesSection()
                 }
             }
             .padding(.horizontal, KJLayout.inset)

@@ -48,7 +48,6 @@ final class AppModel {
     let receiver = ReceiverStore()
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
-    let mixes = MixesStore()
     /// The channel-change pigeon. One player for the life of the app.
     let clips = StationClips()
 

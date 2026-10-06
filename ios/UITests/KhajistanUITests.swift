@@ -56,9 +56,9 @@ final class KhajistanUITests: XCTestCase {
                            "Transmission shows its two channels, or the preview-password step")
             shot("\(skin)-05-transmission", app)
 
-            app.buttons["part-radio"].tap()
-            waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mix-'")).firstMatch, 40, "the mixes register loads")
-            shot("\(skin)-06-khajistan-radio", app)
+            // Khajistan Radio's mixes play on Transmission's channel 2, not in a section of their own
+            // (owner, 2026-10-06).
+            XCTAssertFalse(app.buttons["part-radio"].exists, "there is no Khajistan Radio section")
 
             app.buttons["tab-picsVids"].tap()
             waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "the Born Digital stream loads")
@@ -162,20 +162,6 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 60)
         usleep(700_000)
         shot("player-after-change", app)
-        app.buttons["closePlayer"].tap()
-    }
-
-    /// A Khajistan Radio mix plays and shows its position.
-    func testMixPlays() {
-        let app = launch(skin: "smut", tab: "receiver", extra: ["-kjpart", "radio"])
-        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mix-'")).firstMatch
-        waitFor(first, 40, "the mixes register loads")
-        first.tap()
-        let state = app.staticTexts["playerState"]
-        waitFor(state, 10, "the mix player opens")
-        expectation(for: NSPredicate(format: "label == 'Playing'"), evaluatedWith: state)
-        waitForExpectations(timeout: 60)
-        shot("mix-playing", app)
         app.buttons["closePlayer"].tap()
     }
 

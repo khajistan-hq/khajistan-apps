@@ -48,12 +48,12 @@ The app uses `com.khajistan.archive` as its default bundle identifier. Change it
 
 ## Code shared with the Apple TV app
 
-Since 2026-10-06 the two apps compile **one copy** of the files they had in common. Eleven
+Since 2026-10-06 the two apps compile **one copy** of the files they had in common. Ten
 files under `Khajistan/` are links to the Apple TV app's own files under
 `tvos/KhajistanTV/`, so a fix made for either app reaches both:
 
 - `Core/`: Auth, Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
-- `Services/`: MixesStore, PicsVidsStore
+- `Services/`: PicsVidsStore (MixesStore was dropped with the Khajistan Radio section, owner 2026-10-06)
 - `Player/`: PlayerLayerView
 
 The two copies had drifted apart. The TV station clock carried 38 lines the phone lacked (up

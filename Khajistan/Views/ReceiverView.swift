@@ -34,6 +34,7 @@ struct ReceiverView: View {
                 }
             }
             .padding(.horizontal, KJLayout.inset)
+            .kjColumn(KJLayout.wideWidth)
             .padding(.vertical, 16)
         }
         .scrollDismissesKeyboard(.interactively)

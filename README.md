@@ -87,6 +87,28 @@ The script builds two Foundation-only executables. `verify-core` runs the iPhone
 
 The committed Xcode project can be reproduced after adding/removing Swift sources with `python3 scripts/generate-project.py`. Reproduce the typographic app icon with `swift scripts/make-icon.swift Khajistan/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png`.
 
+## iPad
+
+One app serves both (`TARGETED_DEVICE_FAMILY = "1,2"`). Since 2026-10-06 the pages of rows and
+text hold to a centred column on an iPad instead of running the full width of the screen:
+
+- **Home and Account** cap at 720 points (`KJLayout.readingWidth`).
+- **The Receiver** caps at 1040 (`KJLayout.wideWidth`), so its map keeps the iPad's portrait
+  width and sits centred in landscape.
+- **Pics/Vids** stays full width; its grid already goes to four columns at regular width.
+- The Account footer names the device: "Khajistan for iPad" or "for iPhone".
+
+`kjColumn()` in `Views/Theme.swift` applies the cap. It changes nothing narrower than the cap,
+which covers every iPhone and an iPad app in a narrow split.
+
+`testRowsHoldToAColumnOnIPadAndSpanTheIPhone` checks both sides: on iPad, in portrait and
+landscape, a Home row is no wider than the column and is centred; on iPhone the same row still
+spans the screen less its margins. Run 2026-10-06 on the iPad Pro 13-inch (M5) and iPhone 17
+simulators (iOS 27), and screenshots were looked at in both orientations.
+
+Not done for iPad: a sidebar or split view, the channel list beside the map in landscape, and
+pointer or keyboard shortcuts. A physical iPad has not been tried.
+
 ## Device acceptance still required
 
 This source was created on a Mac with Apple Command Line Tools and **no full Xcode / iOS SDK / Simulator**. Core Swift compilation, behavioral tests, syntax parsing and live network integration have run. The complete iOS target has now compiled and run through GitHub’s Xcode 16.4/iPhone 16 Pro simulator (see VALIDATION.md). Local Xcode setup and physical-device testing remain pending. There is no signed IPA, TestFlight upload or App Store submission.

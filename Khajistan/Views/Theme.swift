@@ -142,6 +142,20 @@ enum KJType {
 enum KJLayout {
     /// The page margin.
     static let inset: CGFloat = 20
+    /// The widest a page of rows and text may run. On an iPhone the screen is narrower, so this
+    /// never applies there; on an iPad it keeps a row's name and its arrow within one glance.
+    static let readingWidth: CGFloat = 720
+    /// The Receiver's cap: wide enough that the map keeps an iPad's portrait width, centred in
+    /// landscape instead of stretching the page.
+    static let wideWidth: CGFloat = 1040
+}
+
+extension View {
+    /// Holds a page's content to `width` and centres it. Below that width (every iPhone, and an
+    /// iPad app in a narrow split) it changes nothing.
+    func kjColumn(_ width: CGFloat = KJLayout.readingWidth) -> some View {
+        frame(maxWidth: width, alignment: .leading).frame(maxWidth: .infinity)
+    }
 }
 
 extension View {

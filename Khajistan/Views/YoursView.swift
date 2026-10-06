@@ -26,6 +26,7 @@ struct YoursView: View {
                 footer
             }
             .padding(.horizontal, KJLayout.inset)
+            .kjColumn()
             .padding(.vertical, 16)
         }
         .overlay(alignment: .bottom) {
@@ -232,7 +233,7 @@ struct YoursView: View {
             HouseRule()
             webRow("About Khajistan", path: "about.html", id: "web-about")
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
-            Text("Khajistan for iPhone \(version)").kjSmall(faint: true)
+            Text("Khajistan for \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") \(version)").kjSmall(faint: true)
             Text("Khajistan carries each broadcaster's own signal and keeps no copy of it.").kjSmall(faint: true)
         }
     }

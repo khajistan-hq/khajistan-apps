@@ -23,6 +23,7 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, KJLayout.inset)
+            .kjColumn()
             .padding(.top, 12)
             .padding(.bottom, 28)
         }

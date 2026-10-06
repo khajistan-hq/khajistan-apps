@@ -86,6 +86,40 @@ final class KhajistanUITests: XCTestCase {
         }
     }
 
+    /// iPad: the rows of HOME and ACCOUNT hold to the reading column (KJLayout.readingWidth, 720)
+    /// and sit centred, in portrait and in landscape, and the Receiver still draws its map and
+    /// regions. iPhone: the same row spans the screen less the page margins, exactly as before,
+    /// which is the case the column must never touch.
+    func testRowsHoldToAColumnOnIPadAndSpanTheIPhone() {
+        let app = launch(skin: "day")
+        let row = app.buttons["destination-reading"]
+        waitFor(row, 10, "HOME lists the Reading Room door")
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        let orientations: [UIDeviceOrientation] = isPad ? [.portrait, .landscapeLeft] : [.portrait]
+        for orientation in orientations {
+            XCUIDevice.shared.orientation = orientation
+            sleep(1)
+            app.buttons["tab-home"].tap()
+            waitFor(row, 10, "the door row after rotating")
+            let screen = app.windows.firstMatch.frame
+            let frame = row.frame
+            if isPad {
+                XCTAssertLessThanOrEqual(frame.width, 721, "a HOME row stays in the reading column (\(orientation.rawValue))")
+                XCTAssertEqual(frame.midX, screen.midX, accuracy: 2, "the column is centred (\(orientation.rawValue))")
+                shot("ipad-\(orientation.rawValue)-home", app)
+                app.buttons["tab-yours"].tap()
+                waitFor(app.staticTexts["Khajistan for iPad 1.0"], 5, "ACCOUNT names the device it runs on")
+                shot("ipad-\(orientation.rawValue)-account", app)
+                app.buttons["tab-receiver"].tap()
+                waitFor(app.buttons["region-indus"], 40, "the Receiver keeps its region strip")
+                shot("ipad-\(orientation.rawValue)-receiver", app)
+            } else {
+                XCTAssertEqual(frame.width, screen.width - 40, accuracy: 1, "on iPhone a HOME row spans the screen less its 20pt margins")
+            }
+        }
+        XCUIDevice.shared.orientation = .portrait
+    }
+
     /// A tap on the map chooses the region under the finger; the strip and the list follow.
     func testMapTapChoosesARegion() {
         let app = launch(skin: "day", tab: "receiver")

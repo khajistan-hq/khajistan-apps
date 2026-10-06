@@ -88,5 +88,20 @@
       "note": "climbs away from the camera, wings clapped over the back in a raised V: a pigeon's display climb",
       "why": "owner, 2026-10-05: \"i dont like the one that is showing the back and going up\""
     }
+  },
+  "refused_cover_flights": {
+    "what": "seven Seedance flights that opened and closed on one 4K image of the wing filling the frame (cover image 4a5d0fce-baa2-4517-b339-12c36ef844e1), chained wing to wing and fitted to each channel's tune time. Shipped to the TV as ff8c79b88 on 2026-10-06 and reverted the same night.",
+    "owner": "'this most recent one is bad': the full-screen wing looked fake/static; the bird too small and far once it pulled back; glitchy; 'the speed is unrealistic, it needs to be more like the original' (the two darts played at 1.8x).",
+    "jobs": {
+      "dart": "a5206204-477e-4c27-8990-d548e147a5e3",
+      "swerve": "c9f5f9b9-202a-4958-9086-f19a2c7e23fc",
+      "circle": "63a27969-5be6-4ca8-acf8-284e7939c0d9",
+      "roll": "62f3e8ed-71e2-4cf9-ad8f-be69596a4b47",
+      "roller": "8c8cf88f-1319-4b32-9488-329550e0a7cf",
+      "loop": "e57e39d7-ac33-462b-906c-b8c706a9bac2",
+      "display": "44c28d7c-e3bb-41b2-8786-dd295f7cbbf6"
+    },
+    "lesson": "do not speed a generated flight up to fit a time: the wingbeat speeds up with it and reads as fake. A generated still image as the cover frame reads as a still, not as the bird.",
+    "credits": "488.5 (balance 643.25 -> 154.75)"
   }
 }

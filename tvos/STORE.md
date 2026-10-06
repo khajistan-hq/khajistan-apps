@@ -28,7 +28,9 @@ to drift.
 
 App Store note: pointing to an outside purchase is allowed on the US storefront (since May 2025);
 elsewhere Apple requires its own purchase or the External Purchase Link entitlement. For an App
-Store release outside the US, the QR/link is hidden on those storefronts and §2 is the route.
+Store release outside the US: the Apple TV app has nothing to hide (no link, no QR code). The
+iPhone/iPad app's "Become a member" buttons would need to be hidden on those storefronts, which
+is not built, or §2 would be the route.
 
 ## 2. Apple in-app purchase (designed, NOT built)
 

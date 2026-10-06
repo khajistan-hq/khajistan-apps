@@ -29,6 +29,9 @@ final class PlayerController {
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
     /// A new signal starts silent and its sound comes up once it is actually playing.
     @ObservationIgnored private var fadeInPending = false
+    /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
+    /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
+    @ObservationIgnored var holdsSound = false
 
     init() {
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
@@ -136,7 +139,7 @@ final class PlayerController {
         case .started:
             timeoutTask?.cancel()
             state = .playing
-            if fadeInPending {
+            if fadeInPending, !holdsSound {
                 fadeInPending = false
                 Task { await ramp(to: 1, over: 0.5) }
             }
@@ -186,6 +189,14 @@ final class PlayerController {
     func fadeOut(over seconds: Double = 0.45) async {
         fadeInPending = false
         await ramp(to: 0, over: seconds)
+    }
+
+    /// The cut: a signal that tuned out of sight comes on screen, and its sound comes up now.
+    func releaseSound() {
+        holdsSound = false
+        guard fadeInPending, state == .playing else { return }
+        fadeInPending = false
+        Task { await ramp(to: 1, over: 0.5) }
     }
 
     /// Returns once the signal plays or fails, or after `limit`, whichever is first. The ground
@@ -269,9 +280,29 @@ final class PlayerController {
            range.start.seconds.isFinite, range.end.seconds.isFinite {
             window = range.start.seconds...range.end.seconds
         }
-        return CaptionClock(now: now, behindLive: window.map { max(0, $0.upperBound - now) } ?? 0,
-                            programDate: item.currentDate(), window: window)
+        // How far behind the live edge the picture is. The seekable window's end says so on most
+        // streams, but on some it sits at or even ahead of the picture (measured on the owner's
+        // Apple TV, 2026-10-06: 2 s, 0.2 s, -11.8 s), while AVPlayer is in fact holding 18-45 s
+        // back from live (configuredTimeOffsetFromLive) — captions then landed 15-20 s before
+        // the speech. The larger of the two is the one that can be trusted.
+        let windowLag = window.map { max(0, $0.upperBound - now) } ?? 0
+        let offset = item.configuredTimeOffsetFromLive.seconds
+        let behind = max(windowLag, offset.isFinite ? offset : 0)
+        return CaptionClock(now: now, behindLive: behind, programDate: item.currentDate(), window: window)
     }
+
+    #if DEBUG
+    /// For measuring how far behind real time the picture plays: the seekable window's end, the
+    /// playlist's programme date, and AVPlayer's own offset from the live edge.
+    var clockReport: String {
+        guard let item = player.currentItem else { return "no item" }
+        let now = player.currentTime().seconds
+        let end = item.seekableTimeRanges.last?.timeRangeValue.end.seconds ?? .nan
+        let pd = item.currentDate().map { Date().timeIntervalSince($0) } ?? .nan
+        return String(format: "behindSeekableEnd=%.1f programDateLag=%.1f configuredOffset=%.1f recommendedOffset=%.1f",
+                      end - now, pd, item.configuredTimeOffsetFromLive.seconds, item.recommendedTimeOffsetFromLive.seconds)
+    }
+    #endif
 
     /// Holds the picture further back, so a caption lands with the speech (the site's resync).
     func seekBack(by seconds: Double) {
@@ -320,7 +351,7 @@ final class PlayerController {
         case .playing:
             timeoutTask?.cancel()
             state = .playing
-            if fadeInPending {
+            if fadeInPending, !holdsSound {
                 fadeInPending = false
                 Task { await ramp(to: 1, over: 0.5) }
             }

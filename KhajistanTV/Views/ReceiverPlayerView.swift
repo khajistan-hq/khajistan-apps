@@ -14,7 +14,11 @@ struct ReceiverPlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var controller = PlayerController()
+    /// Two signals: the one on screen, and the next one tuning out of sight and out of hearing
+    /// until the cut. Each keeps its own layer, so the cut is a change of which layer shows.
+    @State private var playerA = PlayerController()
+    @State private var playerB = PlayerController()
+    @State private var aIsFront = true
     @State private var current: Channel
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
     /// press steps on from here, not from the channel still on screen.
@@ -29,6 +33,11 @@ struct ReceiverPlayerView: View {
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
 
+    /// The signal on screen, which everything on the screen reads.
+    private var controller: PlayerController { aIsFront ? playerA : playerB }
+    /// The signal a channel change tunes, behind the one on screen.
+    private var incoming: PlayerController { aIsFront ? playerB : playerA }
+
     init(channel: Channel, list: [Channel]) {
         self.list = list
         _current = State(initialValue: channel)
@@ -42,8 +51,12 @@ struct ReceiverPlayerView: View {
             // A picture that does not fill the screen sits on black, whatever the skin (owner,
             // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: controller.player)
+            PlayerLayerView(player: playerA.player)
                 .ignoresSafeArea()
+                .opacity(aIsFront ? 1 : 0)
+            PlayerLayerView(player: playerB.player)
+                .ignoresSafeArea()
+                .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
             // front of the channel's name. The band says live radio; the centre carries the name.
             DancerLayer(controller: controller) {
@@ -73,6 +86,7 @@ struct ReceiverPlayerView: View {
             overlay(palette)
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
+            PigeonOverlayLayer(overlay: model.pigeon)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
@@ -107,6 +121,7 @@ struct ReceiverPlayerView: View {
             let n = UserDefaults.standard.integer(forKey: "kjautochange")
             for _ in 0..<n {
                 try? await Task.sleep(for: .seconds(10))
+                print("KJCLOCK \(current.id) \(controller.clockReport)")
                 if Task.isCancelled { return }
                 step(by: 1)
             }
@@ -217,19 +232,22 @@ struct ReceiverPlayerView: View {
 
     // MARK: - Tuning
 
-    /// Stops what is playing, resolves the channel's carrier now and plays it. A tuning the
-    /// viewer has already moved on from is cancelled and says nothing.
-    private func tune(_ target: Channel) {
+    /// Resolves the channel's carrier and plays it on the signal on screen, or, for a channel
+    /// change, on the one behind it, silent until the cut. A tuning the viewer has already moved
+    /// on from is cancelled and says nothing.
+    private func tune(_ target: Channel, behind: Bool = false) {
         tuneTask?.cancel()
-        controller.stop()
-        controller.state = .tuning
-        current = target
+        let player = behind ? incoming : controller
+        player.stop()
+        player.holdsSound = behind
+        player.state = .tuning
+        if !behind { current = target }
         wake()
         tuneTask = Task {
             do {
                 let url = try await model.receiver.resolve(target)
                 try Task.checkCancellation()
-                controller.attach(
+                player.attach(
                     url: url,
                     seekTo: nil,
                     title: target.name,
@@ -240,10 +258,10 @@ struct ReceiverPlayerView: View {
                     // on AVPlayer and has no dancer.
                     live: target.activeStream?.format != "hls" && !url.path.lowercased().hasSuffix(".m3u8")
                 )
-                model.captions.attach(target, player: controller)
+                if !behind { model.captions.attach(target, player: player) }
             } catch {
                 if Task.isCancelled { return }
-                controller.state = .failed(error.localizedDescription)
+                player.state = .failed(error.localizedDescription)
             }
         }
     }
@@ -261,7 +279,6 @@ struct ReceiverPlayerView: View {
         guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
         let target = list[(position + delta + list.count) % list.count]
         destination = target
-        model.clips.skip()
         changeTask?.cancel()
         changeTask = Task { await change(to: target) }
     }
@@ -276,17 +293,63 @@ struct ReceiverPlayerView: View {
         model.clips.uncover()
     }
 
-    /// The wing crosses and holds while the old sound fades, the new channel is tuned behind it,
-    /// the wing leaves, and the picture cuts in as its sound fades up. The video never fades.
+    /// The pigeon flies over the picture while the next channel tunes behind it, out of sight and
+    /// silent; the channel hard-cuts at the moment the bird covers the most of the screen, or the
+    /// moment the new one plays if that is later, and only the sound fades (owner, 2026-10-06).
+    /// A channel known to take 8 s or more gets a long flight; one that outlasts its flight gets
+    /// another. A press during a change retunes behind the bird already flying.
     private func change(to target: Channel) async {
-        async let quiet: Void = controller.fadeOut()
-        await model.clips.play(.wingIn, holdLastFrame: true)
-        await quiet
-        // A newer press, or leaving, cancelled this one while the wing was crossing.
-        guard !Task.isCancelled else { return }
-        tune(target)
+        let outgoing = controller, next = incoming, pigeon = model.pigeon
+        let started = ContinuousClock.now
+        var flight = pigeon.current
+        if !pigeon.isFlying, !reduceMotion,
+           let pick = pigeon.pick(expected: TuneTimes.expected(target.id, fallback: target.mediaType == "radio" ? 1.5 : 2.5)) {
+            await pigeon.arm(pick)
+            guard !Task.isCancelled else { return }
+            pigeon.start()
+            flight = pick
+        }
+        async let quiet: Void = outgoing.fadeOut()
+        tune(target, behind: true)
         destination = nil
-        await model.clips.play(.wingOut)
+        while !Task.isCancelled {
+            switch next.state {
+            case .playing, .failed:
+                // Ready: cut now, unless the bird is still on its way to covering the screen.
+                if let flight, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut { break }
+                cut(to: target, from: outgoing, into: next, tookSince: started)
+                await quiet
+                return
+            default:
+                // Still tuning and the bird has gone: another short flight.
+                if !pigeon.isFlying, !reduceMotion, let more = pigeon.pick(expected: 0) {
+                    await pigeon.arm(more)
+                    if Task.isCancelled { return }
+                    pigeon.start()
+                    flight = more
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+        }
+    }
+
+    /// The hard cut: the new signal's layer shows in the same frame the old one goes, the old
+    /// stops, and the new one's sound comes up.
+    private func cut(to target: Channel, from outgoing: PlayerController, into next: PlayerController, tookSince started: ContinuousClock.Instant) {
+        if next.state == .playing {
+            let took = ContinuousClock.now - started
+            TuneTimes.record(target.id, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
+        }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            aIsFront.toggle()
+            current = target
+        }
+        outgoing.stop()
+        next.releaseSound()
+        model.captions.attach(target, player: next)
+        wake()
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
@@ -295,8 +358,10 @@ struct ReceiverPlayerView: View {
         changeTask?.cancel()
         hideTask?.cancel()
         model.captions.detach()
-        controller.stop()
+        playerA.stop()
+        playerB.stop()
         model.clips.clear()
+        model.pigeon.clear()
     }
 
     /// Shows the overlay. Once the signal is playing it hides again after 2.6 seconds without

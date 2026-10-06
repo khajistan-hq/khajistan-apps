@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from greykey import frames, probe, key
 
 TIERS = {"2160": (3840, 2160), "1080": (1920, 1080)}
+OVERLAY_TIERS = {"1080": (1920, 1080), "720": (1280, 720)}
 # Kept in step with Skin.groundHex in KhajistanTV/Core/Sky.swift.
 SKINS = {"day": (0xF3, 0xFB, 0x04), "grove": (0x18, 0x64, 0x09), "smut": (0xC1, 0x1B, 0x6B)}
 CODEC = {
@@ -114,16 +115,28 @@ def main(src, out_dir, name, ending=None):
     B = np.where((chroma(end) <= chroma(med))[..., None], end, med)
     del picks, lasts
     encs = {}
-    tiers = {t: s for t, s in TIERS.items() if s[0] <= w}
+    # KJ_OVERLAY=1: the bird alone, HEVC with alpha (premultiplied), to fly over the live picture
+    # while the channel cuts behind it (owner, 2026-10-06: "hard cut ... and the pigeon
+    # transition on it"); plus flight-<name>.json with its length and the frame where the bird
+    # covers the most of the screen, which is where the app cuts.
+    overlay = os.environ.get("KJ_OVERLAY") == "1"
+    tiers = {t: s for t, s in (OVERLAY_TIERS if overlay else TIERS).items() if s[0] <= w}
     for tier, (tw, th) in tiers.items():
+        if overlay:
+            path = os.path.join(out_dir, f"flight-{name}-alpha-{tier}.mov")
+            encs[tier, "alpha"] = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
+                "-s", f"{tw}x{th}", "-r", "24", "-i", "-", "-c:v", "hevc_videotoolbox", "-alpha_quality", "0.9",
+                "-q:v", "75", "-tag:v", "hvc1", "-pix_fmt", "bgra", "-an", path], stdin=subprocess.PIPE)
+            continue
         for skin in SKINS:
             path = os.path.join(out_dir, f"flight-{name}-{skin}-{tier}.mp4")
             encs[tier, skin] = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
                 "-s", f"{tw}x{th}", "-r", "24", "-i", "-", *CODEC[tier], "-pix_fmt", "yuv420p",
                 "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709",
                 "-movflags", "+faststart", "-an", path], stdin=subprocess.PIPE)
-    grounds = {k: np.array(v, np.float32) for k, v in SKINS.items()}
+    grounds = {} if overlay else {k: np.array(v, np.float32) for k, v in SKINS.items()}
     order = {k: n for n, k in enumerate(keep)}
+    cover = []
     for i, C in enumerate(frames(src, w, h)):
         if i > keep[-1]: break
         if i not in order: continue
@@ -131,6 +144,19 @@ def main(src, out_dir, name, ending=None):
         # frame's own backdrop is used.
         Bf = frame_plate(C) if ending == "covered" else None
         P, a = key(C, B if Bf is None else Bf)
+        if ending == "covered":
+            # Near the lens the wing's pale feathers read as backdrop and let the picture through
+            # (2026-10-06). Backdrop always reaches the frame's edge; a hole enclosed by the bird
+            # is feathers, so it is filled solid.
+            solid = (a > 0.5).astype(np.uint8)
+            outside = solid.copy()
+            mask = np.zeros((h + 2, w + 2), np.uint8)
+            for x, y in [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)] + [(x, 0) for x in range(0, w, 64)] + [(x, h - 1) for x in range(0, w, 64)] + [(0, y) for y in range(0, h, 64)] + [(w - 1, y) for y in range(0, h, 64)]:
+                if outside[y, x] == 0: cv2.floodFill(outside, mask, (x, y), 2)
+            # The bird's inside, a few pixels in from its edge, is solid; the edge keeps its softness.
+            inner = cv2.erode((outside != 2).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+            a = np.where(inner, 1.0, a).astype(np.float32)
+            P = np.where(inner[..., None], C.astype(np.float32), P)
         if match is not None: P = match(P, a)
         if i % 20 == 0: print(f"  {name}: {i}/{last}", flush=True)
         # A flight that is still on the edge at its last frame fades over its last 6 frames.
@@ -138,17 +164,30 @@ def main(src, out_dir, name, ending=None):
         if stuck and tail < 6:
             fade = (tail + 1) / 7.0
             P, a = P * fade, a * fade
+        cover.append(float(a.mean()))
         for tier, (tw, th) in tiers.items():
             if (tw, th) == (w, h): Pt, at = P, a
             else:
                 Pt = cv2.resize(P.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
                 at = cv2.resize(a.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
+            if overlay:
+                rgba = np.dstack([Pt, at * 255])
+                encs[tier, "alpha"].stdin.write(np.clip(rgba + 0.5, 0, 255).astype(np.uint8).tobytes())
             for skin, g in grounds.items():
                 # P is premultiplied: the ground shows through by what the bird leaves uncovered.
                 img = Pt + g * (1 - at[..., None])
                 encs[tier, skin].stdin.write(np.clip(img + 0.5, 0, 255).astype(np.uint8).tobytes())
     for e in encs.values():
         e.stdin.close(); e.wait()
+    if overlay:
+        import json
+        # The last frame within a tenth of the most the bird covers: a flight that opens and
+        # closes on the wing cuts at the closing wing, which the new channel has had time to reach.
+        top = max(cover)
+        peak = max(i for i, c in enumerate(cover) if c >= 0.9 * top)
+        json.dump({"length": len(cover) / 24, "cut": peak / 24, "cutCover": round(cover[peak], 3)},
+                  open(os.path.join(out_dir, f"flight-{name}.json"), "w"))
+        print(f"{name}: cut at {peak / 24:.2f}s, bird covers {cover[peak] * 100:.0f}% there", flush=True)
     print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {total - len(keep)} trimmed at the end), {w}x{h} -> {', '.join(tiers)}", flush=True)
 
 if __name__ == "__main__":

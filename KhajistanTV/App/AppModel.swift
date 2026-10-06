@@ -26,6 +26,8 @@ final class AppModel {
     let films: FilmStore
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
+    /// The pigeon over the live picture at a Receiver channel change.
+    let pigeon = PigeonOverlay()
     /// Live captions on the receiver's player. One at a time, as there is one player at a time.
     let captions: LiveCaptionSession
 

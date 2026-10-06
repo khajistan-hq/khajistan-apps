@@ -160,7 +160,19 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(focusedID(app).hasPrefix("tile-"), "\(skin): a tile takes focus")
             press(.right, app: app)
             kjPause(1)
-            shot("\(skin)-8-picsvids", app)
+            shot("pv-\(skin)-1-shelves", app)
+            press(.down, app: app)
+            XCTAssertTrue(focusedID(app).hasPrefix("tile-"), "\(skin): down reaches the next region's shelf, got \(focusedID(app))")
+            kjPause(2)
+            shot("pv-\(skin)-2-second-shelf", app)
+            press(.down, times: 2, app: app)
+            kjPause(2)
+            shot("pv-\(skin)-3-lower-shelves", app)
+            // The one filter, above the shelves: Videos narrows every shelf.
+            XCTAssertTrue(kjFocus(app.buttons["pnvkind-video"], app: app), "\(skin): Videos takes focus")
+            XCUIRemote.shared.press(.select)
+            kjPause(8)
+            shot("pv-\(skin)-4-videos", app)
             app.terminate()
         }
     }

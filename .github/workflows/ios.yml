@@ -53,9 +53,20 @@ jobs:
               output.write('udid=' + device['udid'] + '\n')
           PY
       - name: Boot simulator before UI automation
+        # `simctl boot` hung for 29 minutes with no output on macos-15 (2026-10-06, three runs
+        # in a row, same image/Xcode/device as the 2026-09-14 run that booted in 20 s). Boot
+        # through bootstatus -b under a 10-minute alarm, and try once more after a shutdown.
         run: |
-          xcrun simctl boot '${{ steps.simulator.outputs.udid }}'
-          xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
+          udid='${{ steps.simulator.outputs.udid }}'
+          for attempt in 1 2; do
+            if perl -e 'alarm shift; exec @ARGV' 600 xcrun simctl bootstatus "$udid" -b; then
+              echo "booted on attempt $attempt"; exit 0
+            fi
+            echo "boot attempt $attempt did not finish; shutting down and retrying" >&2
+            xcrun simctl shutdown "$udid" || true
+            sleep 15
+          done
+          echo 'simulator did not boot in two attempts' >&2; exit 1
       - name: Build and test iOS app
         run: |
           set -euo pipefail

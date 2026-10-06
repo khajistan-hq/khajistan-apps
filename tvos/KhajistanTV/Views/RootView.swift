@@ -28,6 +28,11 @@ struct RootView: View {
                 .focusSection()
         }
         .background(palette.ground.ignoresSafeArea())
+        #if DEBUG
+        .overlay(alignment: .bottomTrailing) {
+            if UserDefaults.standard.bool(forKey: "kjframemeter") { FrameMeterLabel() }
+        }
+        #endif
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .tint(palette.accent)

@@ -16,12 +16,38 @@ struct RegionMapView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = RegionMapLayout(map: map, size: proxy.size)
-            Canvas { context, _ in
-                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted).paint(&context)
+            let key = RegionMapLayout.key(map, size: proxy.size)
+            let layout = RegionMapLayout.cached(map, size: proxy.size, key: key)
+            ZStack {
+                // The map itself is drawn once and kept as one picture; moving focus along the
+                // strip redraws only the outline and the plate on top (2026-10-06: every step
+                // redrew every shape, hatch and haloed label, about one late frame per step on
+                // the owner's Apple TV HD).
+                RegionMapBase(map: map, layout: layout, palette: palette, key: key, skin: palette.ground.description)
+                    .equatable()
+                Canvas { context, _ in
+                    RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted, mode: .focus).paint(&context)
+                }
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+private struct RegionMapBase: View, Equatable {
+    let map: ComposedMap
+    let layout: RegionMapLayout
+    let palette: Palette
+    let key: String
+    let skin: String
+
+    static func == (a: Self, b: Self) -> Bool { a.key == b.key && a.skin == b.skin }
+
+    var body: some View {
+        Canvas { context, _ in
+            RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: nil, mode: .base).paint(&context)
+        }
+        .drawingGroup()
     }
 }
 
@@ -76,6 +102,21 @@ private struct RegionMapLabel: Identifiable {
 /// Where the map sits in its frame, and where each label stands. A value, so the Canvas and the
 /// focus buttons are built from the same answer.
 private struct RegionMapLayout {
+    /// Measuring every label is the costly part; a map at a size is laid out once.
+    @MainActor private static var cache: [String: RegionMapLayout] = [:]
+
+    static func key(_ map: ComposedMap, size: CGSize) -> String {
+        "\(map.regions.map(\.id).joined(separator: ","))|\(Int(size.width))x\(Int(size.height))"
+    }
+
+    @MainActor static func cached(_ map: ComposedMap, size: CGSize, key: String) -> RegionMapLayout {
+        if let hit = cache[key] { return hit }
+        let made = RegionMapLayout(map: map, size: size)
+        if cache.count > 8 { cache.removeAll() }
+        cache[key] = made
+        return made
+    }
+
     let size: CGSize
     /// Points per viewBox unit. The viewBox is fitted whole into the frame and centred.
     let scale: CGFloat
@@ -197,11 +238,34 @@ private struct RegionMapPainter {
     let layout: RegionMapLayout
     let palette: Palette
     let focusedID: String?
+    /// The map (shapes and every label), or only what focus adds over it (outline and plate).
+    let mode: Mode
+
+    enum Mode { case base, focus }
 
     func paint(_ context: inout GraphicsContext) {
         guard layout.scale > 0 else { return }
-        paintShapes(context)
-        paintLabels(context)
+        switch mode {
+        case .base:
+            paintShapes(context)
+            paintLabels(context)
+        case .focus:
+            paintOutline(context)
+            if let focusedID, let label = layout.labels.first(where: { $0.region.id == focusedID }) {
+                paintPlate(for: label, in: context)
+            }
+        }
+    }
+
+    private func paintOutline(_ context: GraphicsContext) {
+        guard let focusedID, let region = map.regions.first(where: { $0.id == focusedID }) else { return }
+        var world = context
+        world.translateBy(x: layout.offset.x, y: layout.offset.y)
+        world.scaleBy(x: layout.scale, y: layout.scale)
+        world.stroke(
+            Self.path(region.outline), with: .color(palette.onBand),
+            style: StrokeStyle(lineWidth: 3.5, lineJoin: .round)
+        )
     }
 
     // MARK: Shapes, drawn in viewBox units
@@ -227,12 +291,6 @@ private struct RegionMapPainter {
             world.stroke(shape, with: .color(palette.ground), style: gap)
         }
 
-        if let focusedID, let region = map.regions.first(where: { $0.id == focusedID }) {
-            world.stroke(
-                Self.path(region.outline), with: .color(palette.onBand),
-                style: StrokeStyle(lineWidth: 3.5, lineJoin: .round)
-            )
-        }
     }
 
     /// An extension is half there, and so is a region that opens nothing.
@@ -281,12 +339,9 @@ private struct RegionMapPainter {
     // MARK: Labels, drawn in points
 
     private func paintLabels(_ context: GraphicsContext) {
-        for label in layout.labels where label.isDrawn && label.region.id != focusedID {
+        // Every label: the focused one's plate is drawn over it, on the layer above.
+        for label in layout.labels where label.isDrawn {
             paintLabel(label, in: context)
-        }
-        // The focused label last, on its plate, over whatever it overlaps.
-        if let focusedID, let label = layout.labels.first(where: { $0.region.id == focusedID }) {
-            paintPlate(for: label, in: context)
         }
     }
 

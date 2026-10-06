@@ -12,7 +12,6 @@ struct ReceiverView: View {
     @State private var playingMix: Mix?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
-    @FocusState private var focusedRegion: String?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -82,7 +81,6 @@ struct ReceiverView: View {
                 .padding(.bottom, 20)
             }
             .kjTopFade()
-            .defaultFocus($focusedRegion, "indus")
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {
@@ -136,62 +134,7 @@ struct ReceiverView: View {
     // MARK: - Map
 
     private var mapArea: some View {
-        Group {
-            if let mapError {
-                failure(mapError)
-            } else if let composed {
-                VStack(alignment: .leading, spacing: 24) {
-                    RegionMapView(map: composed, highlighted: focusedRegion)
-                        .frame(height: 600)
-                    regionStrip(composed)
-                }
-                // Room for a focused plate's lift at the top edge.
-                .padding(.top, 8)
-            } else {
-                TuningLoader("Loading the receiver\u{2026}")
-                    .frame(maxWidth: .infinity, minHeight: 600)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .focusSection()
-        .defaultFocus($focusedRegion, "indus")
-    }
-
-    /// Every region that opens channels, west to east by where it sits on the map, so a press
-    /// right on the remote moves east across the map. Focus here is what the map highlights.
-    private func regionStrip(_ map: ComposedMap) -> some View {
-        let regions = map.regions
-            .filter(\.opensChannels)
-            .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 4) {
-                ForEach(regions) { region in
-                    Button {
-                        open(region)
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(region.label).kjKicker()
-                            if let live = region.live {
-                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
-                            }
-                        }
-                    }
-                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
-                    .focused($focusedRegion, equals: region.id)
-                    .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
-                }
-            }
-            // The plates' padding is pulled back so the first label sits on the map's margin.
-            .padding(.horizontal, -22)
-            .padding(.vertical, 12)
-        }
-        .scrollClipDisabled()
-        // Clipped on the left, so a strip scrolled east does not run over the sidebar.
-        .mask {
-            Rectangle().padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
-        }
-        .frame(height: 96)
+        AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open)
     }
 
     // MARK: - Shuffle
@@ -329,5 +272,92 @@ struct ReceiverView: View {
             if Task.isCancelled { return }
             mapError = error.localizedDescription
         }
+    }
+}
+
+/// The map and the strip of regions under it, with the strip's focus. Kept in a view of its own
+/// so a step along the strip re-evaluates only this, not the whole front with its shelves of
+/// cards (2026-10-06: every step re-evaluated the page, measured as late frames on the owner's
+/// Apple TV HD).
+private struct AtlasPanel: View {
+    let composed: ComposedMap?
+    let mapError: String?
+    let failure: (String) -> AnyView
+    let open: (MapRegion) -> Void
+    @FocusState private var focusedRegion: String?
+
+    var body: some View {
+        Group {
+            if let mapError {
+                failure(mapError)
+            } else if let composed {
+                VStack(alignment: .leading, spacing: 24) {
+                    RegionMapView(map: composed, highlighted: focusedRegion)
+                        .frame(height: 600)
+                    regionStrip(composed)
+                }
+                // Room for a focused plate's lift at the top edge.
+                .padding(.top, 8)
+            } else {
+                TuningLoader("Loading the receiver\u{2026}")
+                    .frame(maxWidth: .infinity, minHeight: 600)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .focusSection()
+        .defaultFocus($focusedRegion, "indus")
+        #if DEBUG
+        // `-kjautowalk YES` steps focus along the region strip, for measuring on a device with
+        // no one at the remote (FrameMeter prints how many frames come late meanwhile).
+        .task(id: composed == nil) {
+            guard UserDefaults.standard.bool(forKey: "kjautowalk"), let composed else { return }
+            let ids = composed.regions.filter(\.opensChannels)
+                .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }.map(\.id)
+            try? await Task.sleep(for: .seconds(4))
+            print("KJWALK start")
+            for id in ids + ids.reversed() {
+                focusedRegion = id
+                try? await Task.sleep(for: .milliseconds(300))
+            }
+            print("KJWALK end")
+        }
+        #endif
+    }
+
+    /// Every region that opens channels, west to east by where it sits on the map, so a press
+    /// right on the remote moves east across the map. Focus here is what the map highlights.
+    private func regionStrip(_ map: ComposedMap) -> some View {
+        let regions = map.regions
+            .filter(\.opensChannels)
+            .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 4) {
+                ForEach(regions) { region in
+                    Button {
+                        open(region)
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 12) {
+                            Text(region.label).kjKicker()
+                            if let live = region.live {
+                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
+                            }
+                        }
+                    }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+                    .focused($focusedRegion, equals: region.id)
+                    .accessibilityIdentifier("region-\(region.id)")
+                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                }
+            }
+            // The plates' padding is pulled back so the first label sits on the map's margin.
+            .padding(.horizontal, -22)
+            .padding(.vertical, 12)
+        }
+        .scrollClipDisabled()
+        // Clipped on the left, so a strip scrolled east does not run over the sidebar.
+        .mask {
+            Rectangle().padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
+        }
+        .frame(height: 96)
     }
 }

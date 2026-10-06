@@ -591,95 +591,12 @@ private struct SwitchLabel: View {
 
 // MARK: - The pigeon
 
-/// An animated GIF or WebP from the app bundle, played by ImageIO. Reduce Motion, or a file
-/// ImageIO will not animate, shows the first frame; a file that is not there draws nothing.
-struct AnimatedImage: View {
-    let resource: String
-    let ext: String
-    @State private var currentFrame: CGImage?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    init(resource: String, withExtension ext: String) {
-        self.resource = resource
-        self.ext = ext
-    }
-
-    var body: some View {
-        content
-            // The id restarts the task when Reduce Motion changes while the image is on screen.
-            .task(id: "\(resource).\(ext).\(reduceMotion)") { await run() }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let currentFrame {
-            Image(decorative: currentFrame, scale: 1)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-        } else {
-            Color.clear
-        }
-    }
-
-    private func run() async {
-        guard let url = Bundle.main.url(forResource: resource, withExtension: ext) else {
-            currentFrame = nil
-            return
-        }
-        if reduceMotion || UIAccessibility.isReduceMotionEnabled {
-            currentFrame = Self.firstFrame(of: url)
-            return
-        }
-        let stopper = Stopper()
-        // Runs when the task ends: the view left the screen, or this function returned early.
-        defer { stopper.stop() }
-        let status = CGAnimateImageAtURLWithBlock(url as CFURL, nil) { _, image, stop in
-            if stopper.isStopped {
-                stop.pointee = true
-                return
-            }
-            DispatchQueue.main.async {
-                if !stopper.isStopped { currentFrame = image }
-            }
-        }
-        if status != noErr {
-            currentFrame = Self.firstFrame(of: url)
-            return
-        }
-        // ImageIO keeps animating until the block says stop, so this task waits for its own
-        // cancellation and the `defer` above tells the block.
-        while !Task.isCancelled {
-            try? await Task.sleep(for: .seconds(3600))
-        }
-    }
-
-    private static func firstFrame(of url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
-    }
-}
-
-/// The flag the animation block reads. It is written from the task and read from ImageIO's
-/// callback, so it is behind a lock.
-private final class Stopper: @unchecked Sendable {
-    private let lock = NSLock()
-    private var stopped = false
-
-    var isStopped: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return stopped
-    }
-
-    func stop() {
-        lock.lock()
-        stopped = true
-        lock.unlock()
-    }
-}
-
-/// The Khajistan pigeon, the 1080px master, still when Reduce Motion is on.
+/// The Khajistan pigeon, from the 1080px master, still when Reduce Motion is on. Its frames are
+/// decoded once, off the main thread, at the size drawn, and played by a UIImageView, so Core
+/// Animation steps them and the main thread does nothing per frame. Until 2026-10-06 each of its
+/// 133 frames went through the main thread as a full 1080px picture, and the home screen ran at
+/// about 32 frames a second with nothing moving on the owner's Apple TV HD ("a slow lag when I
+/// scroll").
 struct PigeonMark: View {
     let size: CGFloat
 
@@ -688,9 +605,73 @@ struct PigeonMark: View {
     }
 
     var body: some View {
-        AnimatedImage(resource: "pigeon", withExtension: "gif")
+        PigeonFrames(pixels: Int(size * 2))
             .frame(width: size, height: size)
             .accessibilityHidden(true)
+    }
+}
+
+private struct PigeonFrames: UIViewRepresentable {
+    let pixels: Int
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeUIView(context: Context) -> UIImageView {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFit
+        view.clipsToBounds = true
+        view.isUserInteractionEnabled = false
+        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(.defaultLow, for: .vertical)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        Task { @MainActor in
+            let frames = await PigeonFrameCache.shared.frames(pixels: pixels)
+            guard let first = frames.images.first else { return }
+            if reduceMotion || UIAccessibility.isReduceMotionEnabled {
+                view.image = first
+            } else {
+                view.image = UIImage.animatedImage(with: frames.images, duration: frames.duration)
+            }
+        }
+        return view
+    }
+
+    func updateUIView(_ view: UIImageView, context: Context) {}
+
+    /// The size it is given, never the picture's own: a UIImageView reports its image's size and
+    /// drew the 72pt mark at the frames' pixel size over the wordmark.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIImageView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 72, height: proposal.height ?? 72)
+    }
+}
+
+/// The GIF decoded once per size, shared by every pigeon mark.
+private actor PigeonFrameCache {
+    static let shared = PigeonFrameCache()
+    private var made: [Int: (images: [UIImage], duration: TimeInterval)] = [:]
+
+    func frames(pixels: Int) -> (images: [UIImage], duration: TimeInterval) {
+        if let hit = made[pixels] { return hit }
+        guard let url = Bundle.main.url(forResource: "pigeon", withExtension: "gif"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return ([], 0) }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: pixels,
+        ]
+        var images: [UIImage] = []
+        var duration: TimeInterval = 0
+        for index in 0..<CGImageSourceGetCount(source) {
+            guard let cg = CGImageSourceCreateThumbnailAtIndex(source, index, options as CFDictionary) else { continue }
+            images.append(UIImage(cgImage: cg))
+            let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+            let gif = props?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
+            let delay = (gif?[kCGImagePropertyGIFUnclampedDelayTime] as? Double) ?? (gif?[kCGImagePropertyGIFDelayTime] as? Double) ?? 0.04
+            duration += delay > 0.011 ? delay : 0.04
+        }
+        made[pixels] = (images, duration)
+        return (images, duration)
     }
 }
 

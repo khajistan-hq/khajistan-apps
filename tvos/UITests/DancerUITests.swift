@@ -88,7 +88,7 @@ final class DancerUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        kjFocusStrip(app)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
         for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
             XCUIRemote.shared.press(.right)
         }

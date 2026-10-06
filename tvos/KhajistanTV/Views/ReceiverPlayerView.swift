@@ -106,6 +106,9 @@ struct ReceiverPlayerView: View {
         }
         .onPlayPauseCommand {
             wake()
+            // During a change the channel coming in is the one that matters; retuning the one
+            // going out would cancel it and leave the new channel on "Connecting" for good.
+            guard destination == nil else { return }
             if controller.state == .playing {
                 controller.pause()
             } else {
@@ -318,6 +321,7 @@ struct ReceiverPlayerView: View {
                 if !behind { model.captions.attach(target, player: player) }
             } catch {
                 if Task.isCancelled { return }
+                PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
                 player.state = .failed(PlayerController.unreachable)
             }
         }
@@ -357,7 +361,6 @@ struct ReceiverPlayerView: View {
     /// another. A press during a change retunes behind the bird already flying.
     private func change(to target: Channel) async {
         let outgoing = controller, next = incoming, pigeon = model.pigeon
-        let started = ContinuousClock.now
         var flight = pigeon.current
         if !pigeon.isFlying, !reduceMotion,
            let pick = pigeon.pick(expected: TuneTimes.expected(target.id, fallback: target.mediaType == "radio" ? 1.5 : 2.5)) {
@@ -367,7 +370,13 @@ struct ReceiverPlayerView: View {
             flight = pick
         }
         async let quiet: Void = outgoing.fadeOut()
+        let started = ContinuousClock.now
         tune(target, behind: true)
+        // The channel's own tune time, from now to its first frame; never the wait for the bird.
+        // Read live (State storage), so a press on to another channel stops the timing.
+        TuneTimes.recordWhenPlaying(target.id, player: next, since: started) {
+            destination?.id == target.id || current.id == target.id
+        }
         // `destination` stays set until the cut: the channel on screen changes only then, and a
         // press before it must step on from the channel asked for, not the one still showing.
         while !Task.isCancelled {
@@ -398,7 +407,6 @@ struct ReceiverPlayerView: View {
         #if DEBUG
         print("KJCUT \(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
         #endif
-        TuneTimes.recordWhenPlaying(target.id, player: next, since: started)
         var instant = Transaction()
         instant.disablesAnimations = true
         withTransaction(instant) {

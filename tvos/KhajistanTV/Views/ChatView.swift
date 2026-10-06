@@ -89,6 +89,14 @@ struct ChatView: View {
                 if let note {
                     Text(note).kjSmall(faint: true).accessibilityIdentifier("chatNote")
                 }
+                if !ignored.isEmpty {
+                    Button("Show the \(ignored.count) ignored again") {
+                        for handle in ignored { ChatRules.setIgnored(handle, false) }
+                        ignored = ChatRules.ignored()
+                    }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                    .accessibilityIdentifier("chatUnignore")
+                }
             }
         } else {
             VStack(alignment: .leading, spacing: 16) {
@@ -111,6 +119,8 @@ struct ChatView: View {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     if let error = feed?.error {
                         Text(error).kjSmall(faint: true)
+                    } else if shown.isEmpty, feed?.isLoadingOlder == true || feed?.hasLoaded == false {
+                        TuningLoader("Loading the room\u{2026}")
                     } else if shown.isEmpty {
                         Text("No lines in the last 48 hours.").kjSmall(faint: true)
                     }
@@ -162,6 +172,12 @@ struct ChatView: View {
     private var composer: some View {
         if !model.auth.isSignedIn {
             Text("Sign in under Account to write in a room.").kjSmall(faint: true)
+        } else if store.accountUnread {
+            HStack(spacing: 24) {
+                Text("Your account could not be read.").kjBody()
+                Button("Try again") { Task { await store.loadAccount() } }
+                    .buttonStyle(HouseButtonStyle())
+            }
         } else if store.handle == "" {
             HouseInputField("Choose a handle", text: wantHandle) {
                 TextField("", text: $wantHandle)
@@ -196,12 +212,14 @@ struct ChatView: View {
     private func send(as handle: String) {
         guard let feed, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         sending = true
-        let text = draft
+        let text = draft, slug = feed.room.slug
         Task {
             let refusal = await feed.send(text, handle: handle)
-            note = refusal
-            if refusal == nil { draft = "" }
             sending = false
+            // Only the line that was sent is cleared, and only in the room it was sent from.
+            guard room?.slug == slug else { return }
+            note = refusal
+            if refusal == nil, draft == text { draft = "" }
         }
     }
 
@@ -209,6 +227,8 @@ struct ChatView: View {
     private func follow(_ room: ChatRoom?) async {
         feed?.stop()
         note = nil
+        // A draft belongs to the room it was written in.
+        draft = ""
         guard let room else { feed = nil; return }
         let store = store
         let opened = feed?.room == room ? feed! : ChatFeed(room: room, account: { await store.account() })

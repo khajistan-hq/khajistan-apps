@@ -34,8 +34,6 @@ final class PigeonOverlay {
     /// Lift repeated Hover's front-facing hover.
     static let short = ["swerve", "hover"]
     static let long = ["loop", "twirl"]
-    /// Seconds the flight should outlast the expected tune, so the cut lands under the bird.
-    static let margin = 0.5
 
     /// A flight is on screen.
     private(set) var showing = false
@@ -49,7 +47,6 @@ final class PigeonOverlay {
     let renderer = PigeonRenderer()
 
     @ObservationIgnored private var flights: [String: Flight] = [:]
-    @ObservationIgnored private var turn = 0
     @ObservationIgnored private var last: String?
     @ObservationIgnored private var armed: Flight?
     @ObservationIgnored private var ended: Signal?
@@ -68,20 +65,8 @@ final class PigeonOverlay {
     /// to cover it, those within a second of the shortest; when none is, the longest. Turns
     /// through that pool and never repeats the one that flew last.
     func pick(expected: Double) -> Flight? {
-        let pool = Self.pool(from: Array(flights.values), expected: expected)
-        let options = pool.filter { $0.name != last }
-        let list = options.isEmpty ? pool : options
-        guard !list.isEmpty else { return nil }
-        turn += 1
-        return list[turn % list.count]
-    }
-
-    static func pool(from all: [Flight], expected: Double) -> [Flight] {
-        let fits = all.filter { $0.length >= expected + margin }
-        guard let shortest = fits.map(\.length).min() else {
-            return all.sorted { $0.length > $1.length }.prefix(1).map { $0 }
-        }
-        return fits.filter { $0.length <= shortest + 1.0 }.sorted { $0.name < $1.name }
+        let all = (Self.short + Self.long).compactMap { flights[$0] }.map { (name: $0.name, length: $0.length) }
+        return FlightChoice.next(in: FlightChoice.pool(all, expected: expected), after: last).flatMap { flights[$0] }
     }
 
     /// Loads a flight's two videos at their first frame, decoders warmed.
@@ -92,15 +77,23 @@ final class PigeonOverlay {
         renderer.attach(colour: colour, matte: matte)
         colourPlayer.replaceCurrentItem(with: colour)
         mattePlayer.replaceCurrentItem(with: matte)
-        while colour.status == .unknown || matte.status == .unknown { try? await Task.sleep(for: .milliseconds(20)) }
+        // Two seconds at most, and never past a cancellation: a second press must not find this
+        // one still spinning on the main actor and arm the same players over it.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while colour.status == .unknown || matte.status == .unknown {
+            if Task.isCancelled || ContinuousClock.now > deadline { return }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
         guard colour.status == .readyToPlay, matte.status == .readyToPlay else { return }
         async let a: Bool = colourPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         async let b: Bool = mattePlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-        _ = await (a, b)
+        let seeked = await (a, b)
         async let c: Bool = colourPlayer.preroll(atRate: 1)
         async let d: Bool = mattePlayer.preroll(atRate: 1)
-        _ = await (c, d)
-        if colourPlayer.currentItem === colour { armed = flight }
+        let rolled = await (c, d)
+        // Armed only when both are at their first frame and warm, and still the players' items.
+        guard !Task.isCancelled, seeked.0, seeked.1, rolled.0, rolled.1, colourPlayer.currentItem === colour else { return }
+        armed = flight
     }
 
     /// Plays the armed flight over the picture, both videos started on the same host time.
@@ -185,7 +178,9 @@ final class PigeonOverlay {
 /// How long each channel took to tune here, from asking to playing. Kept on the device, a running
 /// average per channel, so a channel known to be slow gets a long flight.
 enum TuneTimes {
-    private static let key = "kj.tuneTimes.v4"
+    /// v5 from 2026-10-06: v4's times included the wait for the bird and inflated every
+    /// channel toward the long flights, so they are not read again.
+    private static let key = "kj.tuneTimes.v5"
 
     static func expected(_ channel: String, fallback: Double) -> Double {
         (UserDefaults.standard.dictionary(forKey: key)?[channel] as? Double) ?? fallback
@@ -194,19 +189,21 @@ enum TuneTimes {
     static func record(_ channel: String, seconds: Double) {
         var all = UserDefaults.standard.dictionary(forKey: key) ?? [:]
         let before = all[channel] as? Double
-        all[channel] = before.map { $0 * 0.5 + seconds * 0.5 } ?? seconds
+        all[channel] = FlightChoice.blend(before, seconds)
         // ponytail: unbounded per-channel dictionary; a few thousand doubles at most.
         UserDefaults.standard.set(all, forKey: key)
     }
 
-    /// Records the time from `since` to the moment `player` plays, which may be after the cut:
-    /// a channel cut in while still tuning is still learned as slow. A failure records nothing.
-    @MainActor static func recordWhenPlaying(_ channel: String, player: PlayerController, since: ContinuousClock.Instant) {
+    /// Called as tuning starts: records the time from `since` to the moment `player` first plays,
+    /// and nothing else, never the wait for the bird to cover the cut. Stops without recording
+    /// when `stillWanted` turns false (the viewer moved on) or the channel fails.
+    @MainActor static func recordWhenPlaying(_ channel: String, player: PlayerController, since: ContinuousClock.Instant,
+                                             stillWanted: @escaping @MainActor () -> Bool) {
         Task { @MainActor in
-            while player.state == .tuning, ContinuousClock.now - since < .seconds(30) {
+            while player.state == .tuning, stillWanted(), ContinuousClock.now - since < .seconds(30) {
                 try? await Task.sleep(for: .milliseconds(100))
             }
-            guard player.state == .playing else { return }
+            guard stillWanted(), player.state == .playing else { return }
             let took = ContinuousClock.now - since
             record(channel, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
         }
@@ -303,7 +300,7 @@ final class PigeonRenderer: NSObject, @unchecked Sendable {
     }
 
     func start() {
-        lock.withLock { lastPTS = -1; frames = 0; skipped = 0; running = true }
+        lock.withLock { lastPTS = -1; frames = 0; skipped = 0; running = true; link?.isPaused = false }
         guard thread == nil else { return }
         let thread = Thread { [weak self] in
             guard let self else { return }
@@ -337,7 +334,8 @@ final class PigeonRenderer: NSObject, @unchecked Sendable {
 
     /// Stops drawing and hides the layer.
     func stop() {
-        lock.withLock { running = false }
+        // The display link sleeps between flights rather than waking 60 times a second for nothing.
+        lock.withLock { running = false; link?.isPaused = true }
         clear()
         DispatchQueue.main.async { [layer] in
             CATransaction.begin()

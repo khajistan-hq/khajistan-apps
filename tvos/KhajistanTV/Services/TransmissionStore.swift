@@ -307,6 +307,8 @@ final class TransmissionStore {
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
     func rejoinLive() async {
+        // A retry asks for a fresh address: the held one may be the one that failed.
+        signed.removeAll()
         await tune(channel: channelNumber)
     }
 

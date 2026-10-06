@@ -9,7 +9,7 @@ final class MapNavigationUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        kjFocusStrip(app)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
         XCTAssertTrue(focused.exists, "a region must take focus")
 
         var visited = Set<String>()

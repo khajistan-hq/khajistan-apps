@@ -5,30 +5,24 @@
   "flights": {
     "across": {
       "role": "change",
-      "model": "kling3_0 mode 4k",
-      "job": "b0ec2b84-a375-4a87-b3bd-311805679d77",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "47ca24bd-fa1e-4744-872e-3249a51dfb2b",
       "start_frame_job": "585677f4-caef-4309-9eb8-d26fba4abc26",
-      "source": "3840x2160 24fps 4.0s",
-      "note": "the website's wing wipe, remade: diagonally across and into the lens, a wing fills the frame, exits top right"
+      "source": "1920x1080 24fps 5.0s",
+      "note": "the website's wing wipe, remade: diagonally across and into the lens, a wing fills the frame, exits top right",
+      "colour_matched": true
     },
     "approach": {
       "role": "change",
-      "model": "kling3_0 mode 4k",
-      "job": "c92a76d2-fbdd-4bde-a37b-c545670049e5",
+      "model": "seedance_2_5 omni_reference 1080p high bitrate",
+      "job": "d6e220b8-4396-47c9-92b5-0fb873f4de18",
       "start_frame_job": "0586ec17-9a64-4855-a2b2-8b975f0a826c",
-      "source": "3840x2160 24fps 5.0s",
-      "note": "straight at the camera, passes over it"
-    },
-    "rise": {
-      "role": "change",
-      "model": "kling3_0 mode 4k",
-      "job": "a05c03b6-0e0a-4a43-8538-20fa2ea5cb9c",
-      "start_frame_media": "e7937e0b-803f-4a7a-b098-231cb5863bd6",
-      "source": "3840x2160 24fps 5.0s",
-      "note": "climbs away from the camera, wings clapped over the back in a raised V: a pigeon's display climb"
+      "source": "1920x1080 24fps 5.0s",
+      "note": "straight at the camera, passes over it",
+      "colour_matched": true
     },
     "twirl": {
-      "role": "wait",
+      "role": "change and wait",
       "model": "seedance_2_5 omni_reference 1080p high bitrate",
       "job": "6a175d43-f64a-4be1-bd3f-32b5699a37c1",
       "start_frame_job": "a69e2715-246e-4e00-949e-e264f2311b3a",
@@ -37,7 +31,7 @@
       "note": "the owner's flamboyant swirling crossing, for a long tune"
     },
     "roller": {
-      "role": "wait",
+      "role": "change and wait",
       "model": "seedance_2_5 omni_reference 1080p high bitrate",
       "job": "6146c9d3-4509-4abb-86ef-d36dba580362",
       "source": "1920x1080 24fps 8.0s",
@@ -45,7 +39,7 @@
       "note": "a Birmingham roller's backward somersaults, wings raised, tumbling like a spinning ball, then away"
     },
     "spiral": {
-      "role": "wait",
+      "role": "change and wait",
       "model": "seedance_2_5 omni_reference 1080p high bitrate",
       "job": "2e9c6cca-ae57-4ef8-9d08-54321f4c3944",
       "start_frame_job": "f40c7f6d-7d2b-4a38-949f-bc7897521ea0",
@@ -53,7 +47,7 @@
       "colour_matched": true
     },
     "display": {
-      "role": "wait",
+      "role": "change and wait",
       "model": "seedance_2_5 omni_reference 1080p high bitrate",
       "job": "ba529ee5-325d-4933-98cd-73d9ff16e7f6",
       "start_frame_media": "e0e858fb-e6b4-40eb-b037-43f890ddb80d",
@@ -68,9 +62,12 @@
     "kling3_0 4k roller 62dc5723-1e07-4795-8622-93352c480634": "frozen for its first four frames, then the 'roll' is a smear of the wings on a bird that keeps its side-on pose.",
     "kling3_0 4k display be25ae06-e810-450f-8966-fa87e0d5c3d8": "ghosted, doubled wings in its third and fourth seconds.",
     "seedance_2_5 roller 536c8539-3d87-4be9-ad4d-f93193ae6677": "a sound roll but the second take (kept) tumbles in place, as a roller does; this one is not refused for a defect and is the spare.",
-    "kling3_0 4k approach 17459310-82fa-4034-b7bd-b6c2a242863c, 468d722e-1ce8-4236-83c8-c62f400312cb": "asked for a sharp close pass over the lens; both hover and fly up and away, never coming nearer than 10% of the frame."
+    "kling3_0 4k approach 17459310-82fa-4034-b7bd-b6c2a242863c, 468d722e-1ce8-4236-83c8-c62f400312cb": "asked for a sharp close pass over the lens; both hover and fly up and away, never coming nearer than 10% of the frame.",
+    "kling3_0 4k across b0ec2b84, approach c92a76d2 (shipped until 2026-10-05 late)": "out of focus whenever the bird is near the lens: bird sharpness fell from ~250 to ~5 over the last 1.5 s of each. Owner: 'the feathers get pixelated and blurry'. Remade in Seedance, which keeps feather barbs at its closest.",
+    "seedance_2_5 across 44d10e93-ca0c-4297-9030-b2b27683f005": "never comes nearer than 11% of the frame: not the 'into us' flight.",
+    "seedance_2_5 approach 49abda56-b528-4569-a27b-806d8a112de7": "fills two-thirds of the frame and lingers there."
   },
-  "credits": "938.25 in all, measured off the Higgsfield balance: 1821.5 before the first generation, 1329.75 after the first five flights, 883.25 after the second round (2026-10-05: two start frames, six takes, two Approach retakes).",
+  "credits": "1178.25 in all, measured off the Higgsfield balance: 1821.5 before the first generation; 1329.75 after the first five flights; 883.25 after the second round; 643.25 after four Seedance remakes of Across and Approach (2026-10-05).",
   "pipeline": "render_flight.py: per-pixel backdrop plate (whichever of end-frames median and flight median is closer to neutral grey), alpha = (C-B).(F-B)/|F-B|^2 with F spread from the solid bird, colourless shadows dropped, colour premultiplied, Seedance plumage Lab-matched to the Kling bird (colour.json, gain capped 1.5); the generator's slow opening retimed to half the clip's median pace (at most 3x) and a close pass over the lens (bird over 60% of the frame, out of focus) at 3x; tail cut where the bird stops moving, a still-on-edge ending faded over 6 frames. Laid on each skin's ground and encoded opaque: H.264 1080 for every flight, HEVC 2160 from a 4K source. HEVC with alpha was dropped 2026-10-05: the Apple TV HD decodes it in software and lost frames while a channel tuned.",
   "removed": {
     "swoop": {
@@ -81,6 +78,15 @@
       "source": "1920x1080 24fps 4.0s",
       "colour_matched": true,
       "why": "owner, 2026-10-05: \"looks like it's swimming and seems 2d\""
+    },
+    "rise": {
+      "role": "change",
+      "model": "kling3_0 mode 4k",
+      "job": "a05c03b6-0e0a-4a43-8538-20fa2ea5cb9c",
+      "start_frame_media": "e7937e0b-803f-4a7a-b098-231cb5863bd6",
+      "source": "3840x2160 24fps 5.0s",
+      "note": "climbs away from the camera, wings clapped over the back in a raised V: a pigeon's display climb",
+      "why": "owner, 2026-10-05: \"i dont like the one that is showing the back and going up\""
     }
   }
 }

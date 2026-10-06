@@ -11,13 +11,14 @@ import UIKit
 /// movements like twirling in air and pigeon showmanship".
 ///
 /// - A **change** flight carries every channel change, in rotation, so no two changes in a row
-///   look the same: Across (the website's wing wipe, remade), Approach (into us), Rise (away
-///   from us, wings clapped over the back). Swoop was removed (owner, 2026-10-05: "looks like
-///   it's swimming and seems 2D").
+///   look the same: the two "into us" flights (Across, the website's wing wipe remade, and
+///   Approach) alternate with the four flamboyant ones (Twirl, Display, Spiral, Roller). Owner,
+///   2026-10-05: "why are you not using the twirl ones you made?" — they had been held for slow
+///   signals only, so a fast channel never showed them. Swoop and Rise were removed by the owner.
+///   A press during a flight ends it, so a long one never holds up someone changing channels.
 /// - A **wait** flight crosses the held ground when the next signal is still tuning after the
-///   change flight has gone — Twirl, Roller (a roller pigeon's backward somersaults), Spiral,
-///   Display (wing-clapping display flight) in turn — until the picture is ready; the picture
-///   then cuts in.
+///   change flight has gone, the flamboyant four in turn, never the one that just flew, until
+///   the picture is ready; the picture then cuts in.
 ///
 /// Each flight is ordinary opaque video, one file per skin, so every device decodes it in
 /// hardware: HEVC with alpha dropped frames by the third on the Apple TV HD (2026-10-05). The
@@ -27,9 +28,9 @@ import UIKit
 @MainActor @Observable
 final class StationClips {
     enum Flight: String, CaseIterable {
-        case across, approach, rise, twirl, roller, spiral, display
-        static let change: [Flight] = [.across, .approach, .rise]
-        static let wait: [Flight] = [.twirl, .roller, .spiral, .display]
+        case across, approach, twirl, roller, spiral, display
+        static let change: [Flight] = [.across, .twirl, .approach, .display, .spiral, .roller]
+        static let wait: [Flight] = [.roller, .spiral, .twirl, .display]
     }
 
     /// Which size of each flight this device plays: H.264 at 1080, or HEVC at 2160 on a 4K
@@ -84,6 +85,8 @@ final class StationClips {
     @ObservationIgnored private var latch: Latch?
     @ObservationIgnored private var armedChange: Flight?
     @ObservationIgnored private var armedWait: Flight?
+    /// The flight on screen last, so a wait flight never repeats the change flight before it.
+    @ObservationIgnored private var lastFlown: Flight?
 
     init() {
         for player in [changePlayer, waitPlayer] {
@@ -168,7 +171,12 @@ final class StationClips {
             // second bird is wanted.
             try? await Task.sleep(for: .milliseconds(600))
             while !Task.isCancelled, let self, mine == self.generation {
-                guard !UIAccessibility.isReduceMotionEnabled, let flight = await self.take(.wait) else { return }
+                guard !UIAccessibility.isReduceMotionEnabled, var flight = await self.take(.wait) else { return }
+                if flight == self.lastFlown {
+                    await self.arm(.wait)
+                    guard let next = await self.take(.wait) else { return }
+                    flight = next
+                }
                 if Task.isCancelled { return }
                 await self.run(.wait, flight: flight, mine: mine)
             }
@@ -222,6 +230,7 @@ final class StationClips {
     private func run(_ role: Role, flight: Flight, mine: Int) async {
         let player = player(role)
         guard let item = player.currentItem else { return }
+        lastFlown = flight
         let latch = Latch()
         self.latch = latch
         let ended = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in

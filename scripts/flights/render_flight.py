@@ -46,7 +46,14 @@ def main(src, out_dir, name):
     w, h = probe(src)
     # Pass 1, small: the plate (the last frames, empty by construction) and where the bird ends.
     sw, sh = w // 8, h // 8
-    small = [cv2.resize(f, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32) for f in frames(src, w, h)]
+    small, sharp = [], []
+    for f in frames(src, w, h):
+        small.append(cv2.resize(f, (sw, sh), interpolation=cv2.INTER_AREA).astype(np.float32))
+        # How sharp the bird is: variance of the Laplacian over a quarter-size grey frame,
+        # read where the frame is not the flat backdrop.
+        q = cv2.cvtColor(cv2.resize(f, (w // 4, h // 4), interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY)
+        bird = np.abs(q.astype(np.int16) - int(np.median(q[:8, :8]))) > 20
+        sharp.append(float(cv2.Laplacian(q, cv2.CV_64F)[bird].var()) if bird.sum() > 400 else None)
     bs = np.median(np.stack(small[-4:]), axis=0)
     present = [i for i, f in enumerate(small) if (np.linalg.norm(f - bs, axis=2) > 25).sum() > 3]
     last = min(len(small), present[-1] + 3) if present else len(small)
@@ -66,17 +73,23 @@ def main(src, out_dir, name):
             if acc >= 0.5 * pace or i - keep[-1] >= 3: keep.append(i); acc = 0.0
             i += 1
         keep += range(i, last)
-    # Close to the lens the generator loses focus (Approach, 2026-10-05: sharpness fell forty-
-    # fold with the bird over 60% of the frame, for 1.3 s). A real pigeon crosses a lens in a
-    # fifth of a second, so the close pass plays at three times speed.
-    cover = [float((np.linalg.norm(f - bs, axis=2) > 25).mean()) for f in small[:last]]
-    run, close = 0, []
+    # Where the bird goes soft — out of focus near the lens (Kling Approach, 2026-10-05: sharpness
+    # fell forty-fold for 1.3 s) or smeared in a fast tumble (Seedance Roller: 2 s) — the clip
+    # plays at three times speed. A real pigeon crosses a lens in a fifth of a second and a
+    # roller's somersault is that quick, so the soft stretch is brief rather than lingering.
+    known = [x for x in sharp[:last] if x is not None]
+    floor = 0.2 * float(np.median(known)) if known else 0
+    run, quick = 0, []
     for k in keep:
-        run = run + 1 if cover[k] > 0.6 else 0
-        if run == 0 or run % 3 == 1: close.append(k)
-    keep = close
+        run = run + 1 if sharp[k] is not None and sharp[k] < floor else 0
+        if run == 0 or run % 3 == 1: quick.append(k)
+    keep = quick
     moving = [k for k, x in enumerate(d) if x >= 0.12 * pace]
     if moving: keep = [k for k in keep if k <= moving[-1] + 2]
+    # A bird still on screen at the last frame never left: it fades over the last 6 frames. A
+    # sliver at the edge as it leaves does not count — fading on that turned Across's closing
+    # wing, half the screen, into a ghost (2026-10-05).
+    stuck = float((np.linalg.norm(small[keep[-1]] - bs, axis=2) > 25).mean()) > 0.01
     total = len(small); del small
     # The plate. Two candidates, each wrong somewhere: the last frames (wrong where a flight
     # has not left by its end) and each pixel's median over the flight (wrong where the bird
@@ -111,7 +124,7 @@ def main(src, out_dir, name):
         if i % 20 == 0: print(f"  {name}: {i}/{last}", flush=True)
         # A flight that is still on the edge at its last frame fades over its last 6 frames.
         tail = len(keep) - 1 - order[i]
-        if tail < 6 and (a > 0.02).sum() > 50:
+        if stuck and tail < 6:
             fade = (tail + 1) / 7.0
             P, a = P * fade, a * fade
         for tier, (tw, th) in tiers.items():
@@ -125,7 +138,7 @@ def main(src, out_dir, name):
                 encs[tier, skin].stdin.write(np.clip(img + 0.5, 0, 255).astype(np.uint8).tobytes())
     for e in encs.values():
         e.stdin.close(); e.wait()
-    print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {keep[-1] + 1 - len(keep)} dropped to quicken the opening and any close pass), {w}x{h} -> {', '.join(tiers)}", flush=True)
+    print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {keep[-1] + 1 - len(keep)} dropped to quicken the opening and any soft stretch), {w}x{h} -> {', '.join(tiers)}", flush=True)
 
 if __name__ == "__main__":
     main(*sys.argv[1:4])

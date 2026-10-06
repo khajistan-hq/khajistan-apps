@@ -21,7 +21,6 @@ final class AppModel {
     let pnv: PicsVidsStore
     /// The Reading Room: the shelf feed, the page server and the reader's pages.
     let reading: ReadingStore
-    let mixes = MixesStore()
     /// The Receiver's open region, if any. Held here rather than in the view so Back from the
     /// top bar, which sits outside the Receiver's stack, pops the region instead of leaving the app.
     var receiverPath: [ReceiverIndex.Region] = []

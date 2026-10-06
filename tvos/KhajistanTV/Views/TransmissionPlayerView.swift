@@ -64,6 +64,18 @@ struct TransmissionPlayerView: View {
             }
         }
         .task { await start() }
+        #if DEBUG
+        // `-kjautoswitch 6` switches channel that many times, fifteen seconds apart, so the
+        // switch can be measured on a device with no one at the remote.
+        .task {
+            let n = UserDefaults.standard.integer(forKey: "kjautoswitch")
+            for _ in 0..<n {
+                try? await Task.sleep(for: .seconds(15))
+                print("KJSWITCH press ch=\(store.channelNumber) state=\(store.player.state) switching=\(switching)")
+                move(.up)
+            }
+        }
+        #endif
         .task(id: subtitleKey) { await loadSubtitles() }
         .onDisappear { leave() }
         .sheet(isPresented: $showSignIn) {
@@ -380,17 +392,22 @@ struct TransmissionPlayerView: View {
                         try? await Task.sleep(for: .milliseconds(30))
                         continue
                     }
-                    if next.state == .playing {
-                        let took = ContinuousClock.now - started
-                        TuneTimes.record(key, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
-                    }
+                    TuneTimes.recordWhenPlaying(key, player: next, since: started)
+                    #if DEBUG
+                    print("KJSWITCH cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(pigeon.current?.name ?? "-")")
+                    #endif
                     store.commitSwitch(pending)
                     break
                 }
-                if !pigeon.isFlying, !UIAccessibility.isReduceMotionEnabled, let more = pigeon.pick(expected: 0) {
-                    await pigeon.arm(more)
-                    pigeon.start()
-                    flight = more
+                // The bird has gone and the channel still tunes: cut now, one flight per press,
+                // never a loop (owner, 2026-10-06). The channel shows its own tuning state.
+                if !pigeon.isFlying {
+                    TuneTimes.recordWhenPlaying(key, player: next, since: started)
+                    #if DEBUG
+                    print("KJSWITCH early-cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started)")
+                    #endif
+                    store.commitSwitch(pending)
+                    break
                 }
                 try? await Task.sleep(for: .milliseconds(30))
             }

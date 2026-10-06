@@ -76,9 +76,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (channels, mixes, the two Transmission channels) sit on a `CardPlate`: the lift
-  plate at rest, the band plate with onBand text under focus. Square, no border. Channel and mix
-  cards are 420x190 and 440x220, so a shelf is the same height from its first card to its last.
+- **Text cards** (channels, the two Transmission channels) sit on a `CardPlate`: the lift
+  plate at rest, the band plate with onBand text under focus. Square, no border. Channel
+  cards are 420x190, so a shelf is the same height from its first card to its last.
 - **Picture cards** (films, Pics/Vids): the picture lifts and casts the shadow; the title and
   lines under it keep the ground's ink. A film poster is 420pt high at its own width, never
   cropped; its text box has a fixed height and takes the poster's width, so a long title wraps
@@ -112,19 +112,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   and its label sits on a yellow plate with black text. Select opens the region. (Until
   2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
   on the owner's TV focus stuck on one region.)
-- **Shelves under the front.** The sidebar, the map and its strip are the first screen; the page
-  scrolls to two full-width shelves under it, as the TV app lays its rows, each peeking at the
-  bottom of the first screen. **Khajistan Radio · 22 mixes** appears once the public register
-  (`/data/radio/mixtapes.json`) has loaded with a mix that plays: cards in the register's own
-  order, each the programme block it aired in as a kicker, the mix's title, and *place · language*
-  in small type. Select plays the mix. (The page of mixes that once opened from a row here is
-  gone; the shelf holds all of them.) A mix is a finished recording Khajistan made, not a live signal,
-  so its player has no LIVE: the band reads KHAJISTAN RECEIVER · the block, and *Khajistan Radio mix*
-  at right. The name is display type on the ground, as radio's is; under it the state, the register's
-  line for the mix, *place · language · decade*, the position (*12:04 / 1:24:13*) and the attribution
-  (*A Khajistan Radio mix, made and carried by Khajistan.*, or *mixed by X and carried by Khajistan.*).
-  A recording has a position: left and right move thirty seconds, up and down move to the
-  neighbouring mix, and a mix that ends rolls on to the next, stopping at the last.
+- **Shelf under the front.** The sidebar, the map and its strip are the first screen; the page
+  scrolls to the Screening Room's full-width shelf under it, as the TV app lays its rows, peeking
+  at the bottom of the first screen. The Khajistan Radio mixes are not on the TV (owner,
+  2026-10-06): they play as programmes on Transmission's channel 2, the website's sound channel.
 - **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
   faint), then one shelf for each medium the region carries: Television 39, Radio 40, Cameras 19
   and On Demand (the films filed to it), in that order. Each card is the place as a kicker, the

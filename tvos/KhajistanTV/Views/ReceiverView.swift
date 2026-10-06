@@ -8,7 +8,6 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var composed: ComposedMap?
     @State private var mapError: String?
-    @State private var playingMix: Mix?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
 
@@ -28,12 +27,8 @@ struct ReceiverView: View {
         .fullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list)
         }
-        .fullScreenCover(item: $playingMix) { mix in
-            MixPlayerView(mix: mix, list: model.mixes.mixes)
-        }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
-        .task { await model.mixes.load() }
         // vod.json opens with the preview password, so a password entered later loads it.
         .task(id: model.auth.previewPassword) { await model.films.load() }
         // Read again when the index lands: a link that opened the app arrives before it.
@@ -75,7 +70,6 @@ struct ReceiverView: View {
                         mapArea
                     }
                     .padding(.bottom, 12)
-                    mixesRow
                     filmsRow
                 }
                 .padding(.horizontal, KJLayout.inset)
@@ -181,28 +175,7 @@ struct ReceiverView: View {
         }
     }
 
-    // MARK: - Khajistan Radio and the Screening Room
-
-    /// The Khajistan Radio mixes, in full, on a shelf under the regions. The website's receiver
-    /// took them in as one of its media (owner, 2026-08-16). Offered once the register has a mix.
-    @ViewBuilder
-    private var mixesRow: some View {
-        let mixes = model.mixes.mixes
-        if !mixes.isEmpty {
-            Shelf("Khajistan Radio", count: "\(mixes.count) \(mixes.count == 1 ? "mix" : "mixes")") {
-                ForEach(mixes) { mix in
-                    Button {
-                        playingMix = mix
-                    } label: {
-                        MixCard(mix: mix)
-                    }
-                    .buttonStyle(HouseCardStyle())
-                    .accessibilityIdentifier("mix-\(mix.id)")
-                }
-            }
-            .accessibilityIdentifier("khajistanRadioMixes")
-        }
-    }
+    // MARK: - The Screening Room
 
     /// The Screening Room, every film as the site's On Demand carries them, on a shelf of posters.
     @ViewBuilder

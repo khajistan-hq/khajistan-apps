@@ -328,12 +328,13 @@ struct ReceiverPlayerView: View {
                 await quiet
                 return
             default:
-                // Still tuning and the bird has gone: another short flight.
-                if !pigeon.isFlying, !reduceMotion, let more = pigeon.pick(expected: 0) {
-                    await pigeon.arm(more)
-                    if Task.isCancelled { return }
-                    pigeon.start()
-                    flight = more
+                // Still tuning and the bird has gone: cut now. One press is one flight, never a
+                // loop (owner, 2026-10-06: "the pigeons keep playing/looping"); the new channel
+                // shows its own tuning state and the remote is free again.
+                if !pigeon.isFlying {
+                    cut(to: target, from: outgoing, into: next, tookSince: started)
+                    await quiet
+                    return
                 }
             }
             try? await Task.sleep(for: .milliseconds(30))
@@ -346,10 +347,7 @@ struct ReceiverPlayerView: View {
         #if DEBUG
         print("KJCUT \(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
         #endif
-        if next.state == .playing {
-            let took = ContinuousClock.now - started
-            TuneTimes.record(target.id, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
-        }
+        TuneTimes.recordWhenPlaying(target.id, player: next, since: started)
         var instant = Transaction()
         instant.disablesAnimations = true
         withTransaction(instant) {

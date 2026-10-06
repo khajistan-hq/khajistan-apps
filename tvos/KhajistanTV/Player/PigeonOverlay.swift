@@ -185,6 +185,19 @@ enum TuneTimes {
         // ponytail: unbounded per-channel dictionary; a few thousand doubles at most.
         UserDefaults.standard.set(all, forKey: key)
     }
+
+    /// Records the time from `since` to the moment `player` plays, which may be after the cut:
+    /// a channel cut in while still tuning is still learned as slow. A failure records nothing.
+    @MainActor static func recordWhenPlaying(_ channel: String, player: PlayerController, since: ContinuousClock.Instant) {
+        Task { @MainActor in
+            while player.state == .tuning, ContinuousClock.now - since < .seconds(30) {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard player.state == .playing else { return }
+            let took = ContinuousClock.now - since
+            record(channel, seconds: Double(took.components.seconds) + Double(took.components.attoseconds) / 1e18)
+        }
+    }
 }
 
 /// A one-shot signal any number of waiters can await; `wait()` returns at once once fired.

@@ -60,23 +60,16 @@ final class ShelfUITests: XCTestCase {
             XCTAssertEqual(focusedID(app), "region-indus", "\(skin): the walk east along the strip reaches Indus")
             shot("\(skin)-1-receiver-front", app)
 
-            let mixes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mix-'"))
-            if mixes.firstMatch.waitForExistence(timeout: 30) {
+            // The Khajistan Radio mixes are not on the TV (owner, 2026-10-06: they play on
+            // Transmission's channel 2). The first shelf under the strip is the Screening Room,
+            // which loads only with the preview password.
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'mix-'")).firstMatch.exists, "\(skin): no mixes shelf")
+            let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+            if films.firstMatch.waitForExistence(timeout: 30) {
                 press(.down, app: app)
-                XCTAssertTrue(focusedID(app).hasPrefix("mix-"), "\(skin): down from the strip lands on the Khajistan Radio shelf, got \(focusedID(app))")
-                kjPause(1.2)
-                shot("\(skin)-2-receiver-radio-shelf", app)
-                press(.right, times: 2, app: app)
-                let inRow = focusedID(app)
-                XCTAssertTrue(inRow.hasPrefix("mix-"), "\(skin): right walks along the shelf")
-                let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
-                if films.firstMatch.exists {
-                    press(.down, app: app)
-                    XCTAssertTrue(focusedID(app).hasPrefix("film-"), "\(skin): down from radio lands on the Screening Room shelf, got \(focusedID(app))")
-                    kjPause(4)   // posters arrive
-                    shot("\(skin)-3-receiver-films-shelf", app)
-                    press(.up, app: app)
-                }
+                XCTAssertTrue(focusedID(app).hasPrefix("film-"), "\(skin): down from the strip lands on the Screening Room shelf, got \(focusedID(app))")
+                kjPause(4)   // posters arrive
+                shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
                 XCTAssertTrue(focusedID(app).hasPrefix("region-"), "\(skin): up from the first shelf returns to the strip, got \(focusedID(app))")
             }

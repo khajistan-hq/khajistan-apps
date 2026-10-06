@@ -3120,6 +3120,422 @@ func liveCaptionRealChannelsDecode() throws {
     try expect(accuracy.languages?["ur"] != nil)
 }
 
+
+// MARK: - Reading Room
+
+struct RRCard: Decodable {
+    struct Issue: Decodable, Equatable { let slug: String; let id: String; let label: String; let pages: Int }
+    let slug: String
+    let name: String
+    let native: String
+    let region: String
+    let members: [String]
+    let issues: [Issue]
+}
+
+/// The site's cards and the app's, field by field. Any difference names the card and the field.
+func rrCompare(_ titles: [RRTitle], _ expected: [RRCard]) throws {
+    try expectEqual(titles.count, expected.count, "card count")
+    for (mine, theirs) in zip(titles, expected) {
+        try expectEqual(mine.slug, theirs.slug, "slug order")
+        try expectEqual(mine.name, theirs.name, "name of \(theirs.slug)")
+        try expectEqual(mine.native, theirs.native, "native of \(theirs.slug)")
+        try expectEqual(mine.region, theirs.region, "region of \(theirs.slug)")
+        try expectEqual(mine.memberSlugs, theirs.members, "members of \(theirs.slug)")
+        try expectEqual(mine.issues.count, theirs.issues.count, "issue count of \(theirs.slug)")
+        for (a, b) in zip(mine.issues, theirs.issues) {
+            try expectEqual(a.slug, b.slug, "issue slug in \(theirs.slug)")
+            try expectEqual(a.id, b.id, "issue id in \(theirs.slug)")
+            try expectEqual(a.label, b.label, "issue label in \(theirs.slug)")
+            try expectEqual(a.pages, b.pages, "issue pages in \(theirs.slug)")
+        }
+    }
+}
+
+func readingGroupingMatchesTheSite() throws {
+    let dir = fixtureURL.deletingLastPathComponent()
+    let feed = try require(RRAPI.titles(fromFeed: Data(contentsOf: dir.appendingPathComponent("rr-sample-catalogue.json"))))
+    let expected = try JSONDecoder().decode([RRCard].self, from: Data(contentsOf: dir.appendingPathComponent("rr-sample-expected.json")))
+    try expect(feed.count > 250, "the sample feed decodes whole: \(feed.count)")
+    try expect(expected.count > 90)
+    try rrCompare(RRCatalogue.titles(from: feed), expected)
+}
+
+/// The same comparison over the whole baked feed, when this checkout has it and the site's cards for it
+/// (scripts/rr-grouping-fixture.mjs writes both).
+func readingGroupingMatchesTheSiteOnTheFullFeed() throws {
+    let env = ProcessInfo.processInfo.environment
+    guard let feedPath = env["KJ_RR_FEED"], let expectedPath = env["KJ_RR_EXPECTED"] else {
+        throw Skip(reason: "set KJ_RR_FEED and KJ_RR_EXPECTED (scripts/rr-grouping-fixture.mjs writes the expected cards)")
+    }
+    struct Baked: Decodable { let rows: [RRLossy<RRCollection>] }
+    let baked = try JSONDecoder().decode(Baked.self, from: Data(contentsOf: URL(fileURLWithPath: feedPath)))
+    let rows = baked.rows.compactMap(\.value)
+    try expect(rows.count == baked.rows.count, "every baked row decodes")
+    let expected = try JSONDecoder().decode([RRCard].self, from: Data(contentsOf: URL(fileURLWithPath: expectedPath)))
+    let titles = RRCatalogue.titles(from: rows)
+    try rrCompare(titles, expected)
+    // And nothing is lost: every collection is a card's member or was absorbed into a card's issue.
+    let issuesIn = titles.reduce(0) { $0 + $1.issues.count }
+    try expect(issuesIn >= rows.filter { !($0.issues ?? []).isEmpty }.count - 1)
+    print("  \(rows.count) collections -> \(titles.count) titles, \(issuesIn) issues")
+}
+
+func readingTitleSplitting() throws {
+    let split = RRCatalogue.splitTitle
+    try expectEqual(split("Cinema 5 (April May 1976)")?.base, "Cinema 5")
+    try expectEqual(split("Cinema 5 (April May 1976)")?.label, "April May 1976")
+    try expectEqual(split("Archie (Arabic)")?.label, "Arabic")
+    try expectEqual(split("Al-Sa\u{02BF}at (Urdu), part 1")?.base, "Al-Sa\u{02BF}at (Urdu), part 1".components(separatedBy: " (")[0] == "" ? "" : split("Al-Sa\u{02BF}at (Urdu), part 1")?.base)
+    // The em dash and the en dash both separate; a bare title does not.
+    try expectEqual(split("Family \u{2014} June")?.label, "June")
+    try expectEqual(split("Family \u{2013} June")?.base, "Family")
+    try expectEqual(split("Bassim") == nil, true)
+    // ", part 2" is a designator only at the end and only as the literal word.
+    try expectEqual(split("Fath al-Ghara\u{02BE}ib, part 4")?.base, "Fath al-Ghara\u{02BE}ib")
+    try expectEqual(split("Fath al-Ghara\u{02BE}ib, part 4")?.label, "part 4")
+    try expectEqual(split("Hello, world") == nil, true)
+    try expectEqual(split("") == nil, true)
+    // Keys: case, spacing and punctuation go; letters and digits in any script stay.
+    try expectEqual(RRCatalogue.titleKey("Al-Wafd"), RRCatalogue.titleKey("al-Wafd"))
+    try expectEqual(RRCatalogue.titleKey("TV Times"), "tvtimes")
+    try expectEqual(RRCatalogue.titleKey("Tv-Times"), "tvtimes")
+    try expectEqual(RRCatalogue.titleKey("\u{0645}\u{062C}\u{0644}\u{0647} 12!"), "\u{0645}\u{062C}\u{0644}\u{0647}12")
+    try expectEqual(RRCatalogue.titleKey("--"), "")
+    // A language is not an issue designator.
+    for language in ["Arabic", " urdu ", "Pashto", "Dari"] { try expect(RRCatalogue.isEditionLanguage(language), language) }
+    for label in ["April 1974", "part 1", "", "Arabian"] { try expect(!RRCatalogue.isEditionLanguage(label), label) }
+}
+
+func readingGroupingByHand() throws {
+    func col(_ slug: String, _ title: String, _ region: String = "indus", _ issues: [(String, Int)] = [("", 10)]) -> RRCollection {
+        RRCollection(slug: slug, title: title, region: region, issues: issues.map { RRIssueRow(id: $0.0.isEmpty ? slug : $0.0, label: nil, pages: $0.1) })
+    }
+    // One publication filed as per-issue collections is one card holding every issue, in numeric order.
+    let weekly = RRCatalogue.titles(from: [
+        col("w-10", "Weekly (No.10)"), col("w-2", "Weekly (No.2)"), col("w-9", "Weekly (No.9)"),
+    ])
+    try expectEqual(weekly.count, 1)
+    try expectEqual(weekly[0].name, "Weekly")
+    try expectEqual(weekly[0].issues.map(\.label), ["No.2", "No.9", "No.10"])
+    try expectEqual(weekly[0].issues.map(\.slug), ["w-2", "w-9", "w-10"])
+    // The card takes its slug from the first member in the FEED's order, not the sorted one.
+    try expectEqual(weekly[0].slug, "w-10")
+    // Region keeps two printings of one name apart.
+    let regions = RRCatalogue.titles(from: [col("shama-a", "Shama", "indus"), col("shama-b", "Shama", "hindustan")])
+    try expectEqual(regions.count, 2)
+    let samePlace = RRCatalogue.titles(from: [col("devta", "Devta"), col("oak-devta", "devta")])
+    try expectEqual(samePlace.count, 1, "the same name in the same region is one card")
+    // Two editions that disagree about the language are two cards, each saying which.
+    let editions = RRCatalogue.titles(from: [col("dawat-pashto", "Da'wat (Pashto)"), col("dawat-urdu", "Da'wat (Urdu)")])
+    try expectEqual(editions.map(\.name), ["Da'wat (Pashto)", "Da'wat (Urdu)"])
+    // A title that declares nothing is its own card, under its full title; the parenthetical native
+    // title drops from the name and rides on its own line.
+    let single = RRCatalogue.titles(from: [col("asrar", "Asrar-i Qasimi (\u{0627}\u{0633}\u{0631}\u{0627}\u{0631} \u{0642}\u{0627}\u{0633}\u{0645}\u{06CC})")])
+    try expectEqual(single[0].name, "Asrar-i Qasimi")
+    try expectEqual(single[0].native, "\u{0627}\u{0633}\u{0631}\u{0627}\u{0631} \u{0642}\u{0627}\u{0633}\u{0645}\u{06CC}")
+    // An empty title is keyed by its slug and named by it.
+    let blank = RRCatalogue.titles(from: [col("x-1", ""), col("x-2", "")])
+    try expectEqual(blank.count, 2)
+    try expectEqual(blank.map(\.name), ["x-1", "x-2"])
+    // A family is declared by slug, so the title is the publication, never the issue.
+    let family = RRCatalogue.titles(from: [
+        col("gol-agha-y1-n2", "Gol Agha Weekly Year.1 No.2"), col("gol-agha-y1-n9", "Gol Agha Weekly Year.1 No.9"),
+    ])
+    try expectEqual(family.count, 1)
+    try expectEqual(family[0].slug, "gol-agha")
+    try expectEqual(family[0].name, "Gol Agha")
+    try expectEqual(family[0].issues.map(\.label), ["Weekly Year.1 No.2", "Weekly Year.1 No.9"])
+    // A child collection a parent already carries is absorbed, and serves the pages where it is as complete.
+    let parent = RRCollection(slug: "kb", title: "Kb", region: "persia",
+                              issues: [RRIssueRow(id: "n1", label: "One", pages: 8), RRIssueRow(id: "n2", label: "Two", pages: 8)])
+    let better = col("kb-n1", "Kb One", "persia", [("", 12)])
+    let shorter = col("kb-n2", "Kb Two", "persia", [("", 5)])
+    let merged = RRCatalogue.titles(from: [parent, better, shorter])
+    try expectEqual(merged.count, 1, "the children are not cards")
+    try expectEqual(merged[0].issues.map(\.slug), ["kb-n1", "kb"], "the complete copy serves, the shorter does not")
+    try expectEqual(merged[0].issues.map(\.pages), [12, 8])
+    try expectEqual(merged[0].issues[0].id, "", "a child's pages sit at <slug>/<slug>-pNNN")
+    // A row with no issues is a card with none, never a crash.
+    let empty = RRCatalogue.titles(from: [RRCollection(slug: "e", title: "E", region: nil, issues: nil)])
+    try expectEqual(empty[0].issues.count, 0)
+    try expectEqual(empty[0].region, "unknown")
+    try expectEqual(RRCatalogue.titles(from: []).count, 0)
+}
+
+func readingFeedRowsDecodeLeniently() throws {
+    let data = Data("""
+    [{"collection_slug":"a","collection_title":"A","collection_region":"indus","issues":[{"id":"x","label":"X","pages":"12"},{"id":"y","pages":7.0},{"id":"z"}]},
+     {"collection_title":"no slug"},
+     {"collection_slug":"b","collection_title":null,"collection_region":null,"issues":null}]
+    """.utf8)
+    let rows = try require(RRAPI.titles(fromFeed: data))
+    try expectEqual(rows.map(\.collection_slug), ["a", "b"], "a row that does not decode is dropped, not the feed")
+    try expectEqual(rows[0].issues?.map(\.pages), [12, 7, 0])
+    try expect(RRAPI.titles(fromFeed: Data("{}".utf8)) == nil, "an object is not a feed")
+}
+
+func readingPaths() throws {
+    let plain = RRIssue(slug: "al-kawakib", id: "1960-01-26", label: "L", pages: 40, index: 0)
+    try expectEqual(RRPath.endpoint(plain, page: 3), "al-kawakib/al-kawakib-1960-01-26-p003")
+    // A collection ingested as one issue has no issue segment.
+    let single = RRIssue(slug: "tilism-e-hoshruba", id: "", label: "L", pages: 9, index: 0)
+    try expectEqual(RRPath.endpoint(single, page: 2), "tilism-e-hoshruba/tilism-e-hoshruba-p002")
+    // The feed echoes the slug back as the id for those; it is read as no id.
+    let echoed = RRIssue(slug: "tilism-e-hoshruba", id: "tilism-e-hoshruba", label: "L", pages: 9, index: 0)
+    try expectEqual(RRPath.endpoint(echoed, page: 2), "tilism-e-hoshruba/tilism-e-hoshruba-p002")
+    // Pages that sit under another collection's folder: the id already carries the stem.
+    let oak = RRIssue(slug: "oak-chitrali", id: "oak-digests-oak-dg-0011", label: "L", pages: 9, index: 0)
+    try expectEqual(RRPath.endpoint(oak, page: 1), "oak-digests/oak-digests-oak-dg-0011-p001")
+    let delhi = RRIssue(slug: "shama-delhi", id: "shama-periodical-1986-09", label: "L", pages: 9, index: 0)
+    try expectEqual(RRPath.endpoint(delhi, page: 1), "shama-periodical/shama-periodical-1986-09-p001")
+    // Four-digit pages, for the two titles that carry them and for a slug a retry proved.
+    let penn = RRIssue(slug: "urdu-afsane-mein-jins-ki-riwayat-poorab-academy", id: "", label: "L", pages: 9, index: 0)
+    try expectEqual(RRPath.endpoint(penn, page: 7), "urdu-afsane-mein-jins-ki-riwayat-poorab-academy/urdu-afsane-mein-jins-ki-riwayat-poorab-academy-p0007")
+    try expectEqual(RRPath.endpoint(plain, page: 3, extra: ["al-kawakib"]), "al-kawakib/al-kawakib-1960-01-26-p0003")
+    try expectEqual(RRPath.endpoint(plain, page: 1234), "al-kawakib/al-kawakib-1960-01-26-p1234")
+    let twin = try require(RRPath.fourDigitTwin(of: "al-kawakib/al-kawakib-1960-01-26-p003"))
+    try expectEqual(twin.path, "al-kawakib/al-kawakib-1960-01-26-p0003")
+    try expectEqual(twin.slug, "al-kawakib")
+    try expect(RRPath.fourDigitTwin(of: "urdu-afsane-mein-jins-ki-riwayat-poorab-academy/x-p0007") == nil, "already four digits")
+    try expect(RRPath.fourDigitTwin(of: "nope") == nil)
+    try expectEqual(RRPath.issuePrefix(plain), "al-kawakib/al-kawakib-1960-01-26")
+    try expectEqual(RRPath.issuePrefix(penn), "urdu-afsane-mein-jins-ki-riwayat-poorab-academy/urdu-afsane-mein-jins-ki-riwayat-poorab-academy")
+    // The card shows the declared cover page of a title whose first page is not its cover.
+    let hoshruba = RRTitle(slug: "tilism-e-hoshruba", name: "T", native: "", region: "indus", memberSlugs: [], issues: [single])
+    try expectEqual(RRPath.coverEndpoint(hoshruba), "tilism-e-hoshruba/tilism-e-hoshruba-p002")
+    // The probe asks for a page past the preview and past the cover: 3, or one past a declared cover.
+    try expectEqual(RRPath.probeEndpoint(hoshruba), "tilism-e-hoshruba/tilism-e-hoshruba-p003", "cover page 2: ask for page 3")
+    let iskandar = RRTitle(slug: "tilism-i-iskandar-1", name: "T", native: "", region: "indus", memberSlugs: [],
+                           issues: [RRIssue(slug: "tilism-i-iskandar-1", id: "", label: "L", pages: 40, index: 0)])
+    try expectEqual(RRPath.probeEndpoint(iskandar), "tilism-i-iskandar-1/tilism-i-iskandar-1-p004", "cover page 3, which is free: ask for page 4")
+    let long = RRIssue(slug: "tilism-e-hoshruba", id: "", label: "L", pages: 30, index: 0)
+    let longTitle = RRTitle(slug: "tilism-e-hoshruba", name: "T", native: "", region: "indus", memberSlugs: [], issues: [long])
+    try expectEqual(RRPath.probeEndpoint(longTitle), "tilism-e-hoshruba/tilism-e-hoshruba-p003")
+    let ordinary = RRTitle(slug: "al-kawakib", name: "A", native: "", region: "indus", memberSlugs: [], issues: [plain])
+    try expectEqual(RRPath.probeEndpoint(ordinary), "al-kawakib/al-kawakib-1960-01-26-p003")
+    let tiny = RRTitle(slug: "al-kawakib", name: "A", native: "", region: "indus", memberSlugs: [],
+                       issues: [RRIssue(slug: "al-kawakib", id: "", label: "L", pages: 2, index: 0)])
+    try expectEqual(RRPath.probeEndpoint(tiny), nil, "a two-leaf issue has no page past the preview")
+    // An issue's own cover: the title's cover page for the first, page 1 for the rest.
+    let second = RRIssue(slug: "tilism-e-hoshruba", id: "b", label: "L", pages: 30, index: 1)
+    let two = RRTitle(slug: "tilism-e-hoshruba", name: "T", native: "", region: "indus", memberSlugs: [], issues: [long, second])
+    try expectEqual(RRPath.issueCoverEndpoint(two, long), "tilism-e-hoshruba/tilism-e-hoshruba-p002")
+    try expectEqual(RRPath.issueCoverEndpoint(two, second), "tilism-e-hoshruba/tilism-e-hoshruba-b-p001")
+}
+
+func readingPageAnswers() throws {
+    let host = KJConfig.supabase.absoluteString
+    let ok = RRPageAnswer.parse(status: 200, body: Data(#"{"url":"\#(host)/storage/v1/object/public/khajistan-digital-archive/a/a-p001.jpg","preview":true,"ttl":600}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(ok), .page(URL(string: "\(host)/storage/v1/object/public/khajistan-digital-archive/a/a-p001.jpg")!))
+    try expectEqual(RRAccess.classify(ok), .open)
+    // The two 401s the function gives, told apart by accountRequired.
+    let account = RRPageAnswer.parse(status: 401, body: Data(#"{"error":"sign in to read","gated":true,"accountRequired":true}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(account), .signIn)
+    try expectEqual(RRAccess.classify(account), .accountOpen)
+    let paid = RRPageAnswer.parse(status: 401, body: Data(#"{"error":"reading-room subscription required","gated":true}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(paid), .members)
+    try expectEqual(RRAccess.classify(paid), .members)
+    // A signed-in viewer outside their wing, or short of the annual tier, meets the same gate.
+    for body in [#"{"error":"outside your wing","gated":true,"outsideScope":true}"#, #"{"error":"annual membership required","gated":true,"annualRequired":true}"#] {
+        let refused = RRPageAnswer.parse(status: 403, body: Data(body.utf8))
+        try expectEqual(RRPageOutcome.decide(refused), .members)
+        try expectEqual(RRAccess.classify(refused), .members)
+    }
+    let closed = RRPageAnswer.parse(status: 403, body: Data(#"{"error":"reading_room_closed","gated":true}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(closed), .closed)
+    // Rights: 451, and the body's own flag, either one.
+    let rights = RRPageAnswer.parse(status: 451, body: Data(#"{"error":"not available","rightsPending":true}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(rights), .rights)
+    try expectEqual(RRAccess.classify(rights), .rightsPending)
+    try expectEqual(RRPageOutcome.decide(RRPageAnswer.parse(status: 200, body: Data(#"{"rightsPending":true}"#.utf8))), .rights)
+    // An absent page, a fault, a body that is not JSON.
+    let missing = RRPageAnswer.parse(status: 404, body: Data(#"{"error":"page not found"}"#.utf8))
+    try expectEqual(RRPageOutcome.decide(missing), .missing)
+    try expectEqual(RRAccess.classify(missing), nil, "no verdict, no line")
+    try expectEqual(RRPageOutcome.decide(RRPageAnswer.parse(status: 503, body: Data(#"{"error":"storage unavailable"}"#.utf8))), .unavailable)
+    try expectEqual(RRPageOutcome.decide(RRPageAnswer.parse(status: 500, body: Data("<html>".utf8))), .unavailable)
+    try expectEqual(RRAccess.classify(nil), nil)
+    // An address on another host, or not https, is not an answer.
+    for url in ["https://evil.example/a.jpg", "http://\(KJConfig.supabase.host!)/a.jpg", "//evil.example/a.jpg", "file:///etc/passwd"] {
+        let foreign = RRPageAnswer.parse(status: 200, body: Data(#"{"url":"\#(url)"}"#.utf8))
+        try expect(foreign.url == nil, url)
+        try expectEqual(RRPageOutcome.decide(foreign), .unavailable, url)
+    }
+    // The tag on a card is the shelf's own wording.
+    try expectEqual([RRAccess.open, .accountOpen, .members, .rightsPending].map(\.tag),
+                    ["Free \u{2014} read in full", "Free \u{2014} sign in to read", "Members", "Rights pending"])
+}
+
+func readingBatchAnswers() throws {
+    let host = KJConfig.supabase.absoluteString
+    let body = Data("""
+    {"results":{"a/a-p001":{"status":200,"url":"\(host)/storage/v1/object/public/x/a-p001.webp","preview":true},
+                "a/a-p003":{"status":401,"error":"sign in to read","gated":true,"accountRequired":true},
+                "b/b-p003":{"status":451,"rightsPending":true},
+                "c/c-p003":{"error":"no status"}},"ttl":600}
+    """.utf8)
+    let out = RRPageAnswer.parseBatch(body)
+    try expectEqual(out.count, 3, "an entry with no status is dropped")
+    try expectEqual(RRAccess.classify(out["a/a-p003"]), .accountOpen)
+    try expectEqual(RRAccess.classify(out["b/b-p003"]), .rightsPending)
+    try expectEqual(RRPageOutcome.decide(try require(out["a/a-p001"])), .page(URL(string: "\(host)/storage/v1/object/public/x/a-p001.webp")!))
+    try expectEqual(RRPageAnswer.parseBatch(Data("[]".utf8)).count, 0)
+    try expectEqual(RRPageAnswer.parseBatch(Data("nope".utf8)).count, 0)
+}
+
+func readingRequests() throws {
+    let feed = RRAPI.catalogueRequest(offset: 1000)
+    try expectEqual(feed.httpMethod, "POST")
+    try expectEqual(feed.url?.host, KJConfig.supabase.host)
+    try expectEqual(feed.url?.path, "/rest/v1/rpc/reading_room_catalogue")
+    let query = feed.url?.query ?? ""
+    try expect(query.contains("order=collection_slug.asc") && query.contains("limit=1000") && query.contains("offset=1000"), query)
+    try expectEqual(feed.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    try expectEqual(feed.value(forHTTPHeaderField: "Authorization"), "Bearer \(KJConfig.anonKey)")
+    // Every request the Reading Room makes carries the public key and nothing else of ours.
+    let page = RRAPI.pageRequest(path: "a/a-p001", size: "full", accessToken: nil)
+    try expectEqual(page.url, RRAPI.pageFunction)
+    try expectEqual(page.value(forHTTPHeaderField: "Authorization"), "Bearer \(KJConfig.anonKey)")
+    let signed = RRAPI.pageRequest(path: "a/a-p001", size: "full", accessToken: "viewer-token")
+    try expectEqual(signed.value(forHTTPHeaderField: "Authorization"), "Bearer viewer-token")
+    try expectEqual(signed.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
+    let sent = try jsonObject(String(decoding: try require(signed.httpBody), as: UTF8.self))
+    try expectEqual(sent["path"] as? String, "a/a-p001")
+    try expectEqual(sent["size"] as? String, "full")
+    // A batch is capped at what the function takes.
+    let paths = (0..<100).map { "a/a-p\($0)" }
+    let batch = RRAPI.batchRequest(paths: paths, size: "sm", accessToken: nil)
+    let sentBatch = try jsonObject(String(decoding: try require(batch.httpBody), as: UTF8.self))
+    try expectEqual((sentBatch["paths"] as? [String])?.count, 64)
+    // Reads only: the one POST to the database is an RPC that answers a question.
+    for request in [RRAPI.rightsRequest(), RRAPI.provenanceRequest(offset: 0), RRAPI.sensitiveRequest(collection: "x")] {
+        try expectEqual(request.httpMethod, "GET")
+    }
+    let numbers = RRAPI.pageNumbersRequest(prefix: "a/a")
+    try expectEqual(numbers.url?.path, "/rest/v1/rpc/rr_issue_pages")
+    // The warned-pages query asks for visible pages in the one state that warns, and a slug cannot break out of it.
+    let warned = RRAPI.sensitiveRequest(collection: "a&hide=eq.true").url?.absoluteString ?? ""
+    try expect(warned.contains("hide=eq.false") && warned.contains("visibility_state=eq.public_warning"), warned)
+    try expect(warned.contains("collection_slug=eq.a%26hide%3Deq.true"), warned)
+    try expectEqual(RRSite.titleURL(RRTitle(slug: "a b", name: "", native: "", region: "", memberSlugs: [], issues: [])).absoluteString,
+                    "\(KJConfig.site.absoluteString)/reading-room.html?m=a%20b")
+}
+
+func readingPageMap() throws {
+    // 1...N changes nothing.
+    let same = RRPageMap.resolve([1, 2, 3, 4], declared: 4)
+    try expectEqual(same.pages, 4)
+    try expect(same.map == nil)
+    // A page taken off the shelf leaves a hole: position 3 shows stored page 4, and the count is the live count.
+    let hole = RRPageMap.resolve([1, 2, 4, 5], declared: 5)
+    try expectEqual(hole.pages, 4)
+    try expectEqual(hole.map, [1, 2, 4, 5])
+    try expectEqual(RRPageMap.stored(3, map: hole.map), 4)
+    try expectEqual(RRPageMap.stored(99, map: hole.map), 5, "a position past the end is clamped")
+    try expectEqual(RRPageMap.stored(0, map: hole.map), 1)
+    // No rows is an unindexed issue: 1...N as declared. A failed request is the same.
+    try expectEqual(RRPageMap.resolve([], declared: 7).pages, 7)
+    try expectEqual(RRPageMap.resolve(nil, declared: 7).pages, 7)
+    try expect(RRPageMap.resolve(nil, declared: 7).map == nil)
+    try expectEqual(RRPageMap.stored(5, map: nil), 5)
+    try expectEqual(RRAPI.pageNumbers(from: Data("[1,2,3]".utf8)), [1, 2, 3])
+    try expect(RRAPI.pageNumbers(from: Data(#"{"error":"x"}"#.utf8)) == nil)
+}
+
+func readingContentWarnings() throws {
+    let data = Data("""
+    [{"resource_endpoint":"a/a-p004","sensitive_flags":["blood","dead_body","blood"]},
+     {"resource_endpoint":"a/a-p005","sensitive_flags":[]},
+     {"resource_endpoint":"a/a-p006","sensitive_flags":null},
+     {"resource_endpoint":"a/a-p007","sensitive_flags":["weapon"]}]
+    """.utf8)
+    let flags = RRSensitive.flags(from: data)
+    try expectEqual(Set(flags.keys), ["a/a-p004", "a/a-p007"], "a page with no flags is not warned")
+    try expectEqual(RRSensitive.sentence(try require(flags["a/a-p004"])), "This page shows blood and a dead body.")
+    try expectEqual(RRSensitive.sentence(["war_casualty", "graphic_violence", "nudity"]), "This page shows war casualties, graphic violence and nudity.")
+    try expectEqual(RRSensitive.sentence(["weapon"]), "This page shows a weapon.")
+    try expectEqual(RRSensitive.sentence(["something_new"]), "This page shows something new.")
+    try expectEqual(RRSensitive.phrase([]), "material some readers will not want to see unannounced")
+    try expectEqual(RRSensitive.flags(from: Data("nope".utf8)).count, 0)
+}
+
+func readingShelves() throws {
+    func title(_ slug: String, region: String = "indus", issues: Int = 2, pages: Int = 10) -> RRTitle {
+        RRTitle(slug: slug, name: slug, native: "", region: region, memberSlugs: [slug],
+                issues: (0..<issues).map { RRIssue(slug: slug, id: "\($0)", label: "L", pages: pages, index: $0) })
+    }
+    let index = try require(RRModuleIndex.parse(Data("""
+    {"modules":[{"key":"arabic","name":"Arabic","native":"x"},{"key":"urdu","name":"Urdu","native":null},{"key":"pashto","name":"Pashto"}],
+     "shelves":[{"key":"children","name":"Children"},{"key":"romance","name":"Romance"},{"key":"cinema","name":"Cinema & Showbusiness"}],
+     "assign":{"a":{"module":"urdu","shelf":"cinema"},"b":{"module":"urdu","shelf":"children"},"c":{"module":"urdu","shelf":"romance"},
+               "d":{"module":"arabic","shelf":"mystery"},"e":{"module":"urdu"},"f":{"module":null,"shelf":"cinema"}}}
+    """.utf8)))
+    let titles = [title("a"), title("b"), title("c"), title("d"), title("e"), title("f"), title("g")]
+    let tabs = RRShelves.tabs(titles: titles, index: index, rights: ["b"])
+    // Tabs follow the index's order, a language with nothing is not a tab, Unfiled closes the list.
+    try expectEqual(tabs.map(\.id), ["arabic", "urdu", "unfiled"])
+    try expectEqual(tabs[1].rows.map(\.id), ["children", "cinema", "unfiled"], "the index's shelf order, romance not offered, no shelf last")
+    try expectEqual(tabs[1].rows.map(\.name), ["Children", "Cinema & Showbusiness", "Unfiled"])
+    try expectEqual(tabs[0].rows.map(\.name), ["Mystery"], "a shelf the index does not define is named from its key, never printed raw")
+    try expectEqual(tabs[2].rows[0].titles.map(\.slug), ["f", "g"], "no module, or none that exists, is unfiled")
+    // Figures: the room's three, rights-held titles named beside and left out of them.
+    try expectEqual(tabs[1].depth, "3 titles \u{00B7} 6 issues \u{00B7} 60 pages \u{00B7} 1 cover-only, pending rights", "urdu holds a, b (held), c, e")
+    try expectEqual(RRShelves.depthLine([title("a", issues: 1, pages: 1)], rights: []), "1 title \u{00B7} 1 issue \u{00B7} 1 pages")
+    try expectEqual(RRShelves.depthLine([title("a", issues: 1, pages: 0)], rights: []), "1 title \u{00B7} 1 issue", "no pages, no pages figure")
+    // Without the index: one tab, a row per region, west to east, the unlabelled last.
+    let flat = RRShelves.tabs(titles: [title("p", region: "persia"), title("m", region: "levant"), title("i", region: "indus"), title("z", region: "mars")],
+                              index: nil, rights: [])
+    try expectEqual(flat.count, 1)
+    try expectEqual(flat[0].rows.map(\.name), ["Mashriq", "Persia", "Indus", "Other"])
+    try expectEqual(RRShelves.tabs(titles: [], index: nil, rights: []).count, 0)
+    // The index must carry modules to be one.
+    try expect(RRModuleIndex.parse(Data(#"{"modules":[],"shelves":[],"assign":{}}"#.utf8)) == nil)
+    try expect(RRModuleIndex.parse(Data(#"{"modules":[{"key":"a","name":"A"}]}"#.utf8)) == nil)
+    // Region words: a finer token answers to its umbrella; a token under none is blank.
+    try expectEqual(RRRegions.label("levant"), "Mashriq")
+    try expectEqual(RRRegions.label("maghreb"), "Maghreb")
+    try expectEqual(RRRegions.label("mashriq"), "")
+    try expectEqual(RRRegions.label("iran"), "Persia")
+    try expectEqual(RRRegions.label("unknown"), "")
+    try expectEqual(RRRegions.label("hindustan"), "Delhi \u{00B7} Awadh")
+}
+
+func readingWords() throws {
+    let paid = RRWords.membersGate(titleName: "Filmart", issueLabel: "June 1962", pages: 80)
+    try expectEqual(paid.heading, "Membership required")
+    try expect(paid.text.hasPrefix("You've read the free preview \u{2014} the first 2 pages of \u{201C}Filmart\u{201D} (June 1962). The full issue runs 80 pages."), paid.text)
+    try expect(RRWords.membersGate(titleName: "Filmart", issueLabel: "unknown-1", pages: 3).text.contains("\u{201C}Filmart\u{201D}. The full"), "an unknown label is not printed")
+    let account = RRWords.accountGate(titleName: "Censor", issueLabel: "", pages: 2)
+    try expectEqual(account.heading, "Free to read \u{2014} sign in to continue")
+    try expect(account.text.hasSuffix("All 2 pages are free \u{2014} a Khajistan account is all it takes. No Pass, no payment."), account.text)
+    try expectEqual(RRWords.doors, ["All Access \u{00B7} $49/mo", "Annual \u{00B7} $480/yr"])
+    try expect(RRWords.rightsBody(issueCount: 3, khajistanScanned: true).hasPrefix("Khajistan has digitised and preserved all 3 issues of this title."))
+    try expect(RRWords.rightsBody(issueCount: 1, khajistanScanned: true).hasPrefix("Khajistan has digitised and preserved the one issue of this title."))
+    try expect(RRWords.rightsBody(issueCount: 3, khajistanScanned: false).hasPrefix("All 3 issues of this title are preserved."))
+    try expect(RRWords.rightsBody(issueCount: 1, khajistanScanned: false).hasPrefix("The one issue of this title is preserved."))
+    try expect(RRWords.rightsBody(issueCount: 2, khajistanScanned: false).hasSuffix("until rights for this material are cleared."))
+    try expectEqual(RRWords.depth(issues: 1, pages: 5, held: true), "1 issue \u{00B7} 5 pages preserved, cover only")
+    try expectEqual(RRWords.depth(issues: 2, pages: 0, held: false), "2 issues")
+    try expectEqual(RRWords.missingPage(4), "Page 4 unavailable \u{2014} not yet in the archive")
+    // The Avoid list holds for what the app says in its own voice.
+    let own = [RRWords.lede, RRWords.residencyText, RRWords.researchersAsk, RRWords.signInDoor]
+    for line in own { try expect(!line.lowercased().contains("this matters"), line) }
+}
+
+func readingProvenance() throws {
+    func row(_ source: String?, _ upstream: String?) -> RRProvenanceRow { RRProvenanceRow(collection_slug: "x", provenance_source: source, source_upstream: upstream) }
+    try expect(RRProvenance.isKhajistanScan(row("Khajistan scan", nil)))
+    try expect(RRProvenance.isKhajistanScan(row("Digitized by Khajistan \u{2014} Arvin Sehhatigdiri, Istanbul, Turkey", nil)))
+    try expect(RRProvenance.isKhajistanScan(row("KHAJISTAN", "")))
+    try expect(!RRProvenance.isKhajistanScan(row("Khajistan scan", "ia:some-item")), "received from upstream is not ours")
+    try expect(!RRProvenance.isKhajistanScan(row("ACKU", nil)))
+    try expect(!RRProvenance.isKhajistanScan(row(nil, nil)), "no line is unread, not ours")
+    let rows = try require(RRProvenance.rows(from: Data(#"[{"collection_slug":"a","provenance_source":"ACKU","source_upstream":null},{"nope":1}]"#.utf8)))
+    try expectEqual(rows.count, 1)
+}
+
+
 let tests: [(String, () throws -> Void)] = [
     ("Skin hours at the boundaries", skinHoursAtBoundaries),
     ("Skin hex triples", skinColours),
@@ -3235,6 +3651,20 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
+    ("Reading Room: titles group as the site groups them (sample, from the site's own code)", readingGroupingMatchesTheSite),
+    ("Reading Room: titles group as the site groups them (full feed)", readingGroupingMatchesTheSiteOnTheFullFeed),
+    ("Reading Room: title splitting and keys", readingTitleSplitting),
+    ("Reading Room: grouping, by hand", readingGroupingByHand),
+    ("Reading Room: a bad feed row is dropped, not the feed", readingFeedRowsDecodeLeniently),
+    ("Reading Room: where a page lives", readingPaths),
+    ("Reading Room: the page server's answers and the access line", readingPageAnswers),
+    ("Reading Room: batch answers", readingBatchAnswers),
+    ("Reading Room: requests are read-only and carry the public key", readingRequests),
+    ("Reading Room: live page numbers", readingPageMap),
+    ("Reading Room: content warnings", readingContentWarnings),
+    ("Reading Room: shelves, tabs and figures", readingShelves),
+    ("Reading Room: the site's words", readingWords),
+    ("Reading Room: provenance", readingProvenance),
 ]
 
 // MARK: - Shuffle

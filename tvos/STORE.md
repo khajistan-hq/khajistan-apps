@@ -11,10 +11,15 @@ their account server-side by `stripe-checkout` and pays in an embedded Stripe sh
 
 - **iPhone (built):** the Home tab's "Become a member" buttons open that URL in the in-app
   browser (`JoinPlan` in `ios/Khajistan/Core/ArchiveDestination.swift`, used by `HomeView.swift`).
-- **Apple TV (not built):** tvOS has no browser, so the plan is a QR code for the same URL; the
-  viewer pays on their phone, and the TV sees the membership on its next check. The only QR code
-  in the TV app today is the one on a film's player page, which points at the film's own web page
-  (`QRCode` in `FilmPlayerView.swift`). No Subscribe screen uses it yet.
+- **Apple TV: sells nothing, in the app or through it.** Owner, 2026-10-06, to the Apple TV
+  session: *"dont allow people to get reading room subscription on the apple tv app, make them go
+  to our site for that"*. The TV's members' gate shows no plans and no prices, only that
+  membership is on khajistan.com, with a QR code to the site. The QR code on a film's player page
+  points at the film's own web page (`QRCode` in `FilmPlayerView.swift`).
+  - **Open, for the owner:** under App Review Guidelines 3.1.1 and 3.1.3, sending readers to buy
+    outside the app, a QR code included, can be rejected unless the app qualifies as a reader app
+    with Apple's external-link entitlement. The Apple TV session recommends dropping the QR code
+    and keeping plain text with no call to action.
 
 Prices are not written into either app. The site states them (All Access $49/month ·
 $480/year, `reading-room.html`, measured 2026-10-05) and `kj_invariants.py` already guards that
@@ -26,6 +31,9 @@ elsewhere Apple requires its own purchase or the External Purchase Link entitlem
 Store release outside the US, the QR/link is hidden on those storefronts and §2 is the route.
 
 ## 2. Apple in-app purchase (designed, NOT built)
+
+**It does not apply to the Apple TV app**, which sells nothing in-app (owner, 2026-10-06, §1).
+Whether the iPhone/iPad app should sell through Apple is not yet ruled.
 
 **Corrected 2026-10-06.** This heading said "built in the app" until then. No branch of either
 app imports StoreKit — checked on `app/tvos-reading`, `app/tvos-pigeon`, `app/tvos-native` and

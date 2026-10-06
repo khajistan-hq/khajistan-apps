@@ -46,6 +46,8 @@ shelf_pigeon_ref = plain(f'{APP}/Resources/Assets.xcassets/Pigeon.imageset/pigeo
 extras = [shelf_pigeon_ref, plain('TopShelf/Info.plist', 'text.plist.xml'), plain('TopShelf/TopShelf.entitlements', 'text.plist.entitlements'), plain(f'{APP}/Resources/{APP}.entitlements', 'text.plist.entitlements')]
 assets = add('assets', obj(isa='PBXFileReference', lastKnownFileType='folder.assetcatalog', path=quote(f'{APP}/Resources/Assets.xcassets'), sourceTree='SOURCE_ROOT'))
 privacy = add('privacy', obj(isa='PBXFileReference', lastKnownFileType='text.xml', path=quote(f'{APP}/Resources/PrivacyInfo.xcprivacy'), sourceTree='SOURCE_ROOT'))
+# The extension carries its own manifest: it reads file dates when it clears old slides.
+shelf_privacy = add('shelf-privacy', obj(isa='PBXFileReference', lastKnownFileType='text.xml', path=quote('TopShelf/PrivacyInfo.xcprivacy'), sourceTree='SOURCE_ROOT'))
 media_dir = root / APP / 'Resources' / 'Media'
 media = sorted((p for p in media_dir.rglob('*') if p.is_file() and not p.name.startswith('.')), key=lambda p: p.as_posix()) if media_dir.is_dir() else []
 media_refs = [add(p.relative_to(root).as_posix(), obj(isa='PBXFileReference', lastKnownFileType='image.gif' if p.suffix.lower() == '.gif' else 'file', path=quote(p.relative_to(root).as_posix()), sourceTree='SOURCE_ROOT')) for p in media]
@@ -54,14 +56,15 @@ app = add('product/app', obj(isa='PBXFileReference', explicitFileType='wrapper.a
 shelf = add('product/shelf', obj(isa='PBXFileReference', explicitFileType=quote('wrapper.app-extension'), includeInIndex='0', path=f'{SHELF}.appex', sourceTree='BUILT_PRODUCTS_DIR'))
 test = add('product/test', obj(isa='PBXFileReference', explicitFileType='wrapper.cfbundle', includeInIndex='0', path=f'{TESTS}.xctest', sourceTree='BUILT_PRODUCTS_DIR'))
 products = add('products', obj(isa='PBXGroup', children=array([app, shelf, test]), name='Products', sourceTree=quote('<group>')))
-main = add('main', obj(isa='PBXGroup', children=array(app_refs + [assets, privacy] + media_refs + shelf_refs + extras + test_refs + [products]), sourceTree=quote('<group>')))
+main = add('main', obj(isa='PBXGroup', children=array(app_refs + [assets, privacy, shelf_privacy] + media_refs + shelf_refs + extras + test_refs + [products]), sourceTree=quote('<group>')))
 
 def phase(key, kind, files): return add(key, obj(isa=kind, buildActionMask='2147483647', files=array(files), runOnlyForDeploymentPostprocessing='0'))
 embed_shelf = add('build/embed-shelf', obj(isa='PBXBuildFile', fileRef=shelf, settings=obj(ATTRIBUTES='(RemoveHeadersOnCopy, )')))
 embed = add('embed', obj(isa='PBXCopyFilesBuildPhase', buildActionMask='2147483647', dstPath=quote(''), dstSubfolderSpec='13', files=array([embed_shelf]), name=quote('Embed Foundation Extensions'), runOnlyForDeploymentPostprocessing='0'))
 app_phases = [phase('sources', 'PBXSourcesBuildPhase', app_builds), phase('frameworks', 'PBXFrameworksBuildPhase', []), phase('resources', 'PBXResourcesBuildPhase', resource_builds), embed]
 shelf_pigeon = add('shelf-build/pigeon', obj(isa='PBXBuildFile', fileRef=shelf_pigeon_ref))
-shelf_phases = [phase('shelf-sources', 'PBXSourcesBuildPhase', shared_builds + shelf_builds), phase('shelf-frameworks', 'PBXFrameworksBuildPhase', []), phase('shelf-resources', 'PBXResourcesBuildPhase', [shelf_pigeon])]
+shelf_privacy_build = add('shelf-build/privacy', obj(isa='PBXBuildFile', fileRef=shelf_privacy))
+shelf_phases = [phase('shelf-sources', 'PBXSourcesBuildPhase', shared_builds + shelf_builds), phase('shelf-frameworks', 'PBXFrameworksBuildPhase', []), phase('shelf-resources', 'PBXResourcesBuildPhase', [shelf_pigeon, shelf_privacy_build])]
 test_phases = [phase('test-sources', 'PBXSourcesBuildPhase', test_builds), phase('test-frameworks', 'PBXFrameworksBuildPhase', []), phase('test-resources', 'PBXResourcesBuildPhase', [])]
 
 def configs(key, settings):

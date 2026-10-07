@@ -206,8 +206,10 @@ struct ChatRoomView: View {
         case .gif:
             ChatMediaView(media: media, height: 160).padding(.top, 4)
         case .archive(let key):
-            Button { open(key) } label: { ChatMediaView(media: media, height: 160) }
-                .buttonStyle(.plain)
+            // A tap layer over the picture: the UIKit view that draws it keeps a Button around it
+            // from ever seeing the touch.
+            ChatMediaView(media: media, height: 160)
+                .overlay { Color.clear.contentShape(Rectangle()).onTapGesture { open(key) } }
                 .padding(.top, 4)
         }
     }

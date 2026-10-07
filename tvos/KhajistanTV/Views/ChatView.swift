@@ -4,7 +4,8 @@ import SwiftUI
 /// right, newest at the foot. Reading needs no account; writing needs one, a handle and the 16+
 /// acknowledgement, the same three things the website asks for. The Apple TV keyboard takes
 /// dictation: hold the remote's microphone button while it is up and speak.
-/// Hold Select on a line to report it, ignore its author on this device, or delete your own.
+/// Select on a line opens its actions under it: report it, ignore its author on this device, or
+/// delete your own.
 struct ChatView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette

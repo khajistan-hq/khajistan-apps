@@ -81,11 +81,12 @@ enum ArchiveURL {
     }
 
     /// The website's rooms an App Store build leaves out (owner rulings 2026-10-06, StoreBuild):
-    /// Pics/Vids at /canvas and every route that forwards to it, Chat, and the Wall with its zines.
+    /// Pics/Vids at /canvas, every route that forwards to it and /board/<id> (the same page served
+    /// under its own path by _worker.js, no redirect), Chat, and the Wall with its zines.
     /// Hiding the app's own doors is not enough: the site's menu inside the browser links them.
     static let leftOutOfStoreBuild: Set<String> = [
         "chat", "wall", "zines",
-        "canvas", "pics-n-vids", "browse", "browse-archive", "born-digital", "digital-borne-archive",
+        "canvas", "board", "pics-n-vids", "browse", "browse-archive", "born-digital", "digital-borne-archive",
     ]
 
     /// Whether `url` is an archive page an App Store build must not open, by its first path

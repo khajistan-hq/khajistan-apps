@@ -193,12 +193,12 @@ private struct AssertionFailure: Error, CustomStringConvertible {
 }
 func storeBuildLeavesOutTheSitesOwnRoutes() throws {
     let out = ["/chat", "/chat.html", "/Chat?room=food", "/wall/", "/wall/zine/7", "/zines.html", "/canvas",
-               "/canvas?kind=video", "/pics-n-vids", "/browse-archive.html", "/browse", "/born-digital.html"]
+               "/canvas?kind=video", "/board/00000000-0000-0000-0000-000000000002?k=x", "/pics-n-vids", "/browse-archive.html", "/browse", "/born-digital.html"]
     for path in out {
         try expect(ArchiveURL.isLeftOutOfStoreBuild(try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)))
     }
     // Near misses and every other room stay open, and no other host is judged.
-    let open = ["/", "/chatter.html", "/wallpaper", "/reading-room.html", "/open-frequencies", "/dashboard.html",
+    let open = ["/", "/chatter.html", "/wallpaper", "/boards.html", "/reading-room.html", "/open-frequencies", "/dashboard.html",
                 "/scripts/kj-chat.js", "/search.html?q=chat"]
     for path in open {
         try expect(!ArchiveURL.isLeftOutOfStoreBuild(try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)))

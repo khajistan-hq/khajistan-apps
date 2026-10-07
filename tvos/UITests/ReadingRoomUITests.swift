@@ -160,7 +160,8 @@ final class ReadingRoomUITests: XCTestCase {
             XCTAssertEqual(heading.label, "Membership required")
             let text = app.staticTexts["rrGateText"].label
             XCTAssertTrue(text.hasPrefix("You've read the free preview"), "the gate says it in the site's words: \(text)")
-            XCTAssertTrue(app.staticTexts["rrSiteLine"].exists, "the gate names the website in plain text")
+            XCTAssertTrue(text.contains("khajistan.com"), "the gate names the website in plain text, once: \(text)")
+            XCTAssertFalse(text.lowercased().contains("scan"), "and promises no code to scan")
             XCTAssertFalse(app.images["rrTitleCode"].exists, "and offers no code")
             kjPause(2)
             kjScreenshot("rr-\(skin)-08-members-gate", app: app)

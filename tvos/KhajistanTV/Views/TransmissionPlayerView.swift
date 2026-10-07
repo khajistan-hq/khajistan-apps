@@ -78,7 +78,7 @@ struct TransmissionPlayerView: View {
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
         .onDisappear { leave() }
-        .sheet(isPresented: $showSignIn) {
+        .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
     }

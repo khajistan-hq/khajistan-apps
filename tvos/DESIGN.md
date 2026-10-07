@@ -195,7 +195,7 @@ same visitor.
   after 2.6 seconds.
 - **Refusals**, in the site's words, with a code for the title's page on the website and no purchase
   in the app: *Membership required* (paid, from page 3), *Free to read — sign in to continue*
-  (account-open, with the sign-in sheet), *Preserved · not published* (451), a content warning
+  (account-open, with the sign-in page), *Preserved · not published* (451), a content warning
   (*This page shows …*) held until the viewer asks, and *Page N unavailable — not yet in the archive*.
 
 ## Pics/Vids
@@ -224,7 +224,7 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   the status band (KHAJISTAN PICS/VIDS · @account · PICTURE or VIDEO) and a ground panel with the
   site's meta line (kind · region · date · size) and the caption. Left and right move through the
   shelf it came from (loading that shelf's next page at its end); a clip loops; a Khajistan TV row opens on its poster and says *Sign in to watch Khajistan
-  Transmission.*, and Select opens the sign-in sheet.
+  Transmission.*, and Select opens the sign-in page.
 
 ## Motion
 

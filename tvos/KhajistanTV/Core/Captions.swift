@@ -340,7 +340,7 @@ enum CaptionRules {
             return "Live captioning has reached its spending limit for now. Nothing was counted against your minutes."
         case "captions_disabled": return "Live captioning is switched off at the source right now."
         case "passphrase_required", "passphrase_incorrect":
-            return "Live captions are owner-only and the passphrase was not accepted. Nothing was counted against your minutes."
+            return "Live captions are not open on this television right now. Nothing was counted against your minutes."
         case "owner_pass_not_configured", "settings_unavailable": return "Live captioning is not configured at the source right now."
         default: return "Captions could not be started for this channel just now. Nothing was counted against your minutes."
         }
@@ -352,7 +352,8 @@ enum CaptionRules {
         switch reason {
         case "daily_cap_reached", "monthly_cap_reached": return "Live captioning has reached its spending limit for now. The channel keeps playing."
         case "captions_disabled": return "Live captioning is switched off at the source right now."
-        case "passphrase_required", "passphrase_incorrect": return "Caption access has expired. Turn captions on to enter the owner passphrase again."
+        // The site asks for a passphrase here; the television never does, so it names no step it lacks.
+        case "passphrase_required", "passphrase_incorrect": return "Live captions are not open on this television right now. The channel keeps playing."
         default: return "Live captions are unavailable right now. The channel keeps playing."
         }
     }

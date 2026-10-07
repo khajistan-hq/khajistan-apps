@@ -217,7 +217,6 @@ struct ReadingReaderView: View {
                         }
                         backToPreview
                     }
-                    siteLine
                 }
             }
         case .closed:
@@ -260,12 +259,6 @@ struct ReadingReaderView: View {
         .buttonStyle(HouseButtonStyle())
         .padding(.leading, -26)
         .accessibilityIdentifier("rrBackToPreview")
-    }
-
-    /// Where membership is taken, named in plain text. No code and no link: on the TV a reader
-    /// app may not send a viewer out to buy (owner, 2026-10-06).
-    private var siteLine: some View {
-        Kicker("khajistan.com").accessibilityIdentifier("rrSiteLine")
     }
 
     /// Where the reader stands, for the UI test that turns pages: "3/76|page", with "|zoom" while zoomed.

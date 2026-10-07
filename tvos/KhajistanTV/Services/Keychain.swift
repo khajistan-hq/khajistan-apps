@@ -45,7 +45,7 @@ enum Keychain {
         delete(account)
         var item = identity(account)
         item[kSecValueData as String] = data
-        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         if shared, let group = sharedGroup {
             var grouped = item
             grouped[kSecAttrAccessGroup as String] = group

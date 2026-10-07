@@ -85,7 +85,7 @@ struct PnvViewerView: View {
         .onChange(of: controller.state) { wake() }
         .task { show(current) }
         .onDisappear { stopEverything() }
-        .sheet(isPresented: $showSignIn) {
+        .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
         }
     }

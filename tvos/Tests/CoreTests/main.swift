@@ -3004,7 +3004,8 @@ func liveCaptionServerAnswers() throws {
     try expectEqual(CaptionRules.startRefusal("atomic_protocol_required"), "Captions could not be started for this channel just now. Nothing was counted against your minutes.")
     try expectEqual(CaptionRules.startRefusal(nil), CaptionRules.startRefusal("anything new"))
     try expectEqual(CaptionRules.heartbeatRefusal("rate_limited"), "Live captions are unavailable right now. The channel keeps playing.")
-    try expectEqual(CaptionRules.heartbeatRefusal("passphrase_required"), "Caption access has expired. Turn captions on to enter the owner passphrase again.")
+    try expectEqual(CaptionRules.heartbeatRefusal("passphrase_required"), "Live captions are not open on this television right now. The channel keeps playing.")
+    try expect(!CaptionRules.startRefusal("passphrase_incorrect").contains("passphrase"), "the TV names no passphrase step it does not have")
 
     try expectEqual(CaptionRules.label(on: false, balance: nil), "Captions")
     try expectEqual(CaptionRules.label(on: false, balance: .infinity), "Captions")
@@ -3721,6 +3722,7 @@ func readingWords() throws {
     // Membership is not sold on the TV (owner, 2026-10-06): the gate sends the viewer to the
     // website and quotes no price.
     try expect(paid.text.contains("khajistan.com"), paid.text)
+    try expect(!paid.text.lowercased().contains("scan"), "no code to scan since 2026-10-06")
     try expect(!paid.text.contains("$") && !paid.text.contains("All Access"), paid.text)
     let account = RRWords.accountGate(titleName: "Censor", issueLabel: "", pages: 2)
     try expectEqual(account.heading, "Free to read \u{2014} sign in to continue")

@@ -77,7 +77,7 @@ struct FilmPlayerView: View {
             wake()
             followTracks()
         }
-        .sheet(isPresented: $showSignIn) {
+        .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { refusal = nil })
                 .environment(\.palette, palette)
         }

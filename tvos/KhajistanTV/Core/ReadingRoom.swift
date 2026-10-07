@@ -925,13 +925,13 @@ enum RRWords {
     /// The gate the site draws for a paid title (:8180): the preview read, what the issue runs to, who can open it.
     /// The gate on a members' title. Membership is not sold on the TV (owner, 2026-10-06: "dont
     /// allow people to get reading room subscription on the apple tv app, make them go to our site
-    /// for that"): the gate says where it is, the code opens the title's page on a phone, and no
-    /// price is quoted here.
+    /// for that"): the gate names the address once, in its sentence, and no price is
+    /// quoted here. There is no code to scan: the QR codes came out on 2026-10-06.
     static func membersGate(titleName: String, issueLabel: String, pages: Int) -> (heading: String, text: String) {
         let issue = (issueLabel.isEmpty || issueLabel.lowercased().hasPrefix("unknown")) ? "" : " (\(issueLabel))"
         return ("Membership required",
                 "You've read the free preview \u{2014} the first 2 pages of \u{201C}\(titleName)\u{201D}\(issue). The full issue runs \(pages) pages and is open to members. "
-                + "Membership is taken on khajistan.com: scan the code with your phone.")
+                + "Membership is taken on khajistan.com.")
     }
 
     /// The gate for a free title that wants an account (:8170).

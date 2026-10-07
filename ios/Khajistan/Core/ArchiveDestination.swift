@@ -28,7 +28,7 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
         .init(id: "publications", door: "PUBLICATIONS", title: "Publications", subtitle: "Khajistan Press — books, catalogues and printed editions", path: "/publications.html"),
         .init(id: "reading", door: "READING ROOM", title: "Reading Room", subtitle: "Digitized periodicals, posters and books · deep-zoom reader", path: "/reading-room.html"),
         .init(id: "madrassa", door: "READING ROOM", title: "Madrassa", subtitle: "The reference wing — street dictionary, indices and writings", path: "/madrassa.html"),
-        .init(id: "cinema", door: "RECEIVER", title: "Screening Room", subtitle: "The 32 films — on demand, rental, purchase & institutional licensing", path: "/screening-room.html"),
+        .init(id: "cinema", door: "RECEIVER", title: "Screening Room", subtitle: "The 32 films — on demand, and institutional licensing", path: "/screening-room.html"),
         .init(id: "receiver", door: "RECEIVER", title: "Khajistan Receiver", subtitle: "Live regional television and radio, and the Khajistan Radio mixes", path: "/open-frequencies"),
         .init(id: "listening-desk", door: "RECEIVER", title: "Listening Desk", subtitle: "Share what you heard — audio & video speech evidence", path: "/listening-desk.html"),
         .init(id: "picsnvids", door: "PICS/VIDS", title: "Pics/Vids", subtitle: "Born Digital Media", path: "/browse-archive.html"),

@@ -179,6 +179,17 @@ func joinIsOfferedOnTheUSStorefrontOnly() throws {
     }
 }
 
+func offPageOffersCarryTheAppFlag() throws {
+    let base = "https://khajistan-archive.pages.dev/reading-room.html"
+    try expect(JoinOffer.tagged(URL(string: base)!).absoluteString == base + "?app=1")
+    // Other queries and the fragment survive; the flag is never written twice or with another value.
+    let busy = URL(string: base + "?q=tehran&app=0#shelf")!
+    try expect(JoinOffer.tagged(busy).absoluteString == base + "?q=tehran&app=1#shelf")
+    let once = JoinOffer.tagged(JoinOffer.tagged(URL(string: base)!))
+    try expect(once.absoluteString.components(separatedBy: "app=").count == 2)
+    try expect(ArchiveURL.isArchive(JoinOffer.tagged(URL(string: base)!)))
+}
+
 func joinPlansOpenTheSitesCheckout() throws {
     try expect(JoinPlan.monthly.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=monthly")
     try expect(JoinPlan.annual.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=annual")
@@ -222,6 +233,7 @@ private func require<T>(_ value: T?) throws -> T {
             ("Hour bands where the zone is not placed", skyHourBandsWhereTheZoneIsNotPlaced),
             ("The skin script for the website", skyScriptForTheWebsite),
             ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
+            ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
             ("Join plans open the site's checkout", joinPlansOpenTheSitesCheckout),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite)
         ]

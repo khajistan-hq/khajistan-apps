@@ -80,6 +80,16 @@ enum JoinOffer {
     static func isOffered(storefront countryCode: String?) -> Bool {
         countryCode?.uppercased() == storefront
     }
+
+    /// The same page with `app=1`, which the website reads (kj-theme-boot.js) to hide its own
+    /// offers and code field for the rest of the visit. Added where the app offers none itself.
+    static func tagged(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = (parts.queryItems ?? []).filter { $0.name != "app" }
+        items.append(URLQueryItem(name: "app", value: "1"))
+        parts.queryItems = items
+        return parts.url ?? url
+    }
 }
 
 enum ArchiveURL {

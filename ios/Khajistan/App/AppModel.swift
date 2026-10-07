@@ -145,10 +145,11 @@ final class AppModel {
 
     // MARK: - Rooms
 
-    /// A website page in the in-app browser. Only the archive's own two hosts open here.
+    /// A website page in the in-app browser. Only the archive's own two hosts open here. Off the
+    /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
-        browser.load(url)
+        browser.load(showsJoin ? url : JoinOffer.tagged(url))
         isShowingBrowser = true
     }
 

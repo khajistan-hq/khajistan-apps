@@ -1,4 +1,5 @@
 import AVFoundation
+import os
 import Foundation
 import MediaPlayer
 import Observation
@@ -98,7 +99,9 @@ final class PlayerController {
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
                 switch status {
-                case .failed: self.state = .failed(Self.unreachable)
+                case .failed:
+                    Self.log.error("item failed: \(observed.error?.localizedDescription ?? "no error", privacy: .public)")
+                    self.state = .failed(Self.unreachable)
                 case .readyToPlay: self.begin(at: start, generation: gen)
                 default: break
                 }
@@ -115,8 +118,10 @@ final class PlayerController {
         failObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
         ) { [weak self] notification in
+            let cause = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "no error"
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
+                Self.log.error("stopped mid-play: \(cause, privacy: .public)")
                 self.state = .failed(Self.unreachable)
             }
         }
@@ -133,11 +138,14 @@ final class PlayerController {
     /// The one thing a viewer is told when a signal fails. The system's own error ("A TLS error
     /// caused the secure connection to fail") names a cause the viewer can do nothing about.
     static let unreachable = "This signal is not reaching us right now."
+    /// The real cause of a failure, kept for whoever has to trace it; the viewer gets the sentence.
+    static let log = Logger(subsystem: "com.khajistan.tv", category: "player")
 
     private func startTimeout(_ gen: Int) {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(30))
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            Self.log.error("did not start within 30 s")
             self.state = .failed(Self.unreachable)
         }
     }

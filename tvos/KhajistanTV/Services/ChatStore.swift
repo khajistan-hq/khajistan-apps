@@ -13,6 +13,9 @@ final class ChatStore {
     /// Nil until read, "" when the account has none yet.
     private(set) var handle: String?
     private(set) var ageAcknowledged = false
+    /// The account could not be read: the screen says so and offers to try again.
+    private(set) var accountUnread = false
+    @ObservationIgnored private var readFor: String?
 
     private unowned let auth: AuthStore
     private let session: URLSession
@@ -45,16 +48,26 @@ final class ChatStore {
 
     /// Reads the handle and the 16+ acknowledgement for the account signed in.
     func loadAccount() async {
-        guard let me = await account() else { handle = nil; ageAcknowledged = false; return }
+        guard let me = await account() else { handle = nil; ageAcknowledged = false; accountUnread = false; readFor = nil; return }
+        // Another account than the one read: nothing of the last one carries over.
+        if readFor != me.userId { handle = nil; ageAcknowledged = false; readFor = me.userId }
+        var read = true
         if let request = ChatAPI.handleRequest(userId: me.userId, token: me.token),
-           let (data, _) = try? await session.data(for: request),
+           let (data, response) = try? await session.data(for: request),
+           (response as? HTTPURLResponse)?.statusCode == 200,
            let rows = try? JSONDecoder().decode([HandleRow].self, from: data) {
             handle = rows.first?.username ?? ""
+        } else {
+            read = false
         }
-        if let (data, _) = try? await session.data(for: ChatAPI.userRequest(token: me.token)),
+        if let (data, response) = try? await session.data(for: ChatAPI.userRequest(token: me.token)),
+           (response as? HTTPURLResponse)?.statusCode == 200,
            let user = try? JSONDecoder().decode(UserRow.self, from: data) {
             ageAcknowledged = (user.user_metadata?.min_age_ack ?? 0) >= 16
+        } else {
+            read = false
         }
+        accountUnread = !read
     }
 
     /// Records "I am 16 or older" on the account, as the website's room door does.

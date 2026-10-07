@@ -3509,7 +3509,8 @@ func chatRoomsGrouped() throws {
         room("indus-visitor-a", region: "indus", kind: "visitor"),
         room("indus-fashion", region: "indus"),
         room("indus-daily-feelings", region: "indus"),
-        room("indus-partners", region: "indus", category: "partners", adult: true),
+        room("indus-partners", region: "indus", category: "partners"),
+        room("indus-adult", region: "indus", adult: true),
         room("khajistan", region: nil, kind: "house"),
         room("maghreb-food", region: "maghreb"),
         room("persia-pending", region: "persia", status: "pending"),
@@ -3519,7 +3520,8 @@ func chatRoomsGrouped() throws {
     try expectEqual(groups[2].rooms.map(\.slug), ["indus-daily-feelings", "indus-fashion", "indus-visitor-a"])
     // Never offered: a Partners or adult room, or one the desk has not approved.
     let all = groups.flatMap(\.rooms).map(\.slug)
-    try expect(!all.contains("indus-partners") && !all.contains("persia-pending"), "\(all)")
+    try expect(!all.contains("indus-partners") && !all.contains("indus-adult") && !all.contains("persia-pending"), "\(all)")
+    try expectEqual(groups.first?.rooms.first?.slug, "khajistan")
 }
 
 func chatRequestsAndRefusals() throws {
@@ -3527,6 +3529,12 @@ func chatRequestsAndRefusals() throws {
     try expect(ChatRules.cleaned("   ") == nil, "an empty line is not sent")
     try expect(ChatRules.cleaned(String(repeating: "a", count: 2001)) == nil, "over 2,000 characters is not sent")
     try expectEqual(ChatRules.cleaned("  salaam \n"), "salaam")
+    // The table counts code points: a vocalised word is longer than it looks.
+    let vocalised = String(repeating: "\u{0628}\u{064E}", count: 1001)   // 1,001 graphemes, 2,002 code points
+    try expect(vocalised.count == 1001 && ChatRules.cleaned(vocalised) == nil, "2,002 code points is over the table's limit")
+    // An expired sign-in is said as one, not as a ban.
+    try expectEqual(ChatRules.explain(status: 401, body: Data("{\"message\":\"JWT expired\"}".utf8)), "Your sign-in has run out. Sign in again under Account.")
+    try expectEqual(ChatRules.explain(status: 403, body: Data("new row violates row-level security policy".utf8)), "The room refused that. Booted, banned, slow mode, or the room is not open to you.")
     guard let post = ChatAPI.postRequest(room: "khajistan", body: " hello ", userId: user, handle: "omar", token: "T") else {
         throw Failure(description: "a good line must build a request")
     }
@@ -3546,6 +3554,49 @@ func chatRequestsAndRefusals() throws {
     try expect(!expired.isVisible(now: ChatClock.date("2026-10-06T12:00:00Z")!), "expired")
     try expect(expired.isVisible(now: ChatClock.date("2026-10-06T10:30:00Z")!), "not yet expired")
     try expectEqual(hidden.who, "a closed account")
+}
+
+func readingAnswerReuse() throws {
+    func answer(_ status: Int, ttl: Int? = nil) -> RRPageAnswer {
+        var object: [String: Any] = [:]
+        if let ttl { object["ttl"] = ttl }
+        return RRPageAnswer(status: status, object: object)
+    }
+    try expectEqual(answer(200, ttl: 600).reuseFor, 480)
+    try expectEqual(answer(200, ttl: 300).reuseFor, 290)
+    try expect(answer(200, ttl: 5).reuseFor == nil, "a URL about to expire is not reused")
+    try expectEqual(answer(451).reuseFor, 480)
+    try expectEqual(answer(401).reuseFor, 60)
+    try expectEqual(answer(403).reuseFor, 60)
+    for status in [400, 404, 408, 429, 500, 503] {
+        try expect(answer(status).reuseFor == nil, "status \(status) is not a decision and must not be reused")
+    }
+}
+
+func flightChoiceByTuneTime() throws {
+    let flights: [(name: String, length: Double)] = [("swerve", 4.04), ("hover", 4.67), ("loop", 8.04), ("twirl", 9.46)]
+    try expectEqual(FlightChoice.pool(flights, expected: 2.5), ["swerve", "hover"])
+    try expectEqual(FlightChoice.pool(flights, expected: 4.3), ["loop"])
+    try expectEqual(FlightChoice.pool(flights, expected: 6.5), ["loop"])
+    try expectEqual(FlightChoice.pool(flights, expected: 8.3), ["twirl"])
+    // Longer than any flight, or no sensible number at all: the longest, never nothing.
+    try expectEqual(FlightChoice.pool(flights, expected: 20), ["twirl"])
+    try expectEqual(FlightChoice.pool(flights, expected: .nan), ["twirl"])
+    try expectEqual(FlightChoice.pool([], expected: 2.5), [])
+    // Every flight in a pool takes its turn, and none flies twice running.
+    let three = ["a", "b", "c"]
+    var flown: [String] = []
+    var last: String?
+    for _ in 0..<6 { last = FlightChoice.next(in: three, after: last); flown.append(last!) }
+    try expectEqual(flown, ["a", "b", "c", "a", "b", "c"])
+    try expectEqual(FlightChoice.next(in: ["only"], after: "only"), "only")
+    try expectEqual(FlightChoice.next(in: three, after: "gone"), "a")
+    // The running time: the first reading stands, then half and half. A channel that tunes
+    // quickly after one slow start comes back to the short flights.
+    try expectEqual(FlightChoice.blend(nil, 6.0), 6.0)
+    var t = FlightChoice.blend(nil, 6.0)
+    for _ in 0..<4 { t = FlightChoice.blend(t, 0.6) }
+    try expect(FlightChoice.pool(flights, expected: t) == ["swerve", "hover"], "after four quick tunes (\(t) s) the short flights return")
 }
 
 func readingPageMap() throws {
@@ -3795,6 +3846,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: shelves, tabs and figures", readingShelves),
     ("Reading Room: the site's words", readingWords),
     ("Saves: the refs the website writes", passportSaveRefs),
+    ("Pigeon: the flight timed to the channel", flightChoiceByTuneTime),
+    ("Reading Room: how long an answer is reused", readingAnswerReuse),
     ("Chat: rooms grouped as the site groups them", chatRoomsGrouped),
     ("Chat: requests, refusals, what is shown", chatRequestsAndRefusals),
     ("Saves: requests, and refusals", passportSaveRequests),

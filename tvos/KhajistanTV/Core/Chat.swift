@@ -118,6 +118,9 @@ enum ChatRules {
     /// What a refused post means, in the site's words (kj-chat.js explain()).
     static func explain(status: Int, body: Data) -> String {
         let text = String(decoding: body, as: UTF8.self)
+        if status == 401, text.contains("JWT") || text.contains("token") {
+            return "Your sign-in has run out. Sign in again under Account."
+        }
         if text.contains("row-level security") || status == 401 || status == 403 {
             return "The room refused that. Booted, banned, slow mode, or the room is not open to you."
         }
@@ -127,7 +130,7 @@ enum ChatRules {
     /// A line as it may be sent: trimmed, 1 to 2,000 characters (the table's own check).
     static func cleaned(_ body: String) -> String? {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (1...2000).contains(trimmed.count) ? trimmed : nil
+        return (1...2000).contains(trimmed.unicodeScalars.count) ? trimmed : nil
     }
 
     static func isSlug(_ text: String) -> Bool {
@@ -181,6 +184,11 @@ enum ChatAPI {
         return request("/rest/v1/chat_message_state?select=message_id,state,at&room_slug=eq.\(room)&at=gt.\(at)", token: token)
     }
 
+    /// One line by id: a line the desk restored comes back through this.
+    static func lineRequest(id: Int64, token: String?) -> URLRequest {
+        request("/rest/v1/chat_messages?select=\(columns)&id=eq.\(id)", token: token)
+    }
+
     static func postRequest(room: String, body: String, userId: String, handle: String, token: String) -> URLRequest? {
         guard ChatRules.isSlug(room), ChatRules.isUserId(userId), let line = ChatRules.cleaned(body) else { return nil }
         let row: [String: Any] = ["room_slug": room, "author_id": userId, "author_handle": handle, "body": line, "kind": "text"]
@@ -193,8 +201,10 @@ enum ChatAPI {
     }
 
     static func deleteRequest(messageId: Int64, token: String) -> URLRequest {
-        var call = request("/rest/v1/chat_messages?id=eq.\(messageId)", token: token)
+        var call = request("/rest/v1/chat_messages?id=eq.\(messageId)&select=id", token: token)
         call.httpMethod = "DELETE"
+        // The deleted row comes back: an RLS refusal deletes nothing and answers 200 with [].
+        call.setValue("return=representation", forHTTPHeaderField: "Prefer")
         return call
     }
 
@@ -269,7 +279,16 @@ final class ChatFeed {
     @ObservationIgnored private var all: [Int64: ChatMessage] = [:]
     @ObservationIgnored private var newest: Int64 = 0
     @ObservationIgnored private var oldest: Int64?
-    @ObservationIgnored private var statesSince = Date()
+    /// The last moment moderation changes were read, as the server's own `at` reported it.
+    @ObservationIgnored private var statesSince = Date().addingTimeInterval(-60)
+    /// The first page of history has been read; until then a poll asks for it again.
+    @ObservationIgnored private var loaded = false {
+        didSet { hasLoaded = loaded }
+    }
+    /// The first page has arrived: before it, an empty room is still loading, not empty.
+    private(set) var hasLoaded = false
+    /// Moderation changes already applied (id and time), so the overlap does not apply one twice.
+    @ObservationIgnored private var applied: Set<String> = []
     @ObservationIgnored private var pollTask: Task<Void, Never>?
 
     var hasOlder: Bool { !reachedStart }
@@ -313,23 +332,43 @@ final class ChatFeed {
         error = nil
         if rows.count < ChatAPI.historyLimit { reachedStart = true }
         for row in rows { all[row.id] = row }
-        oldest = all.keys.min()
+        loaded = true
+        // The cursor is the oldest line FETCHED, not the oldest still held: a reported or deleted
+        // line leaves `all` and must not move the page back over lines already read.
+        if let least = rows.map(\.id).min() { oldest = min(oldest ?? least, least) }
         newest = max(newest, all.keys.max() ?? 0)
         publish()
     }
 
     private func poll() async {
+        // A room whose first page never arrived asks for it again, never for "everything after
+        // 0", which is the room's oldest lines.
+        guard loaded else { await loadOlder(); return }
         let token = await account()?.token
-        if let request = ChatAPI.newerRequest(room: room.slug, after: newest, token: token),
-           let rows: [ChatMessage] = await fetch(request), !rows.isEmpty {
-            for row in rows { all[row.id] = row }
-            newest = max(newest, rows.map(\.id).max() ?? newest)
+        if let request = ChatAPI.newerRequest(room: room.slug, after: newest, token: token) {
+            if let rows: [ChatMessage] = await fetch(request) {
+                for row in rows { all[row.id] = row }
+                newest = max(newest, rows.map(\.id).max() ?? newest)
+                error = nil
+            } else {
+                error = "The room is not answering. Lines may be missing until it does."
+            }
         }
-        let since = statesSince
-        statesSince = Date()
-        if let request = ChatAPI.statesRequest(room: room.slug, since: since.addingTimeInterval(-5), token: token),
+        // Moderation since the last read that worked, with a minute's overlap for clocks; the
+        // window moves only when the read succeeds, so a dropped request loses nothing.
+        if let request = ChatAPI.statesRequest(room: room.slug, since: statesSince.addingTimeInterval(-60), token: token),
            let states: [ChatLineState] = await fetch(request) {
-            for change in states where change.state != "visible" { all[change.message_id] = nil }
+            for change in states where applied.insert("\(change.message_id)|\(change.at)").inserted {
+                if change.state == "visible" {
+                    // Restored by the desk: fetch it again, as the house rules promise it comes back.
+                    if let rows: [ChatMessage] = await fetch(ChatAPI.lineRequest(id: change.message_id, token: token)) {
+                        for row in rows { all[row.id] = row }
+                    }
+                } else {
+                    all[change.message_id] = nil
+                }
+                if let at = ChatClock.date(change.at), at > statesSince { statesSince = at }
+            }
         }
         publish()
     }
@@ -361,15 +400,16 @@ final class ChatFeed {
             publish()
             return "Reported. It is with the desk."
         }
-        if status == 409 || String(decoding: data, as: UTF8.self).contains("duplicate") { return "You already reported that." }
+        if String(decoding: data, as: UTF8.self).contains("23505") { return "You already reported that." }
         return ChatRules.explain(status: status, body: data)
     }
 
     /// Deletes one of the account's own text lines.
     func delete(_ line: ChatMessage) async -> Bool {
         guard line.kind == "text", let me = await account(), line.author_id == me.userId else { return false }
-        guard let (_, response) = try? await session.data(for: ChatAPI.deleteRequest(messageId: line.id, token: me.token)),
-              let status = (response as? HTTPURLResponse)?.statusCode, status == 200 || status == 204 else { return false }
+        guard let (data, response) = try? await session.data(for: ChatAPI.deleteRequest(messageId: line.id, token: me.token)),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let deleted = try? JSONDecoder().decode([[String: Int64]].self, from: data), !deleted.isEmpty else { return false }
         all[line.id] = nil
         publish()
         return true

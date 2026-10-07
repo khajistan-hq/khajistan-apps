@@ -29,7 +29,7 @@ final class BackToAtlasUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        kjFocusStrip(app)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
         XCTAssertTrue(focused.exists, "a region must take focus in the strip")
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 5), "the region page must replace the map")

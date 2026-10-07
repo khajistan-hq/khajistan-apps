@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Observation
 
 /// Why a Pics/Vids video could not start.
@@ -80,6 +81,7 @@ final class PicsVidsStore {
             roster = try await fetch([PnvAccount].self, PnvAPI.accountsRequest())
         } catch {
             if Task.isCancelled { phase = .idle; return }
+            Logger(subsystem: "com.khajistan.tv", category: "picsvids").error("roster, first try: \(String(describing: error), privacy: .public)")
             // One quiet second try: a cold launch sometimes loses the first request, and the page
             // should not open on an error the viewer then has to clear (QA, 2026-10-06).
             try? await Task.sleep(for: .seconds(1))

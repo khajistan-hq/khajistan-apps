@@ -378,6 +378,7 @@ struct TransmissionPlayerView: View {
         var flight: PigeonOverlay.Flight?
         if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
+            guard !left else { return }
             pigeon.start()
             flight = pick
         }
@@ -385,6 +386,8 @@ struct TransmissionPlayerView: View {
         let started = ContinuousClock.now
         if let pending = await store.switchBehind(), !left {
             let next = store.incoming
+            // The channel's own tune time, signing included, to its first frame; never the bird.
+            TuneTimes.recordWhenPlaying(key, player: next, since: started) { !left }
             while !left, !Task.isCancelled {
                 let ready = next.state == .playing || { if case .failed = next.state { return true }; return false }()
                 if ready {
@@ -392,7 +395,6 @@ struct TransmissionPlayerView: View {
                         try? await Task.sleep(for: .milliseconds(30))
                         continue
                     }
-                    TuneTimes.recordWhenPlaying(key, player: next, since: started)
                     #if DEBUG
                     print("KJSWITCH cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(pigeon.current?.name ?? "-")")
                     #endif
@@ -402,7 +404,6 @@ struct TransmissionPlayerView: View {
                 // The bird has gone and the channel still tunes: cut now, one flight per press,
                 // never a loop (owner, 2026-10-06). The channel shows its own tuning state.
                 if !pigeon.isFlying {
-                    TuneTimes.recordWhenPlaying(key, player: next, since: started)
                     #if DEBUG
                     print("KJSWITCH early-cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started)")
                     #endif
@@ -460,6 +461,8 @@ struct TransmissionPlayerView: View {
 
     private func leave() {
         left = true
+        // The bird is on the window, over every screen: it goes with the player.
+        model.pigeon.clear()
         hideTask?.cancel()
         subtitles.clear()
         store.stop()

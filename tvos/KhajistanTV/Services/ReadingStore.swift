@@ -320,12 +320,12 @@ final class ReadingStore {
     /// One page at reading size. The page server decides what this viewer may read; its answer
     /// is held for eight minutes (the website's own reuse window), and only a page it allowed is
     /// shown. The image bytes come from the device's cache where they are already held.
-    func page(_ issue: RRIssue, stored: Int) async -> RRPageResult {
+    func page(_ issue: RRIssue, stored: Int, priority: TaskPriority = .userInitiated) async -> RRPageResult {
         let token = try? await auth.validAccessToken()
         let path = endpoint(issue, page: stored)
         let key = Self.pageKey(path, token: token)
         if let running = inflight[key] { return await running.value }
-        let task = Task { await self.load(path: path, key: key, token: token) }
+        let task = Task { await self.load(path: path, key: key, token: token, priority: priority) }
         inflight[key] = task
         let result = await task.value
         inflight[key] = nil
@@ -350,25 +350,25 @@ final class ReadingStore {
         guard !wanted.isEmpty else { return }
         guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: wanted, size: "full", accessToken: token)),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return }
-        let until = Date().addingTimeInterval(Self.answerLife)
-        for (path, answer) in RRPageAnswer.parseBatch(data) where answer.status != 404 && answer.status < 500 {
-            answers[Self.pageKey(path, token: token)] = (answer, until)
+        let answered = Date()
+        for (path, answer) in RRPageAnswer.parseBatch(data) {
+            guard let life = answer.reuseFor else { continue }
+            answers[Self.pageKey(path, token: token)] = (answer, answered.addingTimeInterval(life))
         }
     }
 
-    /// Warms a page: answered, fetched and decoded into memory, nothing shown.
+    /// Warms a page at a lower priority, so pages ahead never decode before the one being read.
     func prefetch(_ issue: RRIssue, stored: Int) async {
-        _ = await page(issue, stored: stored)
+        _ = await page(issue, stored: stored, priority: .utility)
     }
 
-    private static let answerLife: TimeInterval = 8 * 60
 
     private static func pageKey(_ path: String, token: String?) -> String {
         // The token's tail tells two viewers apart without keeping the whole token as a key.
         path + "|" + (token.map { String($0.suffix(24)) } ?? "anon")
     }
 
-    private func load(path: String, key: String, token: String?) async -> RRPageResult {
+    private func load(path: String, key: String, token: String?, priority: TaskPriority) async -> RRPageResult {
         var answer: RRPageAnswer?
         if let held = answers[key], held.until > Date() { answer = held.answer }
         if answer == nil {
@@ -377,15 +377,19 @@ final class ReadingStore {
                 pad4.insert(twin.slug)
                 answer = retry
             }
-            if let answer, answer.status != 404, answer.status < 500 {
-                answers[key] = (answer, Date().addingTimeInterval(Self.answerLife))
+            if let answer, let life = answer.reuseFor {
+                answers[key] = (answer, Date().addingTimeInterval(life))
             }
         }
         guard let answer else { return .outcome(.unavailable) }
         switch RRPageOutcome.decide(answer) {
         case .page(let url):
             if let held = pages.object(forKey: key as NSString) { return .image(held) }
-            guard let image = await picture(path: path, url: url) else { return .outcome(.unavailable) }
+            guard let image = await picture(url: url, priority: priority) else {
+                // A URL that would not download is not offered again: the next turn asks afresh.
+                answers[key] = nil
+                return .outcome(.unavailable)
+            }
             pages.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
             return .image(image)
         case let other:
@@ -402,9 +406,12 @@ final class ReadingStore {
     /// The page's picture at its stored size (up to 4096 on its long side, which no page reaches),
     /// read and decoded off the main thread. Bytes come from the device's cache, else the network,
     /// and a download is kept for next time.
-    private func picture(path: String, url: URL) async -> UIImage? {
+    private func picture(url: URL, priority: TaskPriority) async -> UIImage? {
         let session = urlSession
-        return await Task.detached(priority: .userInitiated) {
+        // Keyed by the file the server pointed to (bucket and name, not the signature), so the
+        // full tier and the view-only tier of one page are never served in each other's place.
+        let path = url.path
+        return await Task.detached(priority: priority) {
             if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 4096) { return image }
             guard let (data, response) = try? await session.data(from: url),
                   (response as? HTTPURLResponse)?.statusCode == 200,

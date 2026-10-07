@@ -96,7 +96,7 @@ final class FilmsUITests: XCTestCase {
         // Down onto the region strip, then east along it to Indus.
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        kjFocusStrip(app)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
         for _ in 0..<20 where !(focusedRegion.exists && focusedRegion.identifier == "region-indus") {
             XCUIRemote.shared.press(.right)
             kjPause(0.6)

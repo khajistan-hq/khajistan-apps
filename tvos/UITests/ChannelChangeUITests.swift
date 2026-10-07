@@ -69,7 +69,7 @@ final class ChannelChangeUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        kjFocusStrip(app)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
         // Indus carries the most television; walk to it if focus landed elsewhere.
         for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
             XCUIRemote.shared.press(.right)

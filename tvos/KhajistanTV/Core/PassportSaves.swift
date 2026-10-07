@@ -66,7 +66,8 @@ enum PassportSaves {
 
     static func deleteRequest(userId: String, refs: [String], accessToken: String) -> URLRequest? {
         guard isUserId(userId), !refs.isEmpty, refs.allSatisfy({ ref in
-            ref.split(separator: ":", maxSplits: 1).count == 2 && isRefSafe(String(ref.split(separator: ":", maxSplits: 1)[1]))
+            let parts = ref.split(separator: ":", maxSplits: 1)
+            return parts.count == 2 && ["channel", "reading-room"].contains(String(parts[0])) && isRefSafe(String(parts[1]))
         }) else { return nil }
         let list = refs.map { "\"\($0)\"" }.joined(separator: ",")
         guard let encoded = list.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=#"))) else { return nil }

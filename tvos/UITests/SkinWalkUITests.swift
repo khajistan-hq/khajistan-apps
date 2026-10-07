@@ -60,7 +60,7 @@ final class SkinWalkUITests: XCTestCase {
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "\(skin): the receiver must draw its regions")
             let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            kjFocusStrip(app)
+            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
             shot("\(skin)-1-receiver", app)
             XCUIRemote.shared.press(.select)
             let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
@@ -152,7 +152,7 @@ final class SkinWalkUITests: XCTestCase {
             // Down into the region strip, then left along it and off its west end to the switch.
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            kjFocusStrip(app)
+            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
             for _ in 0..<40 where !toggle.hasFocus { XCUIRemote.shared.press(.left) }
             XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
             shot("\(skin)-9-atlas-switch-focused", app)

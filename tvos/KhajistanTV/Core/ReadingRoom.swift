@@ -470,6 +470,23 @@ struct RRPageAnswer: Equatable, Sendable {
     let outsideScope: Bool
     let annualRequired: Bool
     let closed: Bool
+    /// Seconds the signed URL lives, as the server set it: shorter near a reading window's close.
+    let ttl: Int?
+
+    /// How long this answer may be reused before the server is asked again: an allowed page for
+    /// eight minutes or its own URL's life less ten seconds, whichever is shorter; a rights hold for
+    /// eight minutes; a gate for one minute, so a pass bought elsewhere opens the page soon. Any
+    /// other answer (a fault, a rate limit, a missing page) is not reused at all.
+    var reuseFor: TimeInterval? {
+        switch status {
+        case 200:
+            let life = min(480, ttl.map { TimeInterval($0 - 10) } ?? 480)
+            return life > 0 ? life : nil
+        case 451: return 480
+        case 401, 403: return 60
+        default: return nil
+        }
+    }
 
     /// A signed URL must name Supabase storage on the project's own host; any other address is not an answer.
     static func isProjectURL(_ url: URL) -> Bool {
@@ -489,6 +506,7 @@ struct RRPageAnswer: Equatable, Sendable {
         outsideScope = object["outsideScope"] as? Bool ?? false
         annualRequired = object["annualRequired"] as? Bool ?? false
         closed = (object["error"] as? String) == "reading_room_closed"
+        ttl = object["ttl"] as? Int
     }
 
     /// A single-path answer: the HTTP status and the body.

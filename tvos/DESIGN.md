@@ -8,8 +8,9 @@ this file is stale. Rules it inherits: `.claude/rules/frontend.md` §1–§4 and
 
 ## Tokens, per skin
 
-The skin follows the hour (`Skin.current`: day 08:00–17:00, smut 05:00–08:00 and
-17:00–20:00, grove otherwise) unless the viewer holds one in Account. The choice is
+The skin follows the sun (`Skin.current`, the website's KJSky: day with the sun above +6°,
+smut between ±6°, grove below, at the coordinate tzdata gives the device's time zone, and
+the site's hour bands for a zone the table lacks) unless the viewer holds one in Account. The choice is
 **Automatic · Day · Grove · Smut**: the three names are the website switch's own
 (`archive/scripts/kj-theme.js`, `LABEL`), and Automatic, the default, names what the site
 does without a click. It is kept on the device (`kj.skin`) and applies at once. Every colour

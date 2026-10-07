@@ -10,9 +10,8 @@ import UIKit
 /// using the flights they starred in Higgsfield; "use the longer one only for channels that take
 /// longer than 8-10 secs to load").
 ///
-/// Each flight is the bird alone, HEVC with alpha, with a sidecar saying its length and `cut`:
-/// the last moment the bird covers the most of the screen, which is where the channel changes
-/// if the new one is ready (tvos/scripts/flights/, KJ_OVERLAY=1).
+/// Each flight is the bird alone, HEVC with alpha, with a sidecar saying its length
+/// (tvos/scripts/flights/, KJ_OVERLAY=1). The channel cuts the moment it plays, under the bird.
 @MainActor @Observable
 final class PigeonOverlay {
     struct Flight: Equatable {
@@ -20,13 +19,6 @@ final class PigeonOverlay {
         let colour: URL
         let matte: URL
         let length: Double
-        let cut: Double
-        /// How much of the screen the bird covers at `cut`. Under half, there is nothing to hide the
-        /// cut behind, so the channel cuts the moment it is ready.
-        let cutCover: Double
-        /// The stretches, in seconds, where the bird covers at least half the screen (measured off
-        /// the matte, tvos/scripts/flights/render_flight.py). A ready channel cuts inside one.
-        let covered: [ClosedRange<Double>]
     }
 
     /// The flights, short and long. A change gets the shortest flight that lasts as long as the
@@ -172,14 +164,8 @@ final class PigeonOverlay {
               let meta = Bundle.main.url(forResource: "flight-\(name)", withExtension: "json"),
               let data = try? Data(contentsOf: meta),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let length = json["length"] as? Double, let cut = json["cut"] as? Double else { return nil }
-        let cutCover = json["cutCover"] as? Double ?? 0
-        let windows = (json["covered"] as? [[Double]] ?? []).compactMap { pair in
-            pair.count == 2 && pair[0] <= pair[1] ? pair[0]...pair[1] : nil
-        }
-        // A file from before the windows were written: the old rule, the last stretch alone.
-        let covered = json["covered"] == nil && cutCover >= 0.5 ? [max(0, cut - 0.3)...cut] : windows
-        return Flight(name: name, colour: colour, matte: matte, length: length, cut: cut, cutCover: cutCover, covered: covered)
+              let length = json["length"] as? Double else { return nil }
+        return Flight(name: name, colour: colour, matte: matte, length: length)
     }
 }
 

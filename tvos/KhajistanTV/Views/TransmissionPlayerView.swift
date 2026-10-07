@@ -369,18 +369,16 @@ struct TransmissionPlayerView: View {
     }
 
     /// The other channel tunes behind the programme on screen while the pigeon flies over it, and
-    /// cuts in behind the bird, as in the Receiver (owner, 2026-10-06): at the moment the bird
-    /// covers the most of the screen where it covers half or more, or when the channel plays.
+    /// cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the channel
+    /// plays, with the bird flying on over it (2026-10-07).
     /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
     private func switchUnderThePigeon() async {
         let pigeon = model.pigeon
         let key = "transmission-\(store.channelNumber == 1 ? 2 : 1)"
-        var flight: PigeonOverlay.Flight?
         if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
             guard !left else { return }
             pigeon.start()
-            flight = pick
         }
         async let quiet: Void = store.player.fadeOut()
         let started = ContinuousClock.now
@@ -391,10 +389,6 @@ struct TransmissionPlayerView: View {
             while !left, !Task.isCancelled {
                 let ready = next.state == .playing || { if case .failed = next.state { return true }; return false }()
                 if ready {
-                    if let flight, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) {
-                        try? await Task.sleep(for: .milliseconds(30))
-                        continue
-                    }
                     #if DEBUG
                     print("KJSWITCH cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(pigeon.current?.name ?? "-")")
                     #endif
@@ -446,9 +440,6 @@ struct TransmissionPlayerView: View {
             }
             if !gone { await store.tune(channel: channel) }
             if !gone { await store.player.settled() }
-            while !gone, let flight = pigeon.current, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) {
-                try? await Task.sleep(for: .milliseconds(30))
-            }
             if !gone { model.clips.uncover() }
             return
         }

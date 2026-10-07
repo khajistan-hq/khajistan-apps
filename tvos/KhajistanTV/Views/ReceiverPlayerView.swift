@@ -355,13 +355,12 @@ struct ReceiverPlayerView: View {
     }
 
     /// The pigeon flies over the picture while the next channel tunes behind it, out of sight and
-    /// silent; the channel hard-cuts at the moment the bird covers the most of the screen, or the
-    /// moment the new one plays if that is later, and only the sound fades (owner, 2026-10-06).
+    /// silent; the channel hard-cuts the moment the new one plays, with the bird flying on over
+    /// it, and only the sound fades (owner, 2026-10-06; cut on readiness 2026-10-07).
     /// A channel known to take 8 s or more gets a long flight; one that outlasts its flight gets
     /// another. A press during a change retunes behind the bird already flying.
     private func change(to target: Channel) async {
         let outgoing = controller, next = incoming, pigeon = model.pigeon
-        var flight = pigeon.current
         // The tune starts first and the bird is armed while it runs: arming took up to 2 s on the
         // Apple TV HD, and the signal used to wait for it (roast, 2026-10-07).
         async let quiet: Void = outgoing.fadeOut()
@@ -372,7 +371,6 @@ struct ReceiverPlayerView: View {
             await pigeon.arm(pick)
             guard !Task.isCancelled else { await quiet; return }
             pigeon.start()
-            flight = pick
         }
         // The channel's own tune time, from now to its first frame; never the wait for the bird.
         // Read live (State storage), so a press on to another channel stops the timing.
@@ -384,9 +382,8 @@ struct ReceiverPlayerView: View {
         while !Task.isCancelled {
             switch next.state {
             case .playing, .failed:
-                // Ready: cut inside a stretch where the wing covers half the screen, wait for one
-                // still to come, or cut now when none is left.
-                if let flight, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) { break }
+                // Ready: cut now, with the bird flying on over the new picture (owner,
+                // 2026-10-07). Waiting for the wing to cover the cut cost ~4 s a press.
                 cut(to: target, from: outgoing, into: next, tookSince: started)
                 await quiet
                 return

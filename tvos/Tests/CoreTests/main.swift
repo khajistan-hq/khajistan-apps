@@ -3612,13 +3612,6 @@ func readingAnswerReuse() throws {
 func flightChoiceByTuneTime() throws {
     let flights: [(name: String, length: Double)] = [("swerve", 4.04), ("hover", 4.67), ("loop", 8.04), ("twirl", 9.46)]
     try expectEqual(FlightChoice.pool(flights, expected: 2.5), ["swerve", "hover"])
-    // The cut: inside a covered stretch now; before one, wait; after the last, now.
-    let swerve: [ClosedRange<Double>] = [0.0...0.71, 3.67...4.0]
-    try expect(FlightChoice.shouldCut(elapsed: 0.3, covered: swerve), "ready under the opening wing cuts at once")
-    try expect(!FlightChoice.shouldCut(elapsed: 1.5, covered: swerve), "between wings it waits for the next")
-    try expect(FlightChoice.shouldCut(elapsed: 3.8, covered: swerve), "under the closing wing it cuts")
-    try expect(FlightChoice.shouldCut(elapsed: 4.02, covered: swerve), "after the last wing it cuts")
-    try expect(FlightChoice.shouldCut(elapsed: 2.0, covered: []), "a flight that never covers half cuts when ready")
     try expectEqual(FlightChoice.pool(flights, expected: 4.3), ["loop"])
     try expectEqual(FlightChoice.pool(flights, expected: 6.5), ["loop"])
     try expectEqual(FlightChoice.pool(flights, expected: 8.3), ["twirl"])

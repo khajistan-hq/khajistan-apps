@@ -33,6 +33,8 @@ struct ChatMessage: Decodable, Identifiable, Hashable, Sendable {
     let hidden_at: String?
     let removed_at: String?
     let expires_at: String?
+    /// What a media line points at, as kj-chat.js send() writes it: `gif:<file>`, `pnv:<key>`.
+    var asset_ref: String? = nil
 
     /// "a closed account" when the author has gone, as the site prints it (kj-chat.js :446).
     var who: String { author_handle ?? "a closed account" }
@@ -42,6 +44,43 @@ struct ChatMessage: Decodable, Identifiable, Hashable, Sendable {
         guard hidden_at == nil, removed_at == nil else { return false }
         if let expires_at, let at = ChatClock.date(expires_at), at <= now { return false }
         return true
+    }
+}
+
+/// The picture a line carries, drawn as kj-chat.js renderBody draws it in the room: a GIF from
+/// the site's `video-gifs` bucket, or an object from Pics/Vids looked up by its key in
+/// `pnv_media_mv`. Stickers, voice memos and receiver channels stay text in the apps.
+enum ChatMedia: Hashable, Sendable {
+    case gif(URL)
+    case archive(key: String)
+
+    static func of(_ line: ChatMessage) -> ChatMedia? {
+        guard let ref = line.asset_ref else { return nil }
+        switch line.kind {
+        case "gif":
+            // The site's own picker accepts only this shape of name (kj-chat.js archivePicker).
+            guard ref.hasPrefix("gif:") else { return nil }
+            let name = String(ref.dropFirst(4))
+            guard name.range(of: "^[A-Za-z0-9_-][A-Za-z0-9._-]*\\.gif$", options: [.regularExpression, .caseInsensitive]) != nil,
+                  let url = URL(string: "/storage/v1/object/public/video-gifs/" + name, relativeTo: KJConfig.supabase)?.absoluteURL
+            else { return nil }
+            return .gif(url)
+        case "pnv":
+            guard ref.hasPrefix("pnv:") else { return nil }
+            let key = String(ref.dropFirst(4))
+            guard !key.isEmpty, key.count <= 200, key.unicodeScalars.allSatisfy({ $0.value > 32 && $0.value != 127 })
+            else { return nil }
+            return .archive(key: key)
+        default:
+            return nil
+        }
+    }
+
+    /// A browser plays a GIF frame delay of 10 ms or less at 100 ms, and the site's GIFs are
+    /// written with 10 ms delays, so read as written they would play ten times too fast.
+    static func gifDelay(_ seconds: Double?) -> Double {
+        guard let seconds, seconds.isFinite, seconds > 0.011 else { return 0.1 }
+        return seconds
     }
 }
 
@@ -233,7 +272,7 @@ enum ChatAPI {
         return write("/rest/v1/rpc/chat_claim_handle", method: "POST", row: ["want": want], token: token)
     }
 
-    private static let columns = "id,room_slug,author_id,author_handle,body,kind,created_at,hidden_at,removed_at,expires_at"
+    private static let columns = "id,room_slug,author_id,author_handle,body,kind,asset_ref,created_at,hidden_at,removed_at,expires_at"
 
     private static func write(_ path: String, method: String, row: [String: Any], token: String) -> URLRequest? {
         guard let body = try? JSONSerialization.data(withJSONObject: row) else { return nil }

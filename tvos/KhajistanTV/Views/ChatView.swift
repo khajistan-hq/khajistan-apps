@@ -19,7 +19,10 @@ struct ChatView: View {
     /// The line whose actions are open under it. tvOS draws a context menu's focused item white,
     /// so the actions are a row of house buttons instead, opened by Select on the line.
     @State private var actionsFor: Int64?
-    @FocusState private var actionsFocused: Bool
+    @FocusState private var actionFocus: ActionFocus?
+    private enum ActionFocus: Hashable { case open, report }
+    /// A Pics/Vids object opened from a line, in the Pics/Vids viewer.
+    @State private var viewing: PnvRow?
 
     private var store: ChatStore { model.chat }
 
@@ -38,6 +41,9 @@ struct ChatView: View {
         .task { await store.start() }
         .task(id: model.auth.session?.userId) { await store.loadAccount() }
         .task(id: room?.slug) { await follow(room) }
+        .fullScreenCover(item: $viewing) { row in
+            PnvViewerView(row: row, region: PicsVidsStore.allRegions)
+        }
     }
 
     // MARK: - Rooms
@@ -133,12 +139,19 @@ struct ChatView: View {
                     ForEach(shown) { line in
                         Button {
                             actionsFor = actionsFor == line.id ? nil : line.id
-                            actionsFocused = actionsFor != nil
+                            actionFocus = actionsFor == nil ? nil : (Self.archiveKey(ChatMedia.of(line)) == nil ? .report : .open)
                         } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                                Text(Self.time(line.created_at)).kjSmall(faint: true)
-                                Text(line.who).kjKicker()
-                                Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
+                            let media = ChatMedia.of(line)
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                                    Text(Self.time(line.created_at)).kjSmall(faint: true)
+                                    Text(line.who).kjKicker()
+                                    // A GIF line's body is "[gif]"; the picture says it.
+                                    if !Self.isGif(media) {
+                                        Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                if let media { ChatMediaView(media: media, height: 220) }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -157,12 +170,23 @@ struct ChatView: View {
     }
 
     private func actions(for line: ChatMessage) -> some View {
-        HStack(spacing: 12) {
+        let archiveKey = Self.archiveKey(ChatMedia.of(line))
+        return HStack(spacing: 12) {
+            if let archiveKey {
+                Button("Open") {
+                    actionsFor = nil
+                    Task {
+                        if let row = await ChatMediaCache.shared.row(archiveKey) { viewing = row }
+                        else { note = "That is not in Pics/Vids any more." }
+                    }
+                }
+                .focused($actionFocus, equals: .open)
+            }
             Button("Report") {
                 actionsFor = nil
                 Task { note = await feed?.report(line) }
             }
-            .focused($actionsFocused)
+            .focused($actionFocus, equals: .report)
             if let handle = line.author_handle, handle != store.handle {
                 Button("Ignore \(handle)") {
                     actionsFor = nil
@@ -183,6 +207,16 @@ struct ChatView: View {
         .padding(.leading, 16)
         .onExitCommand { actionsFor = nil }
         .accessibilityIdentifier("chat-actions")
+    }
+
+    private static func archiveKey(_ media: ChatMedia?) -> String? {
+        if case .archive(let key) = media { return key }
+        return nil
+    }
+
+    private static func isGif(_ media: ChatMedia?) -> Bool {
+        if case .gif = media { return true }
+        return false
     }
 
     // MARK: - Writing

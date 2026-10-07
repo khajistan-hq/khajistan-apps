@@ -25,7 +25,13 @@ final class ChatUITests: XCTestCase {
         // A line's actions open under it as house buttons (no system menu: tvOS draws its
         // focused item white), and Back closes them.
         guard line.exists else { return }
-        XCTAssertTrue(kjFocus(line, app: app), "a line must take focus")
+        // Right, out of the room list into the lines: the room opens scrolled to its newest line,
+        // and a room with pictures in it is taller than the screen, so the first line is not the
+        // one focus reaches.
+        let lines = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-line-'"))
+        let focusedLine = lines.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<4 where !focusedLine.exists { XCUIRemote.shared.press(.right); kjPause(0.4) }
+        XCTAssertTrue(focusedLine.exists, "a line must take focus")
         XCUIRemote.shared.press(.select)
         let actions = app.descendants(matching: .any)["chat-actions"]
         XCTAssertTrue(actions.waitForExistence(timeout: 5), "Select on a line opens its actions")

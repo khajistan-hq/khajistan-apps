@@ -3517,6 +3517,41 @@ func chatRequestsAndRefusals() throws {
     try expectEqual(hidden.who, "a closed account")
 }
 
+func chatMediaLines() throws {
+    func line(_ kind: String, _ ref: String?) -> ChatMessage {
+        ChatMessage(id: 9, room_slug: "khajistan", author_id: nil, author_handle: "a", body: "[gif]", kind: kind, created_at: "2026-10-06T10:00:00Z", hidden_at: nil, removed_at: nil, expires_at: nil, asset_ref: ref)
+    }
+    // The two kinds the room draws as pictures, as kj-chat.js writes them.
+    try expectEqual(ChatMedia.of(line("gif", "gif:Lollywood_dance-01.gif")),
+                    .gif(URL(string: "https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/public/video-gifs/Lollywood_dance-01.gif")!))
+    try expectEqual(ChatMedia.of(line("pnv", "pnv:da:12345")), .archive(key: "da:12345"))
+    // Negative: a name the site's picker would not offer, a kind and ref that disagree, no ref, and text.
+    for ref in ["gif:../secret.gif", "gif:a/b.gif", "gif:.gif", "gif:x.png", "gif:", "pnv:x.gif", "x.gif"] {
+        try expect(ChatMedia.of(line("gif", ref)) == nil, ref)
+    }
+    for ref in ["pnv:", "gif:x.gif", "pnv:a b", "pnv:" + String(repeating: "k", count: 201)] {
+        try expect(ChatMedia.of(line("pnv", ref)) == nil, ref)
+    }
+    try expect(ChatMedia.of(line("gif", nil)) == nil, "no ref")
+    try expect(ChatMedia.of(line("text", "gif:x.gif")) == nil, "a text line is text")
+    try expect(ChatMedia.of(line("sticker", "sticker:handle")) == nil, "stickers stay text")
+    // A 10 ms GIF delay plays at 100 ms, as in a browser; a real delay is kept.
+    try expectEqual(ChatMedia.gifDelay(0.01), 0.1)
+    try expectEqual(ChatMedia.gifDelay(nil), 0.1)
+    try expectEqual(ChatMedia.gifDelay(.nan), 0.1)
+    try expectEqual(ChatMedia.gifDelay(0.04), 0.04)
+    // The column is read when the server sends it and is absent from older rows.
+    let decoded = try JSONDecoder().decode([ChatMessage].self, from: Data("""
+    [{"id":1,"room_slug":"k","author_id":null,"author_handle":"a","body":"[gif]","kind":"gif","asset_ref":"gif:x.gif","created_at":"2026-10-06T10:00:00Z","hidden_at":null,"removed_at":null,"expires_at":null},
+     {"id":2,"room_slug":"k","author_id":null,"author_handle":"a","body":"hi","kind":"text","created_at":"2026-10-06T10:00:00Z","hidden_at":null,"removed_at":null,"expires_at":null}]
+    """.utf8))
+    try expectEqual(decoded.map(\.asset_ref), ["gif:x.gif", nil])
+    try expect(ChatAPI.historyRequest(room: "khajistan", before: nil, token: nil)?.url?.query?.contains("asset_ref") == true, "history asks for asset_ref")
+    // One Pics/Vids row by its key, encoded.
+    let request = PnvAPI.rowRequest(mediaKey: "da:1 2")
+    try expect(request.url?.absoluteString.hasSuffix("media_key=eq.da%3A1%202&limit=1") == true, request.url?.absoluteString ?? "")
+}
+
 func readingAnswerReuse() throws {
     func answer(_ status: Int, ttl: Int? = nil) -> RRPageAnswer {
         var object: [String: Any] = [:]
@@ -3811,6 +3846,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: how long an answer is reused", readingAnswerReuse),
     ("Chat: rooms grouped as the site groups them", chatRoomsGrouped),
     ("Chat: requests, refusals, what is shown", chatRequestsAndRefusals),
+    ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Reading Room: provenance", readingProvenance),
 ]

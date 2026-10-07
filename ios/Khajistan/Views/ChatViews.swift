@@ -96,6 +96,8 @@ struct ChatRoomView: View {
     @State private var note: String?
     @State private var sending = false
     @State private var ignored = ChatRules.ignored()
+    /// A Pics/Vids object opened from a line, in the Pics/Vids viewer.
+    @State private var viewing: PnvRow?
 
     private var store: ChatStore { model.chat }
 
@@ -163,13 +165,18 @@ struct ChatRoomView: View {
                         Text("No lines in the last 48 hours.").kjSmall(faint: true)
                     }
                     ForEach(shown) { line in
+                        let media = ChatMedia.of(line)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 8) {
                                 Text(line.who).kjKicker()
                                 Text(Self.time(line.created_at)).kjSmall(faint: true)
                             }
-                            Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
-                                .textSelection(.enabled)
+                            // A GIF line's body is "[gif]"; the picture says it.
+                            if !Self.isGif(media) {
+                                Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
+                                    .textSelection(.enabled)
+                            }
+                            if let media { mediaView(media) }
                         }
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -183,14 +190,45 @@ struct ChatRoomView: View {
             }
             .frame(maxHeight: .infinity)
             .scrollDismissesKeyboard(.interactively)
+            .fullScreenCover(item: $viewing) { row in
+                PnvViewerView(row: row)
+            }
             .onChange(of: shown.last?.id) { _, last in
                 if let last { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last, anchor: .bottom) } }
             }
         }
     }
 
+    /// A GIF plays in the line; a Pics/Vids object opens in the Pics/Vids viewer when tapped.
+    @ViewBuilder
+    private func mediaView(_ media: ChatMedia) -> some View {
+        switch media {
+        case .gif:
+            ChatMediaView(media: media, height: 160).padding(.top, 4)
+        case .archive(let key):
+            Button { open(key) } label: { ChatMediaView(media: media, height: 160) }
+                .buttonStyle(.plain)
+                .padding(.top, 4)
+        }
+    }
+
+    private func open(_ key: String) {
+        Task {
+            if let row = await ChatMediaCache.shared.row(key) { viewing = row }
+            else { note = "That is not in Pics/Vids any more." }
+        }
+    }
+
+    private static func isGif(_ media: ChatMedia?) -> Bool {
+        if case .gif = media { return true }
+        return false
+    }
+
     @ViewBuilder
     private func actions(for line: ChatMessage) -> some View {
+        if case .archive(let key) = ChatMedia.of(line) {
+            Button("Open in Pics/Vids") { open(key) }
+        }
         Button("Report") {
             Task { note = await feed?.report(line) }
         }

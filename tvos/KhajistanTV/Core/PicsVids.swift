@@ -211,6 +211,12 @@ enum PnvAPI {
         return request
     }
 
+    /// One object by its key, as a chat line names it (kj-chat.js archRow). The view's own
+    /// gates decide whether it answers.
+    static func rowRequest(mediaKey: String) -> URLRequest {
+        rest("pnv_media_mv?select=\(columns)&media_key=eq.\(PnvMedia.encodeComponent(mediaKey))&limit=1")
+    }
+
     /// The roster. A row is shown only if its account is on it (fail closed: no roster, nothing).
     static func accountsRequest() -> URLRequest {
         rest("pnv_accounts?select=slug,handle,url,platform,region,region_token,country,corpus,account_key")

@@ -39,7 +39,7 @@ struct HomeView: View {
                 Text("Media of the Middle World").kjSmall(faint: true)
             }
             Spacer(minLength: 0)
-            PigeonMark(size: 72)
+            PigeonMark(size: 96)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Khajistan, Media of the Middle World")

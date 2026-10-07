@@ -391,7 +391,7 @@ struct TransmissionPlayerView: View {
             while !left, !Task.isCancelled {
                 let ready = next.state == .playing || { if case .failed = next.state { return true }; return false }()
                 if ready {
-                    if let flight, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut {
+                    if let flight, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) {
                         try? await Task.sleep(for: .milliseconds(30))
                         continue
                     }
@@ -446,7 +446,7 @@ struct TransmissionPlayerView: View {
             }
             if !gone { await store.tune(channel: channel) }
             if !gone { await store.player.settled() }
-            while !gone, let flight = pigeon.current, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut {
+            while !gone, let flight = pigeon.current, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) {
                 try? await Task.sleep(for: .milliseconds(30))
             }
             if !gone { model.clips.uncover() }

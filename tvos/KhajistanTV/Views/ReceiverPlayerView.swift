@@ -362,16 +362,18 @@ struct ReceiverPlayerView: View {
     private func change(to target: Channel) async {
         let outgoing = controller, next = incoming, pigeon = model.pigeon
         var flight = pigeon.current
-        if !pigeon.isFlying, !reduceMotion,
-           let pick = pigeon.pick(expected: TuneTimes.expected(target.id, fallback: target.mediaType == "radio" ? 1.5 : 2.5)) {
-            await pigeon.arm(pick)
-            guard !Task.isCancelled else { return }
-            pigeon.start()
-            flight = pick
-        }
+        // The tune starts first and the bird is armed while it runs: arming took up to 2 s on the
+        // Apple TV HD, and the signal used to wait for it (roast, 2026-10-07).
         async let quiet: Void = outgoing.fadeOut()
         let started = ContinuousClock.now
         tune(target, behind: true)
+        if !pigeon.isFlying, !reduceMotion,
+           let pick = pigeon.pick(expected: TuneTimes.expected(target.id, fallback: target.mediaType == "radio" ? 1.5 : 2.5)) {
+            await pigeon.arm(pick)
+            guard !Task.isCancelled else { await quiet; return }
+            pigeon.start()
+            flight = pick
+        }
         // The channel's own tune time, from now to its first frame; never the wait for the bird.
         // Read live (State storage), so a press on to another channel stops the timing.
         TuneTimes.recordWhenPlaying(target.id, player: next, since: started) {
@@ -382,8 +384,9 @@ struct ReceiverPlayerView: View {
         while !Task.isCancelled {
             switch next.state {
             case .playing, .failed:
-                // Ready: cut now, unless the bird is still on its way to covering the screen.
-                if let flight, flight.waitsForCover, pigeon.isFlying, pigeon.elapsed < flight.cut { break }
+                // Ready: cut inside a stretch where the wing covers half the screen, wait for one
+                // still to come, or cut now when none is left.
+                if let flight, pigeon.isFlying, !FlightChoice.shouldCut(elapsed: pigeon.elapsed, covered: flight.covered) { break }
                 cut(to: target, from: outgoing, into: next, tookSince: started)
                 await quiet
                 return
@@ -405,7 +408,7 @@ struct ReceiverPlayerView: View {
     /// stops, and the new one's sound comes up.
     private func cut(to target: Channel, from outgoing: PlayerController, into next: PlayerController, tookSince started: ContinuousClock.Instant) {
         #if DEBUG
-        print("KJCUT \(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
+        NSLog("KJCUT %@", "\(target.id) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(model.pigeon.current?.name ?? "-") at=\(String(format: "%.2f", model.pigeon.elapsed))")
         #endif
         var instant = Transaction()
         instant.disablesAnimations = true

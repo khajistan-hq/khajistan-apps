@@ -24,7 +24,9 @@ final class PigeonOverlay {
         /// How much of the screen the bird covers at `cut`. Under half, there is nothing to hide the
         /// cut behind, so the channel cuts the moment it is ready.
         let cutCover: Double
-        var waitsForCover: Bool { cutCover >= 0.5 }
+        /// The stretches, in seconds, where the bird covers at least half the screen (measured off
+        /// the matte, tvos/scripts/flights/render_flight.py). A ready channel cuts inside one.
+        let covered: [ClosedRange<Double>]
     }
 
     /// The flights, short and long. A change gets the shortest flight that lasts as long as the
@@ -169,9 +171,15 @@ final class PigeonOverlay {
               let matte = Bundle.main.url(forResource: "flight-\(name)-matte-540", withExtension: "mp4"),
               let meta = Bundle.main.url(forResource: "flight-\(name)", withExtension: "json"),
               let data = try? Data(contentsOf: meta),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Double],
-              let length = json["length"], let cut = json["cut"] else { return nil }
-        return Flight(name: name, colour: colour, matte: matte, length: length, cut: cut, cutCover: json["cutCover"] ?? 0)
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let length = json["length"] as? Double, let cut = json["cut"] as? Double else { return nil }
+        let cutCover = json["cutCover"] as? Double ?? 0
+        let windows = (json["covered"] as? [[Double]] ?? []).compactMap { pair in
+            pair.count == 2 && pair[0] <= pair[1] ? pair[0]...pair[1] : nil
+        }
+        // A file from before the windows were written: the old rule, the last stretch alone.
+        let covered = json["covered"] == nil && cutCover >= 0.5 ? [max(0, cut - 0.3)...cut] : windows
+        return Flight(name: name, colour: colour, matte: matte, length: length, cut: cut, cutCover: cutCover, covered: covered)
     }
 }
 

@@ -24,6 +24,16 @@ enum FlightChoice {
         return pool[(at + 1) % pool.count]
     }
 
+    /// Whether a channel that is ready cuts now, `elapsed` seconds into a flight whose wing covers
+    /// at least half the screen during `covered`: now, inside a covered stretch; not yet, if one
+    /// is still to come; now, if none is left (or the flight never covers half). Before
+    /// 2026-10-07 a ready channel waited for the last stretch alone, up to 4 s on Swerve and 8 s
+    /// on Loop with the new picture already playing behind the bird.
+    static func shouldCut(elapsed: Double, covered: [ClosedRange<Double>]) -> Bool {
+        if covered.contains(where: { $0.contains(elapsed) }) { return true }
+        return !covered.contains(where: { $0.lowerBound > elapsed })
+    }
+
     /// The running tune time: half the old, half the new; the first reading stands alone.
     static func blend(_ before: Double?, _ seconds: Double) -> Double {
         before.map { $0 * 0.5 + seconds * 0.5 } ?? seconds

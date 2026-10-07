@@ -211,7 +211,17 @@ def main(src, out_dir, name, ending=None):
         # closes on the wing cuts at the closing wing, which the new channel has had time to reach.
         top = max(cover)
         peak = max(i for i, c in enumerate(cover) if c >= 0.9 * top)
-        json.dump({"length": len(cover) / 24, "cut": peak / 24, "cutCover": round(cover[peak], 3)},
+        # Every stretch where the bird covers at least half the screen: a ready channel cuts
+        # inside one (FlightChoice.shouldCut), not only at the last.
+        covered, start = [], None
+        for i, c in enumerate(cover + [0.0]):
+            if c >= 0.5 and start is None:
+                start = i
+            elif c < 0.5 and start is not None:
+                covered.append([round(start / 24, 2), round((i - 1) / 24, 2)])
+                start = None
+        json.dump({"length": len(cover) / 24, "cut": peak / 24, "cutCover": round(cover[peak], 3),
+                   "covered": covered},
                   open(os.path.join(out_dir, f"flight-{name}.json"), "w"))
         print(f"{name}: cut at {peak / 24:.2f}s, bird covers {cover[peak] * 100:.0f}% there", flush=True)
     print(f"{name}: {len(keep)} frames of {total} (source {keep[0]}-{keep[-1]}, {total - len(keep)} trimmed at the end), {w}x{h} -> {', '.join(tiers)}", flush=True)

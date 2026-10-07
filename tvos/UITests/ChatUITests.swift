@@ -21,5 +21,18 @@ final class ChatUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Sign in under Account to write in a room."].exists, "signed out, the room says where to sign in")
         XCTAssertFalse(app.descendants(matching: .any)["chatWrite"].exists, "signed out, there is no field to write in")
         kjScreenshot("chat-01-house-room", app: app)
+
+        // A line's actions open under it as house buttons (no system menu: tvOS draws its
+        // focused item white), and Back closes them.
+        guard line.exists else { return }
+        XCTAssertTrue(kjFocus(line, app: app), "a line must take focus")
+        XCUIRemote.shared.press(.select)
+        let actions = app.descendants(matching: .any)["chat-actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 5), "Select on a line opens its actions")
+        XCTAssertTrue(app.buttons["Report"].hasFocus, "focus moves to the first action")
+        XCTAssertTrue(app.buttons["Cancel"].exists)
+        kjScreenshot("chat-02-line-actions", app: app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(actions.waitForNonExistence(timeout: 5), "Back closes the actions")
     }
 }

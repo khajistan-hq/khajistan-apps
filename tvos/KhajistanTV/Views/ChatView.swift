@@ -15,6 +15,10 @@ struct ChatView: View {
     @State private var note: String?
     @State private var ignored = ChatRules.ignored()
     @State private var sending = false
+    /// The line whose actions are open under it. tvOS draws a context menu's focused item white,
+    /// so the actions are a row of house buttons instead, opened by Select on the line.
+    @State private var actionsFor: Int64?
+    @FocusState private var actionsFocused: Bool
 
     private var store: ChatStore { model.chat }
 
@@ -58,6 +62,7 @@ struct ChatView: View {
                             ForEach(group.rooms) { item in
                                 Button {
                                     room = item
+                                    actionsFor = nil
                                 } label: {
                                     Text(item.label).kjKicker()
                                 }
@@ -125,7 +130,10 @@ struct ChatView: View {
                         Text("No lines in the last 48 hours.").kjSmall(faint: true)
                     }
                     ForEach(shown) { line in
-                        Button {} label: {
+                        Button {
+                            actionsFor = actionsFor == line.id ? nil : line.id
+                            actionsFocused = actionsFor != nil
+                        } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 16) {
                                 Text(Self.time(line.created_at)).kjSmall(faint: true)
                                 Text(line.who).kjKicker()
@@ -134,9 +142,9 @@ struct ChatView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
-                        .contextMenu { actions(for: line) }
                         .id(line.id)
                         .accessibilityIdentifier("chat-line-\(line.id)")
+                        if actionsFor == line.id { actions(for: line) }
                     }
                 }
             }
@@ -147,23 +155,33 @@ struct ChatView: View {
         }
     }
 
-    @ViewBuilder
     private func actions(for line: ChatMessage) -> some View {
-        Button("Report") {
-            Task { note = await feed?.report(line) }
-        }
-        if let handle = line.author_handle, handle != store.handle {
-            Button("Ignore \(handle)") {
-                ChatRules.setIgnored(handle, true)
-                ignored = ChatRules.ignored()
-                note = "\(handle) is ignored on this Apple TV."
+        HStack(spacing: 12) {
+            Button("Report") {
+                actionsFor = nil
+                Task { note = await feed?.report(line) }
             }
-        }
-        if line.kind == "text", let mine = model.auth.session?.userId, line.author_id == mine {
-            Button("Delete") {
-                Task { note = (await feed?.delete(line) ?? false) ? nil : "That did not delete." }
+            .focused($actionsFocused)
+            if let handle = line.author_handle, handle != store.handle {
+                Button("Ignore \(handle)") {
+                    actionsFor = nil
+                    ChatRules.setIgnored(handle, true)
+                    ignored = ChatRules.ignored()
+                    note = "\(handle) is ignored on this Apple TV."
+                }
             }
+            if line.kind == "text", let mine = model.auth.session?.userId, line.author_id == mine {
+                Button("Delete") {
+                    actionsFor = nil
+                    Task { note = (await feed?.delete(line) ?? false) ? nil : "That did not delete." }
+                }
+            }
+            Button("Cancel") { actionsFor = nil }
         }
+        .buttonStyle(HouseTabStyle(isCurrent: false))
+        .padding(.leading, 16)
+        .onExitCommand { actionsFor = nil }
+        .accessibilityIdentifier("chat-actions")
     }
 
     // MARK: - Writing

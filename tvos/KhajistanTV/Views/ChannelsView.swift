@@ -134,14 +134,7 @@ struct ChannelsView: View {
                     ChannelCard(channel: channel, liked: model.saves.isSaved(channel))
                 }
                 .buttonStyle(HouseCardStyle())
-                // Holding Select offers Like, as the TV app offers its own actions on a card.
-                .contextMenu {
-                    if model.saves.canSave {
-                        Button(model.saves.isSaved(channel) ? "Unlike" : "Like") {
-                            Task { await model.saves.toggle(channel) }
-                        }
-                    }
-                }
+                // No hold-for-Like menu: tvOS draws its focused item white. Like is on the player strip.
                 .accessibilityIdentifier("channel-\(channel.id)")
             }
         }

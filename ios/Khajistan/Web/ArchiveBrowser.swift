@@ -107,6 +107,11 @@ extension ArchiveBrowser: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { decisionHandler(.cancel); return }
+        if StoreBuild.isOn, ArchiveURL.isLeftOutOfStoreBuild(url) {
+            decisionHandler(.cancel)
+            if action.targetFrame?.isMainFrame != false { error = "This room is not in this version of the app." }
+            return
+        }
         let scheme = url.scheme?.lowercased() ?? ""
         if action.shouldPerformDownload, ["https", "blob"].contains(scheme) { decisionHandler(.download); return }
         // Subframes belong to the site's CSP. Top-level custom schemes never execute in WebKit.

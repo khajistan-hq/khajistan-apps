@@ -191,6 +191,25 @@ func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
 private struct AssertionFailure: Error, CustomStringConvertible {
     let description: String
 }
+func storeBuildLeavesOutTheSitesOwnRoutes() throws {
+    let out = ["/chat", "/chat.html", "/Chat?room=food", "/wall/", "/wall/zine/7", "/zines.html", "/canvas",
+               "/canvas?kind=video", "/pics-n-vids", "/browse-archive.html", "/browse", "/born-digital.html"]
+    for path in out {
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)))
+    }
+    // Near misses and every other room stay open, and no other host is judged.
+    let open = ["/", "/chatter.html", "/wallpaper", "/reading-room.html", "/open-frequencies", "/dashboard.html",
+                "/scripts/kj-chat.js", "/search.html?q=chat"]
+    for path in open {
+        try expect(!ArchiveURL.isLeftOutOfStoreBuild(try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)))
+    }
+    try expect(!ArchiveURL.isLeftOutOfStoreBuild(URL(string: "https://example.com/chat")!))
+    // Every door the store build hides from the app's menu is also closed in its browser.
+    for destination in ArchiveDestination.all where ["chat", "wall", "picsnvids"].contains(destination.id) {
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(destination.url))
+    }
+}
+
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
     guard try condition() else { throw AssertionFailure(description: "\(file):\(line) assertion failed") }
 }
@@ -213,7 +232,8 @@ private func require<T>(_ value: T?) throws -> T {
             ("Hour bands where the zone is not placed", skyHourBandsWhereTheZoneIsNotPlaced),
             ("The skin script for the website", skyScriptForTheWebsite),
             ("Join plans open the site's checkout", joinPlansOpenTheSitesCheckout),
-            ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite)
+            ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
+            ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
         ]
         for (name, run) in tests { try run(); print("PASS \(name)") }
         print("\(tests.count) tests passed")

@@ -32,9 +32,12 @@ final class ChatUITests: XCTestCase {
         let focusedLine = lines.matching(NSPredicate(format: "hasFocus == true")).firstMatch
         for _ in 0..<4 where !focusedLine.exists { XCUIRemote.shared.press(.right); kjPause(0.4) }
         XCTAssertTrue(focusedLine.exists, "a line must take focus")
+        // Let focus settle before Select: a loaded CI runner dropped the press made the moment
+        // focus landed (run 37622253486), while three local runs of the same tree passed.
+        kjPause(0.8)
         XCUIRemote.shared.press(.select)
         let actions = app.descendants(matching: .any)["chat-actions"]
-        XCTAssertTrue(actions.waitForExistence(timeout: 5), "Select on a line opens its actions")
+        XCTAssertTrue(actions.waitForExistence(timeout: 15), "Select on a line opens its actions")
         let first = app.buttons["Open"].exists ? app.buttons["Open"] : app.buttons["Report"]
         XCTAssertTrue(first.hasFocus, "focus moves to the first action (Open on a Pics/Vids line)")
         XCTAssertTrue(app.buttons["Cancel"].exists)

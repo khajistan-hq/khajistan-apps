@@ -43,7 +43,15 @@ struct ReceiverPlayerView: View {
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .statusBarHidden(!overlay.visible)
-        .onChange(of: controller.state) { overlay.wake(settled: controller.state == .playing) }
+        .onChange(of: controller.state) { old, new in
+            overlay.wake(settled: new == .playing)
+            // The site's rule: the pigeon covers every wait, a buffer mid-broadcast included.
+            if old == .playing && new == .tuning && destination == nil {
+                model.clips.cover(caption: current.name)
+            } else if old == .tuning && new == .playing && destination == nil {
+                model.clips.uncover()
+            }
+        }
         .task { await open() }
         .onDisappear { stopEverything() }
         .accessibilityAction(named: "Next channel") { step(1) }

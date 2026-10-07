@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import StoreKit
 
 /// The bottom bar's doors. HOME carries the website's whole menu; the other three are the rooms
 /// the app draws itself.
@@ -47,6 +48,12 @@ final class AppModel {
     /// The pick in force, nil when the skin is the sky's own (Automatic).
     private(set) var skinPick: Skin?
 
+    /// The App Store storefront's country code, nil until StoreKit has answered. The membership
+    /// links follow it (`showsJoin`); `-kjstorefront GBR` on the command line stands in for it in
+    /// UI tests.
+    private(set) var storefrontCode: String?
+    var showsJoin: Bool { JoinOffer.isOffered(storefront: storefrontCode) }
+
     let browser = ArchiveBrowser()
     let auth: AuthStore
     let receiver = ReceiverStore()
@@ -78,6 +85,18 @@ final class AppModel {
         refreshSkin()
         browser.warm()
         watchTheSky()
+        watchTheStorefront(forced: defaults.string(forKey: "kjstorefront"))
+    }
+
+    // MARK: - Storefront
+
+    /// Reads the storefront at launch and again whenever the App Store changes it.
+    private func watchTheStorefront(forced: String?) {
+        if let forced { storefrontCode = forced; return }
+        Task { [weak self] in
+            if let current = await Storefront.current { self?.storefrontCode = current.countryCode }
+            for await next in Storefront.updates { self?.storefrontCode = next.countryCode }
+        }
     }
 
     // MARK: - Skin

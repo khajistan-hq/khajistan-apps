@@ -71,6 +71,17 @@ enum JoinPlan: String, CaseIterable, Sendable {
     }
 }
 
+/// Where the membership links are offered: the United States storefront only (StoreKit's
+/// `Storefront.countryCode`, ISO 3166-1 alpha-3). Until the storefront is known the answer is no,
+/// so a slow or failed read never shows a link outside the US.
+enum JoinOffer {
+    static let storefront = "USA"
+
+    static func isOffered(storefront countryCode: String?) -> Bool {
+        countryCode?.uppercased() == storefront
+    }
+}
+
 enum ArchiveURL {
     static let base = URL(string: "https://khajistan-archive.pages.dev")!
     static let hosts: Set<String> = ["khajistan-archive.pages.dev", "archive.khajistan.com"]

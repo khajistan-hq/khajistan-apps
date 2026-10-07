@@ -170,6 +170,15 @@ func skyScriptForTheWebsite() throws {
 
 // MARK: - Subscribe and the native rooms
 
+func joinIsOfferedOnTheUSStorefrontOnly() throws {
+    try expect(JoinOffer.isOffered(storefront: "USA"))
+    try expect(JoinOffer.isOffered(storefront: "usa"))
+    // Fail closed: unknown, empty, the two-letter form and every other storefront are all no.
+    for code in [nil, "", "US", "GBR", "CAN", "PAK", "USAX", " USA"] as [String?] {
+        try expect(!JoinOffer.isOffered(storefront: code))
+    }
+}
+
 func joinPlansOpenTheSitesCheckout() throws {
     try expect(JoinPlan.monthly.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=monthly")
     try expect(JoinPlan.annual.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=annual")
@@ -212,6 +221,7 @@ private func require<T>(_ value: T?) throws -> T {
             ("A skin pick holds only in its band", skyPickHoldsOnlyInItsBand),
             ("Hour bands where the zone is not placed", skyHourBandsWhereTheZoneIsNotPlaced),
             ("The skin script for the website", skyScriptForTheWebsite),
+            ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
             ("Join plans open the site's checkout", joinPlansOpenTheSitesCheckout),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite)
         ]

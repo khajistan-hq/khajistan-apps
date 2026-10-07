@@ -170,6 +170,26 @@ func skyScriptForTheWebsite() throws {
 
 // MARK: - Subscribe and the native rooms
 
+func joinIsOfferedOnTheUSStorefrontOnly() throws {
+    try expect(JoinOffer.isOffered(storefront: "USA"))
+    try expect(JoinOffer.isOffered(storefront: "usa"))
+    // Fail closed: unknown, empty, the two-letter form and every other storefront are all no.
+    for code in [nil, "", "US", "GBR", "CAN", "PAK", "USAX", " USA"] as [String?] {
+        try expect(!JoinOffer.isOffered(storefront: code))
+    }
+}
+
+func offPageOffersCarryTheAppFlag() throws {
+    let base = "https://khajistan-archive.pages.dev/reading-room.html"
+    try expect(JoinOffer.tagged(URL(string: base)!).absoluteString == base + "?app=1")
+    // Other queries and the fragment survive; the flag is never written twice or with another value.
+    let busy = URL(string: base + "?q=tehran&app=0#shelf")!
+    try expect(JoinOffer.tagged(busy).absoluteString == base + "?q=tehran&app=1#shelf")
+    let once = JoinOffer.tagged(JoinOffer.tagged(URL(string: base)!))
+    try expect(once.absoluteString.components(separatedBy: "app=").count == 2)
+    try expect(ArchiveURL.isArchive(JoinOffer.tagged(URL(string: base)!)))
+}
+
 func joinPlansOpenTheSitesCheckout() throws {
     try expect(JoinPlan.monthly.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=monthly")
     try expect(JoinPlan.annual.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=annual")
@@ -231,6 +251,8 @@ private func require<T>(_ value: T?) throws -> T {
             ("A skin pick holds only in its band", skyPickHoldsOnlyInItsBand),
             ("Hour bands where the zone is not placed", skyHourBandsWhereTheZoneIsNotPlaced),
             ("The skin script for the website", skyScriptForTheWebsite),
+            ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
+            ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
             ("Join plans open the site's checkout", joinPlansOpenTheSitesCheckout),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)

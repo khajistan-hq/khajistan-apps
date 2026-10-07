@@ -61,7 +61,7 @@ struct AccountView: View {
     }
 
     /// The website's three skins, by their names on its switch, and Automatic, which follows
-    /// the hour as the app always has. The choice is kept on this Apple TV.
+    /// the sun, as the website does. The choice is kept on this Apple TV.
     private var skinBlock: some View {
         VStack(alignment: .leading, spacing: 20) {
             Kicker("Skin")
@@ -89,9 +89,9 @@ struct AccountView: View {
     private var skinLine: String {
         switch model.skinChoice {
         case .automatic:
-            return "By this Apple TV\u{2019}s clock: Day 08:00\u{2013}17:00, Smut 05:00\u{2013}08:00 and 17:00\u{2013}20:00, Grove through the night."
+            return "Following the sun for this Apple TV\u{2019}s time zone: Day in daylight, Smut at dawn and dusk, Grove at night."
         case .day, .grove, .smut:
-            return "\(model.skinChoice.label) at every hour."
+            return "\(model.skinChoice.label), whatever the sun is doing."
         }
     }
 

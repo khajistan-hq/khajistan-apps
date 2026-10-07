@@ -20,7 +20,7 @@ struct YoursView: View {
             VStack(alignment: .leading, spacing: 28) {
                 PageHead(kicker: "Account", "Your Khajistan", line: "Account, membership, downloads and saved work")
                 skinBlock
-                JoinBlock()
+                if model.showsJoin { JoinBlock() }
                 accountBlock
                 libraryBlock
                 footer

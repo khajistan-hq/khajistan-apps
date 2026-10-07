@@ -71,6 +71,27 @@ enum JoinPlan: String, CaseIterable, Sendable {
     }
 }
 
+/// Where the membership links are offered: the United States storefront only (StoreKit's
+/// `Storefront.countryCode`, ISO 3166-1 alpha-3). Until the storefront is known the answer is no,
+/// so a slow or failed read never shows a link outside the US.
+enum JoinOffer {
+    static let storefront = "USA"
+
+    static func isOffered(storefront countryCode: String?) -> Bool {
+        countryCode?.uppercased() == storefront
+    }
+
+    /// The same page with `app=1`, which the website reads (kj-theme-boot.js) to hide its own
+    /// offers and code field for the rest of the visit. Added where the app offers none itself.
+    static func tagged(_ url: URL) -> URL {
+        guard var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url }
+        var items = (parts.queryItems ?? []).filter { $0.name != "app" }
+        items.append(URLQueryItem(name: "app", value: "1"))
+        parts.queryItems = items
+        return parts.url ?? url
+    }
+}
+
 enum ArchiveURL {
     static let base = URL(string: "https://khajistan-archive.pages.dev")!
     static let hosts: Set<String> = ["khajistan-archive.pages.dev", "archive.khajistan.com"]

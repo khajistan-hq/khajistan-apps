@@ -11,7 +11,7 @@ private enum DefaultsKey {
 
 @MainActor @Observable
 final class AppModel {
-    /// The skin on screen. It follows `skinChoice`, and the hour when the choice is Automatic.
+    /// The skin on screen. It follows `skinChoice`, and the sun (Sky.theme) when the choice is Automatic.
     private(set) var skin: Skin
     /// The root screen on show. The launch argument `-kjtab <name>` picks the one a UI test starts on.
     var section: Section
@@ -108,7 +108,7 @@ final class AppModel {
         self.link = link
     }
 
-    /// Looks at the clock once a minute and, on Automatic, changes the skin when the hour
+    /// Looks at the clock once a minute and, on Automatic, changes the skin when the sun
     /// crosses a band.
     private func watchTheSky() {
         Task { [weak self] in

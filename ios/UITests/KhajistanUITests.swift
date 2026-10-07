@@ -11,9 +11,11 @@ final class KhajistanUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// `-kjstorefront USA` stands in for the App Store storefront the simulator does not have; a
+    /// test of another storefront passes its own in `extra`, which comes later and wins.
     private func launch(skin: String, tab: String = "home", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA"] + extra
         app.launch()
         return app
     }
@@ -120,6 +122,28 @@ final class KhajistanUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
+    /// The membership links are the US storefront's alone: shown there, absent on HOME and ACCOUNT
+    /// on every other storefront, and absent until the storefront is known.
+    func testJoinLinksAreHiddenOutsideTheUSStorefront() {
+        let us = launch(skin: "day")
+        waitFor(us.buttons["join-monthly"], 10, "the US storefront sees the membership on HOME")
+        us.buttons["tab-yours"].tap()
+        waitFor(us.buttons["join-annual"], 10, "the US storefront sees the membership on ACCOUNT")
+        us.terminate()
+        for code in ["GBR", "PAK", "UNKNOWN"] {
+            let app = launch(skin: "day", extra: ["-kjstorefront", code])
+            waitFor(app.buttons["destination-reading"], 10, "HOME still lists its doors (\(code))")
+            XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership link on HOME (\(code))")
+            XCTAssertFalse(app.otherElements["joinBlock"].exists, "no membership block on HOME (\(code))")
+            app.buttons["tab-yours"].tap()
+            waitFor(app.buttons["skin-day"], 10, "ACCOUNT loads (\(code))")
+            XCTAssertFalse(app.buttons["join-monthly"].exists || app.buttons["join-annual"].exists,
+                           "no membership link on ACCOUNT (\(code))")
+            shot("join-hidden-\(code)", app)
+            app.terminate()
+        }
+    }
+
     /// A tap on the map chooses the region under the finger; the strip and the list follow.
     func testMapTapChoosesARegion() {
         let app = launch(skin: "day", tab: "receiver")
@@ -128,8 +152,11 @@ final class KhajistanUITests: XCTestCase {
         waitFor(map, 5, "the map is on screen")
         let title = app.descendants(matching: .any)["regionTitle"]
         waitFor(title, 10, "the region block is on screen")
-        // The Maghreb is the map's western mass: a quarter of the way in, half way down.
-        map.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.55)).tap()
+        // The Maghreb is the map's western mass. Its label sits a quarter of the way across and just
+        // under half way down, at the same place on every screen because the map is drawn from one
+        // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map
+        // element's own frame, so it follows the map to any screen size.
+        map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.48)).tap()
         let maghreb = NSPredicate(format: "label CONTAINS[c] %@", "Maghreb")
         expectation(for: maghreb, evaluatedWith: title)
         waitForExpectations(timeout: 10)

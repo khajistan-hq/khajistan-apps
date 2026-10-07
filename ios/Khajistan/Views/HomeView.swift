@@ -16,8 +16,10 @@ struct HomeView: View {
                     .padding(.bottom, 24)
                 search
                     .padding(.bottom, 32)
-                JoinBlock()
-                    .padding(.bottom, 36)
+                if model.showsJoin {
+                    JoinBlock()
+                        .padding(.bottom, 36)
+                }
                 ForEach(ArchiveDestination.doorsInThisBuild, id: \.door) { group in
                     door(group.door, rooms: group.rooms)
                 }

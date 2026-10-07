@@ -2,7 +2,7 @@ import Foundation
 
 // The Apple TV app's core tests, run against the same Core files ported into the iPhone app.
 // Copied from tvos/Tests/CoreTests/main.swift on branch app/tvos-pigeon (2026-10-05); the changes
-// are the skin-hour test (the iPhone follows the sun, tested in ArchiveCoreTests), the keychain
+// are the skin tests (the sun rule is now one shared file, Core/Sky.swift), the keychain
 // service name, and where the archive's data files are found. Foundation only, no XCTest: see
 // scripts/test-core.sh. Arguments: the station-clock fixture, then optionally the archive root
 // whose data/ files the "Real ..." tests read (this worktree is sparse and carries none).
@@ -101,14 +101,99 @@ func realFile(_ relative: String) throws -> Data {
 
 // MARK: - Skin
 
+/// The first instant after `from` (stepping `step` seconds up to `limit`) at which the sun's
+/// elevation at the given place crosses `degrees` upward, found by bisection on the almanac
+/// formula the site uses, so the test aims at the +6 boundary itself and not at a clock time.
+func risingCrossing(of degrees: Double, lat: Double, lon: Double, from: Date) throws -> Date {
+    var lo = from
+    var hi = from
+    while Sky.elevation(at: hi, lat: lat, lon: lon) <= degrees {
+        lo = hi
+        hi = hi.addingTimeInterval(600)
+        if hi.timeIntervalSince(from) > 86_400 { throw Failure(description: "the sun never rose past \(degrees) degrees in a day") }
+    }
+    for _ in 0..<40 {
+        let mid = Date(timeIntervalSince1970: (lo.timeIntervalSince1970 + hi.timeIntervalSince1970) / 2)
+        if Sky.elevation(at: mid, lat: lat, lon: lon) > degrees { hi = mid } else { lo = mid }
+    }
+    return hi
+}
+
+func skinFollowsTheSun() throws {
+    let karachiZone = try require(TimeZone(identifier: "Asia/Karachi"))
+    let place = try require(Sky.position(zone: "Asia/Karachi"))
+    // Noon is day and midnight is grove: no clock bands involved, the sun is far above or below.
+    try expectEqual(Sky.theme(at: pkt(2026, 10, 10, 12, 0), timeZone: karachiZone), .day)
+    try expectEqual(Sky.theme(at: pkt(2026, 10, 10, 0, 0), timeZone: karachiZone), .grove)
+    try expectEqual(Skin.current(at: pkt(2026, 10, 10, 12, 0), calendar: karachi), .day)
+    // The sun at about 0 degrees, sunrise: smut. Found on the almanac, then read back through the rule.
+    let sunrise = try risingCrossing(of: 0, lat: place.lat, lon: place.lon, from: pkt(2026, 10, 10, 0, 0))
+    try expect(abs(Sky.elevation(at: sunrise, lat: place.lat, lon: place.lon)) < 0.01, "sunrise elevation")
+    try expectEqual(Sky.theme(at: sunrise, timeZone: karachiZone), .smut, "sun at 0 degrees")
+    // Either side of +6: the sun a minute below it is smut and a minute above it is day, and the
+    // elevations say so. Both are well inside the twilight band for the clock-hour rule too, so a
+    // clock-band implementation fails one of them.
+    let six = try risingCrossing(of: 6, lat: place.lat, lon: place.lon, from: pkt(2026, 10, 10, 0, 0))
+    let below = six.addingTimeInterval(-60), above = six.addingTimeInterval(60)
+    try expect(Sky.elevation(at: below, lat: place.lat, lon: place.lon) < 6, "below +6")
+    try expect(Sky.elevation(at: above, lat: place.lat, lon: place.lon) > 6, "above +6")
+    try expectEqual(Sky.theme(at: below, timeZone: karachiZone), .smut, "just under +6")
+    try expectEqual(Sky.theme(at: above, timeZone: karachiZone), .day, "just over +6")
+    // The night edge is -6, as on the site: smut just above it, grove just below.
+    var minusSix = try risingCrossing(of: -6, lat: place.lat, lon: place.lon, from: pkt(2026, 10, 10, 0, 0))
+    try expectEqual(Sky.theme(at: minusSix.addingTimeInterval(60), timeZone: karachiZone), .smut, "just over -6")
+    minusSix = minusSix.addingTimeInterval(-60)
+    try expectEqual(Sky.theme(at: minusSix, timeZone: karachiZone), .grove, "just under -6")
+    // Whose sky it is follows the zone: the instant of 12:00 in Karachi is 00:00 the same day in Los Angeles.
+    let la = try require(TimeZone(identifier: "America/Los_Angeles"))
+    try expectEqual(Sky.theme(at: pkt(2026, 10, 10, 12, 0), timeZone: la), .grove)
+    // A zone with no place in the table (UTC) falls back to the site's hour bands.
+    let utc = try require(TimeZone(identifier: "UTC"))
+    var cal = Calendar(identifier: .gregorian); cal.timeZone = utc
+    func at(_ h: Int) -> Date { cal.date(from: DateComponents(year: 2026, month: 10, day: 10, hour: h)) ?? .distantPast }
+    try expectEqual([4, 5, 7, 8, 16, 17, 19, 20].map { Sky.theme(at: at($0), timeZone: utc) },
+                    [.grove, .smut, .smut, .day, .day, .smut, .smut, .grove])
+}
+
 func skinColours() throws {
     try expectEqual([Skin.day.groundHex, Skin.day.inkHex, Skin.day.liftHex], [0xF3FB04, 0x000000, 0xFFFFA0])
     try expectEqual([Skin.grove.groundHex, Skin.grove.inkHex, Skin.grove.liftHex], [0x186409, 0xF3FB04, 0x004A00])
     try expectEqual([Skin.smut.groundHex, Skin.smut.inkHex, Skin.smut.liftHex], [0xC11B6B, 0xF3FB04, 0x8F1350])
+    try expectEqual(Skin.allCases.map(\.accentHex), [0x186409, 0xF3FB04, 0xF3FB04])
+    try expectEqual(Skin.allCases.map(\.bandHex), [0x186409, 0x002800, 0x6E003F])
+    try expectEqual(Skin.allCases.map(\.mapDeepHex), [0x006F00, 0x7E9B45, 0x006F00])
+    try expectEqual([Skin.mapTintHex, Skin.onBandHex], [0x7E9B45, 0xF3FB04])
     try expectEqual(Skin.allCases.map(\.rawValue), ["day", "grove", "smut"])
     let encoded = try JSONEncoder().encode([Skin.grove])
     try expectEqual(try JSONDecoder().decode([Skin].self, from: encoded), [.grove])
 }
+
+func skinChoiceResolvesAutomaticAndFixed() throws {
+    try expectEqual(SkinChoice.allCases.map(\.label), ["Automatic", "Day", "Grove", "Smut"])
+    // Stored values: absent, empty, the retired skins and a wrong case all read as Automatic.
+    for stored in [nil, "", "night", "dawn", "Grove", "auto", "DAY"] as [String?] {
+        try expectEqual(SkinChoice(stored: stored), .automatic, String(describing: stored))
+    }
+    for choice in SkinChoice.allCases { try expectEqual(SkinChoice(stored: choice.rawValue), choice) }
+    // Automatic is the sun's skin: Karachi at noon, at midnight and at sunrise (sun near 0 degrees).
+    let karachiZone = try require(TimeZone(identifier: "Asia/Karachi"))
+    let place = try require(Sky.position(zone: "Asia/Karachi"))
+    let sunrise = try risingCrossing(of: 0, lat: place.lat, lon: place.lon, from: pkt(2026, 10, 5, 0, 0))
+    for (when, skin) in [(pkt(2026, 10, 5, 12, 30), Skin.day), (pkt(2026, 10, 5, 0, 30), .grove), (sunrise, .smut)] {
+        try expectEqual(SkinChoice.automatic.skin(at: when, calendar: karachi), skin, "automatic at \(when)")
+        try expectEqual(SkinChoice.automatic.skin(at: when, calendar: karachi), Sky.theme(at: when, timeZone: karachiZone))
+    }
+    // A fixed choice holds through every hour of the day, whatever the sky says.
+    for choice in [SkinChoice.day, .grove, .smut] {
+        let want = Skin(rawValue: choice.rawValue)
+        for hour in 0..<24 {
+            try expectEqual(choice.skin(at: pkt(2026, 10, 5, hour, 0), calendar: karachi), want, "\(choice) at \(hour)")
+        }
+    }
+    // The negative case: a fixed choice is not Automatic in disguise. Grove at noon is not the noon skin.
+    try expect(SkinChoice.grove.skin(at: pkt(2026, 10, 5, 12, 0), calendar: karachi) != SkinChoice.automatic.skin(at: pkt(2026, 10, 5, 12, 0), calendar: karachi))
+}
+
 
 // MARK: - Receiver index
 
@@ -2132,7 +2217,9 @@ func mixClockFormat() throws {
 // MARK: - Runner
 
 let tests: [(String, () throws -> Void)] = [
+    ("Skin follows the sun: noon, midnight, 0 degrees, either side of +6", skinFollowsTheSun),
     ("Skin hex triples", skinColours),
+    ("Skin choice: Automatic follows the sun, a fixed choice holds", skinChoiceResolvesAutomaticAndFixed),
     ("ReceiverIndex regions, URLs and medium lines", receiverIndexRegionsAndLines),
     ("ReceiverIndex without cameraFiles", receiverIndexWithoutCameraFiles),
     ("Channel decoding and active stream", channelDecodesAndFindsItsActiveStream),

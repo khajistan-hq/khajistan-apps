@@ -17,7 +17,9 @@ Every other room (Reading Room, Publications, Screening Room, Bazaar, Chat, Wall
 
 Players (receiver channel, Transmission, mix, Pics/Vids video) are full screen with the status band and a panel that hides 2.6 s into playback. A swipe up or down changes channel behind the website's wing-wipe pigeon (`Resources/Media/wipe-in.mov`, `wipe-out.mov`, from the TV app): the old sound fades out, the wing covers the screen, the new channel tunes behind it, the new sound fades in. Reduce Motion keeps the fades and leaves the bird out. Radio keeps playing with the screen locked; the lock screen's play and pause reach whichever player started last.
 
-**Skins** follow the website exactly (`Core/Sky.swift`, a port of KJSky in `kj-theme-boot.js`): Day with the sun above +6°, Smut between ±6°, Grove below, read from the device's time zone and tzdata's coordinate for it, hour bands where the zone is not in the table. Automatic, Day, Grove or Smut is chosen on the ACCOUNT page and stored under the site's own keys (`kj:theme`, `kj:theme:band`); a pick holds until the sky moves to another band. The same keys are written into every in-app web page before the site's scripts run, so the website opens in the app's skin. `-kjskin grove` on the command line forces a skin for screenshots and is never stored.
+**Skins** follow the website exactly (`Core/Sky.swift`, a port of KJSky in `kj-theme-boot.js`, one file shared with the Apple TV app, whose Automatic is the same sun rule): Day with the sun above +6°, Smut between ±6°, Grove below, read from the device's time zone and tzdata's coordinate for it, hour bands where the zone is not in the table. Automatic, Day, Grove or Smut is chosen on the ACCOUNT page and stored under the site's own keys (`kj:theme`, `kj:theme:band`); a pick holds until the sky moves to another band. The same keys are written into every in-app web page before the site's scripts run, so the website opens in the app's skin. `-kjskin grove` on the command line forces a skin for screenshots and is never stored.
+
+**Membership links** (the Reading Room All Access block on HOME and ACCOUNT) are shown on the United States storefront only. `AppModel` reads StoreKit's `Storefront.current` at launch and on `Storefront.updates`; until it answers, and on any other storefront, the block is not drawn (`JoinOffer`). `-kjstorefront GBR` on the command line stands in for the storefront in UI tests; the UI tests launch with `USA` unless a test says otherwise. The Apple TV app sells nothing and is unchanged.
 
 No system tab bar, navigation bar, alert or grey panel is drawn by the app. What iOS still draws itself: the status bar (black glyphs on Day, white on Grove and Smut, as iOS offers only those two; white there is the owner's ruling of 2026-10-05, recorded in `.claude/rules/frontend.md` §2), the keyboard, the share sheet and Quick Look.
 
@@ -52,7 +54,7 @@ Since 2026-10-06 the two apps compile **one copy** of the files they had in comm
 files under `Khajistan/` are links to the Apple TV app's own files under
 `tvos/KhajistanTV/`, so a fix made for either app reaches both:
 
-- `Core/`: Auth, Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
+- `Core/`: Auth, Sky (the sun rule, `Skin` and `SkinChoice`; the phone adds only its pick-lapses-with-the-band storage in AppModel), Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
 - `Services/`: PicsVidsStore (MixesStore was dropped with the Khajistan Radio section, owner 2026-10-06)
 - `Player/`: PlayerLayerView
 - `Views/`: PigeonMark, ChatMedia (a chat line's GIF or Pics/Vids picture)
@@ -75,10 +77,6 @@ so build both apps after one.
 Still two copies, and why:
 
 - **Config** says which app it is: the user agent and the keychain service name. Each app keeps its own.
-- **Sky** is two designs. The phone follows the sun's elevation, the way the website does
-  (`kj-theme-boot.js` KJSky). The TV uses fixed hour bands and carries the extra colour tokens
-  and `SkinChoice`. Merging them changes how the TV picks its skin, so it waits for the Apple TV
-  session.
 - **Services and Player** (AuthStore, Keychain, PnvImages, ReceiverStore, TransmissionStore,
   PlayerController, StationClips): each app's copy has grown its own behaviour. Sharing them is
   a merge, not a link.

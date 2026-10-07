@@ -146,7 +146,7 @@ struct ChatView: View {
                                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                                     Text(Self.time(line.created_at)).kjSmall(faint: true)
                                     Text(line.who).kjKicker()
-                                    // A GIF line's body is "[gif]"; the picture says it.
+                                    // A GIF line's body is the GIF's file name ("10190"); the picture says it.
                                     if !Self.isGif(media) {
                                         Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
                                     }

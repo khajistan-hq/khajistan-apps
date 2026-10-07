@@ -171,7 +171,7 @@ struct ChatRoomView: View {
                                 Text(line.who).kjKicker()
                                 Text(Self.time(line.created_at)).kjSmall(faint: true)
                             }
-                            // A GIF line's body is "[gif]"; the picture says it.
+                            // A GIF line's body is the GIF's file name ("10190"); the picture says it.
                             if !Self.isGif(media) {
                                 Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
                                     .textSelection(.enabled)
@@ -191,7 +191,7 @@ struct ChatRoomView: View {
             .frame(maxHeight: .infinity)
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
-                PnvViewerView(row: row)
+                PnvViewerView(row: row, steps: false)
             }
             .onChange(of: shown.last?.id) { _, last in
                 if let last { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last, anchor: .bottom) } }

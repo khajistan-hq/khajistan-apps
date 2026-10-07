@@ -35,7 +35,8 @@ final class ChatUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let actions = app.descendants(matching: .any)["chat-actions"]
         XCTAssertTrue(actions.waitForExistence(timeout: 5), "Select on a line opens its actions")
-        XCTAssertTrue(app.buttons["Report"].hasFocus, "focus moves to the first action")
+        let first = app.buttons["Open"].exists ? app.buttons["Open"] : app.buttons["Report"]
+        XCTAssertTrue(first.hasFocus, "focus moves to the first action (Open on a Pics/Vids line)")
         XCTAssertTrue(app.buttons["Cancel"].exists)
         kjScreenshot("chat-02-line-actions", app: app)
         XCUIRemote.shared.press(.menu)

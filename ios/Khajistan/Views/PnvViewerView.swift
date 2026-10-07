@@ -22,8 +22,12 @@ struct PnvViewerView: View {
         case failed(String)
     }
 
-    init(row: PnvRow) {
+    /// False when opened from a chat line: the object is not in a feed, so there is no next.
+    private let steps: Bool
+
+    init(row: PnvRow, steps: Bool = true) {
         _current = State(initialValue: row)
+        self.steps = steps
     }
 
     private var store: PicsVidsStore { model.pnv }
@@ -60,8 +64,12 @@ struct PnvViewerView: View {
         .sheet(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
         }
-        .accessibilityAction(named: "Next") { step(by: 1) }
-        .accessibilityAction(named: "Previous") { step(by: -1) }
+        .accessibilityActions {
+            if steps {
+                Button("Next") { step(by: 1) }
+                Button("Previous") { step(by: -1) }
+            }
+        }
     }
 
     private var isWaiting: Bool {
@@ -102,7 +110,7 @@ struct PnvViewerView: View {
             } else if current.isVideo && phase == .ready {
                 TransportRow(isPlaying: controller.state == .playing, toggle: { controller.toggle() })
             }
-            Text("Swipe left or right for the next.").kjSmall(faint: true)
+            if steps { Text("Swipe left or right for the next.").kjSmall(faint: true) }
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 14)
@@ -186,6 +194,7 @@ struct PnvViewerView: View {
     }
 
     private func step(by delta: Int) {
+        guard steps else { return }
         stepTask?.cancel()
         stepTask = Task {
             let region = model.pnvRegion

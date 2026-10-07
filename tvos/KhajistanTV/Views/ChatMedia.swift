@@ -38,8 +38,16 @@ struct ChatMediaView: View {
                 Text("Loading the picture\u{2026}").kjSmall(faint: true)
             }
         }
-        .accessibilityHidden(true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
         .task(id: media) { await load() }
+    }
+
+    private var spoken: String {
+        switch media {
+        case .gif: return "A GIF"
+        case .archive: return loaded?.isVideo == true ? "A video from Pics/Vids" : "A picture from Pics/Vids"
+        }
     }
 
     private func load() async {
@@ -108,7 +116,17 @@ actor ChatMediaCache {
     private static let maxFrames = 200
 
     private var rows: [String: PnvRow] = [:]
-    private var gifs: [String: Gif] = [:]
+    /// Bounded by decoded bytes and dropped under memory pressure, as PnvImages is: a site GIF is
+    /// about 4.6 MB decoded and the bucket holds thousands.
+    private let gifs: NSCache<NSString, GifBox> = {
+        let cache = NSCache<NSString, GifBox>()
+        cache.totalCostLimit = 96 * 1_024 * 1_024
+        return cache
+    }()
+    private final class GifBox {
+        let gif: Gif
+        init(_ gif: Gif) { self.gif = gif }
+    }
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 20
@@ -127,13 +145,18 @@ actor ChatMediaCache {
     }
 
     func gif(_ url: URL, maxPixel: Int) async -> Gif? {
-        let key = "\(url.absoluteString)#\(maxPixel)"
-        if let gif = gifs[key] { return gif }
+        let key = "\(url.absoluteString)#\(maxPixel)" as NSString
+        if let box = gifs.object(forKey: key) { return box.gif }
         guard let (data, response) = try? await session.data(from: url),
-              (response as? HTTPURLResponse)?.statusCode == 200, data.count <= Self.maxBytes,
-              let gif = Self.decode(data, maxPixel: maxPixel)
+              (response as? HTTPURLResponse)?.statusCode == 200, data.count <= Self.maxBytes
         else { return nil }
-        gifs[key] = gif
+        // Decoded off the actor, so a row lookup never waits behind a GIF.
+        guard let gif = await Task.detached(priority: .utility, operation: { Self.decode(data, maxPixel: maxPixel) }).value
+        else { return nil }
+        let cost = gif.frames.reduce(0) { total, frame in
+            total + Int(frame.size.width * frame.scale * frame.size.height * frame.scale * 4)
+        }
+        gifs.setObject(GifBox(gif), forKey: key, cost: cost)
         return gif
     }
 

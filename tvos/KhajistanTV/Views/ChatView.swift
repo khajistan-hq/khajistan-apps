@@ -141,23 +141,25 @@ struct ChatView: View {
                             actionsFor = actionsFor == line.id ? nil : line.id
                             actionFocus = actionsFor == nil ? nil : (Self.archiveKey(ChatMedia.of(line)) == nil ? .report : .open)
                         } label: {
-                            let media = ChatMedia.of(line)
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                                    Text(Self.time(line.created_at)).kjSmall(faint: true)
-                                    Text(line.who).kjKicker()
-                                    // A GIF line's body is the GIF's file name ("10190"); the picture says it.
-                                    if !Self.isGif(media) {
-                                        Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
-                                    }
+                            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                                Text(Self.time(line.created_at)).kjSmall(faint: true)
+                                Text(line.who).kjKicker()
+                                // A GIF line's body is the GIF's file name ("10190"); the picture says it.
+                                if !Self.isGif(ChatMedia.of(line)) {
+                                    Text(line.body).kjBody().fixedSize(horizontal: false, vertical: true)
                                 }
-                                if let media { ChatMediaView(media: media, height: 220) }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
                         .id(line.id)
                         .accessibilityIdentifier("chat-line-\(line.id)")
+                        // Under the button, not in it: on tvOS 26 the UIKit view that draws the
+                        // picture kept Select from reaching a button it sat inside (CI run
+                        // 37630234504; tvOS 27 was unaffected).
+                        if let media = ChatMedia.of(line) {
+                            ChatMediaView(media: media, height: 220).padding(.leading, 16)
+                        }
                         if actionsFor == line.id { actions(for: line) }
                     }
                 }

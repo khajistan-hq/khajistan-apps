@@ -34,6 +34,9 @@ final class ReceiverTuner {
     /// When the last change settled. A stream often stalls once just after it starts; covering
     /// that would flash the ground over a picture that is about to play.
     @ObservationIgnored private var settledAt = Date.distantPast
+    /// Bumped by every open and change. Transmission's network calls do not stop on cancel, so
+    /// a flow left behind still finishes; only the newest may clear `changing`.
+    @ObservationIgnored private var run = 0
 
     init(clips: StationClips, receiver: ReceiverStore, transmission: TransmissionStore) {
         self.clips = clips
@@ -86,7 +89,7 @@ final class ReceiverTuner {
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }
         case .transmission:
-            guard !changing else { return }
+            changeTask?.cancel()
             changeTask = Task { await switchTransmission() }
         case nil:
             return
@@ -97,7 +100,18 @@ final class ReceiverTuner {
     func playPause() {
         switch source {
         case .live(let channel):
-            if controller.state == .playing || controller.state == .tuning { controller.pause() } else { tune(channel) }
+            if controller.state == .tuning {
+                // Pause while connecting stops the connecting, or the signal would start anyway.
+                tuneTask?.cancel()
+                changeTask?.cancel()
+                controller.stop()
+                controller.state = .paused
+                clips.uncover()
+            } else if controller.state == .playing {
+                controller.pause()
+            } else {
+                tune(channel)
+            }
         case .transmission:
             if transmission.player.state == .playing {
                 transmission.player.pause()
@@ -128,11 +142,25 @@ final class ReceiverTuner {
         if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
             Task {
                 try? await Task.sleep(for: .seconds(1))
-                if !changing, player.state == .tuning { clips.cover(caption: caption) }
+                if !changing, player.state == .tuning, transmissionIsOnAir { clips.cover(caption: caption) }
             }
         } else if new == .playing, clips.coverage > 0 {
             clips.uncover()
         }
+    }
+
+    /// A Transmission handover sets its player tuning, and a carrier that then needs a sign-in or
+    /// fails leaves it there: the screen's message must not sit under the ground.
+    func transmissionPhaseChanged() {
+        guard case .transmission = source, !changing, clips.coverage > 0, !transmissionIsOnAir else { return }
+        if case .tuning = transmission.phase { return }
+        clips.uncover()
+    }
+
+    private var transmissionIsOnAir: Bool {
+        guard case .transmission = source else { return true }
+        if case .onAir = transmission.phase { return true }
+        return false
     }
 
     private var caption: String? {
@@ -162,9 +190,15 @@ final class ReceiverTuner {
         }
     }
 
-    private func open(_ channel: Channel) async {
+    private func begin() -> Int {
+        run += 1
         changing = true
-        defer { changing = false }
+        return run
+    }
+
+    private func open(_ channel: Channel) async {
+        let mine = begin()
+        defer { if run == mine { changing = false } }
         clips.cover(caption: channel.name, animated: false)
         tune(channel)
         await controller.settled()
@@ -174,8 +208,8 @@ final class ReceiverTuner {
     }
 
     private func change(to target: Channel) async {
-        changing = true
-        defer { if destination == nil || destination?.id == target.id { changing = false } }
+        let mine = begin()
+        defer { if run == mine, destination == nil || destination?.id == target.id { changing = false } }
         async let quiet: Void = controller.fadeOut()
         await clips.flyThrough(caption: target.name) {
             guard self.destination?.id == target.id else { return }
@@ -193,8 +227,8 @@ final class ReceiverTuner {
     // MARK: - Khajistan Transmission
 
     private func openTransmission(_ number: Int) async {
-        changing = true
-        defer { changing = false }
+        let mine = begin()
+        defer { if run == mine { changing = false } }
         clips.signOnPlayed = true
         clips.cover(caption: transmission.channelName(number), animated: false)
         await transmission.tune(channel: number)
@@ -206,8 +240,8 @@ final class ReceiverTuner {
     }
 
     private func switchTransmission() async {
-        changing = true
-        defer { changing = false }
+        let mine = begin()
+        defer { if run == mine { changing = false } }
         let next = transmission.channelNumber == 1 ? 2 : 1
         source = .transmission(next)
         async let quiet: Void = transmission.player.fadeOut()

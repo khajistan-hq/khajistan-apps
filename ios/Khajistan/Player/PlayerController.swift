@@ -109,6 +109,11 @@ final class PlayerController {
             try? session.setCategory(.playback, mode: .moviePlayback)
             try? session.setActive(true)
         }
+        // One signal at a time: the Receiver, still docked on its tab, pauses when a Pics/Vids
+        // video starts, rather than both sounding at once.
+        if let previous = Self.active, previous !== self, previous.state == .playing || previous.state == .tuning {
+            previous.pause()
+        }
         Self.active = self
 
         fadeTask?.cancel()

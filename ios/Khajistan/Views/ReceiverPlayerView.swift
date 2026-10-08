@@ -150,6 +150,7 @@ struct ReceiverScreen: View {
         .kjColumn(KJLayout.wideWidth)
         .background(palette.ground)
         .onChange(of: player.state) { old, new in tuner.playerStateChanged(from: old, to: new) }
+        .onChange(of: store.phase) { tuner.transmissionPhaseChanged() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("receiverScreen")
     }

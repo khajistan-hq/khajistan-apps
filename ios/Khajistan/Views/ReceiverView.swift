@@ -21,14 +21,24 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var part: Part = UserDefaults.standard.string(forKey: "kjpart").flatMap(Part.init(rawValue:)) ?? .live
     @State private var fullScreen = false
+    /// Which full-screen view is up, fixed when it opens: read live from the tuner, turning the
+    /// receiver off mid-dismissal swapped in an empty live view for a frame.
+    @State private var fullScreenTransmission = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.tuner.source != nil { ReceiverScreen(fullScreen: $fullScreen) }
+            if model.tuner.source != nil {
+                ReceiverScreen(fullScreen: Binding(get: { fullScreen }, set: { open in
+                    if open {
+                        if case .transmission = model.tuner.source { fullScreenTransmission = true } else { fullScreenTransmission = false }
+                    }
+                    fullScreen = open
+                }))
+            }
             page
         }
         .fullScreenCover(isPresented: $fullScreen) {
-            if case .transmission = model.tuner.source { TransmissionPlayerView() } else { ReceiverPlayerView() }
+            if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
         }
     }
 

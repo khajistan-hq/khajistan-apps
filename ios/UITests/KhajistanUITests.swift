@@ -276,7 +276,12 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
-        if app.buttons["adultNoticeOK"].exists { app.buttons["adultNoticeOK"].tap() }
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists {
+            notice.tap()
+            // A tap while the notice is still leaving lands on it, not on the tile under it.
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+        }
         let count = app.staticTexts["pnvCount"]
         func objects() -> Int {
             let text = count.label.filter(\.isNumber)
@@ -301,7 +306,12 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
-        if app.buttons["adultNoticeOK"].exists { app.buttons["adultNoticeOK"].tap() }
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists {
+            notice.tap()
+            // A tap while the notice is still leaving lands on it, not on the tile under it.
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+        }
         tile.tap()
         waitFor(app.buttons["closePlayer"], 10, "the viewer opens")
         sleep(2)

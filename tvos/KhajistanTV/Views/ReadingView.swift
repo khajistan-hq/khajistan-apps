@@ -53,6 +53,13 @@ struct ReadingView: View {
                 .kjDisplay(KJType.headline, tracking: -0.055)
                 .accessibilityAddTraits(.isHeader)
             Text(RRWords.lede).kjBody()
+            // The whole room's figures, as the site's head gives them (owner, 2026-10-07); each
+            // tab's own line stays on its shelf. One tab is the whole room, so it is not repeated.
+            if case .ready = store.phase, store.tabs.count > 1 {
+                Text(RRShelves.depthLine(store.titles, rights: store.rights))
+                    .kjSmall(faint: true)
+                    .accessibilityIdentifier("rrTotal")
+            }
         }
     }
 

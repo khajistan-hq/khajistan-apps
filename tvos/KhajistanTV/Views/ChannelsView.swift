@@ -6,6 +6,11 @@ import SwiftUI
 struct ChannelsView: View {
     let region: ReceiverIndex.Region
 
+    init(region: ReceiverIndex.Region, camerasFirst: Bool = false) {
+        self.region = region
+        _camerasFirst = State(initialValue: camerasFirst)
+    }
+
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var channels: [Channel] = []
@@ -15,6 +20,9 @@ struct ChannelsView: View {
     @State private var cameraError: String?
     @State private var errorText: String?
     @State private var playing: Playing?
+    /// Opened from the front's Cameras shelf: the cameras load first and their shelf leads, so
+    /// focus lands on a camera.
+    @State private var camerasFirst: Bool
 
     /// A channel chosen, and the shelf it came from: up and down in the player surf that shelf.
     private struct Playing: Identifiable {
@@ -39,6 +47,7 @@ struct ChannelsView: View {
         if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
         if hasCameras { found.append("camera") }
         if !films.isEmpty { found.append("vod") }
+        if camerasFirst, let at = found.firstIndex(of: "camera") { found.insert(found.remove(at: at), at: 0) }
         return found
     }
 
@@ -96,7 +105,7 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
-        } else if !mainLoaded {
+        } else if !mainLoaded || (camerasFirst && hasCameras && !camerasLoaded && cameraError == nil) {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
@@ -175,6 +184,7 @@ struct ChannelsView: View {
     /// Loads the television and radio shard, then the camera shard where the region has one.
     /// Safe to run again: each step skips what it already has.
     private func start() async {
+        if camerasFirst && hasCameras { await loadCameras() }
         await loadMain()
         #if DEBUG
         // With `-kjautochange`, a region link opens straight onto its first channel (see

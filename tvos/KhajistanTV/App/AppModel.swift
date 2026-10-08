@@ -28,6 +28,8 @@ final class AppModel {
     /// The Receiver's open region, if any. Held here rather than in the view so Back from the
     /// top bar, which sits outside the Receiver's stack, pops the region instead of leaving the app.
     var receiverPath: [ReceiverIndex.Region] = []
+    /// A region opened from the front's Cameras shelf: its page leads with its cameras.
+    var camerasFirst: String?
     /// Where a Top Shelf link asked to go. The screen it names reads it and clears it.
     var link: DeepLink?
     /// The Screening Room's films, read from vod.json with the preview password.

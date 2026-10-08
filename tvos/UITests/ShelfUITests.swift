@@ -63,17 +63,47 @@ final class ShelfUITests: XCTestCase {
             // The Khajistan Radio mixes are not on the TV (owner, 2026-10-06: they play on
             // Transmission's channel 2). The first shelf under the strip is the Screening Room,
             // which loads only with the preview password.
+            // The first shelf under the strip is Cameras, a plate per region that has them
+            // (owner, 2026-10-07: "make cctv show up in the reciever").
+            press(.down, app: app)
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down from the strip lands on the Cameras shelf, got \(focusedID(app))")
+            shot("\(skin)-2-receiver-cameras-shelf", app)
             let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
             if films.firstMatch.waitForExistence(timeout: 30) {
                 press(.down, app: app)
-                XCTAssertTrue(focusedID(app).hasPrefix("film-"), "\(skin): down from the strip lands on the Screening Room shelf, got \(focusedID(app))")
+                XCTAssertTrue(focusedID(app).hasPrefix("film-"), "\(skin): down from Cameras lands on the Screening Room shelf, got \(focusedID(app))")
                 kjPause(4)   // posters arrive
                 shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
-                XCTAssertTrue(focusedID(app).hasPrefix("region-"), "\(skin): up from the first shelf returns to the strip, got \(focusedID(app))")
             }
+            // Up returns to the front: the strip, or the sidebar's switch, which is what sits
+            // straight above the left-most plate.
+            press(.up, app: app)
+            let back = focusedID(app)
+            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
         }
+    }
+
+    /// A Cameras plate opens its region on its cameras: the camera shelf leads and takes focus.
+    func testCamerasShelfOpensARegionOnItsCameras() {
+        let app = launch("day", tab: "receiver")
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        kjPause(3)
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+        press(.down, app: app)
+        let plate = focusedID(app)
+        XCTAssertTrue(plate.hasPrefix("cameras-"), "down from the strip lands on a Cameras plate, got \(plate)")
+        XCUIRemote.shared.press(.select)
+        let shelf = app.descendants(matching: .any)["shelf-camera"]
+        XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")
+        let focusedCamera = shelf.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<3 where !focusedCamera.exists { press(.down, app: app) }
+        XCTAssertTrue(focusedCamera.exists, "\(plate): focus lands on a camera first, got \(focusedID(app))")
+        kjPause(1)
+        shot("day-3-region-cameras-first", app)
+        app.terminate()
     }
 
     func testRegionPageIsShelvesByMedium() {

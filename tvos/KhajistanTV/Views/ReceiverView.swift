@@ -10,6 +10,9 @@ struct ReceiverView: View {
     @State private var mapError: String?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
+    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
+    @State private var surfNote: String?
 
     var body: some View {
         @Bindable var model = model
@@ -19,7 +22,7 @@ struct ReceiverView: View {
                 .background(palette.ground.ignoresSafeArea())
                 .foregroundStyle(palette.ink)
                 .navigationDestination(for: ReceiverIndex.Region.self) { region in
-                    ChannelsView(region: region)
+                    ChannelsView(region: region, camerasFirst: model.camerasFirst == region.id)
                 }
         }
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
@@ -70,6 +73,7 @@ struct ReceiverView: View {
                         mapArea
                     }
                     .padding(.bottom, 12)
+                    camerasRow(index)
                     filmsRow
                 }
                 .padding(.horizontal, KJLayout.inset)
@@ -95,7 +99,7 @@ struct ReceiverView: View {
                 .kjDisplay()
             Text("Live television, live radio and public cameras from the Middle World.")
                 .kjBody()
-            shuffleButton
+            surf
             Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
                 GridRow {
                     Figure(label: "Live now", value: figure(index.totals.live))
@@ -136,42 +140,109 @@ struct ReceiverView: View {
         AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open)
     }
 
-    // MARK: - Shuffle
+    // MARK: - Surf
 
-    /// A channel at random, one press from the front (owner, 2026-10-06: "easily accessible
-    /// channel shuffle button in the home page"). The region is drawn by how much it has live,
-    /// as the map shows it (so it follows "Beyond the atlas"); the channel at random from that
-    /// region's television and radio; up and down then surf that region.
-    private var shuffleButton: some View {
-        Button {
-            Task { await shuffle() }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Text(shuffling ? "Shuffling\u{2026}" : "Shuffle").kjKicker()
-                Text("A live channel at random").kjSmall(faint: true)
+    /// A live channel at random, one press from the front (owner, 2026-10-06: "easily accessible
+    /// channel shuffle button in the home page"), of the medium and from the part of the atlas
+    /// chosen under it, kept on the device as the phone keeps them (owner, 2026-10-07). The region
+    /// is drawn by how many channels of that medium it carries; up and down then surf that region.
+    /// Called Surf, as the website's receiver and the phone call it.
+    private var surf: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                Task { await shuffle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
+                    Text(surfLine).kjSmall(faint: true)
+                }
+            }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
+            .accessibilityIdentifier("shuffle")
+            .disabled(shuffling || model.receiver.index == nil)
+            // The plate's padding is pulled back so the label sits on the page margin.
+            .padding(.leading, -26)
+            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
+            // "Main atlas · Extended atlas · Everywhere" is wider than the sidebar; the line above
+            // says "atlas", so the chips can drop it.
+            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label.replacingOccurrences(of: " atlas", with: "")) },
+                  current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
+            if let surfNote { Text(surfNote).kjSmall(faint: true) }
+        }
+    }
+
+    private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
+
+    private var surfLine: String {
+        let kind = medium == .tv ? "television" : "radio"
+        switch scope {
+        case .main: return "A live \(kind) channel from the main atlas"
+        case .extended: return "A live \(kind) channel from the extended atlas"
+        case .everywhere: return "A live \(kind) channel from anywhere"
+        }
+    }
+    private var scope: ShuffleScope { ShuffleScope(rawValue: scopeRaw) ?? .main }
+
+    private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.0) { item in
+                Button { set(item.0) } label: { Text(item.1).kjKicker() }
+                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    .accessibilityIdentifier("\(id)-\(item.0)")
             }
         }
-        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
-        .accessibilityIdentifier("shuffle")
-        // The plate's padding is pulled back so the label sits on the page margin.
-        .padding(.leading, -26)
-        .disabled(shuffling || composed == nil)
+        // The tabs' plate padding is pulled back so their text sits on the page margin.
+        .padding(.leading, -22)
     }
 
     private func shuffle() async {
-        guard let composed, !shuffling else { return }
+        guard let index = model.receiver.index, !shuffling else { return }
         shuffling = true
+        surfNote = nil
         defer { shuffling = false }
-        let regions = composed.regions.filter { $0.opensChannels && ($0.live ?? 0) > 0 }
+        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
         // Up to three regions, in case one's list will not load.
         for _ in 0..<3 {
-            guard let region = ShufflePick.region(regions.map { ($0.id, $0.live ?? 0) }) else { return }
+            guard let region = ShufflePick.region(weights) else { break }
             guard let list = try? await model.receiver.channels(regionId: region, cameras: false) else { continue }
-            let pool = list.filter { $0.mediaType == "tv" || $0.mediaType == "radio" }
+            let pool = list.filter { $0.mediaType == medium.rawValue }
             if let channel = pool.randomElement() {
                 shuffled = ShufflePick(channel: channel, list: pool)
                 return
             }
+        }
+        surfNote = "Nothing to surf there right now."
+    }
+
+    // MARK: - Cameras
+
+    /// Every region with public cameras, main atlas first, each opening its page on its cameras
+    /// (owner, 2026-10-07: "make cctv show up in the reciever").
+    @ViewBuilder
+    private func camerasRow(_ index: ReceiverIndex) -> some View {
+        let regions = CameraRegions.ordered(index)
+        if !regions.isEmpty {
+            Shelf("Cameras", count: "\(CameraRegions.total(index).formatted()) in \(regions.count) regions") {
+                ForEach(regions) { region in
+                    Button {
+                        model.camerasFirst = region.id
+                        model.receiverPath.append(region)
+                    } label: {
+                        CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(region.label).kjName().lineLimit(2)
+                                Spacer(minLength: 0)
+                                if let count = index.regionCounts[region.id]?.byMedium["camera"] {
+                                    Text("\(count.formatted()) \(count == 1 ? "camera" : "cameras")").kjSmall(faint: true)
+                                }
+                            }
+                        }
+                    }
+                    .buttonStyle(HouseCardStyle())
+                    .accessibilityIdentifier("cameras-\(region.id)")
+                }
+            }
+            .accessibilityIdentifier("shelf-cameras")
         }
     }
 

@@ -241,6 +241,10 @@ final class ReadingRoomUITests: XCTestCase {
         XCTAssertTrue(app.buttons["rr-tab-persian"].exists)
         let depth = app.staticTexts["rrDepth"].label
         XCTAssertTrue(depth.contains("titles") && depth.contains("issues"), depth)
+        // The head carries the whole room's figures, which are not any one language's.
+        let total = app.staticTexts["rrTotal"].label
+        XCTAssertTrue(total.contains("titles") && total.contains("issues") && total.contains("pages"), total)
+        XCTAssertNotEqual(total, depth, "the room's total is not the first tab's line")
         // Moving to another language changes the shelf.
         let urdu = app.buttons["rr-tab-urdu"]
         XCTAssertTrue(kjFocus(urdu, app: app))

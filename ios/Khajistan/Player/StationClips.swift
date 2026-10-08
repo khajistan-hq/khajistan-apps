@@ -61,7 +61,9 @@ final class StationClips {
     /// The change itself: the ground and the pigeon come up and the caller tunes at once, behind
     /// them, so the wait is the signal's and never the bird's. They stay until the caller uncovers.
     func flyThrough(caption: String?, covered: @escaping @MainActor () -> Void = {}) async {
-        cover(caption: caption)
+        // At once, as the site shows .tuning-pigeon: a fade-in run while the new stream starts
+        // lagged to a second on the main thread, and the half-up layer read the bird as green.
+        cover(caption: caption, animated: false)
         covered()
     }
 

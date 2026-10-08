@@ -17,6 +17,12 @@ struct ReceiverPlayerView: View {
     @State private var destination: Channel?
     @State private var tuneTask: Task<Void, Never>?
     @State private var changeTask: Task<Void, Never>?
+    /// True while the screen opens or a channel changes: those flows cover and uncover the
+    /// picture themselves, and the player passes through tuning and playing more than once.
+    @State private var changing = false
+    /// When the last change or opening settled. A stream often stalls once just after it starts;
+    /// covering that would flash the ground up and down over a picture that is about to play.
+    @State private var settledAt = Date.distantPast
 
     init(channel: Channel, list: [Channel]) {
         self.list = list
@@ -38,17 +44,24 @@ struct ReceiverPlayerView: View {
             chrome(palette)
                 .opacity(overlay.visible ? 1 : 0)
                 .allowsHitTesting(overlay.visible)
-            StationClipLayer(clips: model.clips)
         }
+        // An overlay, not the last child of the ZStack: as a child the layer composited under the
+        // chrome while it showed, and the bird read green-washed through the panel's ground.
+        .overlay { StationClipLayer(clips: model.clips) }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .statusBarHidden(!overlay.visible)
         .onChange(of: controller.state) { old, new in
             overlay.wake(settled: new == .playing)
-            // The site's rule: the pigeon covers every wait, a buffer mid-broadcast included.
-            if old == .playing && new == .tuning && destination == nil {
-                model.clips.cover(caption: current.name)
-            } else if old == .tuning && new == .playing && destination == nil {
+            // The site's rule: the pigeon covers every wait, a buffer mid-broadcast included. Only
+            // outside a change, and only for a stall that lasts: a blip must not flash the bird.
+            guard !changing else { return }
+            if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    if !changing, controller.state == .tuning { model.clips.cover(caption: current.name) }
+                }
+            } else if new == .playing, model.clips.coverage > 0 {
                 model.clips.uncover()
             }
         }
@@ -164,14 +177,19 @@ struct ReceiverPlayerView: View {
 
     /// The screen opens on the ground with the channel's name, which fades off as the picture arrives.
     private func open() async {
+        changing = true
+        defer { changing = false }
         model.clips.cover(caption: current.name, animated: false)
         tune(current)
         await controller.settled()
         guard !Task.isCancelled else { return }
         model.clips.uncover()
+        settledAt = Date()
     }
 
     private func change(to target: Channel) async {
+        changing = true
+        defer { if destination == nil || destination?.id == target.id { changing = false } }
         async let quiet: Void = controller.fadeOut()
         await model.clips.flyThrough(caption: target.name) {
             guard destination?.id == target.id else { return }
@@ -183,6 +201,7 @@ struct ReceiverPlayerView: View {
         await controller.settled()
         guard !Task.isCancelled else { return }
         model.clips.uncover()
+        settledAt = Date()
     }
 
     private func stopEverything() {

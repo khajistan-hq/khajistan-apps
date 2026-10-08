@@ -25,9 +25,11 @@ final class PigeonOverlay {
     /// channel has taken to tune on this device (owner, 2026-10-06: "use appropriate timed
     /// transitions where needed"), so the bird is still in the air when the picture arrives.
     /// Across and Lift retired, owner 2026-10-06: Across's darker bird broke the one mascot, and
-    /// Lift repeated Hover's front-facing hover.
-    static let short = ["swerve", "hover"]
-    static let long = ["loop", "twirl"]
+    /// Lift repeated Hover's front-facing hover. Swerve and Loop retired, owner 2026-10-08: "remove
+    /// the one where pigeon fully covers the full screen with the wing" (both close on a wing that
+    /// fills the frame); the bird now always flies over the picture.
+    static let short = ["hover"]
+    static let long = ["twirl"]
 
     /// A flight is on screen.
     private(set) var showing = false

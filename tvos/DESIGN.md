@@ -235,25 +235,24 @@ Only the content moves: the pigeon mark, and the pigeon at a changeover (owner r
 (owner, 2026-10-06: "hard cut is ok from one channel to next ... and the pigeon transition on it",
 with the flights they starred in Higgsfield). The next channel tunes on a second player, out of
 sight and silent, while the old one keeps playing and its sound fades. The bird flies over the
-old picture; the channel cuts behind it at the moment it covers the most of the screen (where it
-covers half or more: the closing wing of Swerve and Loop), or the moment the new channel plays if
-that is later, and the bird flies on over the new one. Only the sound eases up. One press is one
+old picture; the channel cuts the moment the new channel plays, and the bird flies on over the
+new one. No flight fills the screen: Swerve and Loop, which closed on a wing filling the frame,
+were retired on 2026-10-08 (owner: "remove the one where pigeon fully covers the full screen with
+the wing and just leave the other one on"). Only the sound eases up. One press is one
 flight: if the bird has gone before the channel plays, the channel cuts in at once and shows its
 own tuning state (owner, 2026-10-06: the pigeons "keep playing/looping"). Transmission switches
 channel the same way.
 
 | flight | length | | cut |
 |---|---|---|---|
-| Swerve | 4.0 s | from a wing filling the screen, banks round, back into the lens | behind the closing wing |
 | Hover | 4.7 s | hangs on its wings, then lifts away | when the channel plays |
-| Loop | 8.0 s | loops and rolls between two full-screen wings; for slow channels | behind the closing wing |
 | Twirl | 9.5 s | loops and a barrel roll across; for slow channels | when the channel plays |
 
 **The flight is timed to the channel** (owner, 2026-10-06: "use appropriate timed transitions"):
 the shortest flight that outlasts what the channel has taken to tune on this device, plus half a
 second (`TuneTimes`, kept per channel, learned even when the cut came first). Transmission's
-channel 1 comes off Dropbox in 5.5-6.7 s on the Apple TV HD and gets Loop or Twirl; its channel 2
-(0.7 s) and most live channels get Swerve or Hover. Across and Lift were retired the same day:
+channel 1 comes off Dropbox in 5.5-6.7 s on the Apple TV HD and gets Twirl; its channel 2
+(0.7 s) and most live channels get Hover. Across and Lift were retired the same day:
 Across's darker bird broke the one mascot, and Lift repeated Hover. Each flight is two ordinary H.264 videos, the bird's colour at 1080
 and its matte at 540, decoded in hardware and composited on the GPU on a display link of its own
 thread (`PigeonOverlay`, `PigeonRenderer`). HEVC with alpha was tried first: the Apple TV HD decodes

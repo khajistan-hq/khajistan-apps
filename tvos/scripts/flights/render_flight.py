@@ -9,7 +9,7 @@ frames per flight while a channel tuned, the bird a 720p file stretched to 1080.
 H.264 1080 and HEVC 2160 decode in hardware where they are played."""
 import os, subprocess, sys, numpy as np, cv2
 sys.path.insert(0, os.path.dirname(__file__))
-from greykey import frames, probe, key
+from greykey import frames, probe, key, backdropish
 
 TIERS = {"2160": (3840, 2160), "1080": (1920, 1080)}
 OVERLAY_TIERS = {"1080": (1920, 1080), "720": (1280, 720)}
@@ -72,6 +72,47 @@ def frame_plate(C):
     fill = num / np.maximum(den, 1e-3)
     s = np.where(m[..., None] > 0, s, fill)
     return cv2.resize(cv2.GaussianBlur(s, k, 1.0), (w, h), interpolation=cv2.INTER_CUBIC)
+
+def plate_colour(P, a):
+    """The colour video of a pair: the bird's own colour, decontaminated at its edge. Where the
+    matte is solid (a >= 0.95) it is the pixel itself; toward the edge and past it, it becomes
+    the colour of the nearest solid bird, spread smoothly over the frame (normalised blurs, fine
+    over coarse, each blended in by how much bird it saw, so the spread has no contours to cost
+    bits or band). The old plate used each edge pixel's own unmixed colour, which carries
+    whatever the key left of the grey backdrop and overshoots to a red-orange rim where the
+    matte is choked; and it went black 6 px out, so any matte reaching past it (an upscaled or
+    late matte frame) would draw dark olive on the yellow ground (2026-10-07)."""
+    inside = P / np.maximum(a[..., None], 1e-3)
+    h, w = a.shape
+    solid = (a >= 0.95).astype(np.float32)
+    if solid.sum() < 64: solid = (a >= 0.5).astype(np.float32)
+    if solid.sum() < 1: return inside
+    S = inside * solid[..., None]
+    q = (w // 4, h // 4)
+    Sq, kq = cv2.resize(S, q, interpolation=cv2.INTER_AREA), cv2.resize(solid, q, interpolation=cv2.INTER_AREA)
+    out = np.broadcast_to(S.reshape(-1, 3).sum(0) / solid.sum(), (q[1], q[0], 3)).astype(np.float32)
+    for s in (32, 8, 2):  # quarter-size sigmas: 128, 32, 8 px
+        num, den = cv2.GaussianBlur(Sq, (0, 0), s), cv2.GaussianBlur(kq, (0, 0), s)[..., None]
+        wgt = np.clip(den / 0.1, 0, 1)
+        out = wgt * num / np.maximum(den, 1e-6) + (1 - wgt) * out
+    out = cv2.resize(out, (w, h), interpolation=cv2.INTER_LINEAR)
+    num, den = cv2.GaussianBlur(S, (0, 0), 2), cv2.GaussianBlur(solid, (0, 0), 2)[..., None]
+    wgt = np.clip(den / 0.1, 0, 1)
+    spread = wgt * num / np.maximum(den, 1e-6) + (1 - wgt) * out
+    wgt = np.clip((a - 0.6) / 0.35, 0, 1)[..., None]
+    return wgt * inside + (1 - wgt) * spread
+
+def plate_matte(a, size=(960, 540), rounds=4):
+    """The 540 matte of a pair, made for the GPU's bilinear upscale to 1080: back-projected, so
+    that upscaled it lands nearest the 1080 matte. A plain area downscale upscaled to a soft,
+    stepped edge: edge-band error 6.5-7.5 of 255 on the four flights, 2.6-4.5 back-projected
+    (measured 2026-10-07 on the decoded H.264 against the 1080 key)."""
+    full = (a.shape[1], a.shape[0])
+    m = cv2.resize(a, size, interpolation=cv2.INTER_AREA)
+    for _ in range(rounds):
+        up = cv2.resize(m, full, interpolation=cv2.INTER_LINEAR)
+        m = np.clip(m + cv2.resize(a - up, size, interpolation=cv2.INTER_AREA), 0, 1)
+    return m
 
 def main(src, out_dir, name, ending=None):
     match = matcher(name)
@@ -169,6 +210,9 @@ def main(src, out_dir, name, ending=None):
                 if outside[y, x] == 0: cv2.floodFill(outside, mask, (x, y), 2)
             # The bird's inside, a few pixels in from its edge, is solid; the edge keeps its softness.
             inner = cv2.erode((outside != 2).astype(np.uint8), np.ones((7, 7), np.uint8)) > 0
+            # Backdrop the wings close round is still backdrop: Loop's gap between the raised
+            # wings was filled solid grey (2026-10-07).
+            inner &= ~backdropish(C, B if Bf is None else Bf)
             a = np.where(inner, 1.0, a).astype(np.float32)
             P = np.where(inner[..., None], C.astype(np.float32), P)
         if match is not None: P = match(P, a)
@@ -185,16 +229,8 @@ def main(src, out_dir, name, ending=None):
                 Pt = cv2.resize(P.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
                 at = cv2.resize(a.astype(np.float32), (tw, th), interpolation=cv2.INTER_AREA)
             if pair:
-                # Colour with the bird's own colour spread past its edge (normalised blur of the
-                # premultiplied picture), so where the matte is soft the edge is still the bird.
-                spread_p = cv2.GaussianBlur(Pt.astype(np.float32), (0, 0), 6)
-                spread_a = cv2.GaussianBlur(at.astype(np.float32), (0, 0), 6)[..., None]
-                inside = Pt / np.maximum(at[..., None], 1e-3)
-                outside = spread_p / np.maximum(spread_a, 1e-3)
-                rgb = np.where(at[..., None] > 0.5, inside, np.where(spread_a > 0.002, outside, 0))
-                encs["1080", "rgb"].stdin.write(np.clip(rgb + 0.5, 0, 255).astype(np.uint8).tobytes())
-                matte = cv2.resize(at.astype(np.float32), (960, 540), interpolation=cv2.INTER_AREA)
-                encs["1080", "matte"].stdin.write(np.clip(matte * 255 + 0.5, 0, 255).astype(np.uint8).tobytes())
+                encs["1080", "rgb"].stdin.write(np.clip(plate_colour(Pt, at) + 0.5, 0, 255).astype(np.uint8).tobytes())
+                encs["1080", "matte"].stdin.write(np.clip(plate_matte(at) * 255 + 0.5, 0, 255).astype(np.uint8).tobytes())
                 continue
             if overlay:
                 rgba = np.dstack([Pt, at * 255])

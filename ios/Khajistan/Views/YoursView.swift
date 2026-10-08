@@ -1,7 +1,7 @@
 import QuickLook
 import SwiftUI
 
-/// ACCOUNT: the website's "Your Khajistan" (account, membership, downloads and saved work) as it
+/// ACCOUNT: the website's "Your Khajistan" (account, downloads and saved work) as it
 /// stands on this device: the skin, All Access, the account Transmission plays under, the pages
 /// kept and visited here, and the files downloaded from the site.
 struct YoursView: View {
@@ -18,7 +18,7 @@ struct YoursView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                PageHead(kicker: "Account", "Your Khajistan", line: "Account, membership, downloads and saved work")
+                PageHead(kicker: "Account", "Your Khajistan", line: "Account, downloads and saved work")
                 skinBlock
                 accountBlock
                 libraryBlock

@@ -15,7 +15,7 @@ mkdir -p .build
 SHARED="Core/Auth Core/Mixes Core/PicsVids Core/Programming Core/Receiver Core/RegionMap
 Core/StationClock Core/Transmission Core/Chat Core/Sky Services/PicsVidsStore Services/ChatStore
 Player/PlayerLayerView Views/PigeonMark"
-SHARED="$SHARED Views/ChatMedia"
+SHARED="$SHARED Views/ChatMedia Core/Shuffle"
 for f in $SHARED; do
     if [ ! -L "Khajistan/$f.swift" ] || [ ! -f "Khajistan/$f.swift" ]; then
         echo "FAIL shared file Khajistan/$f.swift is not a working link to tvos/KhajistanTV/$f.swift" >&2

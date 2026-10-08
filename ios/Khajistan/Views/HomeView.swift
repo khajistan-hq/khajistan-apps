@@ -20,7 +20,7 @@ struct HomeView: View {
                     JoinBlock()
                         .padding(.bottom, 36)
                 }
-                ForEach(ArchiveDestination.doorsInThisBuild, id: \.door) { group in
+                ForEach(Self.doors, id: \.door) { group in
                     door(group.door, rooms: group.rooms)
                 }
             }
@@ -30,6 +30,15 @@ struct HomeView: View {
             .padding(.bottom, 28)
         }
         .scrollDismissesKeyboard(.interactively)
+    }
+
+    /// The website's menu without the rooms the tab bar already holds (owner, 2026-10-07: one
+    /// control once). Receiver, Pics/Vids and Your Khajistan are tabs; the website's own home is
+    /// this page. A door left with no rooms is not drawn.
+    static var doors: [(door: String, rooms: [ArchiveDestination])] {
+        ArchiveDestination.doorsInThisBuild
+            .map { ($0.door, $0.rooms.filter { room in room.id != "home" && room.nativeRoom.flatMap(AppTab.init) == nil }) }
+            .filter { !$0.1.isEmpty }
     }
 
     private var masthead: some View {

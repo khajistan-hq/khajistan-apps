@@ -6,11 +6,12 @@ import SwiftUI
 /// website reads (Core/Receiver.swift, Services/ReceiverStore.swift).
 struct ReceiverView: View {
     enum Part: String, CaseIterable, Identifiable {
-        case live, transmission
+        case live, cameras, transmission
         var id: String { rawValue }
         var title: String {
             switch self {
             case .live: return "Live"
+            case .cameras: return "Cameras"
             case .transmission: return "Transmission"
             }
         }
@@ -28,6 +29,7 @@ struct ReceiverView: View {
                 parts
                 switch part {
                 case .live: LiveSection()
+                case .cameras: CamerasSection()
                 case .transmission: TransmissionSection()
                 }
             }
@@ -135,6 +137,7 @@ private struct LiveSection: View {
 
     private var atlas: some View {
         VStack(alignment: .leading, spacing: 16) {
+            ShuffleControls { playing = PlayerChoice(channel: $0.channel, list: $0.list) }
             HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
                 .accessibilityIdentifier("beyondTheAtlas")
             map
@@ -395,5 +398,148 @@ struct ChannelRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+
+// MARK: - Shuffle
+
+/// A live channel at random, of the chosen medium, from the chosen part of the atlas. Both choices
+/// are kept on the device (owner, 2026-10-07). The region is drawn by how many channels of that
+/// medium it carries; up and down then surf that region's list.
+private struct ShuffleControls: View {
+    @Environment(AppModel.self) private var model
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
+    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
+    @State private var shuffling = false
+    @State private var note: String?
+    let open: (ShufflePick) -> Void
+
+    private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
+    private var scope: ShuffleScope { ShuffleScope(rawValue: scopeRaw) ?? .main }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                Task { await shuffle() }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(shuffling ? "Shuffling\u{2026}" : "Shuffle").kjKicker()
+                    Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
+                }
+            }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 12)))
+            .disabled(shuffling || model.receiver.index == nil)
+            .accessibilityIdentifier("shuffle")
+            chips(ShuffleMedium.allCases, current: medium.rawValue, id: "shuffle-medium") { mediumRaw = $0 }
+            chips(ShuffleScope.allCases, current: scope.rawValue, id: "shuffle-scope") { scopeRaw = $0 }
+            if let note { Text(note).kjSmall(faint: true) }
+        }
+    }
+
+    private func chips<Item: Identifiable & RawRepresentable>(_ items: [Item], current: String, id: String, set: @escaping (String) -> Void) -> some View where Item.RawValue == String {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(items) { item in
+                    Button { withAnimation(.kj) { set(item.rawValue) } } label: {
+                        Text(Self.label(item)).kjKicker()
+                    }
+                    .buttonStyle(HouseTabStyle(isCurrent: item.rawValue == current))
+                    .accessibilityIdentifier("\(id)-\(item.rawValue)")
+                }
+            }
+        }
+        .padding(.horizontal, -12)
+    }
+
+    private static func label<Item>(_ item: Item) -> String {
+        if let m = item as? ShuffleMedium { return m.label }
+        if let s = item as? ShuffleScope { return s.label }
+        return ""
+    }
+
+    private func shuffle() async {
+        guard let index = model.receiver.index, !shuffling else { return }
+        shuffling = true
+        note = nil
+        defer { shuffling = false }
+        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
+        // Up to three regions, in case one's list will not load.
+        for _ in 0..<3 {
+            guard let region = ShufflePick.region(weights) else { break }
+            guard let list = try? await model.receiver.channels(regionId: region, cameras: false) else { continue }
+            let pool = list.filter { $0.mediaType == medium.rawValue }
+            if let channel = pool.randomElement() {
+                open(ShufflePick(channel: channel, list: pool))
+                return
+            }
+        }
+        note = "Nothing to shuffle there right now."
+    }
+}
+
+// MARK: - Cameras
+
+/// Every public camera the receiver carries, by region, the main atlas first (owner, 2026-10-07:
+/// "make cctv show up in the reciever"). A camera opens full screen; up and down move through its
+/// region's cameras.
+private struct CamerasSection: View {
+    @Environment(AppModel.self) private var model
+    @State private var lists: [String: [Channel]] = [:]
+    @State private var failed: Set<String> = []
+    @State private var playing: LiveCamera?
+
+    struct LiveCamera: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        var id: String { channel.id }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            if let index = model.receiver.index {
+                let regions = CameraRegions.ordered(index)
+                Text("\(CameraRegions.total(index).formatted()) cameras in \(regions.count) regions").kjSmall(faint: true)
+                    .accessibilityIdentifier("camerasTotal")
+                ForEach(regions) { region in
+                    VStack(alignment: .leading, spacing: 8) {
+                        HouseRule()
+                        Text(region.label).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(1)
+                        if let list = lists[region.id], list.isEmpty {
+                            Text("No cameras here right now.").kjSmall(faint: true)
+                        } else if let list = lists[region.id] {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(list) { channel in
+                                    Button { playing = LiveCamera(channel: channel, list: list) } label: {
+                                        ChannelRow(channel: channel)
+                                    }
+                                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)))
+                                    .accessibilityIdentifier("camera-\(channel.id)")
+                                }
+                            }
+                        } else if failed.contains(region.id) {
+                            Text("These cameras did not load.").kjSmall(faint: true)
+                        } else {
+                            TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity, minHeight: 60)
+                        }
+                    }
+                    .task { await load(region.id) }
+                }
+            } else {
+                TuningLoader("Loading the receiver\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
+            }
+        }
+        .fullScreenCover(item: $playing) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+        }
+    }
+
+    private func load(_ region: String) async {
+        guard lists[region] == nil else { return }
+        do {
+            lists[region] = try await model.receiver.channels(regionId: region, cameras: true)
+        } catch {
+            failed.insert(region)
+        }
     }
 }

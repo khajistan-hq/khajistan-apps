@@ -3890,6 +3890,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Reading Room: provenance", readingProvenance),
+    ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
 // MARK: - Shuffle
@@ -3902,6 +3903,31 @@ func shuffleDrawsRegionsByLiveCount() throws {
     try expectEqual(ShufflePick.region(w, roll: { _ in 30 }), "khorasan")
     try expectEqual(ShufflePick.region(w, roll: { $0 - 1 }), "khorasan")
     try expectEqual(ShufflePick.region([("persia", 0)]), nil)
+}
+
+func shuffleScopesAndCameraRegions() throws {
+    let json = """
+    {"regions":[{"id":"indus","label":"Indus","kind":"state","tier":"heartbeat"},
+                {"id":"anatolia","label":"Anatolia","kind":"state","tier":"core"},
+                {"id":"nusantara","label":"Nusantara","kind":"state","tier":"islamicate"},
+                {"id":"kashmir","label":"Kashmir","kind":"people","tier":"core"}],
+     "regionFiles":{"indus":"/data/i.json","anatolia":"/data/a.json","nusantara":"/data/n.json"},
+     "cameraFiles":{"nusantara":"/data/n-cam.json","anatolia":"/data/a-cam.json"},
+     "regionCounts":{"indus":{"channels":78,"live":78,"byMedium":{"tv":38,"radio":40}},
+                     "anatolia":{"channels":60,"live":60,"byMedium":{"tv":20,"radio":16,"camera":24}},
+                     "nusantara":{"channels":400,"live":400,"byMedium":{"tv":4,"radio":20,"camera":376}}},
+     "totals":{"channels":538,"live":538,"byMedium":{"tv":62,"radio":76,"camera":400}}}
+    """
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(json.utf8))
+    func names(_ w: [(String, Int)]) -> [String] { w.map { "\($0.0):\($0.1)" } }
+    try expectEqual(names(ShufflePick.weights(index, medium: .tv, scope: .main)), ["indus:38", "anatolia:20"])
+    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .extended)), ["nusantara:20"])
+    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .everywhere)), ["indus:40", "anatolia:16", "nusantara:20"])
+    // Kashmir has no shard of its own (a people's region): never drawn.
+    try expect(!ShufflePick.weights(index, medium: .tv, scope: .everywhere).contains { $0.0 == "kashmir" }, "people's region")
+    // Cameras: the main atlas first, then the extensions; the total is the index's own count.
+    try expectEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
+    try expectEqual(CameraRegions.total(index), 400)
 }
 
 // MARK: - Reading Room order

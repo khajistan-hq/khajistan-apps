@@ -220,7 +220,10 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(tab.exists, "builds for our own devices keep the Pics/Vids tab")
         app.buttons["tab-home"].tap()
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
-        XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids door on Home")
+        // Pics/Vids is reached from its tab; Home no longer repeats it as a door (one control once,
+        // owner 2026-10-07). Chat and the Wall are not tabs and keep their doors.
+        XCTAssertFalse(pnvDoor.exists, "Home does not repeat a tab as a door")
+        XCTAssertFalse(app.buttons["destination-receiver"].exists, "nor the Receiver")
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door on Home")
         XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door on Home")
 #endif

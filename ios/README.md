@@ -58,6 +58,7 @@ files under `Khajistan/` are links to the Apple TV app's own files under
 - `Services/`: PicsVidsStore (MixesStore was dropped with the Khajistan Radio section, owner 2026-10-06)
 - `Player/`: PlayerLayerView
 - `Views/`: PigeonMark, ChatMedia (a chat line's GIF or Pics/Vids picture)
+- `Core/Shuffle`: the Receiver's Shuffle (medium, atlas scope, the weighted draw) and its Cameras grouping
 
 The two copies had drifted apart. The TV station clock carried 38 lines the phone lacked (up
 next, seconds left), and the TV's Programming and Receiver had fields the phone could not

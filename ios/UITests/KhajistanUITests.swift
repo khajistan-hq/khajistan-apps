@@ -192,15 +192,21 @@ final class KhajistanUITests: XCTestCase {
         waitFor(full, 10, "full screen opens when chosen")
         XCTAssertEqual(full.value as? String, tuned, "full screen carries the same channel, not a new tuning")
         shot("player-full-screen", app)
+        // The controls hide 2.6 s into playback; a tap wakes them. On a slow runner they can hide
+        // again before the next step, so wake and tap together, a few times if need be.
         let close = app.buttons["closePlayer"]
-        if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
-        waitFor(close, 5, "the full-screen controls wake")
-        close.tap()
-        waitFor(state, 10, "closing full screen returns to the docked screen")
+        for _ in 0..<4 where close.exists {
+            if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
+            if close.isHittable { close.tap() }
+            _ = close.waitForNonExistence(timeout: 3)
+        }
+        // The docked screen stays in the hierarchy under the cover, so wait for the cover to go.
+        XCTAssertFalse(close.exists, "full screen closes")
+        XCTAssertTrue(app.buttons["receiverOff"].isHittable, "the docked screen is back on top")
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()
-        XCTAssertFalse(state.waitForExistence(timeout: 2), "off turns the receiver off")
+        XCTAssertTrue(state.waitForNonExistence(timeout: 5), "off turns the receiver off")
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.

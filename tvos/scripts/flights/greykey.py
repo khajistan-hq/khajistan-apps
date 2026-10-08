@@ -28,11 +28,23 @@ def pushpull(v, known):
         out[fill] = num[fill] / den[fill][..., None]; have[fill] = 1
     return out
 
+def backdropish(C, B, t=15.0, min_area=30):
+    """Pixels that are the backdrop showing through: within t of the plate, in patches of at
+    least min_area px (a lone near-grey pixel in a feather is the feather), and colourless as the
+    backdrop is: a plate guessed under a wing that fills the frame can sit near the wing's own
+    brown, and those feathers must stay solid (Loop and Swerve's closing wing, 2026-10-07)."""
+    C = C.astype(np.float32)
+    near = ((np.linalg.norm(C - B, axis=2) < t) & (C.max(axis=2) - C.min(axis=2) < 12)).astype(np.uint8)
+    n, lab, st, _ = cv2.connectedComponentsWithStats(near, connectivity=8)
+    big = st[:, cv2.CC_STAT_AREA] >= min_area
+    big[0] = False
+    return big[lab]
+
 def key(C, B, solid_t=38.0, noise_t=7.0):
     C = C.astype(np.float32); D = C - B
     d = np.linalg.norm(D, axis=2)
-    solid = (d > solid_t).astype(np.uint8)
-    solid = cv2.morphologyEx(solid, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    raw = (d > solid_t).astype(np.uint8)
+    solid = cv2.morphologyEx(raw, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
     # holes inside the bird (a feather that happens to be near the grey) are bird
     inv = 1 - solid
     n, lab, st, _ = cv2.connectedComponentsWithStats(inv, 8)
@@ -41,6 +53,11 @@ def key(C, B, solid_t=38.0, noise_t=7.0):
         x, y, w, h, area = st[i]
         if not (x == 0 or y == 0 or x + w >= W or y + h >= H) and area < 0.002 * W * H:
             solid[lab == i] = 1
+    # ...but backdrop seen between the feathers or between the wings is not (2026-10-07: the
+    # closing and the hole fill made those gaps opaque grey, the "grey flecks between the
+    # feathers"). Pixels made solid only by the fill keep their unmixed alpha where they are
+    # backdrop; a pale feather near the grey differs from it by more than 15 and stays solid.
+    solid[(raw == 0) & backdropish(C, B)] = 0
     solidf = solid.astype(np.float32)
     # F is a smooth colour field; spread it at a quarter of the size and bring it back up.
     q = (C.shape[1] // 4, C.shape[0] // 4)

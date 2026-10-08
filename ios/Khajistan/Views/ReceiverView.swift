@@ -86,6 +86,7 @@ private struct LiveSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @AppStorage("kj.extendedAtlas") private var extended = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var composed: ComposedMap?
     @State private var mapError: String?
     @State private var selected = UserDefaults.standard.string(forKey: "kjregion") ?? "indus"
@@ -108,12 +109,20 @@ private struct LiveSection: View {
     private var index: ReceiverIndex? { model.receiver.index }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
-                .accessibilityIdentifier("beyondTheAtlas")
-            map
-            strip
-            regionBlock
+        Group {
+            if sizeClass == .regular {
+                // iPad: the map beside the region's channels, so the list starts at the top of the
+                // page instead of under a full-width map (design review, 2026-10-07).
+                HStack(alignment: .top, spacing: 40) {
+                    atlas.frame(maxWidth: .infinity, alignment: .leading)
+                    regionBlock.frame(width: 400, alignment: .leading)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 16) {
+                    atlas
+                    regionBlock
+                }
+            }
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
@@ -123,6 +132,15 @@ private struct LiveSection: View {
     }
 
     // MARK: Map and strip
+
+    private var atlas: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
+                .accessibilityIdentifier("beyondTheAtlas")
+            map
+            strip
+        }
+    }
 
     private var map: some View {
         ZStack {

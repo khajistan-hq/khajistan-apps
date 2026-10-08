@@ -145,9 +145,9 @@ enum KJLayout {
     /// The widest a page of rows and text may run. On an iPhone the screen is narrower, so this
     /// never applies there; on an iPad it keeps a row's name and its arrow within one glance.
     static let readingWidth: CGFloat = 720
-    /// The Receiver's cap: wide enough that the map keeps an iPad's portrait width, centred in
-    /// landscape instead of stretching the page.
-    static let wideWidth: CGFloat = 1040
+    /// The Receiver's cap: on an iPad the map and the channel list sit side by side within it,
+    /// centred in landscape instead of stretching the page.
+    static let wideWidth: CGFloat = 1240
 }
 
 extension View {

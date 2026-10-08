@@ -86,7 +86,7 @@ final class OverlayClock {
     func wake(settled: Bool) {
         withAnimation(.kj) { visible = true }
         hideTask?.cancel()
-        guard settled else { return }
+        guard settled, !Self.staysUp else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.6))
             guard !Task.isCancelled else { return }
@@ -104,6 +104,16 @@ final class OverlayClock {
     }
 
     func stop() { hideTask?.cancel() }
+
+    /// `-kjcontrolsstay YES` keeps the controls up, so a UI test can reach them without racing the
+    /// 2.6 s hide. Debug builds only.
+    private static let staysUp: Bool = {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "kjcontrolsstay")
+        #else
+        return false
+        #endif
+    }()
 }
 
 extension View {

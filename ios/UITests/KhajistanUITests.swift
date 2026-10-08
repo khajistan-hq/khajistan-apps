@@ -170,7 +170,10 @@ final class KhajistanUITests: XCTestCase {
     /// when full screen is chosen (owner, 2026-10-08). Next tunes the next channel behind the
     /// pigeon; closing full screen leaves the same channel playing; power puts it on standby.
     func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() {
-        let app = launch(skin: "grove", tab: "receiver")
+        // The full-screen controls stay up (-kjcontrolsstay, debug only): on the iOS 26 runner the
+        // close button never reports a hit point, so it is tapped by its frame, and a hide racing
+        // the tap would turn that tap into a wake.
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES"])
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
         waitFor(first, 40, "Indus lists its channels")
         first.tap()
@@ -201,21 +204,14 @@ final class KhajistanUITests: XCTestCase {
         waitFor(close, 10, "full screen opens when chosen")
         XCTAssertEqual(full.value as? String, tuned, "full screen carries the same channel, not a new tuning")
         shot("player-full-screen", app)
-        // The controls hide 2.6 s into playback and a tap on the picture wakes them. Full screen is
-        // closed once the set's own power key, under the cover, can be reached again; the close
-        // button is only asked about while the cover is fully up, since mid-dismissal it has no
-        // hit point to report.
+        let frame = close.frame
+        XCTAssertFalse(frame.isEmpty, "the close button has a frame")
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        // The set stays in the hierarchy under the cover; full screen is closed once its own power
+        // key can be reached again.
         let off = app.buttons["receiverOff"]
-        func reachable(_ element: XCUIElement, within seconds: TimeInterval) -> Bool {
-            let wait = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
-            return XCTWaiter.wait(for: [wait], timeout: seconds) == .completed
-        }
-        for _ in 0..<4 where !reachable(off, within: 1) {
-            if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
-            if reachable(close, within: 2) { close.tap() }
-            _ = reachable(off, within: 5)
-        }
-        XCTAssertTrue(off.isHittable, "full screen closes and the set is reachable again")
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: off)
+        waitForExpectations(timeout: 10)
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()

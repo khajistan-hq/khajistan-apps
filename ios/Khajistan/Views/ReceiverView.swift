@@ -20,8 +20,19 @@ struct ReceiverView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var part: Part = UserDefaults.standard.string(forKey: "kjpart").flatMap(Part.init(rawValue:)) ?? .live
+    @State private var fullScreen = false
 
     var body: some View {
+        VStack(spacing: 0) {
+            if model.tuner.source != nil { ReceiverScreen(fullScreen: $fullScreen) }
+            page
+        }
+        .fullScreenCover(isPresented: $fullScreen) {
+            if case .transmission = model.tuner.source { TransmissionPlayerView() } else { ReceiverPlayerView() }
+        }
+    }
+
+    private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PageHead("Receiver", line: "Live television, live radio and public cameras from the Middle World.")
@@ -81,8 +92,8 @@ struct ReceiverView: View {
 // MARK: - Live
 
 /// The map and the region on it: tap a region (or its name in the strip) and its television,
-/// radio and cameras are listed under it. A channel opens full screen, where a swipe up or down
-/// moves through the list it came from.
+/// radio and cameras are listed under it. A channel plays in the docked screen, whose next and
+/// previous move through the list it came from.
 private struct LiveSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -99,13 +110,6 @@ private struct LiveSection: View {
     @State private var loading = false
     @State private var listError: String?
     @State private var filter = ""
-    @State private var playing: PlayerChoice?
-
-    struct PlayerChoice: Identifiable {
-        let channel: Channel
-        let list: [Channel]
-        var id: String { channel.id }
-    }
 
     private var index: ReceiverIndex? { model.receiver.index }
 
@@ -127,16 +131,13 @@ private struct LiveSection: View {
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
-        .fullScreenCover(item: $playing) { choice in
-            ReceiverPlayerView(channel: choice.channel, list: choice.list)
-        }
     }
 
     // MARK: Map and strip
 
     private var atlas: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ShuffleControls { playing = PlayerChoice(channel: $0.channel, list: $0.list) }
+            ShuffleControls { model.tuner.play($0.channel, in: $0.list) }
             HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
                 .accessibilityIdentifier("beyondTheAtlas")
             map
@@ -293,7 +294,7 @@ private struct LiveSection: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(list) { channel in
                     Button {
-                        playing = PlayerChoice(channel: channel, list: list)
+                        model.tuner.play(channel, in: list)
                     } label: {
                         ChannelRow(channel: channel)
                     }
@@ -477,19 +478,12 @@ private struct ShuffleControls: View {
 // MARK: - Cameras
 
 /// Every public camera the receiver carries, by region, the main atlas first (owner, 2026-10-07:
-/// "make cctv show up in the reciever"). A camera opens full screen; up and down move through its
-/// region's cameras.
+/// "make cctv show up in the reciever"). A camera plays in the docked screen; next and previous
+/// move through its region's cameras.
 private struct CamerasSection: View {
     @Environment(AppModel.self) private var model
     @State private var lists: [String: [Channel]] = [:]
     @State private var failed: Set<String> = []
-    @State private var playing: LiveCamera?
-
-    struct LiveCamera: Identifiable {
-        let channel: Channel
-        let list: [Channel]
-        var id: String { channel.id }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -506,7 +500,7 @@ private struct CamerasSection: View {
                         } else if let list = lists[region.id] {
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(list) { channel in
-                                    Button { playing = LiveCamera(channel: channel, list: list) } label: {
+                                    Button { model.tuner.play(channel, in: list) } label: {
                                         ChannelRow(channel: channel)
                                     }
                                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)))
@@ -524,9 +518,6 @@ private struct CamerasSection: View {
             } else {
                 TuningLoader("Loading the receiver\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
             }
-        }
-        .fullScreenCover(item: $playing) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list)
         }
     }
 

@@ -11,12 +11,6 @@ struct TransmissionSection: View {
     @State private var showSignIn = false
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
-    @State private var playing: ChannelChoice?
-
-    private struct ChannelChoice: Identifiable {
-        let number: Int
-        var id: Int { number }
-    }
 
     private var store: TransmissionStore { model.transmission }
 
@@ -37,9 +31,6 @@ struct TransmissionSection: View {
         }
         .sheet(isPresented: $showSignIn, onDismiss: openChosen) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
-        }
-        .fullScreenCover(item: $playing) { choice in
-            TransmissionPlayerView(channel: choice.number)
         }
     }
 
@@ -115,7 +106,7 @@ struct TransmissionSection: View {
 
     private func choose(_ number: Int) {
         if model.auth.isSignedIn {
-            playing = ChannelChoice(number: number)
+            model.tuner.playTransmission(number)
         } else {
             chosen = number
             showSignIn = true
@@ -123,7 +114,7 @@ struct TransmissionSection: View {
     }
 
     private func openChosen() {
-        if let number = openAfterSignIn { playing = ChannelChoice(number: number) }
+        if let number = openAfterSignIn { model.tuner.playTransmission(number) }
         openAfterSignIn = nil
         chosen = nil
     }
@@ -169,18 +160,14 @@ private struct ChannelCard: View {
     }
 }
 
-/// One channel of Khajistan Transmission, full screen. The first time in a launch the pigeon flies
-/// through and the programme tunes behind it (the website's sign-on); later it opens on the ground
-/// with the channel's name. A swipe up or down switches channel through the wing.
+/// The Transmission channel the Receiver is playing, full screen, chosen from the docked screen's
+/// full-screen control. It reads the tab's one tuner, so closing it leaves the channel playing in
+/// the docked screen. A swipe up or down switches channel behind the pigeon.
 struct TransmissionPlayerView: View {
-    let channel: Int
-
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var overlay = OverlayClock()
     @State private var showSignIn = false
-    @State private var switching = false
-    @State private var left = false
 
     private var store: TransmissionStore { model.transmission }
 
@@ -198,16 +185,25 @@ struct TransmissionPlayerView: View {
         .onChange(of: store.player.state) { overlay.wake(settled: store.player.state == .playing) }
         .onChange(of: store.schedule) { _, schedule in
             switch schedule {
-            case .needsPreviewPassword, .noSchedule: close()
+            case .needsPreviewPassword, .noSchedule:
+                model.tuner.stop()
+                dismiss()
             default: break
             }
         }
-        .task { await start() }
-        .onDisappear { leave() }
+        // The receiver was turned off, or switched to a live channel, while this was up.
+        .onChange(of: isTransmission) { _, on in if !on { dismiss() } }
+        .onAppear { overlay.wake(settled: store.player.state == .playing) }
+        .onDisappear { overlay.stop() }
         .sheet(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
         .accessibilityAction(named: "Switch channel") { switchChannel() }
+    }
+
+    private var isTransmission: Bool {
+        if case .transmission = model.tuner.source { return true }
+        return false
     }
 
     @ViewBuilder
@@ -242,7 +238,7 @@ struct TransmissionPlayerView: View {
     private func topBar(_ trailing: [String], air: OnAir? = nil) -> some View {
         var leading = ["Khajistan Transmission", "Channel \(store.channelNumber)"]
         if let air { leading.append("\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)") }
-        return PlayerTopBar(leading: leading, trailing: trailing) { close() }
+        return PlayerTopBar(leading: leading, trailing: trailing) { dismiss() }
     }
 
     private func message<Actions: View>(_ text: String, title: String? = nil, @ViewBuilder actions: () -> Actions) -> some View {
@@ -326,60 +322,8 @@ struct TransmissionPlayerView: View {
 
     private func switchChannel() {
         overlay.wake(settled: false)
-        if model.clips.showing { model.clips.skip(); return }
-        guard !switching else { return }
-        switching = true
-        Task {
-            let next = store.channelNumber == 1 ? 2 : 1
-            async let quiet: Void = store.player.fadeOut()
-            var retune: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(next)) {
-                if !left { retune = Task { await store.switchChannel() } }
-            }
-            await quiet
-            await retune?.value
-            if !left { await store.player.settled() }
-            if !left { model.clips.uncover() }
-            switching = false
-        }
+        model.tuner.step(1)
     }
 
-    /// Pauses a picture that is playing; anything else joins the channel again, live.
-    private func playPause() {
-        if store.player.state == .playing {
-            store.player.pause()
-        } else {
-            Task { await store.rejoinLive() }
-        }
-    }
-
-    private func start() async {
-        if !model.clips.signOnPlayed {
-            model.clips.signOnPlayed = true
-            var tuning: Task<Void, Never>?
-            await model.clips.flyThrough(caption: store.channelName(channel)) {
-                if !gone { tuning = Task { await store.tune(channel: channel) } }
-            }
-            await tuning?.value
-        } else {
-            model.clips.cover(caption: store.channelName(channel), animated: false)
-            if !gone { await store.tune(channel: channel) }
-        }
-        if !gone { await store.player.settled() }
-        if !gone { model.clips.uncover() }
-    }
-
-    private var gone: Bool { left || Task.isCancelled }
-
-    private func close() {
-        leave()
-        dismiss()
-    }
-
-    private func leave() {
-        left = true
-        overlay.stop()
-        store.stop()
-        model.clips.clear()
-    }
+    private func playPause() { model.tuner.playPause() }
 }

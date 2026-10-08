@@ -158,21 +158,25 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
-    /// A channel plays, and a swipe up tunes the next behind the pigeon.
-    func testChannelPlaysAndSwipeChangesIt() {
+    /// A channel plays in the screen docked at the top of the Receiver and goes full screen only
+    /// when full screen is chosen (owner, 2026-10-08). Next tunes the next channel behind the
+    /// pigeon; closing full screen leaves the same channel playing; off turns the receiver off.
+    func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() {
         let app = launch(skin: "grove", tab: "receiver")
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
         waitFor(first, 40, "Indus lists its channels")
         first.tap()
-        let state = app.staticTexts["playerState"]
-        waitFor(state, 10, "the player opens")
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 10, "the docked screen opens")
+        XCTAssertFalse(app.buttons["closePlayer"].exists, "a channel does not open full screen by itself")
+        XCTAssertTrue(app.buttons["tab-receiver"].isHittable, "the tab bar stays on screen")
         let playing = NSPredicate(format: "label == 'Playing'")
         expectation(for: playing, evaluatedWith: state)
         waitForExpectations(timeout: 60)
         shot("player-playing", app)
         let before = state.value as? String ?? ""
-        XCTAssertFalse(before.isEmpty, "the player names the channel it carries")
-        app.swipeUp()
+        XCTAssertFalse(before.isEmpty, "the screen names the channel it carries")
+        app.buttons["nextChannel"].tap()
         usleep(900_000)
         shot("player-channel-change", app)
         // The next channel in the list is tuned behind the wing, then plays or says why it cannot.
@@ -181,7 +185,22 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 60)
         usleep(700_000)
         shot("player-after-change", app)
-        app.buttons["closePlayer"].tap()
+        let tuned = state.value as? String ?? ""
+
+        app.buttons["fullScreen"].tap()
+        let full = app.staticTexts["playerState"]
+        waitFor(full, 10, "full screen opens when chosen")
+        XCTAssertEqual(full.value as? String, tuned, "full screen carries the same channel, not a new tuning")
+        shot("player-full-screen", app)
+        let close = app.buttons["closePlayer"]
+        if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
+        waitFor(close, 5, "the full-screen controls wake")
+        close.tap()
+        waitFor(state, 10, "closing full screen returns to the docked screen")
+        XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
+
+        app.buttons["receiverOff"].tap()
+        XCTAssertFalse(state.waitForExistence(timeout: 2), "off turns the receiver off")
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.

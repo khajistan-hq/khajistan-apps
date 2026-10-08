@@ -61,6 +61,8 @@ final class AppModel {
     let pnv: PicsVidsStore
     /// The channel-change pigeon. One player for the life of the app.
     let clips = StationClips()
+    /// What the Receiver tab is playing, docked or full screen.
+    let tuner: ReceiverTuner
     let chat: ChatStore
 
     private let libraryFile: LibraryFile
@@ -72,6 +74,7 @@ final class AppModel {
         let auth = AuthStore()
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
+        tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission)
         pnv = PicsVidsStore(auth: auth)
         chat = ChatStore(auth: auth)
         let defaults = UserDefaults.standard

@@ -27,13 +27,13 @@ struct ReceiverView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // On, the set stays above the page while the reader browses; off, it is the top of
+            // the page and scrolls away with it.
             if model.tuner.source != nil {
-                ReceiverScreen(fullScreen: Binding(get: { fullScreen }, set: { open in
-                    if open {
-                        if case .transmission = model.tuner.source { fullScreenTransmission = true } else { fullScreenTransmission = false }
-                    }
-                    fullScreen = open
-                }))
+                device
+                    .padding(.horizontal, KJLayout.inset)
+                    .kjColumn(KJLayout.wideWidth)
+                    .padding(.vertical, 8)
             }
             page
         }
@@ -42,12 +42,21 @@ struct ReceiverView: View {
         }
     }
 
+    private var device: some View {
+        ReceiverDevice(part: $part, fullScreen: Binding(get: { fullScreen }, set: { open in
+            if open {
+                if case .transmission = model.tuner.source { fullScreenTransmission = true } else { fullScreenTransmission = false }
+            }
+            fullScreen = open
+        }))
+    }
+
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 PageHead("Receiver", line: "Live television, live radio and public cameras from the Middle World.")
                 figures
-                parts
+                if model.tuner.source == nil { device }
                 switch part {
                 case .live: LiveSection()
                 case .cameras: CamerasSection()
@@ -79,23 +88,6 @@ struct ReceiverView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var parts: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(Part.allCases) { item in
-                    Button {
-                        part = item
-                    } label: {
-                        Text(item.title).kjKicker()
-                    }
-                    .buttonStyle(HouseTabStyle(isCurrent: part == item))
-                    .accessibilityIdentifier("part-\(item.rawValue)")
-                }
-            }
-        }
-        .padding(.horizontal, -12)
     }
 }
 
@@ -147,7 +139,7 @@ private struct LiveSection: View {
 
     private var atlas: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ShuffleControls { model.tuner.play($0.channel, in: $0.list) }
+            SurfSettings()
             HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
                 .accessibilityIdentifier("beyondTheAtlas")
             map
@@ -411,77 +403,36 @@ struct ChannelRow: View {
 
 // MARK: - Shuffle
 
-/// A live channel at random, of the chosen medium, from the chosen part of the atlas. Both choices
-/// are kept on the device (owner, 2026-10-07). The region is drawn by how many channels of that
-/// medium it carries; up and down then surf that region's list.
-private struct ShuffleControls: View {
-    @Environment(AppModel.self) private var model
+/// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
+/// of the atlas. Kept on the device (owner, 2026-10-07).
+private struct SurfSettings: View {
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
-    @State private var shuffling = false
-    @State private var note: String?
-    let open: (ShufflePick) -> Void
 
     private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
-    private var scope: ShuffleScope { ShuffleScope(rawValue: scopeRaw) ?? .main }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button {
-                Task { await shuffle() }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(shuffling ? "Shuffling\u{2026}" : "Shuffle").kjKicker()
-                    Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
-                }
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Kicker("Surf")
+                Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
             }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 12)))
-            .disabled(shuffling || model.receiver.index == nil)
-            .accessibilityIdentifier("shuffle")
-            chips(ShuffleMedium.allCases, current: medium.rawValue, id: "shuffle-medium") { mediumRaw = $0 }
-            chips(ShuffleScope.allCases, current: scope.rawValue, id: "shuffle-scope") { scopeRaw = $0 }
-            if let note { Text(note).kjSmall(faint: true) }
+            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
+            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
         }
     }
 
-    private func chips<Item: Identifiable & RawRepresentable>(_ items: [Item], current: String, id: String, set: @escaping (String) -> Void) -> some View where Item.RawValue == String {
+    private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
-                ForEach(items) { item in
-                    Button { withAnimation(.kj) { set(item.rawValue) } } label: {
-                        Text(Self.label(item)).kjKicker()
-                    }
-                    .buttonStyle(HouseTabStyle(isCurrent: item.rawValue == current))
-                    .accessibilityIdentifier("\(id)-\(item.rawValue)")
+                ForEach(items, id: \.0) { item in
+                    Button { set(item.0) } label: { Text(item.1).kjKicker() }
+                        .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                        .accessibilityIdentifier("\(id)-\(item.0)")
                 }
             }
         }
         .padding(.horizontal, -12)
-    }
-
-    private static func label<Item>(_ item: Item) -> String {
-        if let m = item as? ShuffleMedium { return m.label }
-        if let s = item as? ShuffleScope { return s.label }
-        return ""
-    }
-
-    private func shuffle() async {
-        guard let index = model.receiver.index, !shuffling else { return }
-        shuffling = true
-        note = nil
-        defer { shuffling = false }
-        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
-        // Up to three regions, in case one's list will not load.
-        for _ in 0..<3 {
-            guard let region = ShufflePick.region(weights) else { break }
-            guard let list = try? await model.receiver.channels(regionId: region, cameras: false) else { continue }
-            let pool = list.filter { $0.mediaType == medium.rawValue }
-            if let channel = pool.randomElement() {
-                open(ShufflePick(channel: channel, list: pool))
-                return
-            }
-        }
-        note = "Nothing to shuffle there right now."
     }
 }
 

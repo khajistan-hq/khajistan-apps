@@ -115,11 +115,13 @@ struct ReceiverPlayerView: View {
     }
 }
 
-/// The screen docked at the top of the Receiver tab: what the tuner is playing, with the picture
-/// for television and cameras, and its controls. It stays above the list while the reader browses
-/// (owner, 2026-10-08: "i need reciever to work like a reciever"). Radio, and a Transmission channel
-/// that is off air or sound only, has no picture box: the row says what is on.
-struct ReceiverScreen: View {
+/// The Khajistan Receiver as one set, as the website draws it (open-frequencies.html `.receiver`):
+/// its tabs in the bar on top, the screen, and the remote under the screen (owner, 2026-10-08:
+/// "the reciever is like a device/tv/radio type"; "it should go fullscreen only if fullscreen is
+/// chosen"). Off, the screen carries the Khajistan Receiver mark and Surf finds a channel; on, it
+/// carries the picture, or the station's name for radio.
+struct ReceiverDevice: View {
+    @Binding var part: ReceiverView.Part
     @Binding var fullScreen: Bool
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -132,30 +134,59 @@ struct ReceiverScreen: View {
     var body: some View {
         Group {
             if sizeClass == .regular {
-                HStack(alignment: .center, spacing: 24) {
-                    if hasPicture { picture.frame(width: 480) }
-                    controls
+                HStack(alignment: .top, spacing: 28) {
+                    set.frame(width: 560)
+                    copy.padding(.top, 52)
                 }
-                .padding(.horizontal, KJLayout.inset)
-                .padding(.vertical, 12)
             } else {
-                VStack(alignment: .leading, spacing: 0) {
-                    if hasPicture { picture }
-                    controls
-                        .padding(.horizontal, KJLayout.inset)
-                        .padding(.vertical, 8)
+                VStack(alignment: .leading, spacing: 10) {
+                    set
+                    copy
                 }
             }
         }
-        .kjColumn(KJLayout.wideWidth)
-        .background(palette.ground)
         .onChange(of: player.state) { old, new in tuner.playerStateChanged(from: old, to: new) }
         .onChange(of: store.phase) { tuner.transmissionPhaseChanged() }
+    }
+
+    /// The set itself: bar, screen and remote, one body.
+    private var set: some View {
+        // The set's body runs round the screen, as a bezel does, so off it still reads as one
+        // object and not a strip of the page between two bars.
+        VStack(spacing: 0) {
+            bar
+            screen.padding(.horizontal, 6)
+            remote
+        }
+        .background(palette.band)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("receiverScreen")
     }
 
-    // MARK: Picture
+    // MARK: Bar
+
+    private var bar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 2) {
+                ForEach(ReceiverView.Part.allCases) { item in
+                    Button { part = item } label: {
+                        Text(item.title).kjKicker(item == part ? palette.band : palette.onBand)
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 34)
+                            .background(item == part ? palette.onBand : .clear)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(item == part ? .isSelected : [])
+                    .accessibilityIdentifier("part-\(item.rawValue)")
+                }
+            }
+            .padding(6)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.band)
+    }
+
+    // MARK: Screen
 
     private var hasPicture: Bool {
         switch tuner.source {
@@ -167,12 +198,23 @@ struct ReceiverScreen: View {
         }
     }
 
-    private var showsPicture: Bool { player.state == .playing || player.state == .paused }
+    private var showsPicture: Bool { hasPicture && (player.state == .playing || player.state == .paused) }
 
-    private var picture: some View {
+    private var screen: some View {
         ZStack {
             (showsPicture ? Color.black : palette.ground)
-            PlayerLayerView(player: player.player)
+            if hasPicture {
+                PlayerLayerView(player: player.player)
+            } else if tuner.source == nil {
+                idleMark
+            } else {
+                Text(title)
+                    .kjDisplay(KJType.headline, tracking: -0.04)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.6)
+                    .padding(.horizontal, 20)
+            }
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .overlay { StationClipLayer(clips: model.clips) }
@@ -180,32 +222,64 @@ struct ReceiverScreen: View {
         .accessibilityHidden(true)
     }
 
-    // MARK: Controls
-
-    private var controls: some View {
-        HStack(alignment: .center, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Kicker(stateLine).lineLimit(2)
-                    .accessibilityIdentifier("screenState")
-                    .accessibilityValue(sourceId)
-                Text(title).kjName().lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if tuner.canStep { control("backward.end.fill", "Previous channel", "previousChannel") { tuner.step(-1) } }
-            control(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause") { tuner.playPause() }
-            if tuner.canStep { control("forward.end.fill", "Next channel", "nextChannel") { tuner.step(1) } }
-            control("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen") { fullScreen = true }
-            control("xmark", "Turn the receiver off", "receiverOff") { tuner.stop() }
+    /// The website's idle mark: the name large, RECEIVER on a band plate under it.
+    private var idleMark: some View {
+        VStack(spacing: 4) {
+            Text("Khajistan").kjDisplay(tracking: -0.075).lineLimit(1).minimumScaleFactor(0.5)
+            Text("Receiver").kjKicker(palette.onBand)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(palette.band)
         }
+        .padding(.horizontal, 20)
     }
 
-    private func control(_ symbol: String, _ label: String, _ id: String, action: @escaping () -> Void) -> some View {
+    // MARK: Remote
+
+    private var remote: some View {
+        HStack(spacing: 0) {
+            key("backward.end.fill", "Previous channel", "previousChannel", enabled: tuner.canStep) { tuner.step(-1) }
+            key("shuffle", tuner.surfing ? "Surfing" : "Surf", "surf", enabled: !tuner.surfing) { Task { await tuner.surf() } }
+            key("forward.end.fill", "Next channel", "nextChannel", enabled: tuner.canStep) { tuner.step(1) }
+            Spacer(minLength: 0)
+            key(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause", enabled: tuner.source != nil) {
+                tuner.playPause()
+            }
+            key("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen", enabled: tuner.source != nil) { fullScreen = true }
+            key("power", "Turn the receiver off", "receiverOff", enabled: tuner.source != nil) { tuner.stop() }
+        }
+        .padding(.horizontal, 4)
+        .background(palette.band)
+        .environment(\.palette, palette.onBandPlate)
+    }
+
+    private func key(_ symbol: String, _ label: String, _ id: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.body.weight(.bold)).frame(width: 40, height: 44)
+            Image(systemName: symbol).font(.body.weight(.bold)).frame(width: 46, height: 44)
         }
         .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+        .disabled(!enabled)
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
+    }
+
+    // MARK: What is on
+
+    private var copy: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Kicker(stateLine).lineLimit(2)
+                .accessibilityIdentifier("screenState")
+                .accessibilityValue(sourceId)
+            // Radio and a sound-only programme carry their name on the screen; it is not said twice.
+            if tuner.source == nil {
+                Text("Choose a channel, or press Surf.").kjName().lineLimit(2)
+            } else if hasPicture {
+                Text(title).kjName().lineLimit(2)
+            }
+            if let place, !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }
+            if let note = tuner.surfNote { Text(note).kjSmall(faint: true) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var isPlaying: Bool { player.state == .playing || player.state == .tuning }
@@ -216,6 +290,11 @@ struct ReceiverScreen: View {
         case .transmission(let number): return "transmission-\(number)"
         case nil: return ""
         }
+    }
+
+    private var place: String? {
+        if case .live(let channel) = tuner.source { return channel.place }
+        return nil
     }
 
     private var title: String {
@@ -232,7 +311,9 @@ struct ReceiverScreen: View {
     }
 
     private var stateLine: String {
-        if case .transmission = tuner.source {
+        switch tuner.source {
+        case nil: return tuner.surfing ? "Surfing\u{2026}" : "Standing by"
+        case .transmission:
             switch store.phase {
             case .idle, .tuning: return "Channel \(store.channelNumber) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in under Account to watch"
@@ -241,8 +322,8 @@ struct ReceiverScreen: View {
             case .failed(let message): return message
             case .onAir: return "Channel \(store.channelNumber) \u{00B7} \(playerText)"
             }
+        case .live: return playerText
         }
-        return playerText
     }
 
     private var playerText: String {

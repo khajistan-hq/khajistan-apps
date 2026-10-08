@@ -158,16 +158,16 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
-    /// A channel plays in the screen docked at the top of the Receiver and goes full screen only
+    /// A channel plays on the receiver set at the top of the Receiver and goes full screen only
     /// when full screen is chosen (owner, 2026-10-08). Next tunes the next channel behind the
-    /// pigeon; closing full screen leaves the same channel playing; off turns the receiver off.
+    /// pigeon; closing full screen leaves the same channel playing; power puts it on standby.
     func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() {
         let app = launch(skin: "grove", tab: "receiver")
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
         waitFor(first, 40, "Indus lists its channels")
         first.tap()
         let state = app.staticTexts["screenState"]
-        waitFor(state, 10, "the docked screen opens")
+        waitFor(state, 10, "the receiver is on the page")
         XCTAssertFalse(app.buttons["closePlayer"].exists, "a channel does not open full screen by itself")
         XCTAssertTrue(app.buttons["tab-receiver"].isHittable, "the tab bar stays on screen")
         let playing = NSPredicate(format: "label == 'Playing'")
@@ -206,7 +206,9 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()
-        XCTAssertTrue(state.waitForNonExistence(timeout: 5), "off turns the receiver off")
+        expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+        shot("player-off", app)
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.

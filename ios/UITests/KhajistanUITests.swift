@@ -144,6 +144,14 @@ final class KhajistanUITests: XCTestCase {
         waitFor(map, 5, "the map is on screen")
         let title = app.descendants(matching: .any)["regionTitle"]
         waitFor(title, 10, "the region block is on screen")
+        // The receiver set sits above the map when it is off, so the map can start below the
+        // screen: bring it fully into view before tapping on it.
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<4 where map.frame.maxY > window.maxY - 60 || map.frame.minY < window.minY {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+            usleep(600_000)
+        }
         // The Maghreb is the map's western mass. Its label sits a quarter of the way across and just
         // under half way down, at the same place on every screen because the map is drawn from one
         // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map

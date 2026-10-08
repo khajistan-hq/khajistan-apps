@@ -48,9 +48,9 @@ final class AppModel {
     /// The pick in force, nil when the skin is the sky's own (Automatic).
     private(set) var skinPick: Skin?
 
-    /// The App Store storefront's country code, nil until StoreKit has answered. The membership
-    /// links follow it (`showsJoin`); `-kjstorefront GBR` on the command line stands in for it in
-    /// UI tests.
+    /// The App Store storefront's country code, nil until StoreKit has answered. The Reading Room
+    /// page's own membership offer follows it (`showsJoin`; elsewhere the page is tagged `app=1`).
+    /// `-kjstorefront GBR` on the command line stands in for it in UI tests.
     private(set) var storefrontCode: String?
     var showsJoin: Bool { JoinOffer.isOffered(storefront: storefrontCode) }
 
@@ -163,7 +163,9 @@ final class AppModel {
         if destination.nativeRoom == .chat {
             isShowingChat = true
         } else if let room = destination.nativeRoom, let tab = AppTab(room) {
-            withAnimation(.kj) { self.tab = tab }
+            var instant = Transaction()
+            instant.disablesAnimations = true
+            withTransaction(instant) { self.tab = tab }
         } else {
             open(destination.url)
         }

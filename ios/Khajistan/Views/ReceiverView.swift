@@ -58,7 +58,6 @@ struct ReceiverView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(.kj, value: totals?.live)
     }
 
     private var parts: some View {
@@ -66,7 +65,7 @@ struct ReceiverView: View {
             HStack(spacing: 0) {
                 ForEach(Part.allCases) { item in
                     Button {
-                        withAnimation(.kj) { part = item }
+                        part = item
                     } label: {
                         Text(item.title).kjKicker()
                     }
@@ -149,7 +148,6 @@ private struct LiveSection: View {
         ZStack {
             if let composed {
                 RegionMapView(map: composed, highlighted: selected) { id in choose(id) }
-                    .transition(.opacity)
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }
             } else {
@@ -158,7 +156,6 @@ private struct LiveSection: View {
                     .overlay { TuningLoader("Loading the receiver\u{2026}") }
             }
         }
-        .animation(.easeOut(duration: 0.25), value: composed == nil)
         // The strip under the map is the accessible way to choose; the map is one element.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Region map")
@@ -200,7 +197,7 @@ private struct LiveSection: View {
 
     private func choose(_ id: String) {
         guard id != selected else { return }
-        withAnimation(.kj) { selected = id }
+        selected = id
     }
 
     // MARK: The region
@@ -260,7 +257,7 @@ private struct LiveSection: View {
             HStack(spacing: 0) {
                 ForEach(media, id: \.self) { kind in
                     Button {
-                        withAnimation(.kj) { medium = kind }
+                        medium = kind
                         if kind == "camera" && !camerasLoaded { Task { await loadCameras() } }
                     } label: {
                         Text(switchTitle(kind)).kjKicker()
@@ -305,7 +302,6 @@ private struct LiveSection: View {
                     if channel.id != list.last?.id { HouseRule() }
                 }
             }
-            .transition(.opacity)
         }
     }
 

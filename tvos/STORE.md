@@ -9,8 +9,9 @@ The Reading Room sells All Access through `scripts/kj-join.js`: a signed-in read
 their account server-side by `stripe-checkout` and pays in an embedded Stripe sheet. A link to
 `/reading-room.html?join=monthly` (or `annual`) resumes that checkout after sign-in.
 
-- **iPhone (built):** the Home tab's "Become a member" buttons open that URL in the in-app
-  browser (`JoinPlan` in `ios/Khajistan/Core/ArchiveDestination.swift`, used by `HomeView.swift`).
+- **iPhone:** the app draws no membership card of its own (owner, 2026-10-07: the Home card was
+  too aggressive). The offer is the Reading Room page's own, in the in-app browser, on the US
+  storefront only; elsewhere the page is opened with `app=1` and the site hides it.
 - **Apple TV: sells nothing, in the app or through it.** Owner, 2026-10-06, to the Apple TV
   session: *"dont allow people to get reading room subscription on the apple tv app, make them go
   to our site for that"*. The TV's members' gate shows no plans and no prices, only that

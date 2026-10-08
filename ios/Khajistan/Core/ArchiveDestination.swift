@@ -58,19 +58,6 @@ enum NativeRoom: String, CaseIterable, Sendable {
     case receiver, picsVids, yours, chat
 }
 
-/// Reading Room All Access, sold by the website's own checkout (scripts/kj-join.js): a link with
-/// `?join=<plan>` resumes it after sign-in. No price is written into the app; the site states it.
-enum JoinPlan: String, CaseIterable, Sendable {
-    case monthly, annual
-
-    var label: String { self == .monthly ? "Monthly" : "Annual" }
-    var url: URL {
-        var parts = URLComponents(url: ArchiveURL.base.appendingPathComponent("reading-room.html"), resolvingAgainstBaseURL: false)!
-        parts.queryItems = [URLQueryItem(name: "join", value: rawValue)]
-        return parts.url!
-    }
-}
-
 /// Where the membership links are offered: the United States storefront only (StoreKit's
 /// `Storefront.countryCode`, ISO 3166-1 alpha-3). Until the storefront is known the answer is no,
 /// so a slow or failed read never shows a link outside the US.

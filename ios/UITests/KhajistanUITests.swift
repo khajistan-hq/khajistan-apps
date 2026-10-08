@@ -37,7 +37,6 @@ final class KhajistanUITests: XCTestCase {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
             waitFor(app.textFields["archiveSearch"], 10, "HOME carries the site's search")
-            waitFor(app.buttons["join-monthly"], 5, "HOME carries the membership")
             shot("\(skin)-01-home", app)
             app.swipeUp()
             shot("\(skin)-02-home-doors", app)
@@ -122,24 +121,17 @@ final class KhajistanUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
     }
 
-    /// The membership links are the US storefront's alone: shown there, absent on HOME and ACCOUNT
-    /// on every other storefront, and absent until the storefront is known.
-    func testJoinLinksAreHiddenOutsideTheUSStorefront() {
-        let us = launch(skin: "day")
-        waitFor(us.buttons["join-monthly"], 10, "the US storefront sees the membership on HOME")
-        us.buttons["tab-yours"].tap()
-        waitFor(us.buttons["join-annual"], 10, "the US storefront sees the membership on ACCOUNT")
-        us.terminate()
-        for code in ["GBR", "PAK", "UNKNOWN"] {
+    /// The app draws no membership card on HOME or ACCOUNT, on any storefront (owner, 2026-10-07):
+    /// the offer is the Reading Room page's own.
+    func testNoMembershipCardOutsideTheReadingRoom() {
+        for code in ["USA", "GBR"] {
             let app = launch(skin: "day", extra: ["-kjstorefront", code])
             waitFor(app.buttons["destination-reading"], 10, "HOME still lists its doors (\(code))")
-            XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership link on HOME (\(code))")
-            XCTAssertFalse(app.otherElements["joinBlock"].exists, "no membership block on HOME (\(code))")
+            XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership card on HOME (\(code))")
             app.buttons["tab-yours"].tap()
             waitFor(app.buttons["skin-day"], 10, "ACCOUNT loads (\(code))")
             XCTAssertFalse(app.buttons["join-monthly"].exists || app.buttons["join-annual"].exists,
-                           "no membership link on ACCOUNT (\(code))")
-            shot("join-hidden-\(code)", app)
+                           "no membership card on ACCOUNT (\(code))")
             app.terminate()
         }
     }

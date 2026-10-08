@@ -190,15 +190,6 @@ func offPageOffersCarryTheAppFlag() throws {
     try expect(ArchiveURL.isArchive(JoinOffer.tagged(URL(string: base)!)))
 }
 
-func joinPlansOpenTheSitesCheckout() throws {
-    try expect(JoinPlan.monthly.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=monthly")
-    try expect(JoinPlan.annual.url.absoluteString == "https://khajistan-archive.pages.dev/reading-room.html?join=annual")
-    for plan in JoinPlan.allCases {
-        try expect(ArchiveURL.isArchive(plan.url))
-        try expect(!ArchiveURL.isSaveable(plan.url))  // a checkout is never kept in history
-    }
-}
-
 func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     let native = Dictionary(uniqueKeysWithValues: ArchiveDestination.all.compactMap { d in d.nativeRoom.map { (d.id, $0) } })
     try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat])
@@ -253,7 +244,6 @@ private func require<T>(_ value: T?) throws -> T {
             ("The skin script for the website", skyScriptForTheWebsite),
             ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
             ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
-            ("Join plans open the site's checkout", joinPlansOpenTheSitesCheckout),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
         ]

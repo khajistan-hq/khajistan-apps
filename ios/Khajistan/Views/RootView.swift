@@ -26,7 +26,10 @@ struct RootView: View {
                 Color.clear.frame(height: 0).background(palette.ground, ignoresSafeAreaEdges: .top)
             }
             HouseTabBar(current: model.tab) { tab in
-                withAnimation(.kj) { model.tab = tab }
+                // At once, as the system tab bar switches: no fade between pages (owner, 2026-10-07).
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { model.tab = tab }
             }
         }
         .overlay(alignment: .top) {

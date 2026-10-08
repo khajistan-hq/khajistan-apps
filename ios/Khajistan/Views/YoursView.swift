@@ -20,7 +20,6 @@ struct YoursView: View {
             VStack(alignment: .leading, spacing: 28) {
                 PageHead(kicker: "Account", "Your Khajistan", line: "Account, membership, downloads and saved work")
                 skinBlock
-                if model.showsJoin { JoinBlock() }
                 accountBlock
                 libraryBlock
                 footer
@@ -171,7 +170,7 @@ struct YoursView: View {
     }
 
     private func shelfTab(_ title: String, _ value: Int) -> some View {
-        Button { withAnimation(.kj) { shelf = value }; if value == 2 { readFiles() } } label: { Text(title).kjKicker() }
+        Button { shelf = value; if value == 2 { readFiles() } } label: { Text(title).kjKicker() }
             .buttonStyle(HouseTabStyle(isCurrent: shelf == value))
             .accessibilityIdentifier("shelf-\(title.lowercased())")
     }

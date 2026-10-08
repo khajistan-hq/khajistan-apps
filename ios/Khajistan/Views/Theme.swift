@@ -247,6 +247,8 @@ private struct SmallStyle: ViewModifier {
 extension Animation {
     /// The house's short ease: quick enough at 120 Hz to feel like a response, not a show.
     static let kj = Animation.easeOut(duration: 0.18)
+    /// A drill-in and back, at about the pace of the system's navigation push.
+    static let kjPush = Animation.smooth(duration: 0.32)
 }
 
 // MARK: - Controls

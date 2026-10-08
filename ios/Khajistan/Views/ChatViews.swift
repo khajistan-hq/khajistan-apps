@@ -14,12 +14,18 @@ struct ChatScreen: View {
             PlayerTopBar(leading: ["Khajistan", "Chat"], trailing: []) {
                 model.isShowingChat = false
             }
-            if let room {
-                ChatRoomView(room: room) { withAnimation(.kj) { self.room = nil } }
-                    .id(room.slug)
-            } else {
-                roomList
+            ZStack {
+                if let room {
+                    ChatRoomView(room: room) { withAnimation(.kjPush) { self.room = nil } }
+                        .id(room.slug)
+                        .transition(.move(edge: .trailing))
+                        .zIndex(1)
+                } else {
+                    roomList
+                        .transition(.move(edge: .leading))
+                }
             }
+            .clipped()
         }
         .background(palette.ground.ignoresSafeArea())
         .task {
@@ -47,7 +53,7 @@ struct ChatScreen: View {
                                 .accessibilityAddTraits(.isHeader)
                             ForEach(group.rooms) { item in
                                 Button {
-                                    withAnimation(.kj) { room = item }
+                                    withAnimation(.kjPush) { room = item }
                                 } label: {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(item.label).kjName()

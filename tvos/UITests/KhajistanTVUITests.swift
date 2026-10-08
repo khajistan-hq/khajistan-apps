@@ -34,13 +34,9 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
         screenshot("01-receiver-map", app: app)
 
-        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for attempt in 0..<20 {
-            if focusedRegion.exists { break }
-            // Down first; after six tries right as well, in case the way down is the switch.
-            XCUIRemote.shared.press(attempt >= 6 && attempt % 2 == 0 ? .right : .down)
-        }
-        XCTAssertTrue(focusedRegion.exists, "A region on the map must take focus")
+        // Down onto the front, then right onto the strip: straight down from the sidebar now
+        // runs into the Surf settings and the Cameras shelf under them.
+        XCTAssertTrue(kjFocusStrip(app), "A region on the map must take focus")
         screenshot("02-map-focused", app: app)
         XCUIRemote.shared.press(.select)
 

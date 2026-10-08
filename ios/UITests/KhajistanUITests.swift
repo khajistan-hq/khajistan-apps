@@ -197,20 +197,25 @@ final class KhajistanUITests: XCTestCase {
 
         app.buttons["fullScreen"].tap()
         let full = app.staticTexts["playerState"]
-        waitFor(full, 10, "full screen opens when chosen")
+        let close = app.buttons["closePlayer"]
+        waitFor(close, 10, "full screen opens when chosen")
         XCTAssertEqual(full.value as? String, tuned, "full screen carries the same channel, not a new tuning")
         shot("player-full-screen", app)
-        // The controls hide 2.6 s into playback; a tap wakes them. On a slow runner they can hide
-        // again before the next step, so wake and tap together, a few times if need be.
-        let close = app.buttons["closePlayer"]
-        for _ in 0..<4 where close.exists {
-            if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
-            if close.isHittable { close.tap() }
-            _ = close.waitForNonExistence(timeout: 3)
+        // The controls hide 2.6 s into playback and a tap on the picture wakes them. Full screen is
+        // closed once the set's own power key, under the cover, can be reached again; the close
+        // button is only asked about while the cover is fully up, since mid-dismissal it has no
+        // hit point to report.
+        let off = app.buttons["receiverOff"]
+        func reachable(_ element: XCUIElement, within seconds: TimeInterval) -> Bool {
+            let wait = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
+            return XCTWaiter.wait(for: [wait], timeout: seconds) == .completed
         }
-        // The docked screen stays in the hierarchy under the cover, so wait for the cover to go.
-        XCTAssertFalse(close.exists, "full screen closes")
-        XCTAssertTrue(app.buttons["receiverOff"].isHittable, "the docked screen is back on top")
+        for _ in 0..<4 where !reachable(off, within: 1) {
+            if !close.isHittable { app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap() }
+            if reachable(close, within: 2) { close.tap() }
+            _ = reachable(off, within: 5)
+        }
+        XCTAssertTrue(off.isHittable, "full screen closes and the set is reachable again")
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()

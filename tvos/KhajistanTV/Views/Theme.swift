@@ -318,15 +318,19 @@ struct FadeIn<Content: View>: View {
 /// 3pt rule under it. Focused, it takes the band plate like any other control.
 struct HouseTabStyle: ButtonStyle {
     let isCurrent: Bool
+    /// The plate's side padding. Tabs on a page pull back by 22 so their text sits on the margin;
+    /// the top bar takes 16 so six sections fit at 24 pt.
+    let inset: CGFloat
 
-    init(isCurrent: Bool) {
+    init(isCurrent: Bool, inset: CGFloat = 22) {
         self.isCurrent = isCurrent
+        self.inset = inset
     }
 
     func makeBody(configuration: Configuration) -> some View {
         HouseControl(
             label: configuration.label, isPressed: configuration.isPressed,
-            padding: EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16), kind: .tab(isCurrent: isCurrent)
+            padding: EdgeInsets(top: 12, leading: inset, bottom: 12, trailing: inset), kind: .tab(isCurrent: isCurrent)
         )
     }
 }
@@ -584,7 +588,7 @@ private struct SwitchLabel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).kjKicker(palette.ink)
                 if let detail {
-                    Text(detail).kjSmall(faint: true)
+                    Text(detail).kjSmall(faint: true).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -721,7 +725,7 @@ struct TopBar: View {
                         // One line always: six sections fill the bar, and a name never wraps.
                         Text(section.title).kjKicker().lineLimit(1).fixedSize()
                     }
-                    .buttonStyle(HouseTabStyle(isCurrent: section == current))
+                    .buttonStyle(HouseTabStyle(isCurrent: section == current, inset: 16))
                     .focused($focused, equals: section)
                     .accessibilityIdentifier("nav-\(section.rawValue)")
                 }

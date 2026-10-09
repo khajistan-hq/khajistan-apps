@@ -173,14 +173,8 @@ struct ReceiverView: View {
 
     private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
 
-    private var surfLine: String {
-        let kind = medium == .tv ? "television" : "radio"
-        switch scope {
-        case .main: return "A live \(kind) channel from the main atlas"
-        case .extended: return "A live \(kind) channel from the extended atlas"
-        case .everywhere: return "A live \(kind) channel from anywhere"
-        }
-    }
+    /// One line that fits the sidebar; the chips under it say which medium and which atlas.
+    private let surfLine = "A live channel at random from the atlas"
     private var scope: ShuffleScope { ShuffleScope(rawValue: scopeRaw) ?? .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {

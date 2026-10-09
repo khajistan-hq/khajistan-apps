@@ -142,13 +142,15 @@ struct ReceiverPlayerView: View {
 
     /// The status band across the top and the panel on the ground below. Both go together.
     private func overlay(_ palette: Palette) -> some View {
-        VStack(spacing: 0) {
+        // During a change the strip names where the viewer is going, not the channel being left.
+        let shown = destination ?? current
+        return VStack(spacing: 0) {
             Spacer(minLength: 0)
             PlayerStrip(
                 // Radio carries its name in display type on the ground; the strip leaves it out.
-                name: current.mediaType == "radio" && controller.state == .playing ? nil : current.name,
+                name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
                 detail: stripDetail,
-                attribution: current.attributionText,
+                attribution: shown.attributionText,
                 trailing: stripTrailing,
                 accessory: controller.state.isFailed ? nil : AnyView(stripControls)
             )
@@ -184,6 +186,7 @@ struct ReceiverPlayerView: View {
 
     /// What follows the name: a failure's reason, Paused, the captions' note, or the place.
     private var stripDetail: String? {
+        if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
         case .failed(let message): return message + " Press Down for the next channel."
         case .paused: return "Paused"
@@ -223,7 +226,8 @@ struct ReceiverPlayerView: View {
     }
 
     private func moveRight() {
-        guard stripShown else { return }
+        // A failed channel's strip carries no controls, so there is nothing to the right.
+        guard stripShown, !controller.state.isFailed else { return }
         hideTask?.cancel()
         switch armed {
         case nil: armed = model.captions.offered ? .captions : .like

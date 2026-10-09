@@ -65,7 +65,10 @@ struct ChatView: View {
                 case .ready:
                     ForEach(store.groups) { group in
                         VStack(alignment: .leading, spacing: 6) {
-                            Kicker(group.title).padding(.leading, 22)
+                            // A group of one room under its own name is said once, by the room.
+                            if !(group.rooms.count == 1 && group.rooms[0].label.caseInsensitiveCompare(group.title) == .orderedSame) {
+                                Kicker(group.title).padding(.leading, 22)
+                            }
                             ForEach(group.rooms) { item in
                                 Button {
                                     room = item

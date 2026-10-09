@@ -411,7 +411,11 @@ private struct AtlasPanel: View {
             // The plates' padding is pulled back so the first label sits on the map's margin.
             .padding(.horizontal, -22)
             .padding(.vertical, 12)
+            .scrollTargetLayout()
         }
+        // The strip comes to rest on a whole chip, never part of one: a chip stopped half under
+        // the sidebar left its count ("44") standing alone at the edge.
+        .scrollTargetBehavior(.viewAligned)
         .scrollClipDisabled()
         // Clipped on the left, so a strip scrolled east does not run over the sidebar.
         .mask {

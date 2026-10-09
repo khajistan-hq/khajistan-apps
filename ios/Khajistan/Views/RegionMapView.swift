@@ -255,6 +255,14 @@ private struct RegionMapPainter {
             world.stroke(shape, with: .color(palette.ground), style: gap)
         }
 
+        // An ink line round every region that opens channels (owner, 2026-10-09): the fills
+        // measure 1.1:1 to 2.8:1 against the ground across the skins, and on grove deep and tint
+        // are one colour, so without it a region could not be told from the page or its neighbour.
+        let edge = StrokeStyle(lineWidth: 1.5 / layout.scale, lineJoin: .round)
+        for region in map.regions where region.opensChannels {
+            world.stroke(Self.path(region.outline), with: .color(palette.ink), style: edge)
+        }
+
         if let focusedID, let region = map.regions.first(where: { $0.id == focusedID }) {
             world.stroke(
                 Self.path(region.outline), with: .color(palette.onBand),

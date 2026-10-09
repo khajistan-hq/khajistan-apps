@@ -217,8 +217,9 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
@@ -235,12 +236,17 @@ struct ReceiverPlayerView: View {
     /// Like: saved on the account, so it is on the dashboard and every device signed in to it.
     private var likeControl: some View {
         let liked = model.saves.isSaved(current)
-        return StripChipStyle.face(Text(liked ? "Liked" : "Like"), isOn: liked, selected: armed == .like)
+        return StripChipStyle.face(Text((model.captions.offered ? "" : rightCue) + (liked ? "Liked" : "Like")), isOn: liked, selected: armed == .like)
             .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(liked ? "Liked" : "Like")
             .accessibilityIdentifier("likeControl")
             .accessibilityAddTraits(armed == .like ? .isSelected : [])
             .accessibilityValue(liked ? "On" : "Off")
     }
+
+    /// "→ " before the first control on the strip while nothing is armed: the strip's controls are
+    /// reached with a press right, and nothing else said so (owner, 2026-10-09).
+    private var rightCue: String { armed == nil ? "\u{2192} " : "" }
 
     private func moveRight() {
         // A failed channel's strip carries no controls, so there is nothing to the right.

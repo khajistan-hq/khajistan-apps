@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 import Observation
 
 /// Live captions on a receiver channel: archive/scripts/kj-captions-live.js on the television.
@@ -86,8 +87,10 @@ final class LiveCaptionSession {
         Task { await self.loadAccuracy(target, generation: gen) }
         guard offered else { return }
         askBalance()
-        // A viewer who had captions on keeps them on from channel to channel (loadMode()).
-        if UserDefaults.standard.string(forKey: CaptionRules.modeKey).map({ $0 != "off" }) == true { turnOn() }
+        // A viewer who had captions on keeps them on from channel to channel (loadMode()); one who
+        // never chose follows the Apple TV's Closed Captions setting (owner, 2026-10-09).
+        let saved = UserDefaults.standard.string(forKey: CaptionRules.modeKey)
+        if saved.map({ $0 != "off" }) ?? UIAccessibility.isClosedCaptioningEnabled { turnOn() }
     }
 
     func detach() {

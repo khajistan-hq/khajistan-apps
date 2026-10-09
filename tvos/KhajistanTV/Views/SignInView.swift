@@ -105,9 +105,9 @@ struct HouseInputField<Entry: View>: View {
     }
 
     var body: some View {
-        let ink = isFocused ? palette.onBand : palette.ink
+        let ink = isFocused ? palette.onFocus : palette.ink
         VStack(alignment: .leading, spacing: 10) {
-            Kicker(label, color: isFocused ? palette.onBand : nil)
+            Kicker(label, color: isFocused ? palette.onFocus : nil)
                 .accessibilityHidden(true)
             // tvOS draws the field as a pill that turns white under focus, and neither the focus
             // effect nor UITextField's appearance takes it away. So the field is kept, focusable
@@ -127,7 +127,7 @@ struct HouseInputField<Entry: View>: View {
                         .foregroundStyle(ink)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .background(isFocused ? palette.band : palette.ground)
+                        .background(isFocused ? palette.focusPlate : palette.ground)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -138,7 +138,7 @@ struct HouseInputField<Entry: View>: View {
         }
         .padding(EdgeInsets(top: 12, leading: 26, bottom: 12, trailing: 26))
         .frame(maxWidth: 900, alignment: .leading)
-        .background(isFocused ? palette.band : Color.clear)
+        .background(isFocused ? palette.focusPlate : Color.clear)
         // The plate's padding is pulled back so the label and the entry sit on the page margin.
         .padding(.leading, -26)
     }

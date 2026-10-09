@@ -30,6 +30,12 @@ struct Palette: Equatable {
     let lift: Color
     let mapDeep: Color
     let mapTint: Color
+    /// The plate under a focused control and the text on it. Day: the band, yellow on green.
+    /// Grove and smut invert it, yellow plate and ground-coloured text (owner, 2026-10-09): their
+    /// dark band measured 2.2:1 and 2.1:1 against the page, under the 3:1 a focus mark needs,
+    /// and the text did not change colour, so focus was hard to find from the sofa.
+    let focusPlate: Color
+    let onFocus: Color
 
     init(_ skin: Skin) {
         let ink = Color(hex: skin.inkHex)
@@ -46,9 +52,18 @@ struct Palette: Equatable {
         case .grove: faint = ink.opacity(0.85)
         case .smut: faint = ink.opacity(0.95)
         }
+        if skin == .day {
+            focusPlate = band
+            onFocus = onBand
+        } else {
+            focusPlate = ink
+            onFocus = ground
+        }
     }
 
-    fileprivate init(ground: Color, ink: Color, accent: Color, faint: Color, band: Color, onBand: Color, lift: Color, mapDeep: Color, mapTint: Color) {
+    fileprivate init(ground: Color, ink: Color, accent: Color, faint: Color, band: Color, onBand: Color, lift: Color, mapDeep: Color, mapTint: Color, focusPlate: Color, onFocus: Color) {
+        self.focusPlate = focusPlate
+        self.onFocus = onFocus
         self.ground = ground
         self.ink = ink
         self.accent = accent
@@ -63,7 +78,8 @@ struct Palette: Equatable {
     private func replacing(ground: Color? = nil, ink: Color? = nil, accent: Color? = nil, faint: Color? = nil) -> Palette {
         Palette(
             ground: ground ?? self.ground, ink: ink ?? self.ink, accent: accent ?? self.accent, faint: faint ?? self.faint,
-            band: band, onBand: onBand, lift: lift, mapDeep: mapDeep, mapTint: mapTint
+            band: band, onBand: onBand, lift: lift, mapDeep: mapDeep, mapTint: mapTint,
+            focusPlate: focusPlate, onFocus: onFocus
         )
     }
 
@@ -71,9 +87,9 @@ struct Palette: Equatable {
     // kicker (accent) or a faint line that is right on the page cannot fall into the plate's own
     // colour: on the day skin the accent and the band are the same green.
 
-    /// A focused control: the band is the ground, `onBand` the ink and the accent.
+    /// A focused control: the focus plate is the ground, `onFocus` the ink and the accent.
     fileprivate var onFocusPlate: Palette {
-        replacing(ground: band, ink: onBand, accent: onBand, faint: onBand.opacity(0.85))
+        replacing(ground: focusPlate, ink: onFocus, accent: onFocus, faint: onFocus.opacity(0.85))
     }
 
     /// A pressed control: the lift plate under the page's own ink.
@@ -278,7 +294,7 @@ struct CardPlate<Content: View>: View {
             .modifier(PlateSize(width: width, height: height))
             .environment(\.palette, look)
             .foregroundStyle(look.ink)
-            .background(isFocused ? palette.band : palette.lift)
+            .background(isFocused ? palette.focusPlate : palette.lift)
             .kjCardArt()
             .animation(.easeOut(duration: 0.15), value: isFocused)
     }
@@ -375,7 +391,7 @@ private struct HousePlate<Face: View>: View {
 
     private var plate: Color {
         if isPressed { return palette.lift }
-        return isFocused ? palette.band : .clear
+        return isFocused ? palette.focusPlate : .clear
     }
 
     /// The rule under the current tab, which a plate under it would make redundant.

@@ -406,16 +406,19 @@ private struct AtlasPanel: View {
                     .focused($focusedRegion, equals: region.id)
                     .accessibilityIdentifier("region-\(region.id)")
                     .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                    // A chip mostly scrolled under the sidebar is not drawn: its label went first
+                    // and left its count ("44") standing alone at the edge. A quarter out is still
+                    // drawn, so the first chip's pulled-back plate at rest is untouched. Resting
+                    // on whole chips (.viewAligned) broke focus walking the strip on tvOS.
+                    .scrollTransition(axis: .horizontal) { chip, phase in
+                        chip.opacity(phase.value < -0.25 ? 0 : 1)
+                    }
                 }
             }
             // The plates' padding is pulled back so the first label sits on the map's margin.
             .padding(.horizontal, -22)
             .padding(.vertical, 12)
-            .scrollTargetLayout()
         }
-        // The strip comes to rest on a whole chip, never part of one: a chip stopped half under
-        // the sidebar left its count ("44") standing alone at the edge.
-        .scrollTargetBehavior(.viewAligned)
         .scrollClipDisabled()
         // Clipped on the left, so a strip scrolled east does not run over the sidebar.
         .mask {

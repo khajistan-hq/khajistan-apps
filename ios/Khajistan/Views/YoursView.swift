@@ -20,8 +20,8 @@ struct YoursView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 PageHead(kicker: "Account", "Your Khajistan", line: "Account, downloads and saved work")
-                skinBlock
                 accountBlock
+                skinBlock
                 libraryBlock
                 footer
             }

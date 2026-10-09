@@ -15,9 +15,13 @@ struct AccountView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 48) {
-                Text("Account")
-                    .kjDisplay()
-                    .accessibilityAddTraits(.isHeader)
+                // The website's name for the page, as on the phone: ACCOUNT over YOUR KHAJISTAN.
+                VStack(alignment: .leading, spacing: 8) {
+                    Kicker("Account")
+                    Text("Your Khajistan")
+                        .kjDisplay()
+                        .accessibilityAddTraits(.isHeader)
+                }
                 signInBlock
                 skinBlock
                 previewBlock
@@ -37,20 +41,17 @@ struct AccountView: View {
     @ViewBuilder
     private var signInBlock: some View {
         VStack(alignment: .leading, spacing: 20) {
+            Kicker("Your account")
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
-                Kicker(email.isEmpty ? "Signed in" : "Signed in as")
-                if !email.isEmpty {
-                    Text(email).kjName()
-                }
+                Text(email.isEmpty ? "Signed in" : email).kjName()
                 Button("Sign out") {
                     Task { await model.auth.signOut() }
                 }
                 .buttonStyle(HouseButtonStyle())
                 .padding(.leading, -26)
             } else {
-                Kicker("Not signed in")
-                Text("Khajistan Transmission needs an account.").kjBody()
+                Text("Khajistan Transmission plays under your website account.").kjBody()
                 Button("Sign in") {
                     showSignIn = true
                 }
@@ -89,7 +90,7 @@ struct AccountView: View {
     private var skinLine: String {
         switch model.skinChoice {
         case .automatic:
-            return "Following the sun for this Apple TV\u{2019}s time zone: Day in daylight, Smut at dawn and dusk, Grove at night."
+            return "Following the sun where you are: \(model.skin.label) now. Day in daylight, Smut at dawn and dusk, Grove at night."
         case .day, .grove, .smut:
             return "\(model.skinChoice.label), whatever the sun is doing."
         }
@@ -99,7 +100,8 @@ struct AccountView: View {
         let isSet = model.auth.previewPassword != nil
         return VStack(alignment: .leading, spacing: 20) {
             Kicker("Preview password")
-            Text(isSet ? "Set" : "Not set").kjBody()
+            Text(isSet ? "Set on this device, for the Transmission schedule until launch." : "Not set. Khajistan Transmission asks for it until launch.")
+                .kjSmall(faint: true)
             if editingPassword {
                 HouseInputField("Password", text: draft, secure: true) {
                     SecureField("", text: $draft)
@@ -119,7 +121,7 @@ struct AccountView: View {
                 .padding(.leading, -26)
             } else {
                 HStack(spacing: 24) {
-                    Button("Change") {
+                    Button(isSet ? "Change" : "Set") {
                         editingPassword = true
                     }
                     if isSet {
@@ -137,7 +139,7 @@ struct AccountView: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let version, !version.isEmpty {
-                Text("Version \(version)").kjSmall(faint: true)
+                Text("Khajistan for Apple TV \(version)").kjSmall(faint: true)
             }
             Text("Khajistan carries each broadcaster's own signal and keeps no copy of it.")
                 .kjSmall(faint: true)

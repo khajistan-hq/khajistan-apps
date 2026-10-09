@@ -150,7 +150,7 @@ struct ReceiverPlayerView: View {
                 // Radio carries its name in display type on the ground; the strip leaves it out.
                 name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
                 detail: stripDetail,
-                attribution: shown.attributionText,
+                attribution: shown.sourceLine,
                 trailing: stripTrailing,
                 accessory: controller.state.isFailed ? nil : AnyView(stripControls)
             )

@@ -350,6 +350,14 @@ func channelPlaceDropsWhatIsNotKnown() throws {
     try expectEqual(try channelWith(["country": "", "primaryLanguage": "Not yet verified"]).place, "")
 }
 
+func channelSourceLineIsTheFirstClause() throws {
+    try expectEqual(try channelWith(["attributionText": "Direct broadcast by Al Masar TV; Khajistan does not host or proxy this signal."]).sourceLine,
+                    "Direct broadcast by Al Masar TV")
+    try expectEqual(try channelWith(["attributionText": "Direct broadcast by PTV"]).sourceLine, "Direct broadcast by PTV")
+    try expectEqual(try channelWith(["attributionText": "  ; rest"]).sourceLine, nil)
+    try expectEqual(try channelWith(["attributionText": NSNull()]).sourceLine, nil)
+}
+
 // MARK: - Eligibility
 
 func eligibilityChannel(_ id: String, name: String? = nil, publication: String? = "published", disabled: Bool? = false,
@@ -3761,6 +3769,7 @@ let tests: [(String, () throws -> Void)] = [
     ("ReceiverIndex without cameraFiles", receiverIndexWithoutCameraFiles),
     ("Channel decoding and active stream", channelDecodesAndFindsItsActiveStream),
     ("Channel.place drops what is unknown", channelPlaceDropsWhatIsNotKnown),
+    ("Channel.sourceLine is the attribution's first clause", channelSourceLineIsTheFirstClause),
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),

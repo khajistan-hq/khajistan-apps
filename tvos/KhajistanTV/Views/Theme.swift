@@ -588,7 +588,10 @@ private struct SwitchLabel: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).kjKicker(palette.ink)
                 if let detail {
-                    Text(detail).kjSmall(faint: true).fixedSize(horizontal: false, vertical: true)
+                    // One line, run into the gap beside it rather than wrapped or cut: a second line
+                    // moved the switch below the region strip, and left off the strip's west end
+                    // stopped reaching it.
+                    Text(detail).kjSmall(faint: true).fixedSize()
                 }
             }
         }

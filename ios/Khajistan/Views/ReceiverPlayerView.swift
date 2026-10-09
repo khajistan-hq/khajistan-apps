@@ -69,7 +69,7 @@ struct ReceiverPlayerView: View {
                     Text(current.name).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
                 }
                 if !current.place.isEmpty { Text(current.place).kjBody() }
-                if let attribution = current.attributionText, !attribution.isEmpty {
+                if let attribution = current.sourceLine {
                     Text(attribution).kjSmall(faint: true).lineLimit(3)
                 }
             }

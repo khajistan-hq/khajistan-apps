@@ -13,6 +13,10 @@ struct ReceiverView: View {
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
     @State private var surfNote: String?
+    /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
+    @FocusState private var surfFocused: Bool
+    /// Once per launch: coming back from a region keeps the focus on the region.
+    @State private var surfFocusedAtLaunch = false
 
     var body: some View {
         @Bindable var model = model
@@ -84,6 +88,7 @@ struct ReceiverView: View {
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
             .kjTopFade()
+            .defaultFocus($surfFocused, true)
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {
@@ -158,6 +163,14 @@ struct ReceiverView: View {
                 }
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
+            .focused($surfFocused)
+            // The top bar and the strip each claim the first focus; this one is placed last.
+            .task {
+                guard !surfFocusedAtLaunch, model.receiverPath.isEmpty else { return }
+                surfFocusedAtLaunch = true
+                try? await Task.sleep(for: .milliseconds(300))
+                surfFocused = true
+            }
             .accessibilityIdentifier("shuffle")
             .disabled(shuffling || model.receiver.index == nil)
             // The plate's padding is pulled back so the label sits on the page margin.

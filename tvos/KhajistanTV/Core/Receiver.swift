@@ -92,6 +92,15 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     let reverent: Bool?
     let visualiser: Bool?
 
+    /// The attribution's first clause, "Direct broadcast by …", which is what a player prints
+    /// (owner, 2026-10-08). The rest of the record's sentence stays in the data and on the website.
+    var sourceLine: String? {
+        guard let attributionText else { return nil }
+        let first = attributionText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? attributionText
+        let line = first.trimmingCharacters(in: .whitespaces)
+        return line.isEmpty ? nil : line
+    }
+
     /// The stream the channel says is live. Nil when none is named or the name matches nothing.
     var activeStream: Stream? {
         guard let activeStreamId else { return nil }

@@ -36,7 +36,7 @@ struct TransmissionSection: View {
 
     private var metaText: String {
         let tail = "two scheduled channels \u{00B7} Pakistan time (UTC+5)"
-        guard case .ready = store.schedule, let count = store.programmeCount else { return tail }
+        guard case .ready = store.schedule, let count = store.programmeCount else { return "Two" + tail.dropFirst(3) }
         return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
     }
 

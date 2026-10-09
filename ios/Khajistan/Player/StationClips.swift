@@ -50,12 +50,11 @@ final class StationClips {
     }
 
     /// Lifts the ground and the pigeon off the picture.
+    /// At once, like the cover: a half-lifted ground washed the new picture green for half a second.
     func uncover() {
-        withAnimation(.easeInOut(duration: 0.5)) { coverage = 0; caption = nil }
-        Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            if coverage == 0 { player.pause() }
-        }
+        coverage = 0
+        caption = nil
+        player.pause()
     }
 
     /// The change itself: the ground and the pigeon come up and the caller tunes at once, behind

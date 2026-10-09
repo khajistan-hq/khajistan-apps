@@ -71,10 +71,13 @@ struct HomeView: View {
     private func door(_ name: String, rooms: [ArchiveDestination]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HouseRule()
-            Kicker(name)
-                .padding(.top, 14)
-                .padding(.bottom, 4)
-                .accessibilityAddTraits(.isHeader)
+            // A door with one room of its own name is named once, by the room.
+            if !(rooms.count == 1 && rooms[0].title.caseInsensitiveCompare(name) == .orderedSame) {
+                Kicker(name)
+                    .padding(.top, 14)
+                    .padding(.bottom, 4)
+                    .accessibilityAddTraits(.isHeader)
+            }
             ForEach(rooms) { room in
                 Button {
                     searching = false

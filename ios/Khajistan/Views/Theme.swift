@@ -74,6 +74,17 @@ struct Palette: Equatable {
         skin = p.skin
     }
 
+    /// The skin's faint strength, which is also how far a disabled control dims: a lower opacity
+    /// blends the ink with the ground into a third colour.
+    var faintAlpha: Double {
+        if isBandPlate { return 0.85 }
+        switch skin {
+        case .day: return 0.62
+        case .grove: return 0.85
+        case .smut: return 0.95
+        }
+    }
+
     /// What a label sees on a band plate: the band is its ground, onBand its ink and accent. On
     /// the day skin the accent and the band are the same green, so a kicker would vanish there.
     var onBandPlate: Palette {
@@ -310,7 +321,7 @@ private struct HousePlate<Face: View>: View {
             .foregroundStyle(look.ink)
             .background(lifts ? palette.lift : (solid ? palette.band : Color.clear))
             .contentShape(Rectangle())
-            .opacity(isEnabled ? (pressed && palette.isBandPlate ? 0.6 : 1) : 0.45)
+            .opacity(isEnabled ? (pressed && palette.isBandPlate ? 0.6 : 1) : palette.faintAlpha)
             .animation(.kj, value: pressed)
     }
 }

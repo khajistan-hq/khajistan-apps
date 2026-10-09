@@ -387,16 +387,30 @@ private struct LiveSection: View {
 /// One channel: its name, the place as a kicker, the broadcaster when it is someone else.
 struct ChannelRow: View {
     let channel: Channel
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    /// The channel on the set: it carries the speaker mark, so the list shows where the dial is.
+    private var isOn: Bool {
+        if case .live(let on) = model.tuner.source { return on.id == channel.id }
+        return false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(channel.name).kjName().lineLimit(2)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if isOn {
+                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(palette.accent).accessibilityHidden(true)
+                }
+                Text(channel.name).kjName().lineLimit(2)
+            }
             if !channel.place.isEmpty { Kicker(channel.place).lineLimit(1) }
             if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
                 Text(broadcaster).kjSmall(faint: true).lineLimit(1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
 

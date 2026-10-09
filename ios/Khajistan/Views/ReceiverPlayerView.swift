@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// The live channel the Receiver is playing, full screen, chosen from the docked screen's
 /// full-screen control (ported from the Apple TV app). It reads the tab's one tuner, so closing it
@@ -126,6 +127,7 @@ struct ReceiverDevice: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.verticalSizeClass) private var verticalClass
 
     private var tuner: ReceiverTuner { model.tuner }
     private var player: PlayerController { tuner.player }
@@ -133,9 +135,11 @@ struct ReceiverDevice: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular {
+            if sizeClass == .regular || verticalClass == .compact {
+                // A phone on its side is as short as it is wide: the set sits beside its words,
+                // small enough to leave the page room under it.
                 HStack(alignment: .top, spacing: 28) {
-                    set.frame(width: 560)
+                    set.frame(width: verticalClass == .compact ? 300 : 560)
                     copy.padding(.top, 52)
                 }
             } else {
@@ -145,7 +149,13 @@ struct ReceiverDevice: View {
                 }
             }
         }
-        .onChange(of: player.state) { old, new in tuner.playerStateChanged(from: old, to: new) }
+        .onChange(of: player.state) { old, new in
+            tuner.playerStateChanged(from: old, to: new)
+            // The screen is hidden from VoiceOver; say what came on.
+            if new == .playing, old != .paused, !title.isEmpty {
+                UIAccessibility.post(notification: .announcement, argument: title)
+            }
+        }
         .onChange(of: store.phase) { tuner.transmissionPhaseChanged() }
     }
 
@@ -172,7 +182,7 @@ struct ReceiverDevice: View {
                     Button { part = item } label: {
                         Text(item.title).kjKicker(item == part ? palette.band : palette.onBand)
                             .padding(.horizontal, 12)
-                            .frame(minHeight: 34)
+                            .frame(minHeight: 44)
                             .background(item == part ? palette.onBand : .clear)
                     }
                     .buttonStyle(.plain)
@@ -237,16 +247,24 @@ struct ReceiverDevice: View {
     // MARK: Remote
 
     private var remote: some View {
+        // Off, the set has one key, Surf; the others come with a channel rather than sitting
+        // there dimmed.
         HStack(spacing: 0) {
-            key("backward.end.fill", "Previous channel", "previousChannel", enabled: tuner.canStep) { tuner.step(-1) }
-            key("shuffle", tuner.surfing ? "Surfing" : "Surf", "surf", enabled: !tuner.surfing) { Task { await tuner.surf() } }
-            key("forward.end.fill", "Next channel", "nextChannel", enabled: tuner.canStep) { tuner.step(1) }
-            Spacer(minLength: 0)
-            key(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause", enabled: tuner.source != nil) {
-                tuner.playPause()
+            if tuner.source != nil {
+                key("backward.end.fill", "Previous channel", "previousChannel", enabled: tuner.canStep) { tuner.step(-1) }
             }
-            key("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen", enabled: tuner.source != nil) { fullScreen = true }
-            key("power", "Turn the receiver off", "receiverOff", enabled: tuner.source != nil) { tuner.stop() }
+            key("shuffle", tuner.surfing ? "Surfing" : "Surf", "surf", enabled: !tuner.surfing) { Task { await tuner.surf() } }
+            if tuner.source != nil {
+                key("forward.end.fill", "Next channel", "nextChannel", enabled: tuner.canStep) { tuner.step(1) }
+                Spacer(minLength: 0)
+                key(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause", enabled: true) {
+                    tuner.playPause()
+                }
+                key("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen", enabled: true) { fullScreen = true }
+                key("power", "Turn the receiver off", "receiverOff", enabled: true) { tuner.stop() }
+            } else {
+                Spacer(minLength: 0)
+            }
         }
         .padding(.horizontal, 4)
         .background(palette.band)
@@ -267,12 +285,11 @@ struct ReceiverDevice: View {
 
     private var copy: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Kicker(stateLine).lineLimit(2)
-                .accessibilityIdentifier("screenState")
-                .accessibilityValue(sourceId)
-            // Radio and a sound-only programme carry their name on the screen; it is not said twice.
+            // "Playing" and "Standing by" say what the screen and the keys already show, so only a
+            // state worth reading is printed. The full state stays for VoiceOver and the UI tests.
+            if let shown = visibleState { Kicker(shown).lineLimit(2) }
             if tuner.source == nil {
-                Text("Choose a channel, or press Surf.").kjName().lineLimit(2)
+                Text(part == .transmission ? "Choose a channel below." : "Choose a channel, or press Surf.").kjName().lineLimit(2)
             } else if hasPicture {
                 Text(title).kjName().lineLimit(2)
             }
@@ -280,6 +297,18 @@ struct ReceiverDevice: View {
             if let note = tuner.surfNote { Text(note).kjSmall(faint: true) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .topLeading) {
+            Text(stateLine)
+                .font(.system(size: 1))
+                .opacity(0.01)
+                .accessibilityIdentifier("screenState")
+                .accessibilityValue(sourceId)
+        }
+    }
+
+    private var visibleState: String? {
+        let line = stateLine.trimmingCharacters(in: .whitespaces)
+        return line.isEmpty || line == "Playing" || line == "Standing by" ? nil : line
     }
 
     private var isPlaying: Bool { player.state == .playing || player.state == .tuning }
@@ -316,7 +345,7 @@ struct ReceiverDevice: View {
         case .transmission:
             switch store.phase {
             case .idle, .tuning: return "Channel \(store.channelNumber) \u{00B7} Connecting\u{2026}"
-            case .needsSignIn: return "Sign in under Account to watch"
+            case .needsSignIn: return "Sign in to watch"
             case .offAir(_, let returns):
                 return returns.map { "Off air \u{00B7} returns at \($0) \(StationClock.tzLabel)" } ?? "Off air"
             case .failed(let message): return message

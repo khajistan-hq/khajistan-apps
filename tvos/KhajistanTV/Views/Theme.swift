@@ -108,7 +108,8 @@ enum KJType {
     static let name: CGFloat = 34
     static let stat: CGFloat = 56
     static let body: CGFloat = 29
-    static let kicker: CGFloat = 22
+    /// No text on the television is under 24 pt (roast 2026-10-07).
+    static let kicker: CGFloat = 24
     static let small: CGFloat = 24
 }
 
@@ -324,7 +325,7 @@ struct HouseTabStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HouseControl(
             label: configuration.label, isPressed: configuration.isPressed,
-            padding: EdgeInsets(top: 12, leading: 22, bottom: 12, trailing: 22), kind: .tab(isCurrent: isCurrent)
+            padding: EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16), kind: .tab(isCurrent: isCurrent)
         )
     }
 }
@@ -491,14 +492,14 @@ struct PlayerStrip: View {
                     }
                     if let detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 22, weight: .semibold))
+                            .font(.system(size: 24, weight: .semibold))
                             .lineLimit(1)
                             .opacity(0.85)
                     }
                 }
                 if let attribution, !attribution.isEmpty {
                     Text(attribution)
-                        .font(.system(size: 17))
+                        .font(.system(size: 24))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .opacity(0.75)
@@ -517,7 +518,7 @@ struct PlayerStrip: View {
                         .lineLimit(1)
                         .fixedSize()
                     Text(upNext.name)
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 24, weight: .semibold))
                         .lineLimit(1)
                 }
                 .frame(maxWidth: 520, alignment: .trailing)

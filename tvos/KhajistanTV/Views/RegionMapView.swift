@@ -66,9 +66,9 @@ private struct MapFace {
     static let label = MapFace(size: 18, weight: .black, uiWeight: .black, em: 0.01)
     static let crowded = MapFace(size: 15, weight: .black, uiWeight: .black, em: 0.01)
     /// The three lines of the plate under the focused region.
-    static let plateName = MapFace(size: 22, weight: .black, uiWeight: .black, em: 0.01)
-    static let plateNative = MapFace(size: 17, weight: .semibold, uiWeight: .semibold, em: 0)
-    static let plateLive = MapFace(size: 15, weight: .black, uiWeight: .black, em: 0.05)
+    static let plateName = MapFace(size: 26, weight: .black, uiWeight: .black, em: 0.01)
+    static let plateNative = MapFace(size: 24, weight: .semibold, uiWeight: .semibold, em: 0)
+    static let plateLive = MapFace(size: 24, weight: .black, uiWeight: .black, em: 0.05)
 
     func text(_ string: String) -> Text {
         Text(string).font(.system(size: size, weight: weight)).tracking(size * em)

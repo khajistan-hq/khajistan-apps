@@ -244,7 +244,7 @@ struct ChannelCard: View {
                 HStack(spacing: 10) {
                     if liked {
                         Image(systemName: "heart.fill")
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 24, weight: .semibold))
                             .accessibilityLabel("Liked")
                     }
                     if !channel.place.isEmpty {

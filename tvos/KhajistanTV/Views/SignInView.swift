@@ -37,7 +37,7 @@ struct SignInView: View {
                 }
                 // Always focusable: a dimmed button that focus skipped gave no reason. A press with
                 // a field empty says which.
-                Button("Sign in") {
+                Button(kicker: "Sign in") {
                     if email.isEmpty || password.isEmpty {
                         errorLine = email.isEmpty ? "Type the email first." : "Type the password first."
                     } else {

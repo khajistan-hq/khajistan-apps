@@ -422,6 +422,20 @@ private struct HousePlate<Face: View>: View {
     }
 }
 
+/// A button's words, as the house sets them: a kicker, in the plate's colours. The phone's
+/// helper of the same name (ios Views/Theme.swift); the TV's Account buttons read as plain body
+/// words beside the phone's kickers until 2026-10-09.
+struct KickerLabel: View {
+    let title: String
+    var body: some View { Text(title).kjKicker() }
+}
+
+extension Button where Label == KickerLabel {
+    init(kicker title: String, action: @escaping () -> Void) {
+        self.init(action: action) { KickerLabel(title: title) }
+    }
+}
+
 /// A label in the accent colour, or `color`.
 struct Kicker: View {
     let text: String

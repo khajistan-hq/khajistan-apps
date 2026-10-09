@@ -45,14 +45,14 @@ struct AccountView: View {
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName()
-                Button("Sign out") {
+                Button(kicker: "Sign out") {
                     Task { await model.auth.signOut() }
                 }
                 .buttonStyle(HouseButtonStyle())
                 .padding(.leading, -26)
             } else {
                 Text("Khajistan Transmission plays under your website account.").kjBody()
-                Button("Sign in") {
+                Button(kicker: "Sign in") {
                     showSignIn = true
                 }
                 .buttonStyle(HouseButtonStyle())
@@ -107,12 +107,12 @@ struct AccountView: View {
                     SecureField("", text: $draft)
                 }
                 HStack(spacing: 24) {
-                    Button("Save") {
+                    Button(kicker: "Save") {
                         model.auth.setPreviewPassword(draft)
                         draft = ""
                         editingPassword = false
                     }
-                    Button("Cancel") {
+                    Button(kicker: "Cancel") {
                         draft = ""
                         editingPassword = false
                     }
@@ -121,11 +121,11 @@ struct AccountView: View {
                 .padding(.leading, -26)
             } else {
                 HStack(spacing: 24) {
-                    Button(isSet ? "Change" : "Set") {
+                    Button(kicker: isSet ? "Change" : "Set") {
                         editingPassword = true
                     }
                     if isSet {
-                        Button("Clear") {
+                        Button(kicker: "Clear") {
                             model.auth.clearPreviewPassword()
                         }
                     }

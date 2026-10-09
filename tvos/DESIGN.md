@@ -51,7 +51,7 @@ The website sets everything in `system-ui`, so on Apple TV the system font IS th
 | name | 34 | black | as written | −0.03 em |
 | stat | 56 | black | — | −0.05 em |
 | body | 29 | regular | as written | 0 |
-| kicker | 22 | black | UPPER | +0.13 em |
+| kicker | 24 | black | UPPER | +0.13 em |
 | small | 24 | regular | as written | 0 |
 
 Kickers are the accent colour. Text on a band is a kicker in `onBand`.

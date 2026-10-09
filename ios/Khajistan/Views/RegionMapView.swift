@@ -265,7 +265,7 @@ private struct RegionMapPainter {
 
         if let focusedID, let region = map.regions.first(where: { $0.id == focusedID }) {
             world.stroke(
-                Self.path(region.outline), with: .color(palette.onBand),
+                Self.path(region.outline), with: .color(palette.ink),
                 style: StrokeStyle(lineWidth: 2.5 / layout.scale, lineJoin: .round)
             )
         }
@@ -384,12 +384,14 @@ private struct RegionMapPainter {
         }
         plate.origin.x = min(max(plate.minX, 0), max(layout.size.width - width, 0))
         plate.origin.y = min(max(plate.minY, 0), max(layout.size.height - height, 0))
-        context.fill(Path(plate), with: .color(palette.onBand))
+        // On day a yellow plate sat on the yellow page at 1.0:1; there it is the band, yellow on green.
+        let onDay = palette.skin == .day
+        context.fill(Path(plate), with: .color(onDay ? palette.band : palette.onBand))
 
         var top = plate.minY + down
         for row in rows {
             var text = context.resolve(row.face.text(row.string))
-            text.shading = .color(.black)
+            text.shading = .color(onDay ? palette.onBand : .black)
             context.draw(text, at: CGPoint(x: plate.midX, y: top), anchor: .top)
             top += row.size.height + gap
         }

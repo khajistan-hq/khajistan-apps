@@ -110,7 +110,17 @@ struct PnvViewerView: View {
             } else if current.isVideo && phase == .ready {
                 TransportRow(isPlaying: controller.state == .playing, toggle: { controller.toggle() })
             }
-            if steps { Text("Swipe left or right for the next.").kjSmall(faint: true) }
+            // Buttons as well as the swipe, for a viewer who cannot swipe (WCAG 2.5.1).
+            if steps {
+                HStack(spacing: 4) {
+                    Button { step(by: -1) } label: { Text("Previous").kjKicker() }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18)))
+                        .accessibilityIdentifier("pnvPrevious")
+                    Button { step(by: 1) } label: { Text("Next").kjKicker() }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18)))
+                        .accessibilityIdentifier("pnvNext")
+                }
+            }
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 14)

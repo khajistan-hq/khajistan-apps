@@ -89,6 +89,9 @@ struct ReceiverView: View {
             .ignoresSafeArea(.container, edges: .bottom)
             .kjTopFade()
             .defaultFocus($surfFocused, true)
+            // Back from deep in the front (a shelf, the strip) goes to Surf first; Back from
+            // Surf leaves the app, as tvOS does from a root screen.
+            .onExitCommand(perform: surfFocused ? nil : { surfFocused = true })
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {
@@ -412,7 +415,13 @@ private struct AtlasPanel: View {
         .scrollClipDisabled()
         // Clipped on the left, so a strip scrolled east does not run over the sidebar.
         .mask {
-            Rectangle().padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
+            // Faded over the plates' pull-back rather than cut, so a chip scrolled under the
+            // sidebar does not leave an orphan "44" at the edge.
+            HStack(spacing: 0) {
+                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 22)
+                Rectangle()
+            }
+            .padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
         }
         .frame(height: 96)
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// RECEIVER, the website's /open-frequencies on a phone: live television, radio and public cameras
 /// by region on the map, and Khajistan Transmission's two channels. The Khajistan Radio mixes are
@@ -161,7 +162,7 @@ private struct LiveSection: View {
         }
         // The strip under the map is the accessible way to choose; the map is one element.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Region map")
+        .accessibilityLabel("Region map. Choose a region from the list under it.")
         .accessibilityIdentifier("receiverMap")
     }
 
@@ -192,6 +193,8 @@ private struct LiveSection: View {
                 }
             }
             .padding(.horizontal, -12)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Regions")
             .onChange(of: selected) { _, id in withAnimation(.kj) { reader.scrollTo(id, anchor: .center) } }
             .onChange(of: composed?.regions.count) { reader.scrollTo(selected, anchor: .center) }
         }
@@ -232,7 +235,8 @@ private struct LiveSection: View {
             HouseRule()
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(regionLabel).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(1)
+                    Text(regionLabel).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
+                        .accessibilityAddTraits(.isHeader)
                     // Native script is never letter-spaced: tracking breaks the joins.
                     if let native = model.receiver.nativeName(for: selected) {
                         Text(native).font(.system(KJType.title, weight: .bold)).foregroundStyle(palette.faint).lineLimit(1)
@@ -362,6 +366,8 @@ private struct LiveSection: View {
             }
             if medium == "camera" { await loadCameras() }
             loadedRegion = region
+            // The list arrives below the strip, out of VoiceOver's way: say that it did.
+            UIAccessibility.post(notification: .announcement, argument: "\(regionLabel): \(list.count) channels")
         } catch {
             if Task.isCancelled || region != selected { return }
             listError = error.localizedDescription
@@ -469,7 +475,8 @@ private struct CamerasSection: View {
                 ForEach(regions) { region in
                     VStack(alignment: .leading, spacing: 8) {
                         HouseRule()
-                        Text(region.label).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(1)
+                        Text(region.label).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
+                            .accessibilityAddTraits(.isHeader)
                         if let list = lists[region.id], list.isEmpty {
                             Text("No cameras here right now.").kjSmall(faint: true)
                         } else if let list = lists[region.id] {

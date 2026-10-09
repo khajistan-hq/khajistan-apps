@@ -22,6 +22,8 @@ struct ReadingReaderView: View {
     @State private var shown: UIImage?
     @State private var phase: Phase = .loading
     @State private var zoom: CGFloat = 1
+    /// Set by the first zoom; the band stops saying "Select to zoom" after it.
+    @AppStorage("kj.rr.zoomUsed") private var zoomUsed = false
     @State private var pan: CGSize = .zero
     @State private var screen: CGSize = CGSize(width: 1920, height: 1080)
     @State private var flags: [String: [String]] = [:]
@@ -282,7 +284,8 @@ struct ReadingReaderView: View {
 
     private var overlay: some View {
         VStack(spacing: 0) {
-            StatusBand(leading: bandLeading, trailing: [pageLabel])
+            // Select zooms, and nothing said so: the cue rides the band until the first zoom.
+            StatusBand(leading: bandLeading, trailing: (phase == .page && !zoomed && !zoomUsed ? ["Select to zoom"] : []) + [pageLabel])
             Spacer(minLength: 0)
         }
         .opacity(overlayVisible ? 1 : 0)
@@ -403,6 +406,7 @@ struct ReadingReaderView: View {
     private func setZoom(_ next: CGFloat) {
         let ratio = next / zoom
         zoom = next
+        if next > 1 { zoomUsed = true }
         let limit = panLimit
         pan = CGSize(width: min(max(pan.width * ratio, -limit.width), limit.width),
                      height: min(max(pan.height * ratio, -limit.height), limit.height))

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Email and password, for Khajistan Transmission. `onSignedIn` runs after the session is stored
 /// and before the screen closes. Menu goes back without signing in.
@@ -12,10 +13,6 @@ struct SignInView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var errorLine: String?
-
-    private var canSubmit: Bool {
-        !email.isEmpty && !password.isEmpty && !busy
-    }
 
     var body: some View {
         ZStack {
@@ -38,13 +35,18 @@ struct SignInView: View {
                     SecureField("", text: $password)
                         .textContentType(.password)
                 }
+                // Always focusable: a dimmed button that focus skipped gave no reason. A press with
+                // a field empty says which.
                 Button("Sign in") {
-                    Task { await submit() }
+                    if email.isEmpty || password.isEmpty {
+                        errorLine = email.isEmpty ? "Type the email first." : "Type the password first."
+                    } else {
+                        Task { await submit() }
+                    }
                 }
                 .buttonStyle(HouseButtonStyle())
                 .padding(.leading, -26)
-                .disabled(!canSubmit)
-                .opacity(canSubmit ? 1 : 0.5)
+                .disabled(busy)
                 if let line = errorLine {
                     Text(line).kjBody()
                 }
@@ -54,6 +56,9 @@ struct SignInView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .foregroundStyle(palette.ink)
+        .onChange(of: errorLine) { _, line in
+            if let line { UIAccessibility.post(notification: .announcement, argument: line) }
+        }
         .onExitCommand { dismiss() }
         // The colour scheme steers what tvOS draws itself: the keyboard this screen brings up.
         .preferredColorScheme(model.skin == .day ? .light : .dark)
@@ -80,7 +85,7 @@ struct SignInView: View {
         switch failure {
         case .server(let text): return text
         case .anonymous: return "This account cannot watch Khajistan Transmission."
-        default: return "Sign-in failed."
+        default: return "Sign-in failed. Check the email and password and try again."
         }
     }
 }

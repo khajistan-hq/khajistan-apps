@@ -525,7 +525,8 @@ struct PlayerStrip: View {
                         .font(.system(size: 24))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .opacity(0.75)
+                        // 0.85: at 0.75 the line measured 4.42:1 on day, under 4.5.
+                        .opacity(0.85)
                 }
             }
             .layoutPriority(1)

@@ -257,9 +257,10 @@ private struct SmallStyle: ViewModifier {
 
 extension Animation {
     /// The house's short ease: quick enough at 120 Hz to feel like a response, not a show.
-    static let kj = Animation.easeOut(duration: 0.18)
+    /// Reduce Motion takes every house animation to an instant: slides and pushes included.
+    static var kj: Animation { UIAccessibility.isReduceMotionEnabled ? .linear(duration: 0) : .easeOut(duration: 0.18) }
     /// A drill-in and back, at about the pace of the system's navigation push.
-    static let kjPush = Animation.smooth(duration: 0.32)
+    static var kjPush: Animation { UIAccessibility.isReduceMotionEnabled ? .linear(duration: 0) : .smooth(duration: 0.32) }
 }
 
 // MARK: - Controls
@@ -319,6 +320,8 @@ private struct HousePlate<Face: View>: View {
                 }
             }
             .padding(padding)
+            // The smallest a finger can aim at (HIG 44 pt): chips and small buttons grow to it.
+            .frame(minHeight: 44)
             .environment(\.palette, look)
             .foregroundStyle(look.ink)
             .background(lifts ? palette.lift : (solid ? palette.band : Color.clear))

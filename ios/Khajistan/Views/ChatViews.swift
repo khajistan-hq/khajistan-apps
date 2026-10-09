@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// CHAT, the website's rooms (kj-chat.js) on a phone: the rooms by region, a room's last 48 hours,
 /// and a line written by typing or by the keyboard's own dictation. The rules and the requests are
@@ -104,6 +105,9 @@ struct ChatRoomView: View {
     @State private var ignored = ChatRules.ignored()
     /// A Pics/Vids object opened from a line, in the Pics/Vids viewer.
     @State private var viewing: PnvRow?
+    /// The line whose actions are up, in the house dialog. Apple's context menu drew a grey
+    /// platter over the room (ECC roast 2026-10-08).
+    @State private var actionsFor: ChatMessage?
 
     private var store: ChatStore { model.chat }
 
@@ -187,9 +191,10 @@ struct ChatRoomView: View {
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
-                        .contextMenu { actions(for: line) }
+                        .onTapGesture { withAnimation(.kj) { actionsFor = line } }
                         .id(line.id)
                         .accessibilityElement(children: .combine)
+                        .accessibilityAction(named: "Line actions") { actionsFor = line }
                         .accessibilityIdentifier("chat-line-\(line.id)")
                     }
                 }
@@ -198,6 +203,13 @@ struct ChatRoomView: View {
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
                 PnvViewerView(row: row, steps: false)
+            }
+            .overlay(alignment: .bottom) {
+                if let line = actionsFor {
+                    HouseDialog(text: "\(line.who): \(line.body)", actions: actions(for: line) + [
+                        .init(title: "Cancel") { withAnimation(.kj) { actionsFor = nil } },
+                    ])
+                }
             }
             .onChange(of: shown.last?.id) { _, last in
                 if let last { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(last, anchor: .bottom) } }
@@ -232,26 +244,28 @@ struct ChatRoomView: View {
         return false
     }
 
-    @ViewBuilder
-    private func actions(for line: ChatMessage) -> some View {
+    private func actions(for line: ChatMessage) -> [HouseDialog.Action] {
+        var list: [HouseDialog.Action] = []
+        let close = { withAnimation(.kj) { actionsFor = nil } }
         if case .archive(let key) = ChatMedia.of(line) {
-            Button("Open in Pics/Vids") { open(key) }
+            list.append(.init(title: "Open") { close(); open(key) })
         }
-        Button("Report") {
-            Task { note = await feed?.report(line) }
-        }
+        list.append(.init(title: "Report") { close(); Task { note = await feed?.report(line) } })
         if let handle = line.author_handle, handle != store.handle {
-            Button("Ignore \(handle)") {
+            list.append(.init(title: "Ignore") {
+                close()
                 ChatRules.setIgnored(handle, true)
                 ignored = ChatRules.ignored()
                 note = "\(handle) is ignored on this device."
-            }
+            })
         }
         if line.kind == "text", let mine = model.auth.session?.userId, line.author_id == mine {
-            Button("Delete", role: .destructive) {
+            list.append(.init(title: "Delete") {
+                close()
                 Task { note = (await feed?.delete(line) ?? false) ? nil : "That did not delete." }
-            }
+            })
         }
+        return list
     }
 
     // MARK: - Writing

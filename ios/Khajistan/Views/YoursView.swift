@@ -1,5 +1,6 @@
 import QuickLook
 import SwiftUI
+import UIKit
 
 /// ACCOUNT: the website's "Your Khajistan" (account, downloads and saved work) as it
 /// stands on this device: the skin, All Access, the account Transmission plays under, the pages
@@ -291,7 +292,10 @@ struct SignInView: View {
                 Button(kicker: busy ? "Signing in\u{2026}" : "Sign in") { Task { await submit() } }
                     .buttonStyle(HouseButtonStyle(solid: true))
                     .disabled(!canSubmit)
-                if let errorLine { Text(errorLine).kjBody() }
+                if let errorLine {
+                    Text(errorLine).kjBody()
+                        .onAppear { UIAccessibility.post(notification: .announcement, argument: errorLine) }
+                }
             }
             .padding(KJLayout.inset)
         }
@@ -316,7 +320,7 @@ struct SignInView: View {
                 switch failure {
                 case .server(let text): errorLine = text
                 case .anonymous: errorLine = "This account cannot watch Khajistan Transmission."
-                default: errorLine = "Sign-in failed."
+                default: errorLine = "Sign-in failed. Check the email and password and try again."
                 }
             } else {
                 errorLine = error.localizedDescription

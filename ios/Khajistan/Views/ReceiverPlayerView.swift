@@ -157,6 +157,9 @@ struct ReceiverDevice: View {
             if new == .playing, old != .paused, !title.isEmpty {
                 UIAccessibility.post(notification: .announcement, argument: title)
             }
+            if case .failed(let message) = new {
+                UIAccessibility.post(notification: .announcement, argument: message)
+            }
         }
         .onChange(of: store.phase) { tuner.transmissionPhaseChanged() }
     }

@@ -171,7 +171,7 @@ struct ChannelsView: View {
                     }
                     .frame(width: 900, height: ChannelCard.height, alignment: .leading)
                 } else {
-                    TuningLoader("Loading\u{2026}")
+                    TuningLoader("Loading\u{2026}", bird: 120)
                         .frame(width: ChannelCard.width, height: ChannelCard.height, alignment: .leading)
                 }
             }

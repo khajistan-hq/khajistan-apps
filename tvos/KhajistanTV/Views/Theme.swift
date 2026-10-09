@@ -1,3 +1,4 @@
+import AVFoundation
 import ImageIO
 import SwiftUI
 import UIKit
@@ -590,20 +591,70 @@ private struct SwitchLabel: View {
     }
 }
 
-/// What a screen says while it waits. The grooming pigeon that stood here was retired in the
-/// apps on 2026-10-05 (owner: one pigeon, the flying one, which carries the channel change).
+/// What a screen says while it waits: the website receiver's grooming pigeon over the words.
+/// Retired on 2026-10-05 for one pigeon; brought back on the loaders only (owner, 2026-10-08).
+/// The flying pigeon still carries the channel change.
 struct TuningLoader: View {
     let label: String?
+    let bird: CGFloat
 
-    /// nil draws nothing, for a screen that already says what it is waiting for.
-    init(_ label: String? = "Connecting\u{2026}") {
+    /// nil draws no words, for a screen that already says what it is waiting for. `bird` is the
+    /// pigeon's width: the site's cap of 200 points, smaller in a shelf's placeholder.
+    init(_ label: String? = "Connecting\u{2026}", bird: CGFloat = 200) {
         self.label = label
+        self.bird = bird
     }
 
     var body: some View {
-        if let label, !label.isEmpty {
-            Kicker(label)
+        VStack(spacing: 16) {
+            GroomingPigeon(width: bird)
+            if let label, !label.isEmpty {
+                Kicker(label)
+            }
         }
+    }
+}
+
+/// The grooming loop (ios/scripts/make-tuning-pigeon.sh, 300x276 HEVC with alpha). One player
+/// for every loader on screen, playing only while one is: the Apple TV HD decodes HEVC in
+/// software. Reduce Motion holds it on its first frame.
+private struct GroomingPigeon: View {
+    let width: CGFloat
+
+    var body: some View {
+        PlayerLayerView(player: GroomingLoop.shared.player)
+            .frame(width: width, height: width * 276 / 300)
+            .onAppear { GroomingLoop.shared.retain() }
+            .onDisappear { GroomingLoop.shared.release() }
+            .accessibilityHidden(true)
+    }
+}
+
+@MainActor
+private final class GroomingLoop {
+    static let shared = GroomingLoop()
+    let player = AVQueuePlayer()
+    private var looper: AVPlayerLooper?
+    private var watchers = 0
+
+    private init() {
+        // The bird must never take the audio session from a signal.
+        player.isMuted = true
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        player.automaticallyWaitsToMinimizeStalling = false
+        if let url = Bundle.main.url(forResource: "tuning-pigeon", withExtension: "mov") {
+            looper = AVPlayerLooper(player: player, templateItem: AVPlayerItem(url: url))
+        }
+    }
+
+    func retain() {
+        watchers += 1
+        if !UIAccessibility.isReduceMotionEnabled { player.play() }
+    }
+
+    func release() {
+        watchers = max(watchers - 1, 0)
+        if watchers == 0 { player.pause() }
     }
 }
 

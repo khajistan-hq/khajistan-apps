@@ -202,7 +202,7 @@ private struct PnvRegionShelf: View {
             if let error = feed.error {
                 retry(error)
             } else {
-                TuningLoader("Loading\u{2026}")
+                TuningLoader("Loading\u{2026}", bird: 120)
             }
         }
         .frame(width: 600, height: Self.tileHeight + 12 + Self.captionHeight, alignment: .leading)

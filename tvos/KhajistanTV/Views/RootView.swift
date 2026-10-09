@@ -32,6 +32,14 @@ struct RootView: View {
         .overlay(alignment: .bottomTrailing) {
             if UserDefaults.standard.bool(forKey: "kjframemeter") { FrameMeterLabel() }
         }
+        // A loader held on screen, for the UI test that photographs the grooming pigeon.
+        .overlay {
+            if UserDefaults.standard.bool(forKey: "kjloaderpreview") {
+                TuningLoader("Loading the receiver\u{2026}")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(palette.ground.ignoresSafeArea())
+            }
+        }
         #endif
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)

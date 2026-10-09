@@ -26,10 +26,10 @@ for i in range(im.n_frames):
     lab, n = ndimage.label(alpha > 0)
     sizes = ndimage.sum(np.ones_like(alpha), lab, range(1, n + 1))
     alpha[~np.isin(lab, 1 + np.where(sizes >= 40)[0])] = 0
-    # Every pixel takes the colour of the nearest solid bird pixel, so the soft edge blends
-    # into brown rather than into whatever the clear pixels held.
-    idx = ndimage.distance_transform_edt(alpha < 250, return_distances=False, return_indices=True)
-    rgb = a[..., :3][idx[0], idx[1]]
+    # AVPlayerLayer draws HEVC alpha as PREMULTIPLIED: colour is added to the ground, not
+    # mixed with it. Straight colour at a soft edge came out as a white fringe, and colour in
+    # a clear pixel as a pale patch. So the colour is multiplied by alpha here (clear = black).
+    rgb = (a[..., :3].astype(np.float32) * (alpha[..., None] / 255.0)).round()
     Image.fromarray(np.dstack([rgb, alpha]).astype(np.uint8), "RGBA").save(f"{sys.argv[2]}/f{i:04d}.png")
 print(im.n_frames, "frames")
 PY

@@ -89,7 +89,12 @@ struct ReadingReaderView: View {
                 }
                 .buttonStyle(SurfaceButtonStyle())
                 .accessibilityIdentifier("rrReaderSurface")
+                // Spoken: "Page 3 of 76". The UI tests read the machine form, in debug builds.
+                .accessibilityLabel(pages > 0 ? "Page \(position) of \(pages)" : "Loading")
+                .accessibilityHint("Swipe left or right to turn the page. Select zooms in.")
+                #if DEBUG
                 .accessibilityValue(stateValue)
+                #endif
             }
         }
         .foregroundStyle(palette.ink)
@@ -437,8 +442,9 @@ struct ReadingReaderView: View {
         overlayVisible = true
         hideTask?.cancel()
         guard phase == .page else { return }
+        guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: OverlayTiming.idle)
             if !Task.isCancelled { overlayVisible = false }
         }
     }

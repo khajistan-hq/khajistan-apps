@@ -63,7 +63,10 @@ struct ReceiverPlayerView: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Kicker(stateText).accessibilityIdentifier("playerState").accessibilityValue(current?.id ?? "")
+            Kicker(stateText).accessibilityIdentifier("playerState")
+                #if DEBUG
+                .accessibilityValue(current?.id ?? "")
+                #endif
             if let current {
                 if !(current.mediaType == "radio" && controller.state == .playing) {
                     Text(current.name).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
@@ -73,10 +76,9 @@ struct ReceiverPlayerView: View {
                     Text(attribution).kjSmall(faint: true).lineLimit(3)
                 }
             }
-            TransportRow(isPlaying: controller.state == .playing || controller.state == .tuning, toggle: tuner.playPause)
-            if tuner.canStep {
-                Text("Swipe up or down for the next channel.").kjSmall(faint: true)
-            }
+            TransportRow(isPlaying: controller.state == .playing || controller.state == .tuning, toggle: tuner.playPause,
+                         previousChannel: tuner.canStep ? { step(-1) } : nil,
+                         nextChannel: tuner.canStep ? { step(1) } : nil)
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 14)
@@ -214,9 +216,9 @@ struct ReceiverDevice: View {
         ZStack {
             (showsPicture ? Color.black : palette.ground)
             if hasPicture {
-                PlayerLayerView(player: player.player)
+                PlayerLayerView(player: player.player).accessibilityHidden(true)
             } else if tuner.source == nil {
-                idleMark
+                idleMark.accessibilityHidden(true)
             } else {
                 Text(title)
                     .kjDisplay(KJType.headline, tracking: -0.04)
@@ -229,7 +231,7 @@ struct ReceiverDevice: View {
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .overlay { StationClipLayer(clips: model.clips) }
         .clipped()
-        .accessibilityHidden(true)
+        // Only a radio station's name is read here: it is said nowhere else on the page.
     }
 
     /// The website's idle mark: the name large, RECEIVER on a band plate under it.
@@ -302,7 +304,9 @@ struct ReceiverDevice: View {
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("screenState")
+                #if DEBUG
                 .accessibilityValue(sourceId)
+                #endif
         }
     }
 

@@ -32,10 +32,19 @@ struct TransportRow: View {
     let toggle: () -> Void
     var back: (() -> Void)?
     var forward: (() -> Void)?
+    /// Channel steps, for a viewer who cannot swipe (WCAG 2.5.1). Nil where there is no list.
+    var previousChannel: (() -> Void)?
+    var nextChannel: (() -> Void)?
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 4) {
+            if let previousChannel {
+                Button(action: previousChannel) { Image(systemName: "backward.end.fill").font(.title3.weight(.bold)).frame(width: 48, height: 44) }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+                    .accessibilityLabel("Previous channel")
+                    .accessibilityIdentifier("previousChannel")
+            }
             if let back {
                 Button(action: back) { Image(systemName: "gobackward.30").font(.title3.weight(.bold)).frame(width: 48, height: 44) }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
@@ -51,6 +60,12 @@ struct TransportRow: View {
                 Button(action: forward) { Image(systemName: "goforward.30").font(.title3.weight(.bold)).frame(width: 48, height: 44) }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
                     .accessibilityLabel("Forward 30 seconds")
+            }
+            if let nextChannel {
+                Button(action: nextChannel) { Image(systemName: "forward.end.fill").font(.title3.weight(.bold)).frame(width: 48, height: 44) }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+                    .accessibilityLabel("Next channel")
+                    .accessibilityIdentifier("nextChannel")
             }
             Spacer(minLength: 0)
             AirPlayButton(tint: UIColor(palette.ink), active: UIColor(palette.accent))
@@ -86,7 +101,9 @@ final class OverlayClock {
     func wake(settled: Bool) {
         withAnimation(.kj) { visible = true }
         hideTask?.cancel()
-        guard settled, !Self.staysUp else { return }
+        // Never hides itself under VoiceOver or Switch Control: the controls are how those
+        // viewers reach anything.
+        guard settled, !Self.staysUp, !UIAccessibility.isVoiceOverRunning, !UIAccessibility.isSwitchControlRunning else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(2.6))
             guard !Task.isCancelled else { return }

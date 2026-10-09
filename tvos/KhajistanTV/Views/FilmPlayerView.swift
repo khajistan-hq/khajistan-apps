@@ -295,8 +295,9 @@ struct FilmPlayerView: View {
         }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }
+        guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: OverlayTiming.idle)
             if !Task.isCancelled { withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false } }
         }
     }

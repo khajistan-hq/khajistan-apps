@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A receiver channel, full screen. Up and down tune the neighbouring channel in the list the
 /// viewer came from, behind the pigeon (StationClips); play/pause pauses, and pressing it again tunes the
@@ -88,6 +89,14 @@ struct ReceiverPlayerView: View {
             }
             .buttonStyle(SurfaceButtonStyle())
             .focused($focus, equals: .surface)
+            // The surface is the only thing VoiceOver lands on, so it says what is on and offers
+            // what the arrows and the strip do.
+            .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
+            .accessibilityHint("Swipe up or down to change channel.")
+            .accessibilityAction(named: "Next channel") { step(by: 1) }
+            .accessibilityAction(named: "Previous channel") { step(by: -1) }
+            .accessibilityAction(named: model.captions.isOn ? "Captions off" : "Captions on") { model.captions.toggle() }
+            .accessibilityAction(named: "Like") { like() }
             overlay(palette)
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
@@ -116,6 +125,12 @@ struct ReceiverPlayerView: View {
             }
         }
         .onExitCommand {
+            // Back lets go of an armed Captions or Like control first, as it leaves any control.
+            if armed != nil {
+                armed = nil
+                wake()
+                return
+            }
             stopEverything()
             dismiss()
         }
@@ -159,20 +174,22 @@ struct ReceiverPlayerView: View {
             .opacity(stripShown ? 1 : 0)
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
+        #if DEBUG
+        // The state and the channel id, for the UI tests. Debug builds only: VoiceOver read the
+        // raw id aloud, and the surface's label carries the name.
         .overlay(alignment: .bottomLeading) {
-            // The state, for tests and VoiceOver; the strip shows only a reason, never "Playing".
             Text(stateText)
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("playerState")
                 .overlay {
-                    // Which channel is on screen, for the UI tests.
                     Text(current.id)
                         .font(.system(size: 1))
                         .opacity(0.01)
                         .accessibilityIdentifier("currentChannel")
                 }
         }
+        #endif
     }
 
     /// While a signal tunes the ground already says so; the strip waits for the picture.
@@ -422,6 +439,7 @@ struct ReceiverPlayerView: View {
         next.releaseSound()
         model.captions.attach(target, player: next)
         wake()
+        UIAccessibility.post(notification: .announcement, argument: target.name)
     }
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
@@ -442,8 +460,9 @@ struct ReceiverPlayerView: View {
         overlayVisible = true
         hideTask?.cancel()
         guard controller.state == .playing else { return }
+        guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: OverlayTiming.idle)
             // The strip stays while the viewer is on its Captions control.
             if !Task.isCancelled, armed == nil {
                 overlayVisible = false

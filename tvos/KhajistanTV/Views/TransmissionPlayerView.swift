@@ -467,8 +467,9 @@ struct TransmissionPlayerView: View {
         hideTask?.cancel()
         // A schedule file (DEBUG, UI tests) plays no picture; its overlay hides as a playing one does.
         guard store.player.state == .playing || store.isScheduleFile else { return }
+        guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: OverlayTiming.idle)
             // The strip stays while the viewer is on its Subtitles control.
             if !Task.isCancelled, !captionArmed {
                 overlayVisible = false

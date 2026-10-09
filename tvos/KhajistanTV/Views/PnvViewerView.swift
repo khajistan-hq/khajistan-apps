@@ -241,8 +241,9 @@ struct PnvViewerView: View {
         hideTask?.cancel()
         let settled = phase == .ready && (!current.isVideo || controller.state == .playing)
         guard settled else { return }
+        guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
-            try? await Task.sleep(for: .seconds(2.6))
+            try? await Task.sleep(for: OverlayTiming.idle)
             if !Task.isCancelled { overlayVisible = false }
         }
     }

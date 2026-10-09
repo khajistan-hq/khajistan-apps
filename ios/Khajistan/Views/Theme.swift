@@ -283,6 +283,8 @@ struct HouseTabStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         HousePlate(label: configuration.label, pressed: configuration.isPressed, solid: false, padding: padding, tab: isCurrent)
+            // The current tab is marked by colour and a rule; VoiceOver is told in words.
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }
 
@@ -480,6 +482,8 @@ struct HouseBanner: View {
         .transition(.move(edge: .top).combined(with: .opacity))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("houseBanner")
+        // It sits last in reading order; VoiceOver hears it when it comes up.
+        .onAppear { UIAccessibility.post(notification: .announcement, argument: text) }
     }
 }
 
@@ -513,6 +517,10 @@ struct HouseDialog: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.band, ignoresSafeAreaEdges: [.horizontal, .bottom])
         .transition(.move(edge: .bottom))
+        // A question that needs an answer: VoiceOver stays on it and reads it out.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isModal)
+        .onAppear { UIAccessibility.post(notification: .screenChanged, argument: text) }
     }
 }
 

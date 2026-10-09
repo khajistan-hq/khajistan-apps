@@ -332,6 +332,8 @@ struct HouseTabStyle: ButtonStyle {
             label: configuration.label, isPressed: configuration.isPressed,
             padding: EdgeInsets(top: 12, leading: inset, bottom: 12, trailing: inset), kind: .tab(isCurrent: isCurrent)
         )
+        // The current tab is marked by colour and a rule; VoiceOver is told in words.
+        .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }
 
@@ -596,6 +598,14 @@ private struct SwitchLabel: View {
             }
         }
     }
+}
+
+/// When a player's or reader's overlay hides itself: after ~2.6 s idle (frontend.md §4), and
+/// never while VoiceOver or Switch Control is running, because the overlay is how those viewers
+/// reach anything.
+enum OverlayTiming {
+    static let idle: Duration = .seconds(2.6)
+    static var hidesItself: Bool { !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning }
 }
 
 /// What a screen says while it waits: the website receiver's grooming pigeon over the words.

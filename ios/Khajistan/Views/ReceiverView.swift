@@ -78,6 +78,7 @@ struct ReceiverView: View {
             .kjColumn(KJLayout.wideWidth)
             .padding(.vertical, 16)
         }
+        .accessibilityIdentifier("receiverCatalogue")
         .scrollDismissesKeyboard(.interactively)
         .task { await model.receiver.loadIndex() }
     }

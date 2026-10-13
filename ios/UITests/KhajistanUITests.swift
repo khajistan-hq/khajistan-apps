@@ -31,6 +31,22 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
     }
 
+    /// An active dock occupies the top of the screen. The lazy channel rows only enter the
+    /// accessibility tree after the reader scrolls the catalogue past the map.
+    private func firstReceiverChannel(_ app: XCUIApplication) -> XCUIElement {
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        waitFor(catalogue, 10, "Receiver exposes its scrollable catalogue")
+        waitFor(app.buttons["region-indus"], 40, "The region strip lists Indus")
+        let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
+        for _ in 0..<8 {
+            if channel.exists && channel.isHittable { return channel }
+            catalogue.swipeUp()
+        }
+        waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
+        XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
+        return channel
+    }
+
     /// The house bar is the app's own: no system tab bar anywhere.
     func testEveryDoorInEverySkin() {
         for skin in skins {
@@ -42,8 +58,7 @@ final class KhajistanUITests: XCTestCase {
             shot("\(skin)-02-home-doors", app)
 
             app.buttons["tab-receiver"].tap()
-            waitFor(app.buttons["region-indus"], 40, "the region strip lists Indus")
-            waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch, 40, "Indus lists its channels")
+            _ = firstReceiverChannel(app)
             shot("\(skin)-03-receiver", app)
             app.swipeUp()
             shot("\(skin)-04-receiver-channels", app)
@@ -174,8 +189,7 @@ final class KhajistanUITests: XCTestCase {
         // close button never reports a hit point, so it is tapped by its frame, and a hide racing
         // the tap would turn that tap into a wake.
         let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
-        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
-        waitFor(first, 40, "Indus lists its channels")
+        let first = firstReceiverChannel(app)
         first.tap()
         let state = app.staticTexts["screenState"]
         waitFor(state, 10, "the receiver is on the page")

@@ -35,6 +35,8 @@
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.entertainment</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Attach a photo or recording when you choose to contribute to Khajistan.</string>
 	<key>NSMicrophoneUsageDescription</key>

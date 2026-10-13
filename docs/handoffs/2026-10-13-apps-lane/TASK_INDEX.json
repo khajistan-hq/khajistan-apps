@@ -1,0 +1,90 @@
+{
+  "written_at": "2026-10-13T16:48:42.313683-04:00",
+  "owner": "apps lane / current chat; pickup claims required",
+  "worktree": "/Users/home/CZURImages/khajistan-apps-receiver-macos-20261013",
+  "branch": "codex/apps-receiver-macos-20261013",
+  "source_head": "52c0a63bf9210f22d791d888538fdaf02d8b5261",
+  "source_commits_pushed": [
+    "8dd939a",
+    "fed7df2",
+    "530a903",
+    "52c0a63"
+  ],
+  "pull_request": "https://github.com/khajistan-hq/khajistan-apps/pull/1",
+  "local_task_processes": [],
+  "subagents": "read-only app audits completed; stickerbridge interrupted; no newworkers launched",
+  "tasks": [
+    {
+      "id": "01-apps-release-and-ci",
+      "status": "pending",
+      "owner": "Apps / pickup owner to claim",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/01-apps-release-and-ci.md"
+    },
+    {
+      "id": "02-privacy-policy-manifests-labels",
+      "status": "pending",
+      "owner": "Apps + Front/Security for site policy",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/02-privacy-policy-manifests-labels.md"
+    },
+    {
+      "id": "03-age-rating-and-content-scope",
+      "status": "pending",
+      "owner": "Apps + archive content owner",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/03-age-rating-and-content-scope.md"
+    },
+    {
+      "id": "04-eu-trader-account-declarations",
+      "status": "blocked-owner-final-verification",
+      "owner": "Owner + Apps",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/04-eu-trader-account-declarations.md"
+    },
+    {
+      "id": "05-dedicated-apple-review-account",
+      "status": "pending-owner-private-credential",
+      "owner": "Files/account owner + Apps",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/05-dedicated-apple-review-account.md"
+    },
+    {
+      "id": "06-account-deletion-compliance",
+      "status": "pending",
+      "owner": "Files/account owner + Apps",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/06-account-deletion-compliance.md"
+    },
+    {
+      "id": "07-store-listings-assets-and-release-controls",
+      "status": "pending",
+      "owner": "Apps / owner final public release",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/07-store-listings-assets-and-release-controls.md"
+    },
+    {
+      "id": "08-receiver-captions-and-device-acceptance",
+      "status": "pending-user-device-check",
+      "owner": "Apps",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/08-receiver-captions-and-device-acceptance.md"
+    },
+    {
+      "id": "09-stickers-printful-paused-claude",
+      "status": "paused-Claude-takeover",
+      "owner": "Claude/Bazaar \u2014 do not duplicate",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/09-stickers-printful-paused-claude.md"
+    },
+    {
+      "id": "10-afghanistan-video-cleanup-review",
+      "status": "held-owner-review",
+      "owner": "Broadcast/content owner \u2014 claim required",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/10-afghanistan-video-cleanup-review.md"
+    },
+    {
+      "id": "11-game-release-historical-locator",
+      "status": "ownership-unverified-historical",
+      "owner": "Current game owner; not this app worker",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/11-game-release-historical-locator.md"
+    },
+    {
+      "id": "12-coromandel-recite-truth-soak-hold",
+      "status": "conditional-pending-historical",
+      "owner": "Broadcast/current radio owner",
+      "prompt": "/Users/home/CZURImages/filmart/reports/app-distribution-20261013/handover/12-coromandel-recite-truth-soak-hold.md"
+    }
+  ]
+}

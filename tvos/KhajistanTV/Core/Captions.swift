@@ -294,7 +294,7 @@ enum CaptionRules {
     /// eligible(): a live carrier with a stream, in a language the recogniser takes or none known
     /// (Auto). The source-language picker is not carried on the television, so its override is not.
     static func eligible(_ ch: Channel, detected: DetectedLanguage?, accuracy: CaptionAccuracy?) -> Bool {
-        guard ch.activeStreamId != nil, liveMedia.contains(ch.mediaType) else { return false }
+        guard ch.captionsDenied != true, ch.activeStreamId != nil, liveMedia.contains(ch.mediaType) else { return false }
         guard let code = effectiveLangCode(ch, detected: detected) else { return true }
         if parked[code] != nil || !supported.contains(code) { return false }
         if isExtension(ch, accuracy: accuracy) && !measured(ch, code: code, accuracy: accuracy) { return false }
@@ -303,7 +303,9 @@ enum CaptionRules {
 
     /// parkedReason(): the one line a channel without a Captions control gets, or "" for none.
     static func parkedReason(_ ch: Channel, detected: DetectedLanguage?, accuracy: CaptionAccuracy?) -> String {
-        guard ch.activeStreamId != nil, let code = effectiveLangCode(ch, detected: detected) else { return "" }
+        if ch.captionsDenied == true { return "Captions are unavailable for this channel." }
+        guard liveMedia.contains(ch.mediaType), ch.activeStreamId != nil else { return "Live captions are available for television and radio." }
+        guard let code = effectiveLangCode(ch, detected: detected) else { return "" }
         if let reason = parked[code] { return reason }
         let name = langNames[code] ?? code
         if !supported.contains(code) { return "No captions: \(name) is not on the live recogniser." }
@@ -634,5 +636,16 @@ enum CaptionRealtime {
         default:
             return .other
         }
+    }
+}
+
+/// Identity captured before token refresh; a paid continuation cannot follow a new session.
+struct CaptionContinuation {
+    let generation: Int
+    let channelID: String
+    let sessionID: String?
+
+    func admits(generation: Int, channelID: String?, sessionID: String?, on: Bool, cancelled: Bool) -> Bool {
+        on && !cancelled && generation == self.generation && channelID == self.channelID && sessionID == self.sessionID
     }
 }

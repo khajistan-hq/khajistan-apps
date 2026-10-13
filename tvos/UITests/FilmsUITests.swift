@@ -19,7 +19,7 @@ final class FilmsUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = ["-kjfilms", origin]
-        app.launch()
+        kjLaunch(app)
         return app
     }
 

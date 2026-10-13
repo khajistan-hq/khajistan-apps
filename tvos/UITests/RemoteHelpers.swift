@@ -3,6 +3,12 @@ import XCTest
 /// What every remote-driven UI test needs: a kept screenshot, a pause that lets focus settle, and
 /// a walk toward an element by the Siri Remote's presses.
 extension XCTestCase {
+    /// Existing navigation fixtures keep the map visible; autoplay has its own acceptance test.
+    func kjLaunch(_ app: XCUIApplication, autoplay: Bool = false) {
+        if !autoplay { app.launchArguments += ["-kjnoautoplay", "YES"] }
+        app.launch()
+    }
+
     func kjScreenshot(_ name: String, app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name

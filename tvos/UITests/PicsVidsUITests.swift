@@ -11,7 +11,7 @@ final class PicsVidsUITests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids"]
-        app.launch()
+        kjLaunch(app)
         return app
     }
 

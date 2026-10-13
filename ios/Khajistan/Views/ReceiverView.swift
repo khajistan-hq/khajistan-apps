@@ -38,8 +38,18 @@ struct ReceiverView: View {
             }
             page
         }
+        .task(id: model.tab) {
+            guard model.tab == .receiver else { return }
+            await model.tuner.receiverOpened(isActive: { model.tab == .receiver })
+        }
+        .onChange(of: model.tab) { _, tab in
+            if tab != .receiver { model.tuner.receiverClosed() }
+        }
         .fullScreenCover(isPresented: $fullScreen) {
-            if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
+            Group {
+                if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
+            }
+            .environment(model)
         }
     }
 

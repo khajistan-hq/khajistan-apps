@@ -3761,7 +3761,62 @@ func readingProvenance() throws {
 }
 
 
+func receiverOpeningDoesNotRestartOrOverrideIntent() throws {
+    var opening = ReceiverOpeningPlayback()
+    try expect(opening.begin(active: true, ready: false, explicitDestination: false) == nil)
+    let ticket = opening.begin(active: true, ready: true, explicitDestination: false)!
+    try expect(opening.admits(ticket))
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) == nil, "render/player dismissal must not restart")
+    opening.manualInteraction()
+    try expect(!opening.admits(ticket), "pending automatic surf cannot override manual navigation")
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) == nil)
+    _ = opening.begin(active: false, ready: true, explicitDestination: false)
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) != nil, "new Receiver visit starts once")
+    var linked = ReceiverOpeningPlayback()
+    try expect(linked.begin(active: true, ready: true, explicitDestination: true) == nil)
+    try expect(linked.begin(active: true, ready: true, explicitDestination: false) == nil, "clearing a deep link does not trigger shuffle")
+}
+
+func receiverCaptionsRespectDeniedRights() throws {
+    var channel = try eligibilityChannel("caption-rights")
+    channel.captionsDenied = true
+    try expect(!CaptionRules.eligible(channel, detected: nil, accuracy: nil))
+    try expectEqual(CaptionRules.parkedReason(channel, detected: nil, accuracy: nil), "Captions are unavailable for this channel.")
+    let data = Data(#"{"id":"rights","name":"Rights","mediaType":"tv","streams":[],"captionsDenied":true}"#.utf8)
+    let decoded = try JSONDecoder().decode(Channel.self, from: data)
+    try expectEqual(decoded.captionsDenied, true, "payload rights refusal must be decoded")
+}
+
+func captionContinuationRejectsStalePaidWork() throws {
+    let captured = CaptionContinuation(generation: 4, channelID: "channel-a", sessionID: "session-a")
+    try expect(captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: false))
+    try expect(!captured.admits(generation: 5, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: false), "off/on while refreshing token invalidates old work")
+    try expect(!captured.admits(generation: 4, channelID: "channel-b", sessionID: "session-a", on: true, cancelled: false), "channel change blocks dispatch")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-b", on: true, cancelled: false), "new billing session blocks dispatch")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: false, cancelled: false), "off blocks dispatch and response consumption")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: true), "cancelled translation cannot dispatch")
+}
+
+func receiverPauseInvalidatesPendingResolver() throws {
+    var intent = ReceiverTuneIntent()
+    let initial = intent.begin()
+    try expect(intent.admits(initial))
+    intent.cancel()
+    try expect(!intent.admits(initial), "first Pause during connection prevents a late resolve from attaching")
+    let resumed = intent.begin()
+    try expect(intent.admits(resumed), "explicit Play permits a new resolve")
+    try expect(!intent.admits(initial), "old readiness cannot join the new play intent")
+    let changed = intent.begin()
+    try expect(!intent.admits(resumed), "channel change invalidates old resolver")
+    intent.cancel()
+    try expect(!intent.admits(changed), "pause during channel change blocks incoming playback")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
+    ("Caption continuation rejects stale paid work after token refresh", captionContinuationRejectsStalePaidWork),
+    ("Receiver opening starts once and respects manual/deep-link intent", receiverOpeningDoesNotRestartOrOverrideIntent),
+    ("Receiver captions preserve explicit rights refusals", receiverCaptionsRespectDeniedRights),
     ("Skin follows the sun: noon, midnight, 0 degrees, either side of +6", skinFollowsTheSun),
     ("Skin hex triples", skinColours),
     ("Skin choice: Automatic follows the sun, a fixed choice holds", skinChoiceResolvesAutomaticAndFixed),

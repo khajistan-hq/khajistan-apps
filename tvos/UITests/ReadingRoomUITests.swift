@@ -23,7 +23,7 @@ final class ReadingRoomUITests: XCTestCase {
             arguments += ["-kjfilms", origin]
         }
         app.launchArguments = arguments
-        app.launch()
+        kjLaunch(app)
         return app
     }
 

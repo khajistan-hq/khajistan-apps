@@ -59,7 +59,7 @@ final class DancerUITests: XCTestCase {
     private func soundCheck(skin: String) {
         let app = XCUIApplication()
         app.launchArguments = ["-kjsoundtest", channelTwoMix, "-kjsoundtestat", "600", "-kjskin", skin]
-        app.launch()
+        kjLaunch(app)
         XCTAssertTrue(dancer(app).waitForExistence(timeout: 30), "the dancer layer must be on screen")
         let first = waitForDancing(app, timeout: 60)
         XCTAssertTrue(first.hasPrefix("stage=enter") || first.hasPrefix("stage=on") || first.hasPrefix("stage=smoke"),
@@ -84,7 +84,7 @@ final class DancerUITests: XCTestCase {
 
     private func openRadio(_ ids: [String], skin: String, _ app: XCUIApplication) -> String? {
         app.launchArguments = ["-kjskin", skin]
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch

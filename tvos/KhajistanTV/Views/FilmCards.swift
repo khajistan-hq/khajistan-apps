@@ -5,12 +5,14 @@ struct FilmShelf: View {
     let title: String
     let count: String
     let films: [Film]
+    var onChoose: () -> Void = {}
     @State private var playing: Film?
 
     var body: some View {
         Shelf(title, count: count) {
             ForEach(films) { film in
                 Button {
+                    onChoose()
                     playing = film
                 } label: {
                     FilmCard(film: film)

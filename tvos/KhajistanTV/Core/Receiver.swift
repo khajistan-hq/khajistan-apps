@@ -91,6 +91,8 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     /// isReverentChannel). Absent on every record today; honoured when present.
     let reverent: Bool?
     let visualiser: Bool?
+    /// The receiver payload carries explicit transcription/translation rights refusals.
+    var captionsDenied: Bool? = nil
 
     /// The attribution's first clause, "Direct broadcast by …", which is what a player prints
     /// (owner, 2026-10-08). The rest of the record's sentence stays in the data and on the website.
@@ -228,4 +230,49 @@ enum ReceiverRules {
         default: return mediaType.prefix(1).uppercased() + mediaType.dropFirst()
         }
     }
+}
+
+/// One automatic start for each visit to Receiver, never for a render or a player dismissal.
+/// An async picker must present only while its original ticket is still current.
+struct ReceiverOpeningPlayback {
+    private var revision = 0
+    private var attempted = false
+
+    mutating func begin(active: Bool, ready: Bool, explicitDestination: Bool) -> Int? {
+        guard active else {
+            revision += 1
+            attempted = false
+            return nil
+        }
+        guard ready, !attempted else { return nil }
+        attempted = true
+        guard !explicitDestination else { return nil }
+        return revision
+    }
+
+    mutating func manualInteraction() {
+        revision += 1
+        attempted = true
+    }
+
+    func admits(_ ticket: Int) -> Bool { ticket == revision && attempted }
+}
+
+/// A resolver may finish after Pause; only the latest explicit playback intent may attach it.
+struct ReceiverTuneIntent {
+    private var revision = 0
+    private var wantsPlayback = false
+
+    mutating func begin() -> Int {
+        revision += 1
+        wantsPlayback = true
+        return revision
+    }
+
+    mutating func cancel() {
+        revision += 1
+        wantsPlayback = false
+    }
+
+    func admits(_ ticket: Int) -> Bool { wantsPlayback && ticket == revision }
 }

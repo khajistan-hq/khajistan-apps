@@ -35,7 +35,7 @@ final class SkinWalkUITests: XCTestCase {
     private func launch(_ arguments: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = arguments
-        app.launch()
+        kjLaunch(app)
         return app
     }
 

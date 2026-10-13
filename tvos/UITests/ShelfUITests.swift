@@ -31,7 +31,7 @@ final class ShelfUITests: XCTestCase {
             args += ["-kjfilms", origin]
         }
         app.launchArguments = args + extra
-        app.launch()
+        kjLaunch(app)
         return app
     }
 

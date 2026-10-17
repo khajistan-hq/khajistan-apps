@@ -60,9 +60,10 @@ final class PicsVidsStore {
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
-    init(auth: AuthStore) {
+    /// `configuration` is for tests (ios/Tests/PnvRetry), which answer the requests themselves.
+    init(auth: AuthStore, configuration: URLSessionConfiguration = .ephemeral) {
         self.auth = auth
-        let config = URLSessionConfiguration.ephemeral
+        let config = configuration
         config.timeoutIntervalForRequest = 25
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         urlSession = URLSession(configuration: config)
@@ -156,10 +157,8 @@ final class PicsVidsStore {
         feeds[region] = feed
         let request = PnvAPI.pageRequest(keys: keys, kind: kind, offset: feed.offset, wantCount: feed.total == nil)
         do {
-            let (data, response) = try await urlSession.data(for: request)
+            let (data, http) = try await page(request, generation: gen)
             guard gen == generation else { return }
-            let http = response as? HTTPURLResponse
-            guard let code = http?.statusCode, (200..<300).contains(code) else { throw ReceiverStoreError.http(http?.statusCode ?? 0) }
             let rows = try await Task.detached(priority: .userInitiated) {
                 try JSONDecoder().decode([PnvRow].self, from: data)
             }.value
@@ -255,6 +254,32 @@ final class PicsVidsStore {
     }
 
     // MARK: - Fetching
+
+    /// One page, asked for again on a 5xx or a dropped connection (PnvAPI.retryDelay). A shelf
+    /// that has been left (a new kind filter, a new generation) stops asking.
+    private func page(_ request: URLRequest, generation gen: Int) async throws -> (Data, HTTPURLResponse?) {
+        var attempt = 0
+        while true {
+            var status: Int?
+            do {
+                let (data, response) = try await urlSession.data(for: request)
+                let http = response as? HTTPURLResponse
+                if let code = http?.statusCode, (200..<300).contains(code) { return (data, http) }
+                status = http?.statusCode ?? 0
+            } catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
+                // No answer from a server that is there: retried like a 5xx. No network at all,
+                // or a host that does not resolve, is not going to change in seven seconds.
+                status = nil
+            }
+            guard let wait = PnvAPI.retryDelay(status: status, attempt: attempt), gen == generation else {
+                throw ReceiverStoreError.http(status ?? 0)
+            }
+            try await Task.sleep(for: .seconds(wait))
+            // A shelf left while waiting (another kind, another region) does not ask again.
+            guard gen == generation else { throw CancellationError() }
+            attempt += 1
+        }
+    }
 
     private func fetch<T: Decodable & Sendable>(_ type: T.Type, _ request: URLRequest) async throws -> T {
         let (data, response) = try await urlSession.data(for: request)

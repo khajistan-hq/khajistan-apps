@@ -253,6 +253,18 @@ enum PnvAPI {
         return request
     }
 
+    /// How long to wait before asking for a failed page again, or nil to give up. A busy database
+    /// cancels the page query at the public role's 3 s limit (`anon` statement_timeout) and the
+    /// server answers 500; the same query moments later answers in a tenth of a second (measured
+    /// 2026-10-17, when one such 500 failed the region test on CI). So a 5xx, or no answer at all
+    /// (`status` nil: a dropped connection), is asked twice more; any other status is final.
+    static func retryDelay(status: Int?, attempt: Int) -> Double? {
+        let delays: [Double] = [2, 5]
+        guard attempt < delays.count else { return nil }
+        if let status, status < 500 { return nil }
+        return delays[attempt]
+    }
+
     /// The total out of `Content-Range: 0-59/99474`. "*" (an unknown total) and anything else is nil.
     static func total(fromContentRange header: String?) -> Int? {
         guard let header, let slash = header.lastIndex(of: "/") else { return nil }

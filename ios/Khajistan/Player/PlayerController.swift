@@ -229,13 +229,32 @@ final class PlayerController {
             }
         case .waitingToPlayAtSpecifiedRate:
             switch state {
-            case .tuning, .playing: state = .tuning
+            case .playing:
+                state = .tuning
+                watchForStall()
+            case .tuning: break
             case .idle, .paused, .failed: break
             }
         case .paused:
             break
         @unknown default:
             break
+        }
+    }
+
+    /// How long a signal that stops mid-play gets to come back before the screen says it stopped.
+    private static let stallLimit: Duration = .seconds(20)
+
+    /// The start-up timeout is cancelled once a signal plays, so a stall later on had no limit and
+    /// sat on "Connecting…" for good. A stall gets its own timer; playing again cancels it.
+    private func watchForStall() {
+        let gen = generation
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.stallLimit)
+            guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            self.player.pause()
+            self.state = .failed("The signal stopped.")
         }
     }
 

@@ -154,10 +154,12 @@ final class AppModel {
 
     /// Once per launch, when the app opened on RECEIVER and nothing is on: Surf picks a channel,
     /// with the reader's Surf settings, so the first screen is a live signal rather than a page.
+    /// Not under VoiceOver: sound that starts by itself talks over the screen reader (WCAG 1.4.2),
+    /// so the set opens on standby and Surf is one control away.
     func playIfOpening() async {
         guard playsAtLaunch else { return }
         playsAtLaunch = false
-        guard tab == .receiver, tuner.source == nil else { return }
+        guard tab == .receiver, tuner.source == nil, !UIAccessibility.isVoiceOverRunning else { return }
         await tuner.surf()
     }
 

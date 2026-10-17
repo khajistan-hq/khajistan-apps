@@ -69,6 +69,9 @@ final class AppModel {
     private var libraryReadable = false
     /// `-kjskin grove` on the command line: a skin for screenshots, never stored.
     private let forcedSkin: Skin?
+    /// True until the app has put a channel on at launch. The app opens on RECEIVER with something
+    /// already playing (Pluto TV's lesson); `-kjautoplay NO` keeps it quiet for UI tests.
+    private var playsAtLaunch: Bool
 
     init() {
         let auth = AuthStore()
@@ -79,7 +82,8 @@ final class AppModel {
         chat = ChatStore(auth: auth)
         let defaults = UserDefaults.standard
         forcedSkin = defaults.string(forKey: "kjskin").flatMap(Skin.init(rawValue:))
-        tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)).flatMap { AppTab.available.contains($0) ? $0 : nil } ?? .home
+        playsAtLaunch = defaults.object(forKey: "kjautoplay") == nil || defaults.bool(forKey: "kjautoplay")
+        tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)).flatMap { AppTab.available.contains($0) ? $0 : nil } ?? .receiver
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
@@ -144,6 +148,17 @@ final class AppModel {
                 withAnimation(.easeInOut(duration: 0.6)) { self.refreshSkin() }
             }
         }
+    }
+
+    // MARK: - Opening
+
+    /// Once per launch, when the app opened on RECEIVER and nothing is on: Surf picks a channel,
+    /// with the reader's Surf settings, so the first screen is a live signal rather than a page.
+    func playIfOpening() async {
+        guard playsAtLaunch else { return }
+        playsAtLaunch = false
+        guard tab == .receiver, tuner.source == nil else { return }
+        await tuner.surf()
     }
 
     // MARK: - Rooms

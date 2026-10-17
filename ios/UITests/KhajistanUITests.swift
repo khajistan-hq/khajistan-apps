@@ -15,7 +15,9 @@ final class KhajistanUITests: XCTestCase {
     /// test of another storefront passes its own in `extra`, which comes later and wins.
     private func launch(skin: String, tab: String = "home", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA"] + extra
+        // The app plays a channel when it opens on the Receiver; the tests that drive the
+        // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
         app.launch()
         return app
     }
@@ -164,6 +166,18 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["region-anatolia"].tap()
         expectation(for: NSPredicate(format: "label CONTAINS[c] %@", "Anatolia"), evaluatedWith: title)
         waitForExpectations(timeout: 10)
+    }
+
+    /// The app opens on the Receiver with a channel already tuning on the set, before anything
+    /// is touched (Pluto TV's lesson). A live signal may fail; the set must at least be on.
+    func testAppOpensWithAChannelOn() {
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjautoplay", "YES"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "a channel is on the set at launch, untouched")
+        let on = NSPredicate(format: "label != 'Standing by'")
+        expectation(for: on, evaluatedWith: state)
+        waitForExpectations(timeout: 30)
+        shot("opens-with-a-channel-on", app)
     }
 
     /// A channel plays on the receiver set at the top of the Receiver and goes full screen only

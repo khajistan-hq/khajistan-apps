@@ -11,21 +11,48 @@ struct RegionMapView: View {
     /// The region chosen: outlined, with its label on a plate.
     let highlighted: String?
     let onTap: (String) -> Void
+    /// When set, the map is also a dial: press and slide, and the region under the finger is
+    /// reported as it changes (nil once lifted), with a tick at each border; lifting chooses the
+    /// last region passed. A quick swipe still scrolls the page, and a tap still taps.
+    var onScrub: ((String?) -> Void)? = nil
     @Environment(\.palette) private var palette
+    @State private var passing: String?
+
+    /// How long a press rests before the finger is a dial rather than a scroll.
+    private static let pressToScrub = 0.18
 
     var body: some View {
         GeometryReader { proxy in
             let layout = RegionMapLayout(map: map, size: proxy.size)
             Canvas { context, _ in
-                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted).paint(&context)
+                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: passing ?? highlighted).paint(&context)
             }
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { point in
                 if let id = layout.region(at: point, in: map) { onTap(id) }
             }
+            .gesture(scrub(layout), including: onScrub == nil ? .none : .all)
         }
         .aspectRatio(CGFloat(map.viewBox.width / map.viewBox.height), contentMode: .fit)
         .accessibilityHidden(true)
+    }
+
+    private func scrub(_ layout: RegionMapLayout) -> some Gesture {
+        LongPressGesture(minimumDuration: Self.pressToScrub)
+            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
+            .onChanged { value in
+                guard case .second(true, let drag?) = value,
+                      let id = layout.region(at: drag.location, in: map), id != passing else { return }
+                passing = id
+                UISelectionFeedbackGenerator().selectionChanged()
+                onScrub?(id)
+            }
+            .onEnded { _ in
+                let chosen = passing
+                passing = nil
+                onScrub?(nil)
+                if let chosen { onTap(chosen) }
+            }
     }
 }
 

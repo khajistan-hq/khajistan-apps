@@ -69,7 +69,10 @@ struct ReceiverView: View {
             .padding(.vertical, 16)
         }
         .scrollDismissesKeyboard(.interactively)
-        .task { await model.receiver.loadIndex() }
+        .task {
+            await model.receiver.loadIndex()
+            await model.playIfOpening()
+        }
     }
 
     /// The four figures of the receiver index, laid out before they arrive so nothing moves.
@@ -113,6 +116,8 @@ private struct LiveSection: View {
     @State private var loading = false
     @State private var listError: String?
     @State private var filter = ""
+    /// The hiss of a dial between stations, while a finger slides across the map.
+    @State private var hiss = StaticNoise()
 
     private var index: ReceiverIndex? { model.receiver.index }
 
@@ -151,7 +156,9 @@ private struct LiveSection: View {
     private var map: some View {
         ZStack {
             if let composed {
-                RegionMapView(map: composed, highlighted: selected) { id in choose(id) }
+                RegionMapView(map: composed, highlighted: selected, onTap: choose) { passing in
+                    hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
+                }
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }
             } else {
@@ -201,9 +208,28 @@ private struct LiveSection: View {
         .frame(height: 44)
     }
 
+    /// Chooses a region and tunes it, from the map or the strip: the map is a dial (Radio Garden's
+    /// lesson). The region on the set moves to its next channel; another region starts on one of
+    /// its channels of the Surf medium, drawn at random as Surf draws.
     private func choose(_ id: String) {
+        tune(region: id)
         guard id != selected else { return }
         selected = id
+    }
+
+    private func tune(region id: String) {
+        if model.tuner.channel?.regionIds?.contains(id) == true, model.tuner.canStep {
+            model.tuner.step(1)
+            return
+        }
+        Task {
+            guard let all = try? await model.receiver.channels(regionId: id, cameras: false) else { return }
+            let medium = UserDefaults.standard.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
+            let pool = all.filter { $0.mediaType == medium.rawValue }
+            let list = pool.isEmpty ? all : pool
+            guard let channel = list.randomElement() else { return }
+            model.tuner.play(channel, in: list)
+        }
     }
 
     // MARK: The region

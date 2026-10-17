@@ -2026,6 +2026,19 @@ func pnvContentRange() throws {
     try expectEqual(PnvAPI.total(fromContentRange: "garbage"), nil)
 }
 
+func pnvRetryOnlyWhatABusyServerCauses() throws {
+    // A 500 (the database cancelled the query at its time limit) is asked for again twice.
+    try expectEqual(PnvAPI.retryDelay(status: 500, attempt: 0), 2)
+    try expectEqual(PnvAPI.retryDelay(status: 503, attempt: 1), 5)
+    try expectEqual(PnvAPI.retryDelay(status: 500, attempt: 2), nil, "then the shelf says so")
+    // No answer at all is the same case.
+    try expectEqual(PnvAPI.retryDelay(status: nil, attempt: 0), 2)
+    // A refusal is final: asking again cannot change a 4xx.
+    try expectEqual(PnvAPI.retryDelay(status: 400, attempt: 0), nil)
+    try expectEqual(PnvAPI.retryDelay(status: 401, attempt: 0), nil)
+    try expectEqual(PnvAPI.retryDelay(status: 404, attempt: 0), nil)
+}
+
 func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
     let t = token.map { "\"\($0)\"" } ?? "null"
     return try decode(PnvAccount.self, #"{"slug":"\#(key)","account_key":"\#(key)","region_token":\#(t)}"#)
@@ -2279,6 +2292,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Pics/Vids: rows decode, with and without a size", pnvRowsDecode),
     ("Pics/Vids: the page's requests", pnvRequests),
     ("Pics/Vids: Content-Range totals", pnvContentRange),
+    ("Pics/Vids: a busy server is asked again, a refusal is not", pnvRetryOnlyWhatABusyServerCauses),
     ("Pics/Vids: account keys follow the roster and the fold", pnvAccountKeysFollowTheRosterAndTheFold),
     ("Pics/Vids: the summary line", pnvSummaryLine),
     ("Pics/Vids: captions", pnvCaptions),

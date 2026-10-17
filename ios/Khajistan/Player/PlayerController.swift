@@ -229,11 +229,13 @@ final class PlayerController {
             }
         case .waitingToPlayAtSpecifiedRate:
             switch state {
-            case .playing:
+            // A resume from .paused waits too, and on a stream that died while paused nothing
+            // else would ever end that wait: the start-up timeout belongs to `attach`.
+            case .playing, .paused:
                 state = .tuning
                 watchForStall()
             case .tuning: break
-            case .idle, .paused, .failed: break
+            case .idle, .failed: break
             }
         case .paused:
             break

@@ -386,13 +386,35 @@ final class PlayerController {
             }
         case .waitingToPlayAtSpecifiedRate:
             switch state {
-            case .tuning, .playing: state = .tuning
-            case .idle, .paused, .failed: break
+            // A stall mid-play, or a resume from .paused, waits with no start-up timeout left
+            // to end it (`startTimeout` is cancelled once a signal plays). It gets its own.
+            case .playing, .paused:
+                state = .tuning
+                watchForStall()
+            case .tuning: break
+            case .idle, .failed: break
             }
         case .paused:
             break
         @unknown default:
             break
+        }
+    }
+
+    /// How long a signal that stops mid-play gets to come back before the screen says it stopped.
+    private static let stallLimit: Duration = .seconds(20)
+
+    /// The iPhone's rule (ios/Khajistan/Player/PlayerController.swift): a stall sat on the
+    /// ground for good. Playing again cancels the timer; a new tuning moves the generation on.
+    private func watchForStall() {
+        let gen = generation
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.stallLimit)
+            guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            Self.log.error("stalled for 20 s")
+            self.player.pause()
+            self.state = .failed(Self.unreachable)
         }
     }
 

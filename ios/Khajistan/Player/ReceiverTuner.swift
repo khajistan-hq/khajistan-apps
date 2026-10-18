@@ -179,9 +179,16 @@ final class ReceiverTuner {
                 try? await Task.sleep(for: .seconds(1))
                 if !changing, player.state == .tuning, transmissionIsOnAir { clips.cover(caption: caption) }
             }
-        } else if new == .playing, clips.coverage > 0 {
+        } else if clips.coverage > 0, new == .playing || Self.isFailure(new) {
+            // A stall that runs out fails (PlayerController.watchForStall): the reason must not
+            // sit under the bird, so a failure lifts it as playing does.
             clips.uncover()
         }
+    }
+
+    private static func isFailure(_ state: PlayerController.State) -> Bool {
+        if case .failed = state { return true }
+        return false
     }
 
     /// A Transmission handover sets its player tuning, and a carrier that then needs a sign-in or

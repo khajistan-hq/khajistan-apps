@@ -3906,6 +3906,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Shuffle: changing region deals a new deck", shuffleRegionChangeDealsANewDeck),
     ("Shuffle: main and beyond survive a region change", shuffleMainAndBeyondSurviveARegionChange),
     ("Shuffle: previous on a surf list stays put", shufflePreviousOnASurfListStaysPut),
+    ("Shuffle: a two-channel shelf wraps after surfing that region", shuffleTwoChannelShelfWrapsAfterSurfingThatRegion),
+    ("Shuffle: duplicate orders advance only the ended region", shuffleDuplicateOrdersAdvanceOnlyTheEndedRegion),
     ("Shuffle: the pool keeps file order", shufflePoolKeepsFileOrder),
     ("Shuffle: the fixture bytes are the archive file", shuffleFixtureBytesAreTheArchiveFile),
     ("Shuffle: one channel may repeat, and none deals nothing", shuffleOneMayRepeatAndNoneDealsNothing),
@@ -4086,6 +4088,44 @@ func shuffleMainAndBeyondSurviveARegionChange() throws {
     let again = try require(split.draw(entries: entries, medium: .tv, scope: .main, regionId: "nusantara", playing: nil))
     try expectEqual(again.id, television.order[1])
     try expectEqual(again.order, television.order)
+}
+
+func shuffleTwoChannelShelfWrapsAfterSurfingThatRegion() throws {
+    let shelf = ["indus-two", "indus-one"].sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    // File order is the reverse of the shelf, so the two lists match only when the shuffle swaps them.
+    let entries = [
+        ShuffleEntry(id: "indus-two", regionIds: ["indus"], beyond: false, medium: "tv"),
+        ShuffleEntry(id: "indus-one", regionIds: ["indus"], beyond: false, medium: "tv"),
+    ]
+    var matches = 0
+    for seed: UInt32 in 1...40 {
+        var deck = ShuffleDeck(seed: seed)
+        let drawn = deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil)
+        if drawn?.order == shelf { matches += 1 }
+    }
+    try expectEqual(matches, 17, "name order matches the deck")
+    var installed: ShuffleDeckRef? = ShuffleDeckRef(medium: .tv, scope: .region, regionId: "indus")
+    try expectEqual(SurfList.step(delta: -1, from: 0, count: shelf.count, deck: installed), .stay)
+    installed = nil
+    try expectEqual(SurfList.step(delta: -1, from: 0, count: shelf.count, deck: installed), .move(1))
+    try expectEqual(SurfList.step(delta: 1, from: 1, count: shelf.count, deck: installed), .move(0))
+}
+
+func shuffleDuplicateOrdersAdvanceOnlyTheEndedRegion() throws {
+    let entries = [
+        ShuffleEntry(id: "same-a", regionIds: ["horn", "indus"], beyond: false, medium: "tv"),
+        ShuffleEntry(id: "same-b", regionIds: ["horn", "indus"], beyond: false, medium: "tv"),
+    ]
+    var deck = ShuffleDeck(seed: 1)
+    let horn = try require(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "horn", playing: nil))
+    let indus = try require(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil))
+    try expectEqual(horn.order, indus.order, "the two regions share an order")
+    deck.noteListEnded(on: try require(horn.order.last), key: ShuffleDeck.deckKey(medium: .tv, scope: .region, regionId: "horn"))
+    let hornNext = try require(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "horn", playing: nil))
+    let indusNext = try require(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil))
+    try expectEqual(hornNext.id, hornNext.order[0], "the ended region deals a new deck")
+    try expectEqual(indusNext.id, indus.order[1], "the other region is still on its next card")
+    try expectEqual(indusNext.order, indus.order)
 }
 
 func shufflePreviousOnASurfListStaysPut() throws {

@@ -10,9 +10,11 @@ import UIKit
 /// picture and up/down are already the player's, and a control the viewer can see in the strip says
 /// what it does, which a hidden gesture would not.
 struct ReceiverPlayerView: View {
-    /// The deck this screen was opened from, when it was opened by Surf. Nil for a list the
-    /// viewer opened by hand: that list still wraps at the ends.
+    /// The app's decks, so a directory pick is remembered and is not a draw. Nil only when
+    /// this screen was opened with no session at all.
     var shuffle: ShuffleSession?
+    /// The deck this list was dealt from. Nil for a shelf: that list still wraps at the ends.
+    @State private var listDeck: ShuffleDeckRef?
     @State private var list: [Channel]
 
     @Environment(AppModel.self) private var model
@@ -47,8 +49,9 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel], shuffle: ShuffleSession? = nil) {
+    init(channel: Channel, list: [Channel], deck: ShuffleDeckRef? = nil, shuffle: ShuffleSession? = nil) {
         self.shuffle = shuffle
+        _listDeck = State(initialValue: deck)
         _list = State(initialValue: list)
         _current = State(initialValue: channel)
     }
@@ -373,12 +376,14 @@ struct ReceiverPlayerView: View {
     private func step(by delta: Int) {
         let from = destination ?? current
         guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-        switch SurfNavigation.step(delta: delta, from: position, count: list.count, surfList: shuffle?.plays(list.map(\.id)) ?? false) {
+        switch SurfList.step(delta: delta, from: position, count: list.count, deck: listDeck) {
         case .stay:
             return
         case .deal:
             changeTask?.cancel()
-            changeTask = Task { await dealNext(after: from) }
+            let task = Task { await dealNext(after: from) }
+            shuffle?.takeFlight(task)
+            changeTask = task
         case .move(let index):
             let target = list[index]
             shuffle?.observe(target.id)
@@ -388,19 +393,19 @@ struct ReceiverPlayerView: View {
         }
     }
 
-    /// The card after this permutation. The channel on screen is not dealt first again.
+    /// The card after this list's own deck. The chips may have moved; they do not choose the deck.
+    /// The channel on screen is not dealt first again.
     private func dealNext(after from: Channel) async {
-        guard let shuffle, let index = model.receiver.index else { return }
-        let (medium, scope, regionId) = shuffle.settings(openRegion: model.receiverPath.last?.id)
-        let order = list.map(\.id)
+        guard !Task.isCancelled else { return }
+        guard let shuffle, let deck = listDeck, let index = model.receiver.index else { return }
         guard let prepared = await shuffle.prepare(
-            index: index, medium: medium, scope: scope, regionId: regionId,
+            index: index, medium: deck.medium, scope: deck.scope, regionId: deck.regionId,
             load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else { return }
         guard !Task.isCancelled else { return }
-        guard let pick = shuffle.commit(prepared, finishList: order, playingId: from.id) else { return }
-        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: deck, playingId: from.id) else { return }
         list = pick.list
+        listDeck = pick.deck
         destination = pick.channel
         await change(to: pick.channel)
     }

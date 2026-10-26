@@ -5,12 +5,9 @@ import SwiftUI
 /// between shelves; left and right along one.
 struct ChannelsView: View {
     let region: ReceiverIndex.Region
-    /// The front's deck, so a directory pick is remembered and is not a draw.
-    let shuffle: ShuffleSession?
 
-    init(region: ReceiverIndex.Region, camerasFirst: Bool = false, shuffle: ShuffleSession? = nil) {
+    init(region: ReceiverIndex.Region, camerasFirst: Bool = false) {
         self.region = region
-        self.shuffle = shuffle
         _camerasFirst = State(initialValue: camerasFirst)
     }
 
@@ -72,7 +69,7 @@ struct ChannelsView: View {
         .task { await model.saves.load() }
         .task { await model.films.load() }
         .fullScreenCover(item: $playing) { choice in
-            ReceiverPlayerView(channel: choice.channel, list: choice.list, shuffle: shuffle)
+            ReceiverPlayerView(channel: choice.channel, list: choice.list, shuffle: model.shuffle)
         }
     }
 
@@ -142,7 +139,7 @@ struct ChannelsView: View {
             ForEach(list) { channel in
                 Button {
                     // A directory pick is not a draw. Surf skips it only when it is the card at the cursor.
-                    shuffle?.observe(channel.id)
+                    model.shuffle.observe(channel.id)
                     playing = Playing(channel: channel, list: list)
                 } label: {
                     ChannelCard(channel: channel, liked: model.saves.isSaved(channel))

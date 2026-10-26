@@ -158,6 +158,7 @@ final class ShuffleTests: XCTestCase {
         XCTFail("fixture missing")
     }
 
+    @MainActor
     func testAStaleOrCancelledPickDoesNotDeal() async throws {
         let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(Self.sampleIndex.utf8))
         let session = ShuffleSession(seed: 1)
@@ -194,7 +195,8 @@ final class ShuffleTests: XCTestCase {
         let stalePrepared = try XCTUnwrap(staleLoad)
         let newerLoad = await later.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: load)
         let newer = try XCTUnwrap(newerLoad)
-        XCTAssertNil(later.commit(stalePrepared, finishList: laterOrder, playingId: laterOrder.last))
+        let mainDeck = ShuffleDeckRef(medium: .tv, scope: .main, regionId: "indus")
+        XCTAssertNil(later.commit(stalePrepared, finishList: mainDeck, playingId: laterOrder.last))
         let resumed = try XCTUnwrap(later.commit(newer, finishList: nil, playingId: nil))
         XCTAssertEqual(resumed.list.map(\.id), laterOrder)
         XCTAssertEqual(resumed.channel.id, laterOrder[1])
@@ -205,9 +207,10 @@ final class ShuffleTests: XCTestCase {
         let thirdOrder = openedThird.list.map(\.id)
         let heldLoad = await third.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: load)
         let held = try XCTUnwrap(heldLoad)
-        let cancelled = Task { () -> ShufflePick? in
+        let cancelled = Task { @MainActor () -> ShufflePick? in
             while !Task.isCancelled { await Task.yield() }
-            return third.commit(held, finishList: thirdOrder, playingId: thirdOrder.last)
+            let mainDeck = ShuffleDeckRef(medium: .tv, scope: .main, regionId: "indus")
+            return third.commit(held, finishList: mainDeck, playingId: thirdOrder.last)
         }
         cancelled.cancel()
         let cancelledPick = await cancelled.value
@@ -248,6 +251,7 @@ final class ShuffleTests: XCTestCase {
         XCTAssertEqual(CameraRegions.total(index), 400)
     }
 
+    @MainActor
     func testEmptyScopeDisablesAndAFailedLoadKeepsTheDeck() async throws {
         let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(Self.sampleIndex.utf8))
         let session = ShuffleSession(seed: 1)
@@ -265,9 +269,10 @@ final class ShuffleTests: XCTestCase {
         fail = true
         let missed = await session.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: load)
         XCTAssertNil(missed)
-        XCTAssertFalse(session.blocked)
-        XCTAssertEqual(session.note, "The region could not be loaded.")
-        XCTAssertTrue(session.plays(first.list.map(\.id)))
+        let missedBlocked = session.blocked
+        let missedNote = session.note
+        XCTAssertFalse(missedBlocked)
+        XCTAssertEqual(missedNote, "The region could not be loaded.")
         fail = false
         let continued = await session.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: load)
         let third = try XCTUnwrap(continued)
@@ -276,11 +281,15 @@ final class ShuffleTests: XCTestCase {
 
         let empty = await session.pick(index: index, medium: .tv, scope: .region, regionId: "kashmir", playingId: nil, load: load)
         XCTAssertNil(empty)
-        XCTAssertTrue(session.blocked)
-        XCTAssertEqual(session.note, "No television in this region right now.")
+        let emptyBlocked = session.blocked
+        let emptyNote = session.note
+        XCTAssertTrue(emptyBlocked)
+        XCTAssertEqual(emptyNote, "No television in this region right now.")
         session.noteSelectionChanged()
-        XCTAssertFalse(session.blocked)
-        XCTAssertNil(session.note)
+        let clearedBlocked = session.blocked
+        let clearedNote = session.note
+        XCTAssertFalse(clearedBlocked)
+        XCTAssertNil(clearedNote)
 
         let once = await session.pick(index: index, medium: .tv, scope: .region, regionId: "anatolia", playingId: nil, load: load)
         let only = try XCTUnwrap(once)
@@ -288,7 +297,168 @@ final class ShuffleTests: XCTestCase {
         let again = try XCTUnwrap(twice)
         XCTAssertEqual(only.channel.id, "anatolia")
         XCTAssertEqual(again.channel.id, "anatolia")
-        XCTAssertFalse(session.blocked)
+        let stillOpen = session.blocked
+        XCTAssertFalse(stillOpen)
+    }
+
+    /// Surf Main, then the chip moves to Region or Radio. The step off the end of the list
+    /// deals Main again. A commit aimed at the new chip, while finishing Main's list, changes nothing.
+    @MainActor
+    func testChipChangeThenEndOfListContinuesTheListsOwnDeck() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let openedPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        let opened = try XCTUnwrap(openedPick)
+        let order = opened.list.map(\.id)
+        let last = try XCTUnwrap(order.last)
+
+        let regionPrepared = await session.prepare(index: index, medium: .tv, scope: .region, regionId: "indus", load: Self.atlas)
+        let regionLoad = try XCTUnwrap(regionPrepared)
+        XCTAssertNil(session.commit(regionLoad, finishList: opened.deck, playingId: last))
+        let regionBlocked = session.blocked
+        XCTAssertFalse(regionBlocked)
+        let radio = ShuffleSession(seed: 1)
+        let radioOpenedPick = await radio.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        let radioOpened = try XCTUnwrap(radioOpenedPick)
+        let radioPrepared = await radio.prepare(index: index, medium: .radio, scope: .main, regionId: "indus", load: Self.atlas)
+        let radioChip = try XCTUnwrap(radioPrepared)
+        XCTAssertNil(radio.commit(radioChip, finishList: radioOpened.deck, playingId: radioOpened.list.last?.id))
+        let radioBlocked = radio.blocked
+        XCTAssertFalse(radioBlocked)
+        let radioNext = await radio.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.atlas)
+        let radioContinued = try XCTUnwrap(radioNext)
+        XCTAssertEqual(radioContinued.list.map(\.id), radioOpened.list.map(\.id))
+        XCTAssertEqual(radioContinued.channel.id, radioOpened.list[1].id)
+
+        let continuedPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.atlas)
+        let continued = try XCTUnwrap(continuedPick)
+        XCTAssertEqual(continued.list.map(\.id), order)
+        XCTAssertEqual(continued.channel.id, order[1])
+
+        let own = ShuffleSession(seed: 1)
+        let listedPick = await own.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        let listed = try XCTUnwrap(listedPick)
+        let ownPrepared = await own.prepare(index: index, medium: listed.deck.medium, scope: listed.deck.scope, regionId: listed.deck.regionId, load: Self.atlas)
+        let prepared = try XCTUnwrap(ownPrepared)
+        let dealtPick = own.commit(prepared, finishList: listed.deck, playingId: listed.list.last?.id)
+        let dealt = try XCTUnwrap(dealtPick)
+        XCTAssertEqual(dealt.deck, listed.deck)
+        let dealtFirst = try XCTUnwrap(dealt.list.first)
+        XCTAssertEqual(dealt.channel.id, dealtFirst.id)
+        // A playing id from outside this region must not skip the region's first card.
+        let regionPick = await own.pick(index: index, medium: .tv, scope: .region, regionId: "indus", playingId: "anatolia", load: Self.atlas)
+        let region = try XCTUnwrap(regionPick)
+        let fresh = ShuffleSession(seed: 1)
+        let freshPick = await fresh.pick(index: index, medium: .tv, scope: .region, regionId: "indus", playingId: "anatolia", load: Self.atlas)
+        let regionFresh = try XCTUnwrap(freshPick)
+        XCTAssertEqual(region.channel.id, regionFresh.channel.id)
+        XCTAssertEqual(region.list.map(\.id), regionFresh.list.map(\.id))
+    }
+
+    /// A name-sorted shelf of two channels matches the deck on some seeds. Previous still wraps,
+    /// because the shelf is not the Surf list. The Surf list, same ids, stays on the first card.
+    func testTwoChannelShelfWrapsAfterSurfingThatRegion() {
+        let shelf = ["indus-two", "indus-one"].sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        // File order is the reverse of the shelf, so the two lists match only when the shuffle swaps them.
+        let entries = [
+            ShuffleEntry(id: "indus-two", regionIds: ["indus"], beyond: false, medium: "tv"),
+            ShuffleEntry(id: "indus-one", regionIds: ["indus"], beyond: false, medium: "tv"),
+        ]
+        var matches = 0
+        for seed: UInt32 in 1...40 {
+            var deck = ShuffleDeck(seed: seed)
+            let drawn = deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil)
+            if drawn?.order == shelf { matches += 1 }
+        }
+        XCTAssertEqual(matches, 17)
+        var installed: ShuffleDeckRef? = ShuffleDeckRef(medium: .tv, scope: .region, regionId: "indus")
+        XCTAssertEqual(SurfList.step(delta: -1, from: 0, count: shelf.count, deck: installed), .stay)
+        installed = nil
+        XCTAssertEqual(SurfList.step(delta: -1, from: 0, count: shelf.count, deck: installed), .move(1))
+        XCTAssertEqual(SurfList.step(delta: 1, from: 1, count: shelf.count, deck: installed), .move(0))
+    }
+
+    /// Two regions filed with the same channels share an order. Ending one does not move the other.
+    func testDuplicateOrdersAdvanceOnlyTheEndedRegion() throws {
+        let entries = [
+            ShuffleEntry(id: "same-a", regionIds: ["horn", "indus"], beyond: false, medium: "tv"),
+            ShuffleEntry(id: "same-b", regionIds: ["horn", "indus"], beyond: false, medium: "tv"),
+        ]
+        var deck = ShuffleDeck(seed: 1)
+        let horn = try XCTUnwrap(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "horn", playing: nil))
+        let indus = try XCTUnwrap(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil))
+        XCTAssertEqual(horn.order, indus.order)
+        deck.noteListEnded(on: try XCTUnwrap(horn.order.last), key: ShuffleDeck.deckKey(medium: .tv, scope: .region, regionId: "horn"))
+        let hornNext = try XCTUnwrap(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "horn", playing: nil))
+        let indusNext = try XCTUnwrap(deck.draw(entries: entries, medium: .tv, scope: .region, regionId: "indus", playing: nil))
+        XCTAssertEqual(hornNext.id, hornNext.order[0])
+        XCTAssertEqual(indusNext.id, indus.order[1])
+        XCTAssertEqual(indusNext.order, indus.order)
+    }
+
+    /// One prepared deals one card. Committing it again does not deal a second.
+    @MainActor
+    func testDoubleCommitOfOnePreparedDealsOnce() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let preparedLoad = await session.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: Self.oneEach)
+        let prepared = try XCTUnwrap(preparedLoad)
+        let firstPick = session.commit(prepared, finishList: nil, playingId: nil)
+        let first = try XCTUnwrap(firstPick)
+        XCTAssertNil(session.commit(prepared, finishList: nil, playingId: nil))
+        let nextPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "anatolia", playingId: nil, load: Self.oneEach)
+        let next = try XCTUnwrap(nextPick)
+        XCTAssertEqual(next.list.map(\.id), first.list.map(\.id))
+        XCTAssertEqual(next.channel.id, first.list[1].id)
+    }
+
+    /// The tvOS app model keeps the session. Leaving Receiver used to rebuild it with the view.
+    @MainActor
+    func testTelevisionDeckSurvivesLeavingReceiver() async throws {
+        let index = try Self.decodedIndex()
+        let model = TelevisionReceiverModel(seed: 1)
+        let firstPick = await model.shuffle.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.oneEach)
+        let first = try XCTUnwrap(firstPick)
+        let secondPick = await model.shuffle.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.oneEach)
+        let second = try XCTUnwrap(secondPick)
+        XCTAssertEqual(second.list.map(\.id), first.list.map(\.id))
+        XCTAssertEqual(second.channel.id, first.list[1].id)
+        let rebuilt = TelevisionReceiverModel(seed: 1)
+        let restartedPick = await rebuilt.shuffle.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.oneEach)
+        let restarted = try XCTUnwrap(restartedPick)
+        XCTAssertEqual(restarted.channel.id, first.channel.id)
+        XCTAssertEqual(restarted.list.map(\.id), first.list.map(\.id))
+    }
+
+    private static func decodedIndex() throws -> ReceiverIndex {
+        try JSONDecoder().decode(ReceiverIndex.self, from: Data(sampleIndex.utf8))
+    }
+
+    /// One television channel per shard, id equal to the region id. Main is indus then anatolia.
+    private static func oneEach(_ id: String) async throws -> [Channel] {
+        [try channel(id)]
+    }
+
+    /// Indus carries two channels, so a region deck and the main deck are not the same list.
+    private static func atlas(_ id: String) async throws -> [Channel] {
+        switch id {
+        case "indus": return [try channel("indus-one"), try channel("indus-two")]
+        case "anatolia": return [try channel("anatolia")]
+        default: return [try channel(id)]
+        }
+    }
+
+    private static func channel(_ id: String, medium: String = "tv") throws -> Channel {
+        let json = "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"mediaType\":\"\(medium)\",\"streams\":[{\"id\":\"s\"}],\"activeStreamId\":\"s\"}"
+        return try JSONDecoder().decode(Channel.self, from: Data(json.utf8))
+    }
+
+    /// The tvOS `AppModel` keeps one of these for the life of the app. A new Receiver
+    /// screen reads it; it does not build another.
+    @MainActor
+    private final class TelevisionReceiverModel {
+        let shuffle: ShuffleSession
+        init(seed: UInt32) { shuffle = ShuffleSession(seed: seed) }
     }
 
     private final class PickGate: @unchecked Sendable {

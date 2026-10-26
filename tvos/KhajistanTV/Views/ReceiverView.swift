@@ -10,7 +10,6 @@ struct ReceiverView: View {
     @State private var mapError: String?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
-    @State private var shuffle = ShuffleSession()
     @State private var surfBlocked = false
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
@@ -28,13 +27,13 @@ struct ReceiverView: View {
                 .background(palette.ground.ignoresSafeArea())
                 .foregroundStyle(palette.ink)
                 .navigationDestination(for: ReceiverIndex.Region.self) { region in
-                    ChannelsView(region: region, camerasFirst: model.camerasFirst == region.id, shuffle: shuffle)
+                    ChannelsView(region: region, camerasFirst: model.camerasFirst == region.id)
                 }
         }
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $shuffled) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list, shuffle: shuffle)
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, deck: pick.deck, shuffle: model.shuffle)
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
@@ -159,7 +158,13 @@ struct ReceiverView: View {
     private var surf: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                Task { await shuffle() }
+                guard !shuffling else { return }
+                shuffling = true
+                let task = Task { @MainActor in
+                    defer { self.shuffling = false }
+                    await self.shuffleChannels()
+                }
+                model.shuffle.takeFlight(task)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
@@ -181,7 +186,7 @@ struct ReceiverView: View {
             .padding(.leading, -26)
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") {
                 mediumRaw = $0
-                shuffle.noteSelectionChanged()
+                model.shuffle.noteSelectionChanged()
                 surfBlocked = false
                 surfNote = nil
             }
@@ -190,7 +195,7 @@ struct ReceiverView: View {
             chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label.replacingOccurrences(of: " atlas", with: "")) },
                   current: scope.rawValue, id: "shuffle-scope") {
                 scopeRaw = $0
-                shuffle.noteSelectionChanged()
+                model.shuffle.noteSelectionChanged()
                 surfBlocked = false
                 surfNote = nil
             }
@@ -216,29 +221,26 @@ struct ReceiverView: View {
         .padding(.leading, -22)
     }
 
-    private func shuffle() async {
-        guard let index = model.receiver.index, !shuffling else { return }
-        shuffling = true
+    private func shuffleChannels() async {
+        guard !Task.isCancelled, let index = model.receiver.index else { return }
         surfNote = nil
-        defer { shuffling = false }
-        let (medium, scope, regionId) = shuffle.settings(openRegion: model.receiverPath.last?.id)
-        guard let prepared = await shuffle.prepare(
+        let (medium, scope, regionId) = model.shuffle.settings(openRegion: model.receiverPath.last?.id)
+        guard let prepared = await model.shuffle.prepare(
             index: index, medium: medium, scope: scope, regionId: regionId,
             load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else {
             guard !Task.isCancelled else { return }
-            surfNote = shuffle.note
-            surfBlocked = shuffle.blocked
+            surfNote = model.shuffle.note
+            surfBlocked = model.shuffle.blocked
             return
         }
         guard !Task.isCancelled else { return }
-        guard let pick = shuffle.commit(prepared, finishList: nil, playingId: nil) else {
+        guard let pick = model.shuffle.commit(prepared, finishList: nil, playingId: nil) else {
             guard !Task.isCancelled else { return }
-            surfNote = shuffle.note
-            surfBlocked = shuffle.blocked
+            surfNote = model.shuffle.note
+            surfBlocked = model.shuffle.blocked
             return
         }
-        guard !Task.isCancelled else { return }
         surfBlocked = false
         shuffled = pick
     }
@@ -249,7 +251,7 @@ struct ReceiverView: View {
         let previous = UserDefaults.standard.string(forKey: ShuffleSession.regionKey)
         UserDefaults.standard.set(id, forKey: ShuffleSession.regionKey)
         guard previous != id else { return }
-        shuffle.noteSelectionChanged()
+        model.shuffle.noteSelectionChanged()
         surfBlocked = false
         surfNote = nil
     }

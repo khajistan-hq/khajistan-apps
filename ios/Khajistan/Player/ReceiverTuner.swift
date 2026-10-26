@@ -66,10 +66,12 @@ final class ReceiverTuner {
     // MARK: - Choosing
 
     func play(_ channel: Channel, in list: [Channel]) {
-        // A directory pick is not a draw. Surf skips it only when it is the card at the cursor.
+        // A directory or shelf pick is not a draw, and it is not a Surf list.
+        // Surf skips it only when it is the card at the cursor.
         shuffle.observe(channel.id)
         stop()
         self.list = list
+        listDeck = nil
         source = .live(channel)
         changeTask = Task { await open(channel) }
     }
@@ -87,13 +89,15 @@ final class ReceiverTuner {
             let from = destination ?? current
             guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
             // The list Surf dealt does not wrap. Previous on its first card stays. Next past
-            // its end deals the next permutation. A shelf opened by hand still wraps.
-            switch SurfNavigation.step(delta: delta, from: position, count: list.count, surfList: shuffle.plays(list.map(\.id))) {
+            // its end deals the next permutation of that list's own deck. A shelf still wraps.
+            switch SurfList.step(delta: delta, from: position, count: list.count, deck: listDeck) {
             case .stay:
                 return
             case .deal:
                 changeTask?.cancel()
-                changeTask = Task { await dealNext(after: from) }
+                let task = Task { await dealNext(after: from) }
+                shuffle.takeFlight(task)
+                changeTask = task
                 return
             case .move(let index):
                 let target = list[index]
@@ -145,6 +149,8 @@ final class ReceiverTuner {
     private(set) var surfBlocked = false
     /// The deck Surf deals, shared with the step past the end of that deck.
     @ObservationIgnored private let shuffle = ShuffleSession()
+    /// The deck the list on screen was dealt from. Nil for a shelf opened by hand.
+    @ObservationIgnored private var listDeck: ShuffleDeckRef?
 
     /// The medium, the scope or the region changed, so Surf can be tried again.
     func shuffleSelectionChanged() {
@@ -155,13 +161,29 @@ final class ReceiverTuner {
 
     /// The next card of the deck kept in the Surf settings (owner, 2026-10-07). The deck is one
     /// permutation of the playable channels. Next and previous move through that order. The step
-    /// past the end deals the next permutation.
+    /// past the end deals the next permutation of the same deck. Starting Surf cancels a deal
+    /// that is already in flight.
     func surf() async {
         guard !surfing else { return }
         surfing = true
+        changeTask?.cancel()
+        let task = Task { @MainActor in
+            defer { self.surfing = false }
+            await self.runSurf()
+        }
+        shuffle.takeFlight(task)
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func runSurf() async {
+        guard !Task.isCancelled else { return }
         surfNote = nil
-        defer { surfing = false }
         await receiver.loadIndex()
+        guard !Task.isCancelled else { return }
         guard let index = receiver.index else {
             surfNote = "The receiver has not loaded."
             return
@@ -183,9 +205,9 @@ final class ReceiverTuner {
             surfBlocked = shuffle.blocked
             return
         }
-        guard !Task.isCancelled else { return }
         surfBlocked = false
         play(pick.channel, in: pick.list)
+        listDeck = pick.deck
     }
 
     /// Turns the receiver off.
@@ -279,14 +301,13 @@ final class ReceiverTuner {
         settledAt = Date()
     }
 
-    /// The card after the permutation on screen. The channel that was playing is the last id of
-    /// that deck, so the new one does not open on it.
+    /// The card after this list's own deck. The chips may have moved; they do not choose the deck.
+    /// The channel that was playing is the last id of that deck, so the new one does not open on it.
     private func dealNext(after from: Channel) async {
-        guard let index = receiver.index else { return }
-        let (medium, scope, regionId) = shuffle.settings()
-        let order = list.map(\.id)
+        guard !Task.isCancelled else { return }
+        guard let index = receiver.index, let deck = listDeck else { return }
         guard let prepared = await shuffle.prepare(
-            index: index, medium: medium, scope: scope, regionId: regionId,
+            index: index, medium: deck.medium, scope: deck.scope, regionId: deck.regionId,
             load: { try await self.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else {
             guard !Task.isCancelled else { return }
@@ -295,14 +316,14 @@ final class ReceiverTuner {
             return
         }
         guard !Task.isCancelled else { return }
-        guard let pick = shuffle.commit(prepared, finishList: order, playingId: from.id) else {
+        guard let pick = shuffle.commit(prepared, finishList: deck, playingId: from.id) else {
             guard !Task.isCancelled else { return }
             surfNote = shuffle.note
             surfBlocked = shuffle.blocked
             return
         }
-        guard !Task.isCancelled else { return }
         list = pick.list
+        listDeck = pick.deck
         destination = pick.channel
         await change(to: pick.channel)
     }

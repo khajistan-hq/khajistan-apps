@@ -209,9 +209,13 @@ private struct LiveSection: View {
     }
 
     /// Chooses a region and tunes it, from the map or the strip: the map is a dial (Radio Garden's
-    /// lesson). The region on the set moves to its next channel; another region starts on one of
-    /// its channels of the Surf medium, drawn at random as Surf draws.
+    /// lesson). The region on the set moves to its next channel. Another region starts on one of
+    /// its channels of the Surf medium, drawn at random. Surf itself deals a deck, and this choice
+    /// is the region that deck belongs to.
     private func choose(_ id: String) {
+        let previous = UserDefaults.standard.string(forKey: ShuffleSession.regionKey)
+        UserDefaults.standard.set(id, forKey: ShuffleSession.regionKey)
+        if previous != id { model.tuner.shuffleSelectionChanged() }
         tune(region: id)
         guard id != selected else { return }
         selected = id
@@ -452,10 +456,12 @@ struct ChannelRow: View {
 /// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
 /// of the atlas. Kept on the device (owner, 2026-10-07).
 private struct SurfSettings: View {
+    @Environment(AppModel.self) private var model
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
 
     private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
+    private var scope: ShuffleScope { ShuffleScope.resolved(scopeRaw) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -463,8 +469,14 @@ private struct SurfSettings: View {
                 Kicker("Surf")
                 Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
             }
-            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
+            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") {
+                mediumRaw = $0
+                model.tuner.shuffleSelectionChanged()
+            }
+            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scope.rawValue, id: "shuffle-scope") {
+                scopeRaw = $0
+                model.tuner.shuffleSelectionChanged()
+            }
         }
     }
 

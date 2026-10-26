@@ -83,8 +83,17 @@ final class ReceiverTuner {
         switch source {
         case .live(let current):
             let from = destination ?? current
-            guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
+            guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
+            // The list Surf dealt is the permutation. The step past its end deals the next one,
+            // and the channel on screen is not dealt first again.
+            if delta > 0, position + 1 == list.count, shuffle.plays(list.map(\.id)) {
+                changeTask?.cancel()
+                changeTask = Task { await dealNext(after: from) }
+                return
+            }
+            guard list.count > 1 else { return }
             let target = list[(position + delta + list.count) % list.count]
+            shuffle.observe(target.id)
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }
@@ -127,10 +136,21 @@ final class ReceiverTuner {
     private(set) var surfing = false
     /// Why the last Surf found nothing, until the next one.
     private(set) var surfNote: String?
+    /// True when the chosen scope has nothing that can play, until the medium, scope or region changes.
+    private(set) var surfBlocked = false
+    /// The deck Surf deals, shared with the step past the end of that deck.
+    @ObservationIgnored private let shuffle = ShuffleSession()
 
-    /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
-    /// settings (owner, 2026-10-07). The region is drawn by how many channels of that medium it
-    /// carries; next and previous then move through that region's list.
+    /// The medium, the scope or the region changed, so Surf can be tried again.
+    func shuffleSelectionChanged() {
+        shuffle.noteSelectionChanged()
+        surfBlocked = false
+        surfNote = nil
+    }
+
+    /// The next card of the deck kept in the Surf settings (owner, 2026-10-07). The deck is one
+    /// permutation of the playable channels. Next and previous move through that order. The step
+    /// past the end deals the next permutation.
     func surf() async {
         guard !surfing else { return }
         surfing = true
@@ -141,21 +161,18 @@ final class ReceiverTuner {
             surfNote = "The receiver has not loaded."
             return
         }
-        let defaults = UserDefaults.standard
-        let medium = defaults.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
-        let scope = defaults.string(forKey: ShuffleScope.key).flatMap(ShuffleScope.init(rawValue:)) ?? .main
-        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
-        // Up to three regions, in case one's list will not load.
-        for _ in 0..<3 {
-            guard let region = ShufflePick.region(weights) else { break }
-            guard let list = try? await receiver.channels(regionId: region, cameras: false) else { continue }
-            let pool = list.filter { $0.mediaType == medium.rawValue }
-            if let channel = pool.randomElement() {
-                play(channel, in: pool)
-                return
-            }
+        let (medium, scope, regionId) = shuffle.settings()
+        guard let pick = await shuffle.pick(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            playingId: destination?.id ?? channel?.id,
+            load: { try await self.receiver.channels(regionId: $0, cameras: false) }
+        ) else {
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
         }
-        surfNote = "Nothing to surf there right now."
+        surfBlocked = false
+        play(pick.channel, in: pick.list)
     }
 
     /// Turns the receiver off.
@@ -247,6 +264,25 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
+    }
+
+    /// The card after the permutation on screen. The channel that was playing is the last-played
+    /// card of the new deck.
+    private func dealNext(after from: Channel) async {
+        guard let index = receiver.index else { return }
+        let (medium, scope, regionId) = shuffle.settings()
+        guard let pick = await shuffle.pick(
+            index: index, medium: medium, scope: scope, regionId: regionId, playingId: from.id,
+            load: { try await self.receiver.channels(regionId: $0, cameras: false) }
+        ) else {
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        guard !Task.isCancelled else { return }
+        list = pick.list
+        destination = pick.channel
+        await change(to: pick.channel)
     }
 
     private func change(to target: Channel) async {

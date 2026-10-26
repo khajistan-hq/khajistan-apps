@@ -258,7 +258,7 @@ struct ReceiverDevice: View {
             if tuner.source != nil {
                 key("backward.end.fill", "Previous channel", "previousChannel", enabled: tuner.canStep) { tuner.step(-1) }
             }
-            key("shuffle", tuner.surfing ? "Surfing" : "Surf", "surf", enabled: !tuner.surfing) { Task { await tuner.surf() } }
+            key("shuffle", tuner.surfing ? "Surfing" : "Surf", "surf", enabled: !tuner.surfing && !tuner.surfBlocked) { Task { await tuner.surf() } }
             if tuner.source != nil {
                 key("forward.end.fill", "Next channel", "nextChannel", enabled: tuner.canStep) { tuner.step(1) }
                 Spacer(minLength: 0)

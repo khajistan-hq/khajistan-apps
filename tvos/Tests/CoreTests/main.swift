@@ -621,6 +621,99 @@ func scheduleURLAndBasicAuthorization() throws {
     try expectEqual(KJConfig.streamHost, "customer-0svgnorro16tedsf.cloudflarestream.com")
 }
 
+func keychainQueryMatchesTheEntitlementAndKeepsTheOldItem() throws {
+    let team = "A1B2C3D4E5."
+    let full = try require(KeychainAccess.entitledGroup(teamPrefix: team))
+    try expectEqual(full, "A1B2C3D4E5.com.khajistan.tv.shared")
+
+    // The session, and every item on the phone, was saved with no access group.
+    // Read and write still share that query, and there is no second slot to migrate.
+    let existing = KeychainAccess.lookup(service: KJConfig.keychainService, account: "session", accessGroup: nil)
+    let existingAgain = KeychainAccess.lookup(service: KJConfig.keychainService, account: "session", accessGroup: nil)
+    try expectEqual(existing.preferred, existingAgain.preferred)
+    try expect(existing.legacy.isEmpty, "an ungrouped item is already the preferred one")
+    try expectEqual(existing.preferred.accessGroup, nil)
+    try expectEqual(existing.preferred.attributes["svce"], KJConfig.keychainService)
+    try expectEqual(existing.preferred.attributes["acct"], "session")
+    try expect(existing.preferred.attributes["agrp"] == nil, "no access group")
+    // The name is service, account and maybe a group. The secret is not part of it.
+    try expectEqual(Set(existing.preferred.attributes.keys), Set(["svce", "acct"]))
+
+    // Apple TV preview password: the read query and the write query are one group,
+    // the entitlement suffix with the team id in front.
+    let tv = KeychainAccess.lookup(service: "com.khajistan.tv", account: "preview", accessGroup: full)
+    let tvWrite = KeychainAccess.lookup(service: "com.khajistan.tv", account: "preview", accessGroup: full)
+    try expectEqual(tv.preferred, tvWrite.preferred)
+    try expectEqual(tv.preferred.attributes["agrp"], full)
+    try expectEqual(Set(tv.preferred.attributes.keys), Set(["svce", "acct", "agrp"]))
+    try expect(!tv.legacy.contains(tv.preferred), "migration must not delete the only copy")
+    try expectEqual(tv.legacy.map(\.accessGroup), [nil, KeychainAccess.tvSharedSuffix])
+    for old in tv.legacy {
+        try expectEqual(old.service, tv.preferred.service)
+        try expectEqual(old.account, tv.preferred.account)
+    }
+
+    // A phone item looked up under a new group is still found: the old query is first.
+    let phone = KeychainAccess.lookup(service: "com.khajistan.archive", account: "preview", accessGroup: full)
+    try expectEqual(phone.legacy.first?.service, "com.khajistan.archive")
+    try expectEqual(phone.legacy.first?.account, "preview")
+    try expectEqual(phone.legacy.first?.accessGroup, nil)
+    try expectEqual(phone.preferred.service, "com.khajistan.archive")
+
+    for bad in ["$(AppIdentifierPrefix)", "$(AppIdentifierPrefix)com.khajistan.tv.shared",
+                "", "   ", "com.khajistan.tv.shared", "a1b2c3d4e5.", "A1B2C3D4E5", "A1B2C3D4E.",
+                "A1B2C3D4E5.com.khajistan.tv", "A1B2C3D4E5.com.example.shared"] {
+        try expectEqual(KeychainAccess.group(fromPlistValue: bad), nil, bad)
+    }
+    try expectEqual(KeychainAccess.group(fromPlistValue: nil), nil)
+    try expectEqual(KeychainAccess.group(fromPlistValue: full), full)
+    try expectEqual(KeychainAccess.group(fromPlistValue: "  \(full)  "), full)
+    try expectEqual(KeychainAccess.group(fromPlistValue: team), full)
+
+    try expectEqual(
+        KeychainAccess.resolvedSharedGroup(plistValue: "$(AppIdentifierPrefix)com.khajistan.tv.shared", probedGroup: "A1B2C3D4E5.com.khajistan.tv"),
+        full)
+    try expectEqual(
+        KeychainAccess.resolvedSharedGroup(plistValue: "com.khajistan.tv.shared", probedGroup: "A1B2C3D4E5.com.khajistan.tv.shared"),
+        full)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: full, probedGroup: nil), full)
+    // The phone bundle has no KJKeychainGroup. A probe of its own group must not adopt the tvOS one.
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: nil, probedGroup: "A1B2C3D4E5.com.khajistan.archive"), nil)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: nil, probedGroup: "A1B2C3D4E5.com.khajistan.tv"), nil)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: "", probedGroup: "A1B2C3D4E5.com.khajistan.tv"), nil)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "A1B2C3D4E5.com.khajistan.tv"), team)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: full), team)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "com.khajistan.tv.shared"), nil)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "A1B2C3D4E5.com.khajistan.archive"), nil)
+    try expect(KeychainAccess.probeAccount != "preview" && KeychainAccess.probeAccount != "session", "the probe is not a password slot")
+    try expectEqual(KeychainAccess.entitledGroup(teamPrefix: nil), nil)
+    try expectEqual(KeychainAccess.entitledGroup(teamPrefix: "$(AppIdentifierPrefix)"), nil)
+
+    // A second save that could not replace the grouped item left the readable password in the old slot.
+    let earlier = Date(timeIntervalSince1970: 1_000)
+    let later = Date(timeIntervalSince1970: 2_000)
+    try expect(KeychainAccess.legacyIsNewer(preferred: earlier, legacy: later))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: later, legacy: earlier))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: earlier, legacy: earlier))
+    try expect(KeychainAccess.legacyIsNewer(preferred: nil, legacy: later))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: later, legacy: nil))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: nil, legacy: nil))
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: earlier, hasLegacy: true, legacyModified: later), .legacy)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: later, hasLegacy: true, legacyModified: earlier), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: earlier, hasLegacy: true, legacyModified: earlier), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: nil, hasLegacy: true, legacyModified: nil), .legacy)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: nil, hasLegacy: false, legacyModified: nil), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: false, preferredModified: nil, hasLegacy: true, legacyModified: nil), .legacy)
+    try expectEqual(KeychainAccess.keep(hasPreferred: false, preferredModified: nil, hasLegacy: false, legacyModified: nil), nil)
+
+    let appEntitlements = try String(contentsOfFile: "KhajistanTV/Resources/KhajistanTV.entitlements", encoding: .utf8)
+    let shelfEntitlements = try String(contentsOfFile: "TopShelf/TopShelf.entitlements", encoding: .utf8)
+    try expect(appEntitlements.contains("$(AppIdentifierPrefix)\(KeychainAccess.tvSharedSuffix)"), "app entitlement")
+    try expect(appEntitlements.contains("$(AppIdentifierPrefix)\(KeychainAccess.tvAppSuffix)"), "app's own group")
+    try expect(shelfEntitlements.contains("$(AppIdentifierPrefix)\(KeychainAccess.tvSharedSuffix)"), "Top Shelf entitlement")
+    try expect(!shelfEntitlements.contains("$(AppIdentifierPrefix)\(KeychainAccess.tvAppSuffix)</string>"), "the extension is not entitled to the app group")
+}
+
 func anonKeyIsTheSitesAnonRole() throws {
     let parts = KJConfig.anonKey.split(separator: ".")
     try expectEqual(parts.count, 3)
@@ -3786,6 +3879,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Transmission carriers", transmissionCarriers),
     ("Schedule URL, basic authorization, config", scheduleURLAndBasicAuthorization),
     ("Anon key is the site's anon role", anonKeyIsTheSitesAnonRole),
+    ("Keychain query matches the entitlement and keeps the old item", keychainQueryMatchesTheEntitlementAndKeepsTheOldItem),
     ("Auth session from a body", authSessionFromBody),
     ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
     ("Auth error messages", authErrorMessages),

@@ -36,11 +36,11 @@ final class AuthStore {
            let stored = try? JSONDecoder().decode(Session.self, from: data) {
             session = stored
         }
-        if let data = Keychain.read(Account.preview),
+        // Same group the password was written to, which is the one Top Shelf can read.
+        // A copy still in the old group is moved across inside this read.
+        if let data = Keychain.read(Account.preview, shared: true),
            let text = String(data: data, encoding: .utf8), !text.isEmpty {
             previewPassword = text
-            // Stored before the Top Shelf could read it: moved into the shared group.
-            _ = try? Keychain.write(data, account: Account.preview, shared: true)
         }
     }
 
@@ -98,7 +98,7 @@ final class AuthStore {
 
     func clearPreviewPassword() {
         previewPassword = nil
-        Keychain.delete(Account.preview)
+        Keychain.delete(Account.preview, shared: true)
         Self.topShelfChanged()
     }
 

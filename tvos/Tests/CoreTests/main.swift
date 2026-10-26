@@ -779,6 +779,10 @@ func keychainQueryMatchesTheEntitlementAndKeepsTheOldItem() throws {
     try expect(!shelf.trap, "an omitted-group delete must not hit the shared partition")
     try expectEqual(shelf.items[full]?.data, .some(secret))
     try expect(shelf.log.filter { $0.hasPrefix("remove") }.isEmpty, "the extension read does not delete")
+    // The same store, with migration forced on, deletes the aliased slot. The gate above is what keeps the password.
+    _ = KeychainAccess.readItem(service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: true, store: shelf)
+    try expect(shelf.trap, "an omitted-group delete on this store hits the shared partition")
+    try expect(shelf.items[full]?.data == nil, "the shared item is gone")
 
     let privateGroup = "A1B2C3D4E5.com.khajistan.tv"
     let app = SamePartitionTrap(omittedPartition: privateGroup, sharedGroup: full)

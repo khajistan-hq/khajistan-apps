@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// How a Khajistan TV `play_url` becomes something the player can open. Mirrors resolve() in
 /// archive/scripts/kj-transmission-auth.js: the server checks the viewer's session before it

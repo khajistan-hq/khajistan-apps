@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // The Reading Room, as the website's reading-room.html and scripts/reading-room-app.js read it.
 // Everything here is pure: rows in, titles out, answers in, decisions out. The network lives in

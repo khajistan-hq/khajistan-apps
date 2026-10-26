@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // The Screening Room's films: data/khajistan-tv/vod.json, read as archive/scripts/open-frequencies.js
 // reads it (filmChannel, marqueeOffer, slideTitle, broadcastRegionFor, requestFilmToken, denyText,

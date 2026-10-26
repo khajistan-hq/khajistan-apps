@@ -9,6 +9,11 @@ import Foundation
 /// suffix with no team id, does not find the item on the next launch: the preview password
 /// is still in the keychain and the viewer is asked to type it again.
 ///
+/// The extension's default group is that shared group, because it is the extension's only
+/// entitlement. An omitted-group query there names the same item. The extension therefore
+/// reads the explicit group and does not search or delete the omitted-group slot. Migration
+/// of an older copy stays in the app, whose default group is a different entitlement.
+///
 /// The iPhone app has no keychain-access-groups entitlement. Its items were stored with the
 /// group omitted, and that is still the query a phone read and write share. When a query does
 /// name a group and the item is not there, the ungrouped item is the old copy to read once.
@@ -44,6 +49,23 @@ enum KeychainAccess {
         }
     }
 
+    /// One stored secret and the date the keychain recorded for it, if any. The bytes are
+    /// compared in memory. Nothing here is logged.
+    struct Held: Equatable {
+        var data: Data
+        var modified: Date?
+    }
+
+    /// A stand-in or the real keychain. `store` inserts or replaces and returns true only
+    /// when a following copy equals `data`. On false the previous value is still there.
+    /// `store` does not delete first.
+    protocol SlotStore {
+        func copy(_ name: Name) -> Data?
+        func modified(_ name: Name) -> Date?
+        func store(_ data: Data, as name: Name) -> Bool
+        func remove(_ name: Name)
+    }
+
     /// A team-id prefix is the ten-character Team ID and a trailing dot, as in `A1B2C3D4E5.`.
     /// An unexpanded `$(AppIdentifierPrefix)`, an empty expansion, or the bare entitlement
     /// suffix is not a prefix. Using one of those as the group is how the item was lost.
@@ -77,6 +99,8 @@ enum KeychainAccess {
     /// `KJKeychainGroup` from Info.plist, when it has already been expanded to the entitled
     /// group. `$(AppIdentifierPrefix)` is substituted in the entitlements file; in Info.plist
     /// it is sometimes left as written or replaced with nothing, and neither of those is a group.
+    /// `$(DEVELOPMENT_TEAM)` is a build setting, so a signed build can bake
+    /// `<TeamID>.com.khajistan.tv.shared`. An empty team expands to a leading dot and is rejected.
     static func group(fromPlistValue raw: String?) -> String? {
         guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
               !text.contains("$(") else { return nil }
@@ -105,36 +129,34 @@ enum KeychainAccess {
         case legacy
     }
 
-    /// True when `legacy` is a strictly later modification than `preferred`. A missing date
-    /// is not later. Equal dates are not later. Used to choose among old slots.
+    /// True when both dates are known and `legacy` is strictly later. A missing date is
+    /// unknown, not newer. Equal dates are not later.
     static func legacyIsNewer(preferred: Date?, legacy: Date?) -> Bool {
-        switch (preferred, legacy) {
-        case (_, nil): return false
-        case (nil, .some): return true
-        case let (preferredDate?, legacyDate?): return legacyDate > preferredDate
-        }
+        guard let preferred, let legacy else { return false }
+        return legacy > preferred
     }
 
     /// Which copy to keep when both the grouped item and an older slot may exist.
-    /// A later date wins. When neither date is known, the old slot wins: that is the item
-    /// the previous app was able to read, and the grouped copy may be an earlier save that
-    /// a duplicate add could not replace. Equal dates keep the grouped item.
+    ///
+    /// A later legacy date wins only when both dates are known. A missing date is unknown:
+    /// the shared item stays when it exists, because that is the only copy the last successful
+    /// shared write could have stored. The legacy item is kept when it is the only copy.
     static func keep(hasPreferred: Bool, preferredModified: Date?, hasLegacy: Bool, legacyModified: Date?) -> KeptCopy? {
         if !hasPreferred && !hasLegacy { return nil }
         if hasPreferred && !hasLegacy { return .preferred }
         if !hasPreferred && hasLegacy { return .legacy }
-        switch (preferredModified, legacyModified) {
-        case let (preferredDate?, legacyDate?) where legacyDate > preferredDate:
-            return .legacy
-        case (_?, _?):
-            return .preferred
-        case (nil, nil):
-            return .legacy
-        case (_?, nil):
-            return .preferred
-        case (nil, _?):
+        if let preferredModified, let legacyModified, legacyModified > preferredModified {
             return .legacy
         }
+        return .preferred
+    }
+
+    /// The omitted-group private item is the app's old default slot. It wins over the bare
+    /// entitlement suffix even when the private item has no date and the suffix does. The bare
+    /// suffix is only a candidate when the private slot is empty.
+    static func chooseLegacy(omitted: Held?, bare: Held?) -> Held? {
+        if let omitted { return omitted }
+        return bare
     }
 
     /// `preferred` is the query read and write both use. `legacy` is where a copy saved before
@@ -143,14 +165,99 @@ enum KeychainAccess {
     ///
     /// When `accessGroup` is nil, `legacy` is empty. That is the iPhone query, and the Apple TV
     /// query for the session: the item already stored is the one this read finds, and nothing
-    /// is moved.
-    static func lookup(service: String, account: String, accessGroup: String?) -> (preferred: Name, legacy: [Name]) {
+    /// is moved. When `migrate` is false, `legacy` is empty as well: the Top Shelf extension
+    /// passes that, because its omitted-group slot is the shared item and must not be deleted.
+    static func lookup(service: String, account: String, accessGroup: String?, migrate: Bool = true) -> (preferred: Name, legacy: [Name]) {
         let preferred = Name(service: service, account: account, accessGroup: accessGroup)
-        guard let accessGroup else { return (preferred, []) }
+        guard migrate, accessGroup != nil else { return (preferred, []) }
         var legacy = [Name(service: service, account: account, accessGroup: nil)]
-        if accessGroup.hasSuffix(tvSharedSuffix), accessGroup != tvSharedSuffix {
+        if let accessGroup, accessGroup.hasSuffix(tvSharedSuffix), accessGroup != tvSharedSuffix {
             legacy.append(Name(service: service, account: account, accessGroup: tvSharedSuffix))
         }
         return (preferred, legacy.filter { $0 != preferred })
+    }
+
+    /// Reads the preferred slot. With `migrate` false, that is the only query: nothing is
+    /// searched or deleted. With `migrate` true (the app), an older copy is adopted into the
+    /// preferred slot only after that store reads back, and only then are the old slots removed.
+    static func readItem<S: SlotStore>(service: String, account: String, accessGroup: String?, migrate: Bool, store: S) -> Data? {
+        let found = lookup(service: service, account: account, accessGroup: accessGroup, migrate: migrate)
+        let preferredData = store.copy(found.preferred)
+        guard migrate, !found.legacy.isEmpty else { return preferredData }
+
+        var omitted: Held?
+        var bare: Held?
+        for old in found.legacy {
+            guard let data = store.copy(old) else { continue }
+            let held = Held(data: data, modified: store.modified(old))
+            if old.accessGroup == nil {
+                omitted = held
+            } else if bare == nil {
+                bare = held
+            }
+        }
+        let chosen = chooseLegacy(omitted: omitted, bare: bare)
+        let decision = keep(
+            hasPreferred: preferredData != nil,
+            preferredModified: preferredData == nil ? nil : store.modified(found.preferred),
+            hasLegacy: chosen != nil,
+            legacyModified: chosen?.modified)
+        switch decision {
+        case .legacy:
+            guard let chosen else { return nil }
+            if store.store(chosen.data, as: found.preferred) {
+                for old in found.legacy { store.remove(old) }
+            }
+            return chosen.data
+        case .preferred:
+            for old in found.legacy where store.copy(old) != nil {
+                store.remove(old)
+            }
+            return preferredData
+        case nil:
+            return nil
+        }
+    }
+
+    /// Stores into the preferred slot first and reads it back. Old slots are removed only after
+    /// that succeeds. If the preferred add is refused, the previous preferred item stays unless
+    /// a private (omitted-group) fallback reads back; only then is the old preferred item removed.
+    /// `migrate` false never writes or deletes the omitted-group slot.
+    static func writeItem<S: SlotStore>(data: Data, service: String, account: String, accessGroup: String?, migrate: Bool, store: S) -> Bool {
+        let found = lookup(service: service, account: account, accessGroup: accessGroup, migrate: migrate)
+        if found.preferred.accessGroup != nil {
+            if store.store(data, as: found.preferred) {
+                if migrate {
+                    for old in found.legacy { store.remove(old) }
+                }
+                return true
+            }
+            // The add was refused. If the bytes are already there, the previous item is the
+            // value we wanted; leave it and drop the old slots.
+            if store.copy(found.preferred) == data {
+                if migrate {
+                    for old in found.legacy { store.remove(old) }
+                }
+                return true
+            }
+            guard migrate else { return false }
+            let plain = Name(service: service, account: account, accessGroup: nil)
+            guard store.store(data, as: plain), store.copy(plain) == data else { return false }
+            store.remove(found.preferred)
+            for old in found.legacy where old.accessGroup != nil {
+                store.remove(old)
+            }
+            return true
+        }
+        return store.store(data, as: found.preferred)
+    }
+
+    /// Removes the preferred item. Old slots are removed only when `migrate` is true, so an
+    /// extension delete cannot hit the omitted-group name of the same shared item.
+    static func deleteItem<S: SlotStore>(service: String, account: String, accessGroup: String?, migrate: Bool, store: S) {
+        let found = lookup(service: service, account: account, accessGroup: accessGroup, migrate: migrate)
+        store.remove(found.preferred)
+        guard migrate else { return }
+        for old in found.legacy { store.remove(old) }
     }
 }

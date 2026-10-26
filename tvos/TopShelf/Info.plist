@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>KJKeychainGroup</key>
-	<string>$(AppIdentifierPrefix)com.khajistan.tv.shared</string>
+	<string>$(KJ_KEYCHAIN_GROUP)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

@@ -8,7 +8,14 @@ import Security
 /// entitlement and no `KJKeychainGroup`, so its queries omit the access group: that is where
 /// every item already on a phone was stored. The Apple TV preview password is stored in the
 /// group the Top Shelf entitlement names, team id included, and a read uses that same group.
-/// Nothing in here is written to a log. `Failure` carries the status code only.
+///
+/// The Top Shelf process is an `.appex`. Its only keychain entitlement is the shared group,
+/// so that group is also what an omitted-group query finds. This file therefore does not
+/// search or delete the omitted-group slot from the extension, and it does not insert the
+/// team-id probe there. Migration of an older copy runs in the app.
+///
+/// A write adds the shared item and reads it back before any old slot is deleted. Nothing
+/// in here is written to a log. `Failure` carries the status code only.
 enum Keychain {
     struct Failure: Error, LocalizedError {
         let status: OSStatus
@@ -19,24 +26,27 @@ enum Keychain {
     }
 
     private static let gate = NSLock()
-    private static var didResolveSharedGroup = false
+    /// Cached only after a real group is known. A failed probe is not remembered, so a later
+    /// call in the same process can try again. Nil means "not resolved yet", not "no group".
     private static var sharedGroup: String?
+    private static var lastStatus: OSStatus = errSecSuccess
+
+    /// True inside Top Shelf. The extension bundle is an `.appex`; the app bundle is not.
+    private static var isAppExtension: Bool {
+        Bundle.main.bundleURL.pathExtension == "appex"
+    }
 
     /// The group in the tvOS entitlements, with the team id prefix. Nil on iOS, and nil on a
     /// tvOS build whose signing did not yield a team prefix: queries then omit the group,
     /// which is the only place those builds can keep an item.
     private static func resolvedSharedGroup() -> String? {
         gate.lock()
-        let done = didResolveSharedGroup
         let cached = sharedGroup
         gate.unlock()
-        if done { return cached }
-        let value = computeSharedGroup()
+        if let cached { return cached }
+        guard let value = computeSharedGroup() else { return nil }
         gate.lock()
-        if !didResolveSharedGroup {
-            sharedGroup = value
-            didResolveSharedGroup = true
-        }
+        if sharedGroup == nil { sharedGroup = value }
         let result = sharedGroup
         gate.unlock()
         return result
@@ -51,14 +61,17 @@ enum Keychain {
     }
 
     /// The access group the system assigns when a query sets none. That string begins with
-    /// the Team ID. The marker stored here is not a password and not a session.
+    /// the Team ID. The marker stored here is not a password and not a session. It is removed
+    /// before this function returns, and it is never inserted from the extension.
     private static func probedDefaultAccessGroup() -> String? {
-        let name = KeychainAccess.Name(service: KJConfig.keychainService, account: KeychainAccess.probeAccount, accessGroup: nil)
-        if copy(name) == nil {
-            let status = SecItemAdd(adding(Data([1]), name) as CFDictionary, nil)
+        guard !isAppExtension else { return nil }
+        let probe = KeychainAccess.Name(service: KJConfig.keychainService, account: KeychainAccess.probeAccount, accessGroup: nil)
+        defer { remove(probe) }
+        if copy(probe) == nil {
+            let status = SecItemAdd(adding(Data([1]), probe) as CFDictionary, nil)
             if status != errSecSuccess && status != errSecDuplicateItem { return nil }
         }
-        var query = dictionary(name)
+        var query = dictionary(probe)
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var found: AnyObject?
@@ -67,99 +80,76 @@ enum Keychain {
         return attrs[kSecAttrAccessGroup as String] as? String
     }
 
-    private static func names(account: String, shared: Bool) -> (preferred: KeychainAccess.Name, legacy: [KeychainAccess.Name]) {
+    /// `shared` selects the group the Top Shelf extension is entitled to. Migration runs only
+    /// in the app: the extension's omitted-group query is the shared item itself.
+    private static func placement(shared: Bool) -> (group: String?, migrate: Bool) {
+        let migrate = shared && !isAppExtension
         let group = shared ? resolvedSharedGroup() : nil
-        return KeychainAccess.lookup(service: KJConfig.keychainService, account: account, accessGroup: group)
+        return (group, migrate)
     }
 
     /// `shared` reads the group the Top Shelf extension is entitled to. The phone never passes
-    /// it, and its query has no legacy slots, so an item already stored is read and left where
-    /// it is. On Apple TV a copy in an older slot is kept when it is the later write, and it is
-    /// removed only after the grouped item reads back.
+    /// it. On Apple TV the app moves a newer copy out of an older slot only after the shared
+    /// item reads back. The extension reads the shared item and does not touch the other slot.
     static func read(_ account: String, shared: Bool = false) -> Data? {
-        let found = names(account: account, shared: shared)
-        // Slots a previous build may have used. The phone's query sets no group, so this
-        // list stays empty and the item already on the device is what `preferred` reads.
-        var legacyNames = found.legacy
-        if shared, found.preferred.accessGroup == nil {
-            let bare = KeychainAccess.Name(service: KJConfig.keychainService, account: account, accessGroup: KeychainAccess.tvSharedSuffix)
-            if !legacyNames.contains(bare) { legacyNames.append(bare) }
-        }
-
-        let preferredData = copy(found.preferred)
-        // The phone's query names no old slot, so the item already stored is what this returns.
-        guard !legacyNames.isEmpty else { return preferredData }
-
-        var bestLegacy: (data: Data, modified: Date?)?
-        for old in legacyNames {
-            guard let data = copy(old) else { continue }
-            let stamp = modified(old)
-            if bestLegacy == nil || KeychainAccess.legacyIsNewer(preferred: bestLegacy?.modified, legacy: stamp) {
-                bestLegacy = (data, stamp)
-            }
-        }
-        let decision = KeychainAccess.keep(
-            hasPreferred: preferredData != nil,
-            preferredModified: preferredData == nil ? nil : modified(found.preferred),
-            hasLegacy: bestLegacy != nil,
-            legacyModified: bestLegacy?.modified)
-        switch decision {
-        case .legacy:
-            if let data = bestLegacy?.data, adopted(data, as: found.preferred) {
-                for old in legacyNames { remove(old) }
-            }
-            return bestLegacy?.data
-        case .preferred:
-            // An older copy was actually stored. Drop it now that the grouped item is the later one.
-            if bestLegacy != nil {
-                for old in legacyNames { remove(old) }
-            }
-            return preferredData
-        case nil:
-            return nil
-        }
+        let place = placement(shared: shared)
+        return KeychainAccess.readItem(
+            service: KJConfig.keychainService,
+            account: account,
+            accessGroup: place.group,
+            migrate: place.migrate,
+            store: SecSlots())
     }
 
-    /// Replaces whatever is stored under the account. Every previous slot is removed first,
-    /// so a stale copy in the old group cannot outlive the value just saved.
+    /// Replaces the account. The shared item is added and read back before any older slot is
+    /// deleted. A refused add leaves the previous shared item in place unless the private
+    /// fallback reads back.
     static func write(_ data: Data, account: String, shared: Bool = false) throws {
-        let found = names(account: account, shared: shared)
-        remove(found.preferred)
-        for legacy in found.legacy { remove(legacy) }
-        if shared, found.preferred.accessGroup == nil {
-            remove(KeychainAccess.Name(service: found.preferred.service, account: account, accessGroup: KeychainAccess.tvSharedSuffix))
+        let place = placement(shared: shared)
+        guard KeychainAccess.writeItem(
+            data: data,
+            service: KJConfig.keychainService,
+            account: account,
+            accessGroup: place.group,
+            migrate: place.migrate,
+            store: SecSlots()) else {
+            throw Failure(status: lastStatus)
         }
-        if found.preferred.accessGroup != nil {
-            let status = SecItemAdd(adding(data, found.preferred) as CFDictionary, nil)
-            if status == errSecSuccess { return }
-            if status == errSecDuplicateItem {
-                remove(found.preferred)
-                if SecItemAdd(adding(data, found.preferred) as CFDictionary, nil) == errSecSuccess { return }
-            }
-            // The group was refused (a simulator signed with CODE_SIGNING_ALLOWED=NO).
-            // Keep the value in the default group so this app can still read it back.
-        }
-        let plain = KeychainAccess.Name(service: found.preferred.service, account: found.preferred.account, accessGroup: nil)
-        let status = SecItemAdd(adding(data, plain) as CFDictionary, nil)
-        guard status == errSecSuccess else { throw Failure(status: status) }
     }
 
     static func delete(_ account: String, shared: Bool = false) {
-        let found = names(account: account, shared: shared)
-        remove(found.preferred)
-        for legacy in found.legacy { remove(legacy) }
-        if shared {
-            remove(KeychainAccess.Name(service: KJConfig.keychainService, account: account, accessGroup: KeychainAccess.tvSharedSuffix))
-        }
+        let place = placement(shared: shared)
+        KeychainAccess.deleteItem(
+            service: KJConfig.keychainService,
+            account: account,
+            accessGroup: place.group,
+            migrate: place.migrate,
+            store: SecSlots())
     }
 
-    /// Stores `data` in the group reads use, replacing whatever was there. True only after
-    /// that item reads back as `data`. The bytes are compared in memory and never logged.
-    private static func adopted(_ data: Data, as preferred: KeychainAccess.Name) -> Bool {
-        guard preferred.accessGroup != nil else { return false }
-        remove(preferred)
-        guard SecItemAdd(adding(data, preferred) as CFDictionary, nil) == errSecSuccess else { return false }
-        return copy(preferred) == data
+    private struct SecSlots: KeychainAccess.SlotStore {
+        func copy(_ name: KeychainAccess.Name) -> Data? { Keychain.copy(name) }
+        func modified(_ name: KeychainAccess.Name) -> Date? { Keychain.modified(name) }
+        func store(_ data: Data, as name: KeychainAccess.Name) -> Bool { Keychain.store(data, as: name) }
+        func remove(_ name: KeychainAccess.Name) { Keychain.remove(name) }
+    }
+
+    /// Inserts or replaces. True only when the item then reads back as `data`. A refused add
+    /// or update leaves the previous item in place.
+    private static func store(_ data: Data, as name: KeychainAccess.Name) -> Bool {
+        let added = SecItemAdd(adding(data, name) as CFDictionary, nil)
+        if added == errSecDuplicateItem {
+            let changes: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            ]
+            lastStatus = SecItemUpdate(dictionary(name) as CFDictionary, changes as CFDictionary)
+            guard lastStatus == errSecSuccess else { return false }
+        } else {
+            lastStatus = added
+            guard added == errSecSuccess else { return false }
+        }
+        return copy(name) == data
     }
 
     private static func modified(_ name: KeychainAccess.Name) -> Date? {

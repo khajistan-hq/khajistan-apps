@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // Pics/Vids: the Born Digital stream at /browse-archive.html. Everything here mirrors the site's
 // own code, read 2026-10-05, and says which file and what it copied:

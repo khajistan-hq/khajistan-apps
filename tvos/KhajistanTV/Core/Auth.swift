@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// A signed-in viewer's tokens, stored in the Keychain as JSON.
 struct Session: Codable, Equatable, Sendable {

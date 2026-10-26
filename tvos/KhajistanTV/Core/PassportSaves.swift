@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// One saved thing, as `public.passport_saves` holds it. The website's Reading Room Save, the
 /// receiver's heart and the dashboard read and write these same rows, so a save made on one device

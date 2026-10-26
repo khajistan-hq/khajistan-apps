@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import Observation
 
 // Live chat, against the website's own rooms (archive/chat.html, scripts/kj-chat.js;

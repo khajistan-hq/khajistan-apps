@@ -568,6 +568,220 @@ func scheduleURLAndBasicAuthorization() throws {
     try expectEqual(KJConfig.streamHost, "customer-0svgnorro16tedsf.cloudflarestream.com")
 }
 
+/// What an omitted-group query resolves to. In Top Shelf that partition is the shared group,
+/// so a delete of the omitted-group name destroys the preview password. `trap` records that.
+final class SamePartitionTrap: KeychainAccess.SlotStore {
+    let omittedPartition: String
+    let sharedGroup: String
+    var items: [String: (data: Data, modified: Date?)] = [:]
+    var log: [String] = []
+    var trap = false
+    var refuse: Set<String> = []
+
+    init(omittedPartition: String, sharedGroup: String) {
+        self.omittedPartition = omittedPartition
+        self.sharedGroup = sharedGroup
+    }
+
+    func partition(_ name: KeychainAccess.Name) -> String {
+        name.accessGroup ?? omittedPartition
+    }
+
+    func copy(_ name: KeychainAccess.Name) -> Data? {
+        items[partition(name)]?.data
+    }
+
+    func modified(_ name: KeychainAccess.Name) -> Date? {
+        items[partition(name)]?.modified
+    }
+
+    func store(_ data: Data, as name: KeychainAccess.Name) -> Bool {
+        let part = partition(name)
+        log.append("store \(part)")
+        if refuse.contains(part) { return false }
+        let stamp = items[part]?.modified
+        items[part] = (data, stamp ?? Date(timeIntervalSince1970: 5_000))
+        return copy(name) == data
+    }
+
+    func remove(_ name: KeychainAccess.Name) {
+        let part = partition(name)
+        log.append("remove \(part)")
+        if name.accessGroup == nil, part == sharedGroup {
+            trap = true
+        }
+        items[part] = nil
+    }
+}
+
+func bundledSource(_ relative: String) throws -> String {
+    for path in [relative, "../tvos/\(relative)"] where FileManager.default.fileExists(atPath: path) {
+        return try String(contentsOfFile: path, encoding: .utf8)
+    }
+    throw Failure(description: "missing source \(relative)")
+}
+
+func keychainQueryMatchesTheEntitlementAndKeepsTheOldItem() throws {
+    let team = "A1B2C3D4E5."
+    let full = try require(KeychainAccess.entitledGroup(teamPrefix: team))
+    try expectEqual(full, "A1B2C3D4E5.com.khajistan.tv.shared")
+
+    // The session, and every item on the phone, was saved with no access group.
+    // Read and write still share that query, and there is no second slot to migrate.
+    let existing = KeychainAccess.lookup(service: KJConfig.keychainService, account: "session", accessGroup: nil)
+    let existingAgain = KeychainAccess.lookup(service: KJConfig.keychainService, account: "session", accessGroup: nil)
+    try expectEqual(existing.preferred, existingAgain.preferred)
+    try expect(existing.legacy.isEmpty, "an ungrouped item is already the preferred one")
+    try expectEqual(existing.preferred.accessGroup, nil)
+    try expectEqual(existing.preferred.attributes["svce"], KJConfig.keychainService)
+    try expectEqual(existing.preferred.attributes["acct"], "session")
+    try expect(existing.preferred.attributes["agrp"] == nil, "no access group")
+    // The name is service, account and maybe a group. The secret is not part of it.
+    try expectEqual(Set(existing.preferred.attributes.keys), Set(["svce", "acct"]))
+
+    // Apple TV preview password: the read query and the write query are one group,
+    // the entitlement suffix with the team id in front.
+    let tv = KeychainAccess.lookup(service: "com.khajistan.tv", account: "preview", accessGroup: full)
+    let tvWrite = KeychainAccess.lookup(service: "com.khajistan.tv", account: "preview", accessGroup: full)
+    try expectEqual(tv.preferred, tvWrite.preferred)
+    try expectEqual(tv.preferred.attributes["agrp"], full)
+    try expectEqual(Set(tv.preferred.attributes.keys), Set(["svce", "acct", "agrp"]))
+    try expect(!tv.legacy.contains(tv.preferred), "migration must not delete the only copy")
+    try expectEqual(tv.legacy.map(\.accessGroup), [nil, KeychainAccess.tvSharedSuffix])
+    for old in tv.legacy {
+        try expectEqual(old.service, tv.preferred.service)
+        try expectEqual(old.account, tv.preferred.account)
+    }
+
+    // A phone item looked up under a new group is still found: the old query is first.
+    let phone = KeychainAccess.lookup(service: "com.khajistan.archive", account: "preview", accessGroup: full)
+    try expectEqual(phone.legacy.first?.service, "com.khajistan.archive")
+    try expectEqual(phone.legacy.first?.account, "preview")
+    try expectEqual(phone.legacy.first?.accessGroup, nil)
+    try expectEqual(phone.preferred.service, "com.khajistan.archive")
+
+    let shelfOnly = KeychainAccess.lookup(service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: false)
+    try expect(shelfOnly.legacy.isEmpty, "the extension does not search the omitted-group slot")
+    try expectEqual(shelfOnly.preferred.accessGroup, full)
+
+    for bad in ["$(AppIdentifierPrefix)", "$(AppIdentifierPrefix)com.khajistan.tv.shared",
+                "", "   ", "com.khajistan.tv.shared", ".com.khajistan.tv.shared",
+                "$(DEVELOPMENT_TEAM).com.khajistan.tv.shared", "$(KJ_KEYCHAIN_GROUP)",
+                "a1b2c3d4e5.", "A1B2C3D4E5", "A1B2C3D4E.",
+                "A1B2C3D4E5.com.khajistan.tv", "A1B2C3D4E5.com.example.shared"] {
+        try expectEqual(KeychainAccess.group(fromPlistValue: bad), nil, bad)
+    }
+    try expectEqual(KeychainAccess.group(fromPlistValue: nil), nil)
+    try expectEqual(KeychainAccess.group(fromPlistValue: full), full)
+    try expectEqual(KeychainAccess.group(fromPlistValue: "  \(full)  "), full)
+    try expectEqual(KeychainAccess.group(fromPlistValue: team), full)
+
+    try expectEqual(
+        KeychainAccess.resolvedSharedGroup(plistValue: "$(AppIdentifierPrefix)com.khajistan.tv.shared", probedGroup: "A1B2C3D4E5.com.khajistan.tv"),
+        full)
+    try expectEqual(
+        KeychainAccess.resolvedSharedGroup(plistValue: "com.khajistan.tv.shared", probedGroup: "A1B2C3D4E5.com.khajistan.tv.shared"),
+        full)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: full, probedGroup: nil), full)
+    // The phone bundle has no KJKeychainGroup. A probe of its own group must not adopt the tvOS one.
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: nil, probedGroup: "A1B2C3D4E5.com.khajistan.archive"), nil)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: nil, probedGroup: "A1B2C3D4E5.com.khajistan.tv"), nil)
+    try expectEqual(KeychainAccess.resolvedSharedGroup(plistValue: "", probedGroup: "A1B2C3D4E5.com.khajistan.tv"), nil)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "A1B2C3D4E5.com.khajistan.tv"), team)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: full), team)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "com.khajistan.tv.shared"), nil)
+    try expectEqual(KeychainAccess.teamPrefix(inAccessGroup: "A1B2C3D4E5.com.khajistan.archive"), nil)
+    try expect(KeychainAccess.probeAccount != "preview" && KeychainAccess.probeAccount != "session", "the probe is not a password slot")
+    try expectEqual(KeychainAccess.entitledGroup(teamPrefix: nil), nil)
+    try expectEqual(KeychainAccess.entitledGroup(teamPrefix: "$(AppIdentifierPrefix)"), nil)
+
+    // A missing date is unknown. The shared item stays when it exists; a dated legacy copy
+    // wins only when both dates are known and the legacy copy is strictly later.
+    let earlier = Date(timeIntervalSince1970: 1_000)
+    let later = Date(timeIntervalSince1970: 2_000)
+    try expect(KeychainAccess.legacyIsNewer(preferred: earlier, legacy: later))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: later, legacy: earlier))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: earlier, legacy: earlier))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: nil, legacy: later))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: later, legacy: nil))
+    try expect(!KeychainAccess.legacyIsNewer(preferred: nil, legacy: nil))
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: earlier, hasLegacy: true, legacyModified: later), .legacy)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: later, hasLegacy: true, legacyModified: earlier), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: earlier, hasLegacy: true, legacyModified: earlier), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: nil, hasLegacy: true, legacyModified: nil), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: nil, hasLegacy: true, legacyModified: later), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: true, preferredModified: nil, hasLegacy: false, legacyModified: nil), .preferred)
+    try expectEqual(KeychainAccess.keep(hasPreferred: false, preferredModified: nil, hasLegacy: true, legacyModified: nil), .legacy)
+    try expectEqual(KeychainAccess.keep(hasPreferred: false, preferredModified: nil, hasLegacy: false, legacyModified: nil), nil)
+    let omittedHeld = KeychainAccess.Held(data: Data("private".utf8), modified: nil)
+    let bareHeld = KeychainAccess.Held(data: Data("bare".utf8), modified: later)
+    try expectEqual(KeychainAccess.chooseLegacy(omitted: omittedHeld, bare: bareHeld), omittedHeld)
+    try expectEqual(KeychainAccess.chooseLegacy(omitted: nil, bare: bareHeld), bareHeld)
+
+    let secret = Data("preview-secret".utf8)
+    let shelf = SamePartitionTrap(omittedPartition: full, sharedGroup: full)
+    shelf.items[full] = (data: secret, modified: nil)
+    let shelfRead = KeychainAccess.readItem(service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: false, store: shelf)
+    try expectEqual(shelfRead, .some(secret))
+    try expect(!shelf.trap, "an omitted-group delete must not hit the shared partition")
+    try expectEqual(shelf.items[full]?.data, .some(secret))
+    try expect(shelf.log.filter { $0.hasPrefix("remove") }.isEmpty, "the extension read does not delete")
+
+    let privateGroup = "A1B2C3D4E5.com.khajistan.tv"
+    let app = SamePartitionTrap(omittedPartition: privateGroup, sharedGroup: full)
+    app.items[privateGroup] = (data: secret, modified: nil)
+    app.items[KeychainAccess.tvSharedSuffix] = (data: Data("bare".utf8), modified: later)
+    let moved = KeychainAccess.readItem(service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: true, store: app)
+    try expectEqual(moved, .some(secret))
+    try expectEqual(app.items[full]?.data, .some(secret))
+    try expect(app.items[privateGroup]?.data == nil, "the private slot is removed after the shared item reads back")
+    try expect(app.items[KeychainAccess.tvSharedSuffix]?.data == nil, "the bare suffix is removed after the shared item reads back")
+    try expect(!app.trap, "the app's private partition is not the shared group")
+    try expect(app.log.first == "store \(full)", "the shared item is stored before any old slot is removed")
+
+    let undated = SamePartitionTrap(omittedPartition: privateGroup, sharedGroup: full)
+    undated.items[full] = (data: secret, modified: nil)
+    undated.items[privateGroup] = (data: Data("older".utf8), modified: later)
+    let kept = KeychainAccess.readItem(service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: true, store: undated)
+    try expectEqual(kept, .some(secret))
+    try expectEqual(undated.items[full]?.data, .some(secret))
+
+    let refused = SamePartitionTrap(omittedPartition: privateGroup, sharedGroup: full)
+    refused.items[full] = (data: Data("old".utf8), modified: nil)
+    refused.refuse = [full, privateGroup]
+    let refusedWrite = KeychainAccess.writeItem(data: Data("new".utf8), service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: true, store: refused)
+    try expect(!refusedWrite)
+    try expectEqual(refused.items[full]?.data, .some(Data("old".utf8)))
+    try expect(refused.log.filter { $0.hasPrefix("remove") }.isEmpty, "a refused add deletes nothing")
+    try expectEqual(refused.log.first, "store \(full)")
+
+    let fallback = SamePartitionTrap(omittedPartition: privateGroup, sharedGroup: full)
+    fallback.items[full] = (data: Data("old".utf8), modified: nil)
+    fallback.refuse = [full]
+    let fallbackWrite = KeychainAccess.writeItem(data: Data("new".utf8), service: "com.khajistan.tv", account: "preview", accessGroup: full, migrate: true, store: fallback)
+    try expect(fallbackWrite)
+    try expectEqual(fallback.items[privateGroup]?.data, .some(Data("new".utf8)))
+    try expect(fallback.items[full]?.data == nil, "the old shared item is removed only after the private fallback reads back")
+    try expectEqual(fallback.log.first, "store \(full)")
+    try expect(fallback.log.contains("store \(privateGroup)"))
+    let firstRemove = try require(fallback.log.firstIndex { $0.hasPrefix("remove") })
+    let privateStore = try require(fallback.log.firstIndex(of: "store \(privateGroup)"))
+    try expect(privateStore < firstRemove, "the fallback is read back before the old shared item is removed")
+
+    let auth = try bundledSource("KhajistanTV/Services/AuthStore.swift")
+    try expect(auth.contains("Keychain.read(Account.preview, shared: true)"))
+    try expect(auth.contains("Keychain.write(Data(password.utf8), account: Account.preview, shared: true)"))
+    try expect(auth.contains("Keychain.delete(Account.preview, shared: true)"))
+    let shelfSource = try bundledSource("TopShelf/ShelfFeed.swift")
+    try expect(shelfSource.contains("Keychain.read(\"preview\", shared: true)"))
+    let keychainSource = try bundledSource("KhajistanTV/Services/Keychain.swift")
+    try expect(keychainSource.contains("Bundle.main.bundleURL.pathExtension == \"appex\""))
+    try expect(keychainSource.contains("let migrate = shared && !isAppExtension"))
+    try expect(keychainSource.contains("guard !isAppExtension else { return nil }"))
+    try expect(keychainSource.contains("defer { remove(probe) }"))
+    try expect(!keychainSource.contains("didResolveSharedGroup"))
+}
+
 func anonKeyIsTheSitesAnonRole() throws {
     let parts = KJConfig.anonKey.split(separator: ".")
     try expectEqual(parts.count, 3)
@@ -2251,6 +2465,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Transmission carriers", transmissionCarriers),
     ("Schedule URL, basic authorization, config", scheduleURLAndBasicAuthorization),
     ("Anon key is the site's anon role", anonKeyIsTheSitesAnonRole),
+    ("Keychain query matches the entitlement and keeps the old item", keychainQueryMatchesTheEntitlementAndKeepsTheOldItem),
     ("Auth session from a body", authSessionFromBody),
     ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
     ("Auth error messages", authErrorMessages),

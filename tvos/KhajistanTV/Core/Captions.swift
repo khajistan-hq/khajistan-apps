@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 // Subtitles and live captions, Foundation only so the core tests reach every rule.
 //

@@ -54,8 +54,8 @@ Since 2026-10-06 the two apps compile **one copy** of the files they had in comm
 files under `Khajistan/` are links to the Apple TV app's own files under
 `tvos/KhajistanTV/`, so a fix made for either app reaches both:
 
-- `Core/`: Auth, Sky (the sun rule, `Skin` and `SkinChoice`; the phone adds only its pick-lapses-with-the-band storage in AppModel), Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
-- `Services/`: PicsVidsStore (MixesStore was dropped with the Khajistan Radio section, owner 2026-10-06)
+- `Core/`: Auth, KeychainAccess (the keychain query; the phone omits the access group), Sky (the sun rule, `Skin` and `SkinChoice`; the phone adds only its pick-lapses-with-the-band storage in AppModel), Mixes, PicsVids, Programming, Receiver, RegionMap, StationClock, Transmission
+- `Services/`: Keychain, PicsVidsStore (MixesStore was dropped with the Khajistan Radio section, owner 2026-10-06)
 - `Player/`: PlayerLayerView
 - `Views/`: PigeonMark, ChatMedia (a chat line's GIF or Pics/Vids picture)
 - `Core/Shuffle`: the Receiver's Shuffle (medium, atlas scope, the weighted draw) and its Cameras grouping
@@ -78,9 +78,10 @@ so build both apps after one.
 Still two copies, and why:
 
 - **Config** says which app it is: the user agent and the keychain service name. Each app keeps its own.
-- **Services and Player** (AuthStore, Keychain, PnvImages, ReceiverStore, TransmissionStore,
+- **Services and Player** (AuthStore, PnvImages, ReceiverStore, TransmissionStore,
   PlayerController, StationClips): each app's copy has grown its own behaviour. Sharing them is
-  a merge, not a link.
+  a merge, not a link. Keychain is shared; the phone never sets an access group, so items
+  already stored on a phone stay on the query they were saved with.
 
 ## Verify without Xcode
 

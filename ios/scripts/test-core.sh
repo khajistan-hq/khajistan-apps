@@ -12,8 +12,8 @@ mkdir -p .build
 # These files are the Apple TV app's own (tvos/KhajistanTV/...), linked here so the two apps
 # compile ONE copy. A copy in place of a link is how they drifted apart before (2026-10-06), so
 # the check refuses to run the tests if any link has been replaced by a file.
-SHARED="Core/Auth Core/Mixes Core/PicsVids Core/Programming Core/Receiver Core/RegionMap
-Core/StationClock Core/Transmission Core/Chat Core/Sky Services/PicsVidsStore Services/ChatStore
+SHARED="Core/Auth Core/KeychainAccess Core/Mixes Core/PicsVids Core/Programming Core/Receiver Core/RegionMap
+Core/StationClock Core/Transmission Core/Chat Core/Sky Services/Keychain Services/PicsVidsStore Services/ChatStore
 Player/PlayerLayerView Views/PigeonMark"
 SHARED="$SHARED Views/ChatMedia Core/Shuffle"
 for f in $SHARED; do

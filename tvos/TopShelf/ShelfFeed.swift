@@ -53,7 +53,7 @@ enum ShelfFeed {
         let now = Date()
         let url = Transmission.scheduleURL(month: StationClock.stationMonth(now))
         var programming: Programming? = await fetch(url)
-        if programming == nil, let data = Keychain.read("preview"),
+        if programming == nil, let data = Keychain.read("preview", shared: true),
            let password = String(data: data, encoding: .utf8), !password.isEmpty {
             programming = await fetch(url, authorization: Transmission.basicAuthorization(user: KJConfig.previewUser, password: password))
         }

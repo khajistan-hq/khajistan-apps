@@ -66,8 +66,12 @@ final class ReceiverTuner {
     // MARK: - Choosing
 
     func play(_ channel: Channel, in list: [Channel]) {
+        // A directory or shelf pick is not a draw, and it is not a Surf list.
+        // Surf skips it only when it is the card at the cursor.
+        shuffle.observe(channel.id)
         stop()
         self.list = list
+        listDeck = nil
         source = .live(channel)
         changeTask = Task { await open(channel) }
     }
@@ -83,11 +87,25 @@ final class ReceiverTuner {
         switch source {
         case .live(let current):
             let from = destination ?? current
-            guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-            let target = list[(position + delta + list.count) % list.count]
-            destination = target
-            changeTask?.cancel()
-            changeTask = Task { await change(to: target) }
+            guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
+            // The list Surf dealt does not wrap. Previous on its first card stays. Next past
+            // its end deals the next permutation of that list's own deck. A shelf still wraps.
+            switch SurfList.step(delta: delta, from: position, count: list.count, deck: listDeck) {
+            case .stay:
+                return
+            case .deal:
+                changeTask?.cancel()
+                let task = Task { await dealNext(after: from) }
+                shuffle.takeFlight(task)
+                changeTask = task
+                return
+            case .move(let index):
+                let target = list[index]
+                shuffle.observe(target.id)
+                destination = target
+                changeTask?.cancel()
+                changeTask = Task { await change(to: target) }
+            }
         case .transmission:
             changeTask?.cancel()
             changeTask = Task { await switchTransmission() }
@@ -127,35 +145,74 @@ final class ReceiverTuner {
     private(set) var surfing = false
     /// Why the last Surf found nothing, until the next one.
     private(set) var surfNote: String?
+    /// True when the chosen scope has nothing that can play, until the medium, scope or region changes.
+    private(set) var surfBlocked = false
+    /// The deck Surf deals, shared with the step past the end of that deck.
+    @ObservationIgnored private let shuffle = ShuffleSession()
+    /// The deck the list on screen was dealt from. Nil for a shelf opened by hand.
+    @ObservationIgnored private var listDeck: ShuffleDeckRef?
 
-    /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
-    /// settings (owner, 2026-10-07). The region is drawn by how many channels of that medium it
-    /// carries; next and previous then move through that region's list.
+    /// The medium, the scope or the region changed, so Surf can be tried again.
+    func shuffleSelectionChanged() {
+        shuffle.noteSelectionChanged()
+        surfBlocked = false
+        surfNote = nil
+    }
+
+    /// The next card of the deck kept in the Surf settings (owner, 2026-10-07). The deck is one
+    /// permutation of the playable channels. Next and previous move through that order. The step
+    /// past the end deals the next permutation of the same deck. Starting Surf cancels a deal
+    /// that is already in flight.
     func surf() async {
         guard !surfing else { return }
         surfing = true
+        changeTask?.cancel()
+        let task = Task { @MainActor in
+            defer { self.surfing = false }
+            await self.runSurf()
+        }
+        shuffle.takeFlight(task)
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func runSurf() async {
+        guard !Task.isCancelled else { return }
         surfNote = nil
-        defer { surfing = false }
         await receiver.loadIndex()
+        guard !Task.isCancelled else { return }
         guard let index = receiver.index else {
             surfNote = "The receiver has not loaded."
             return
         }
-        let defaults = UserDefaults.standard
-        let medium = defaults.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
-        let scope = defaults.string(forKey: ShuffleScope.key).flatMap(ShuffleScope.init(rawValue:)) ?? .main
-        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
-        // Up to three regions, in case one's list will not load.
-        for _ in 0..<3 {
-            guard let region = ShufflePick.region(weights) else { break }
-            guard let list = try? await receiver.channels(regionId: region, cameras: false) else { continue }
-            let pool = list.filter { $0.mediaType == medium.rawValue }
-            if let channel = pool.randomElement() {
-                play(channel, in: pool)
-                return
-            }
+        let (medium, scope, regionId) = shuffle.settings()
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            load: { try await self.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
+        ) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
         }
-        surfNote = "Nothing to surf there right now."
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: nil, playingId: destination?.id ?? channel?.id) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        // Cancelled after the deal, before the channel is the source: the card stays held.
+        // A tab change does not cancel this task. The tuner is still here, so the channel
+        // is installed now and the next Surf is the card after it.
+        guard !Task.isCancelled else { return }
+        surfBlocked = false
+        play(pick.channel, in: pick.list)
+        listDeck = pick.deck
+        shuffle.noteArrival(SurfPresentation.phone(sourceId: pick.channel.id, dealtId: pick.channel.id, installed: true), key: pick.deck.key)
     }
 
     /// Turns the receiver off.
@@ -220,6 +277,8 @@ final class ReceiverTuner {
         controller.stop()
         controller.state = .tuning
         source = .live(target)
+        // Spent at install, before the fade and the settle. A cancel during those still keeps the spend.
+        shuffle.noteArrival(SurfPresentation.phone(sourceId: target.id, dealtId: target.id, installed: true), key: listDeck?.key)
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -247,6 +306,35 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
+    }
+
+    /// The card after this list's own deck. The chips may have moved; they do not choose the deck.
+    /// The channel that was playing is the last id of that deck, so the new one does not open on it.
+    private func dealNext(after from: Channel) async {
+        guard !Task.isCancelled else { return }
+        guard let index = receiver.index, let deck = listDeck else { return }
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: deck.medium, scope: deck.scope, regionId: deck.regionId,
+            load: { try await self.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
+        ) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: deck, playingId: from.id) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        list = pick.list
+        listDeck = pick.deck
+        destination = pick.channel
+        // `change` installs the source inside the tune, before the fade and the settle.
+        // That spend stands if Next, Surf, or power cancels the rest.
+        await change(to: pick.channel)
     }
 
     private func change(to target: Channel) async {

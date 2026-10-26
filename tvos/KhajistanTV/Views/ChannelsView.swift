@@ -69,7 +69,7 @@ struct ChannelsView: View {
         .task { await model.saves.load() }
         .task { await model.films.load() }
         .fullScreenCover(item: $playing) { choice in
-            ReceiverPlayerView(channel: choice.channel, list: choice.list)
+            ReceiverPlayerView(channel: choice.channel, list: choice.list, shuffle: model.shuffle)
         }
     }
 
@@ -138,6 +138,8 @@ struct ChannelsView: View {
         Shelf(ReceiverRules.mediumLabel(kind), count: "\(list.count)") {
             ForEach(list) { channel in
                 Button {
+                    // A directory pick is not a draw. Surf skips it only when it is the card at the cursor.
+                    model.shuffle.observe(channel.id)
                     playing = Playing(channel: channel, list: list)
                 } label: {
                     ChannelCard(channel: channel, liked: model.saves.isSaved(channel))

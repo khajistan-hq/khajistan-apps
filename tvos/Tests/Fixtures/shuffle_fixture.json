@@ -1,0 +1,153 @@
+{
+  "name": "Khajistan receiver surf shuffle",
+  "version": 1,
+  "purpose": "Shared contract for the site receiver and the iOS/tvOS apps. Deal these channels with these seeds and the draws must match. Copy this file as-is.",
+  "algorithm": {
+    "prng": "mulberry32",
+    "prngRange": "[0, 1)",
+    "mulberry32": "function mulberry32(seed) { var a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }",
+    "fisherYates": "Copy the scope's ids, preserving channels-array order. Do not sort. For i from length-1 down to 1 inclusive, j = floor(rand() * (i + 1)), then swap i and j. Do not call rand for i = 0.",
+    "deck": "One deck is one Fisher-Yates permutation. Draw from index 0 upward, without replacement. A directory click is not a draw. If the card at the cursor is the channel already playing and the pool has more than one channel, skip that card and draw the next one. If the skip exhausts the deck, reshuffle with the reshuffle boundary rule, treating the playing channel as the last id drawn. Pure Surf does not click between draws, so this skip does not change the seeded orders below.",
+    "reshuffle": "When the deck is exhausted, deal again with the same PRNG stream. Do not reseed. If the new deck has more than one id and its first id equals the last id drawn, swap index 0 with index 1. A one-channel deck may repeat.",
+    "firstDeck": "The first deck is dealt with no channel already playing, so the boundary swap does not apply to it. Each scope below is two full decks: the permutation, then one reshuffle.",
+    "scopes": {
+      "main": "beyond === false. Every channel in the main atlas, including one also filed to an extension region.",
+      "region": "regions contains regionScope. A selected region uses this scope even when the beyond toggle is on.",
+      "beyond": "beyond === true. Channels outside the main atlas only. Not main+extension."
+    },
+    "excluded": "Drop a channel health marks offline or denylisted before dealing. This list is already the playable set. An empty playable scope shows a message and does not fall back to another scope."
+  },
+  "regionScope": "horn",
+  "channels": [
+    {
+      "id": "horn-news",
+      "regions": [
+        "horn"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "horn-music",
+      "regions": [
+        "horn"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "horn-diaspora",
+      "regions": [
+        "horn",
+        "nusantara"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "indus-one",
+      "regions": [
+        "indus"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "indus-two",
+      "regions": [
+        "indus"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "nusantara-one",
+      "regions": [
+        "nusantara"
+      ],
+      "beyond": true
+    },
+    {
+      "id": "nusantara-two",
+      "regions": [
+        "nusantara"
+      ],
+      "beyond": true
+    },
+    {
+      "id": "rumelia-one",
+      "regions": [
+        "rumelia"
+      ],
+      "beyond": true
+    }
+  ],
+  "pools": {
+    "main": [
+      "horn-news",
+      "horn-music",
+      "horn-diaspora",
+      "indus-one",
+      "indus-two"
+    ],
+    "region": [
+      "horn-news",
+      "horn-music",
+      "horn-diaspora"
+    ],
+    "beyond": [
+      "nusantara-one",
+      "nusantara-two",
+      "rumelia-one"
+    ]
+  },
+  "seeds": {
+    "main": 2,
+    "region": 3,
+    "beyond": 5
+  },
+  "boundaryNote": "Each seed is one where a second Fisher-Yates with the same stream would open on the previous deck's last id. The second deck recorded here has index 0 swapped with index 1, so the boundary does not repeat.",
+  "draws": {
+    "main": {
+      "decks": [
+        [
+          "horn-diaspora",
+          "indus-two",
+          "horn-news",
+          "horn-music",
+          "indus-one"
+        ],
+        [
+          "horn-news",
+          "indus-one",
+          "horn-music",
+          "horn-diaspora",
+          "indus-two"
+        ]
+      ]
+    },
+    "region": {
+      "decks": [
+        [
+          "horn-music",
+          "horn-news",
+          "horn-diaspora"
+        ],
+        [
+          "horn-news",
+          "horn-diaspora",
+          "horn-music"
+        ]
+      ]
+    },
+    "beyond": {
+      "decks": [
+        [
+          "nusantara-one",
+          "nusantara-two",
+          "rumelia-one"
+        ],
+        [
+          "nusantara-two",
+          "rumelia-one",
+          "nusantara-one"
+        ]
+      ]
+    }
+  }
+}

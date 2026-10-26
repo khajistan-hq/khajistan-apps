@@ -168,11 +168,11 @@ enum ReceiverRules {
     /// MIN_DELIVERY_RATIO).
     private static let minimumDeliveryRatio = 0.5
 
-    /// Channels the receiver may offer, sorted by name. A channel is dropped when it is not
+    /// Channels the receiver may offer, in the file's order. A channel is dropped when it is not
     /// published, is switched off, is on the denylist or the off-air list, is graded offline or
     /// blocked, delivers under half the expected stream, or has no active stream. The health
     /// feed's grade outranks the channel's own `healthStatus`. A repeated id is kept once, at
-    /// its first eligible occurrence.
+    /// its first eligible occurrence. The shelf sorts this by name. Surf keeps this order.
     static func eligible(_ channels: [Channel], controls: Controls) -> [Channel] {
         var seen = Set<String>()
         var kept: [Channel] = []
@@ -188,7 +188,12 @@ enum ReceiverRules {
             if !seen.insert(channel.id).inserted { continue }
             kept.append(channel)
         }
-        return kept.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        return kept
+    }
+
+    /// The directory's order. Surf does not use this. The deck stays in file order.
+    static func byName(_ channels: [Channel]) -> [Channel] {
+        channels.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     /// GET site/api/frequency?stream=<streamId>. The id is opaque, so it is encoded as one.

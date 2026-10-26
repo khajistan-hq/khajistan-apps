@@ -10,7 +10,12 @@ import UIKit
 /// picture and up/down are already the player's, and a control the viewer can see in the strip says
 /// what it does, which a hidden gesture would not.
 struct ReceiverPlayerView: View {
-    let list: [Channel]
+    /// The app's decks, so a directory pick is remembered and is not a draw. Nil only when
+    /// this screen was opened with no session at all.
+    var shuffle: ShuffleSession?
+    /// The deck this list was dealt from. Nil for a shelf: that list still wraps at the ends.
+    @State private var listDeck: ShuffleDeckRef?
+    @State private var list: [Channel]
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -44,8 +49,10 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel]) {
-        self.list = list
+    init(channel: Channel, list: [Channel], deck: ShuffleDeckRef? = nil, shuffle: ShuffleSession? = nil) {
+        self.shuffle = shuffle
+        _listDeck = State(initialValue: deck)
+        _list = State(initialValue: list)
         _current = State(initialValue: channel)
     }
 
@@ -135,6 +142,7 @@ struct ReceiverPlayerView: View {
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
+        .onAppear { noteOnScreen(current, tune: .presented) }
         .task {
             await open()
             #if DEBUG
@@ -150,7 +158,10 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
-        .onDisappear { stopEverything() }
+        .onDisappear {
+            shuffle?.observe(current.id)
+            stopEverything()
+        }
     }
 
     // MARK: - Overlay
@@ -360,15 +371,61 @@ struct ReceiverPlayerView: View {
         channel.mediaType == "radio" && !channel.isReverent && !reduceMotion
     }
 
-    /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
-    /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
+    /// The neighbour of the channel last asked for, reached behind the pigeon. On a list Surf
+    /// dealt, Previous on the first card stays and Next past the end deals again. Any other list
+    /// wraps. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
         let from = destination ?? current
-        guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-        let target = list[(position + delta + list.count) % list.count]
-        destination = target
-        changeTask?.cancel()
-        changeTask = Task { await change(to: target) }
+        guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
+        switch SurfList.step(delta: delta, from: position, count: list.count, deck: listDeck) {
+        case .stay:
+            return
+        case .deal:
+            changeTask?.cancel()
+            let task = Task { await dealNext(after: from) }
+            shuffle?.takeFlight(task)
+            changeTask = task
+        case .move(let index):
+            let target = list[index]
+            shuffle?.observe(target.id)
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
+        }
+    }
+
+    /// The card after this list's own deck. The chips may have moved; they do not choose the deck.
+    /// The channel on screen is not dealt first again.
+    private func dealNext(after from: Channel) async {
+        guard !Task.isCancelled else { return }
+        guard let shuffle, let deck = listDeck, let index = model.receiver.index else { return }
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: deck.medium, scope: deck.scope, regionId: deck.regionId,
+            load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
+        ) else { return }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: deck, playingId: from.id) else { return }
+        list = pick.list
+        listDeck = pick.deck
+        destination = pick.channel
+        await change(to: pick.channel)
+    }
+
+    /// The dealt channel is now the one on screen. A failure and a timeout spend it, the same as a picture.
+    /// Menu before the cut never calls this: the previous picture is still current, so the card stays held.
+    /// A neighbour reaching `.playing` is not passed here.
+    private func noteOnScreen(_ channel: Channel, tune: SurfTune) {
+        guard let deck = listDeck else { return }
+        shuffle?.noteArrival(SurfPresentation.television(currentId: channel.id, dealtId: channel.id, tune: tune), key: deck.key)
+    }
+
+    /// The state the cut landed on. A dead stream and the 30 second timeout both publish `.failed`.
+    private func tuneOnScreen(_ state: PlayerController.State) -> SurfTune {
+        switch state {
+        case .failed: return .failed
+        case .playing, .paused: return .playing
+        case .tuning, .idle: return .presented
+        }
     }
 
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
@@ -441,6 +498,7 @@ struct ReceiverPlayerView: View {
             current = target
         }
         if destination?.id == target.id { destination = nil }
+        noteOnScreen(target, tune: tuneOnScreen(next.state))
         outgoing.stop()
         next.releaseSound()
         model.captions.attach(target, player: next)

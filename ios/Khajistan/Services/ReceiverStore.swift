@@ -98,7 +98,7 @@ final class ReceiverStore {
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera
     /// shard instead of the television and radio one.
-    func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
+    func channels(regionId: String, cameras: Bool, fileOrder: Bool = false) async throws -> [Channel] {
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
         let key = cameras ? regionId + "-camera" : regionId
         let raw: [Channel]
@@ -123,7 +123,8 @@ final class ReceiverStore {
             shards[key] = raw
         }
         await refreshControlsIfStale()
-        return ReceiverRules.eligible(raw, controls: controls)
+        let kept = ReceiverRules.eligible(raw, controls: controls)
+        return fileOrder ? kept : ReceiverRules.byName(kept)
     }
 
     /// The shape files the map is drawn from. The extended file comes only when asked for. Both are

@@ -386,7 +386,9 @@ func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
     let result = ReceiverRules.eligible(channels, controls: .empty)
     try expectEqual(result.map(\.id).filter { $0.hasPrefix("dup") }.sorted(), ["dup", "dup2"])
     try expectEqual(result.count, 7)
-    try expectEqual(result.map(\.name), ["Alpha", "beta", "Dup", "Dup Two", "Radio 2", "Radio 10", "zeta"])
+    // File order. The shelf sorts by name; Surf does not.
+    try expectEqual(result.map(\.name), ["Dup", "Dup Two", "zeta", "Alpha", "beta", "Radio 10", "Radio 2"])
+    try expectEqual(ReceiverRules.byName(result).map(\.name), ["Alpha", "beta", "Dup", "Dup Two", "Radio 2", "Radio 10", "zeta"])
     try expectEqual(ReceiverRules.eligible([], controls: .empty).count, 0)
 }
 
@@ -2238,7 +2240,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Channel decoding and active stream", channelDecodesAndFindsItsActiveStream),
     ("Channel.place drops what is unknown", channelPlaceDropsWhatIsNotKnown),
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
-    ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
+    ("Eligibility: duplicates once, file order, shelf sorts by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),

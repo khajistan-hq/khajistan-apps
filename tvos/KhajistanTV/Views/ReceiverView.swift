@@ -10,6 +10,7 @@ struct ReceiverView: View {
     @State private var mapError: String?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
+    @State private var surfBlocked = false
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
     @State private var surfNote: String?
@@ -32,8 +33,11 @@ struct ReceiverView: View {
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $shuffled) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, deck: pick.deck, shuffle: model.shuffle)
         }
+        // Leaving Receiver (the top bar, for instance) drops this screen. Cancel a Surf that
+        // has not dealt yet. A card already dealt stays held until that channel is on screen.
+        .onDisappear { model.shuffle.cancelFlight() }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         // vod.json opens with the preview password, so a password entered later loads it.
@@ -145,20 +149,25 @@ struct ReceiverView: View {
     // MARK: - Map
 
     private var mapArea: some View {
-        AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open)
+        AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open, selectRegion: rememberRegion)
     }
 
     // MARK: - Surf
 
-    /// A live channel at random, one press from the front (owner, 2026-10-06: "easily accessible
+    /// A live channel from the deck, one press from the front (owner, 2026-10-06: "easily accessible
     /// channel shuffle button in the home page"), of the medium and from the part of the atlas
-    /// chosen under it, kept on the device as the phone keeps them (owner, 2026-10-07). The region
-    /// is drawn by how many channels of that medium it carries; up and down then surf that region.
-    /// Called Surf, as the website's receiver and the phone call it.
+    /// chosen under it, kept on the device as the phone keeps them (owner, 2026-10-07). Up and down
+    /// then move through that deck. Called Surf, as the website's receiver and the phone call it.
     private var surf: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                Task { await shuffle() }
+                guard !shuffling else { return }
+                shuffling = true
+                let task = Task { @MainActor in
+                    defer { self.shuffling = false }
+                    await self.shuffleChannels()
+                }
+                model.shuffle.takeFlight(task)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
@@ -175,23 +184,33 @@ struct ReceiverView: View {
                 surfFocused = true
             }
             .accessibilityIdentifier("shuffle")
-            .disabled(shuffling || model.receiver.index == nil)
+            .disabled(shuffling || surfBlocked || model.receiver.index == nil)
             // The plate's padding is pulled back so the label sits on the page margin.
             .padding(.leading, -26)
-            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            // "Main atlas · Extended atlas · Everywhere" is wider than the sidebar; the line above
-            // says "atlas", so the chips can drop it.
+            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") {
+                mediumRaw = $0
+                model.shuffle.noteSelectionChanged()
+                surfBlocked = false
+                surfNote = nil
+            }
+            // "Main atlas" is wider than the sidebar needs; the line above says "atlas", so the
+            // chip can drop it.
             chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label.replacingOccurrences(of: " atlas", with: "")) },
-                  current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
+                  current: scope.rawValue, id: "shuffle-scope") {
+                scopeRaw = $0
+                model.shuffle.noteSelectionChanged()
+                surfBlocked = false
+                surfNote = nil
+            }
             if let surfNote { Text(surfNote).kjSmall(faint: true) }
         }
     }
 
     private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
 
-    /// One line that fits the sidebar; the chips under it say which medium and which atlas.
+    /// One line that fits the sidebar; the chips under it say which medium and which part of the atlas.
     private let surfLine = "A live channel at random from the atlas"
-    private var scope: ShuffleScope { ShuffleScope(rawValue: scopeRaw) ?? .main }
+    private var scope: ShuffleScope { ShuffleScope.resolved(scopeRaw) }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
         HStack(spacing: 4) {
@@ -205,23 +224,42 @@ struct ReceiverView: View {
         .padding(.leading, -22)
     }
 
-    private func shuffle() async {
-        guard let index = model.receiver.index, !shuffling else { return }
-        shuffling = true
+    private func shuffleChannels() async {
+        guard !Task.isCancelled, let index = model.receiver.index else { return }
         surfNote = nil
-        defer { shuffling = false }
-        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
-        // Up to three regions, in case one's list will not load.
-        for _ in 0..<3 {
-            guard let region = ShufflePick.region(weights) else { break }
-            guard let list = try? await model.receiver.channels(regionId: region, cameras: false) else { continue }
-            let pool = list.filter { $0.mediaType == medium.rawValue }
-            if let channel = pool.randomElement() {
-                shuffled = ShufflePick(channel: channel, list: pool)
-                return
-            }
+        let (medium, scope, regionId) = model.shuffle.settings(openRegion: model.receiverPath.last?.id)
+        guard let prepared = await model.shuffle.prepare(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
+        ) else {
+            guard !Task.isCancelled else { return }
+            surfNote = model.shuffle.note
+            surfBlocked = model.shuffle.blocked
+            return
         }
-        surfNote = "Nothing to surf there right now."
+        guard !Task.isCancelled else { return }
+        guard let pick = model.shuffle.commit(prepared, finishList: nil, playingId: nil) else {
+            guard !Task.isCancelled else { return }
+            surfNote = model.shuffle.note
+            surfBlocked = model.shuffle.blocked
+            return
+        }
+        // Leaving Receiver cancels this task. The deal is already held, so the next Surf
+        // returns it. Presenting it here would be on a screen that is going away.
+        guard !Task.isCancelled else { return }
+        surfBlocked = false
+        shuffled = pick
+    }
+
+    /// The strip's region is the one Region scope draws from. Main and Beyond keep the deck
+    /// they were dealing. Moving the strip lets an empty region be tried again.
+    private func rememberRegion(_ id: String) {
+        let previous = UserDefaults.standard.string(forKey: ShuffleSession.regionKey)
+        UserDefaults.standard.set(id, forKey: ShuffleSession.regionKey)
+        guard previous != id else { return }
+        model.shuffle.noteSelectionChanged()
+        surfBlocked = false
+        surfNote = nil
     }
 
     // MARK: - Cameras
@@ -291,6 +329,7 @@ struct ReceiverView: View {
     /// Opens a region from the strip. The region is the index's own line for it; a map shape the
     /// index has no line for is still opened, as what the map says it is.
     private func open(_ mapRegion: MapRegion) {
+        rememberRegion(mapRegion.id)
         guard let index = model.receiver.index else { return }
         let region = index.regions.first { $0.id == mapRegion.id }
             ?? ReceiverIndex.Region(
@@ -343,6 +382,7 @@ private struct AtlasPanel: View {
     let mapError: String?
     let failure: (String) -> AnyView
     let open: (MapRegion) -> Void
+    let selectRegion: (String) -> Void
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -364,7 +404,10 @@ private struct AtlasPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .focusSection()
-        .defaultFocus($focusedRegion, "indus")
+        .defaultFocus($focusedRegion, UserDefaults.standard.string(forKey: ShuffleSession.regionKey) ?? ShuffleSession.defaultRegionId)
+        .onChange(of: focusedRegion) { _, id in
+            if let id { selectRegion(id) }
+        }
         #if DEBUG
         // `-kjautowalk YES` steps focus along the region strip, for measuring on a device with
         // no one at the remote (FrameMeter prints how many frames come late meanwhile).

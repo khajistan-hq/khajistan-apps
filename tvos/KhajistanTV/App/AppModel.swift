@@ -17,6 +17,10 @@ final class AppModel {
     var section: Section
     let auth: AuthStore
     let receiver: ReceiverStore
+    /// Surf's decks. The Receiver screen is built again when the section changes, so the
+    /// decks live here, as the phone keeps them on its tuner. Leaving for Transmission
+    /// does not start them over.
+    let shuffle = ShuffleSession()
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
     /// Likes and saves, on the account (`passport_saves`), shared with the website and the dashboard.

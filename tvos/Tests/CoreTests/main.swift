@@ -3900,7 +3900,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Reading Room: provenance", readingProvenance),
     ("Shuffle: the fixture's orders, byte for byte", shuffleFixtureOrders),
-    ("Shuffle: a deck does not repeat, and the boundary swaps the first two", shuffleBoundarySwapsTheFirstTwo),
+    ("Shuffle: a directory click skips the card at the cursor", shuffleClickSkipsTheCardAtTheCursor),
     ("Shuffle: changing region deals a new deck", shuffleRegionChangeDealsANewDeck),
     ("Shuffle: one channel may repeat, and none deals nothing", shuffleOneMayRepeatAndNoneDealsNothing),
     ("Shuffle: which regions a scope loads; cameras by region", shuffleScopeRegionsAndCameras),
@@ -3911,77 +3911,17 @@ let tests: [(String, () throws -> Void)] = [
 private struct ShuffleFixture: Decodable {
     struct Channel: Decodable {
         let id: String
-        let region: String
-        let tier: String
-        let medium: String
-        let offline: Bool?
-        let country: String?
+        let regions: [String]
+        let beyond: Bool
     }
-    struct Words: Decodable {
-        let seed: UInt32
-        let words: [UInt32]
+    struct Draw: Decodable {
+        let decks: [[String]]
     }
-    struct Order: Decodable {
-        let name: String
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let playing: String?
-        let ids: [String]
-        let filters: Filters?
-    }
-    struct Filters: Decodable {
-        let country: String
-        let language: String
-        let genre: String
-        let query: String
-    }
-    struct Boundary: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let tail: String
-        let head: String
-    }
-    struct RegionChange: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let from: String
-        let take: Int
-        let to: String
-        let openingOrder: [String]
-        let wouldHaveContinued: String
-        let resetOrder: [String]
-    }
-    struct Repeat: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let first: String
-        let second: String
-    }
-    struct Empty: Decodable {
-        let medium: String
-        let scope: String
-        let region: String?
-    }
-    let filters: Filters
+    let regionScope: String
     let channels: [Channel]
-    let mulberry32: [Words]
-    let orders: [Order]
-    let boundary: [Boundary]
-    let regionChange: [RegionChange]
-    let repeats: [Repeat]
-    let empty: [Empty]
-
-    enum CodingKeys: String, CodingKey {
-        case filters, channels, mulberry32, orders, boundary, regionChange, empty
-        case repeats = "repeat"
-    }
+    let pools: [String: [String]]
+    let seeds: [String: UInt32]
+    let draws: [String: Draw]
 }
 
 private func shuffleFixture() throws -> ShuffleFixture {
@@ -3991,124 +3931,138 @@ private func shuffleFixture() throws -> ShuffleFixture {
 
 private func shuffleEntries(_ fixture: ShuffleFixture) -> [ShuffleEntry] {
     fixture.channels.map {
-        ShuffleEntry(id: $0.id, regionId: $0.region, tier: $0.tier, medium: $0.medium, offline: $0.offline ?? false)
+        ShuffleEntry(id: $0.id, regionIds: $0.regions, beyond: $0.beyond, medium: "tv")
     }
 }
 
-private func shuffleDeal(_ deck: inout ShuffleDeck, _ entries: [ShuffleEntry], medium: String, scope: String, region: String?, playing: String?) -> ShuffleDraw? {
+private func shuffleScope(_ name: String) -> ShuffleScope {
+    ShuffleScope(rawValue: name) ?? .main
+}
+
+private func shuffleRegion(_ fixture: ShuffleFixture, scope: String) -> String? {
+    scope == "region" ? fixture.regionScope : nil
+}
+
+private func shuffleDeal(_ deck: inout ShuffleDeck, _ entries: [ShuffleEntry], scope: String, region: String?, playing: String?) -> ShuffleDraw? {
     deck.draw(
         entries: entries,
-        medium: ShuffleMedium(rawValue: medium) ?? .tv,
-        scope: ShuffleScope(rawValue: scope) ?? .main,
+        medium: .tv,
+        scope: shuffleScope(scope),
         regionId: region,
         playing: playing
     )
 }
 
 func shuffleMulberry32MatchesTheFixture() throws {
-    let fixture = try shuffleFixture()
-    for row in fixture.mulberry32 {
-        var rng = Mulberry32(seed: row.seed)
-        let got = (0..<row.words.count).map { _ in rng.nextWord() }
-        try expectEqual(got, row.words, "seed \(row.seed)")
+    // The site's mulberry32, first four words. The fixture's deals are the rest of the check.
+    let words: [UInt32: [UInt32]] = [
+        2: [3153583793, 1395857638, 1225337227, 2310499808],
+        3: [3093350482, 166052715, 1959330548, 321813351],
+        5: [2962560684, 3318907087, 943874942, 2676532661],
+    ]
+    for (seed, expected) in words {
+        var rng = Mulberry32(seed: seed)
+        let got = expected.map { _ in rng.nextWord() }
+        try expectEqual(got, expected, "seed \(seed)")
     }
 }
 
 func shuffleFixtureOrders() throws {
     let fixture = try shuffleFixture()
     let entries = shuffleEntries(fixture)
-    try expect(!fixture.filters.country.isEmpty && !fixture.filters.query.isEmpty, "filters are recorded and not applied")
-    for row in fixture.orders {
-        var deck = ShuffleDeck(seed: row.seed)
-        let dealt = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: row.playing), row.name)
-        // The id strings, in order, including the card already playing when one was named.
-        try expectEqual(dealt.order, row.ids, row.name)
-        try expectEqual(dealt.id, row.ids[0], row.name)
-        try expectEqual(Set(dealt.order).count, dealt.order.count, "no repeat inside \(row.name)")
-        let pool = Set(ShuffleDeck.playableIDs(
-            entries, medium: ShuffleMedium(rawValue: row.medium) ?? .tv,
-            scope: ShuffleScope(rawValue: row.scope) ?? .main, regionId: row.region
-        ))
-        try expectEqual(Set(dealt.order), pool, row.name)
-        if let playing = row.playing, row.ids.count > 1 {
-            try expect(dealt.order[0] != playing, "already playing opens \(row.name)")
+    for (name, pool) in fixture.pools {
+        let region = shuffleRegion(fixture, scope: name)
+        let ids = ShuffleDeck.playableIDs(entries, medium: .tv, scope: shuffleScope(name), regionId: region)
+        try expectEqual(ids, pool, name)
+        // A selected region does not narrow Beyond. It does select the region pool.
+        if name == "beyond" {
+            let narrowed = ShuffleDeck.playableIDs(entries, medium: .tv, scope: .beyond, regionId: fixture.regionScope)
+            try expectEqual(narrowed, pool, "beyond ignores the selected region")
         }
     }
-    let main = try require(fixture.orders.first { $0.name == "main television, seed 1" }, "main television")
-    try expect(main.filters?.country == fixture.filters.country, "the filtered row still carries the filters")
-    try expect(main.ids.contains("levant-tv-a") && main.ids.contains("anatolia-tv-a") && main.ids.contains("solo-tv"), "filters did not narrow the deck")
-    try expect(!main.ids.contains("indus-tv-off") && !main.ids.contains("nusantara-tv-a"), "offline and extension stay out of main")
-    let beyondIndus = try require(fixture.orders.first { $0.scope == "beyond" && $0.region == "indus" }, "beyond indus")
-    let regionIndus = try require(fixture.orders.first { $0.scope == "region" && $0.region == "indus" && $0.seed == beyondIndus.seed }, "region indus")
-    try expectEqual(beyondIndus.ids, regionIndus.ids, "a selected region wins over Beyond")
-    let beyondOpen = try require(fixture.orders.first { $0.scope == "beyond" && $0.region == nil && $0.medium == "tv" }, "beyond open")
-    let tiers = Dictionary(uniqueKeysWithValues: fixture.channels.map { ($0.id, $0.tier) })
-    try expect(beyondOpen.ids.allSatisfy { tiers[$0] == "islamicate" }, "Beyond with no region is extension channels only")
+    try expect(fixture.pools["main"]?.contains("horn-diaspora") == true, "an extension filing stays in the main atlas")
+    try expect(fixture.pools["beyond"]?.contains("horn-diaspora") == false, "that filing is not a beyond channel")
+    for (name, draw) in fixture.draws {
+        var deck = ShuffleDeck(seed: try require(fixture.seeds[name], name))
+        let region = shuffleRegion(fixture, scope: name)
+        for expected in draw.decks {
+            var got: [String] = []
+            var order: [String] = []
+            for _ in expected {
+                let dealt = try require(shuffleDeal(&deck, entries, scope: name, region: region, playing: nil), name)
+                got.append(dealt.id)
+                order = dealt.order
+            }
+            try expectEqual(got, expected, name)
+            try expectEqual(order, expected, name)
+            try expectEqual(Set(order).count, order.count, "no repeat inside \(name)")
+        }
+        let decks = draw.decks
+        try expect(decks[0].last != decks[1][0], "the boundary does not repeat \(name)")
+        try expectEqual(decks[1][1], decks[0].last ?? "", "index 0 swapped with index 1 \(name)")
+    }
 }
 
-func shuffleBoundarySwapsTheFirstTwo() throws {
+func shuffleClickSkipsTheCardAtTheCursor() throws {
     let fixture = try shuffleFixture()
     let entries = shuffleEntries(fixture)
-    for row in fixture.boundary {
-        var deck = ShuffleDeck(seed: row.seed)
-        let first = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil), row.tail)
-        var last = first
-        for _ in 1..<first.order.count {
-            last = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-        }
-        let next = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil), row.head)
-        try expectEqual(last.id, row.tail, row.tail)
-        try expectEqual(next.id, row.head, row.head)
-        try expect(row.tail != row.head, "the boundary swapped")
-        try expectEqual(next.order[0], row.head)
-        try expectEqual(next.order[1], row.tail, "index 0 swapped with index 1")
+    let main = try require(fixture.draws["main"])
+    // Seed 2, one pure Surf, then a directory click of the card now at the cursor.
+    var deck = ShuffleDeck(seed: try require(fixture.seeds["main"]))
+    let opened = try require(shuffleDeal(&deck, entries, scope: "main", region: nil, playing: nil))
+    try expectEqual(opened.id, "horn-diaspora")
+    try expectEqual(opened.order, main.decks[0])
+    deck.observe("indus-two")
+    let surfed = try require(shuffleDeal(&deck, entries, scope: "main", region: nil, playing: "indus-two"))
+    try expectEqual(surfed.id, "horn-news", "click indus-two, Surf lands on horn-news")
+    try expectEqual(surfed.order, main.decks[0], "the click did not reshuffle")
+    // A click is not a draw: it does not jump the cursor to the clicked channel.
+    var cold = ShuffleDeck(seed: try require(fixture.seeds["main"]))
+    let coldDraw = try require(shuffleDeal(&cold, entries, scope: "main", region: nil, playing: "indus-two"))
+    try expectEqual(coldDraw.id, "horn-diaspora")
+    try expectEqual(coldDraw.order, main.decks[0])
+    // The card at the cursor is the last one, and it is the channel playing: the skip
+    // exhausts the deck and the reshuffle treats that channel as the last id drawn.
+    var tail = ShuffleDeck(seed: try require(fixture.seeds["main"]))
+    for _ in 0..<4 {
+        _ = try require(shuffleDeal(&tail, entries, scope: "main", region: nil, playing: nil))
     }
+    let wrapped = try require(shuffleDeal(&tail, entries, scope: "main", region: nil, playing: "indus-one"))
+    try expectEqual(wrapped.id, "horn-news")
+    try expectEqual(wrapped.order, main.decks[1])
 }
 
 func shuffleRegionChangeDealsANewDeck() throws {
     let fixture = try shuffleFixture()
     let entries = shuffleEntries(fixture)
-    for row in fixture.regionChange {
-        var left = ShuffleDeck(seed: row.seed)
-        var right = left
-        var opening: [String] = []
-        for i in 0..<row.take {
-            let dealt = try require(shuffleDeal(&left, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil))
-            _ = shuffleDeal(&right, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil)
-            if i == 0 { opening = dealt.order }
-        }
-        let continued = try require(shuffleDeal(&left, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil))
-        let reset = try require(shuffleDeal(&right, entries, medium: row.medium, scope: row.scope, region: row.to, playing: nil))
-        try expectEqual(opening, row.openingOrder)
-        try expectEqual(continued.id, row.wouldHaveContinued)
-        try expectEqual(reset.order, row.resetOrder)
-        try expect(reset.id != row.wouldHaveContinued, "the new region is not the next card of the old one")
-        var fresh = ShuffleDeck(seed: row.seed)
-        let reseeded = try require(shuffleDeal(&fresh, entries, medium: row.medium, scope: row.scope, region: row.to, playing: nil))
-        try expect(reset.order != reseeded.order, "the new deck continues the generator")
-        try expect(reset.order != opening, "the old permutation was discarded")
-    }
+    var kept = ShuffleDeck(seed: 3)
+    let opening = try require(shuffleDeal(&kept, entries, scope: "region", region: "horn", playing: nil))
+    let continued = try require(shuffleDeal(&kept, entries, scope: "region", region: "horn", playing: nil))
+    var switched = ShuffleDeck(seed: 3)
+    _ = shuffleDeal(&switched, entries, scope: "region", region: "horn", playing: nil)
+    let reset = try require(shuffleDeal(&switched, entries, scope: "region", region: "indus", playing: nil))
+    try expectEqual(opening.order, fixture.draws["region"]?.decks[0] ?? [])
+    try expect(reset.order != continued.order, "the old permutation was discarded")
+    try expectEqual(Set(reset.order), Set(["indus-one", "indus-two"]))
+    var fresh = ShuffleDeck(seed: 3)
+    let reseeded = try require(shuffleDeal(&fresh, entries, scope: "region", region: "indus", playing: nil))
+    try expect(reset.order != reseeded.order, "the new deck continues the generator")
 }
 
 func shuffleOneMayRepeatAndNoneDealsNothing() throws {
-    let fixture = try shuffleFixture()
-    let entries = shuffleEntries(fixture)
-    for row in fixture.repeats {
-        var deck = ShuffleDeck(seed: row.seed)
-        let first = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-        let second = try require(shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-        try expectEqual(first.id, row.first)
-        try expectEqual(second.id, row.second)
-    }
-    for row in fixture.empty {
-        var deck = ShuffleDeck(seed: 1)
-        let dealt = shuffleDeal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil)
-        try expect(dealt == nil, row.region ?? "none")
-    }
+    let solo = [ShuffleEntry(id: "only", regionIds: ["indus"], beyond: false, medium: "tv")]
+    var deck = ShuffleDeck(seed: 1)
+    let first = try require(shuffleDeal(&deck, solo, scope: "region", region: "indus", playing: nil))
+    let second = try require(shuffleDeal(&deck, solo, scope: "region", region: "indus", playing: "only"))
+    try expectEqual(first.id, "only")
+    try expectEqual(second.id, "only")
+    var empty = ShuffleDeck(seed: 1)
+    try expect(shuffleDeal(&empty, solo, scope: "region", region: "kashmir", playing: nil) == nil, "empty region")
+    try expect(shuffleDeal(&empty, [], scope: "main", region: nil, playing: nil) == nil, "empty main")
     try expectEqual(ShuffleScope.main.emptyNote(medium: .tv, regionSelected: true), "No television to surf on the main atlas right now.")
     try expectEqual(ShuffleScope.region.emptyNote(medium: .radio, regionSelected: true), "No radio in this region right now.")
     try expectEqual(ShuffleScope.beyond.emptyNote(medium: .tv, regionSelected: false), "No television beyond the atlas right now.")
-    try expectEqual(ShuffleScope.beyond.emptyNote(medium: .radio, regionSelected: true), "No radio in this region right now.")
+    try expectEqual(ShuffleScope.beyond.emptyNote(medium: .radio, regionSelected: true), "No radio beyond the atlas right now.")
     try expectEqual(ShuffleScope.resolved("extended"), .beyond)
     try expectEqual(ShuffleScope.resolved("everywhere"), .main)
     try expectEqual(ShuffleScope.resolved(nil), .main)
@@ -4130,12 +4084,12 @@ func shuffleScopeRegionsAndCameras() throws {
     let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(json.utf8))
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .main, selected: "indus"), ["indus", "anatolia"])
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: nil), ["nusantara"])
-    try expectEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "anatolia"), ["anatolia"])
+    try expectEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "anatolia"), ["nusantara"])
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: "anatolia"), ["anatolia"])
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: "nusantara"), ["nusantara"])
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: nil), [])
     try expectEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: "kashmir"), [])
-    try expectEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "missing"), [])
+    try expectEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "missing"), ["nusantara"])
     // Cameras: the main atlas first, then the extensions; the total is the index's own count.
     try expectEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
     try expectEqual(CameraRegions.total(index), 400)

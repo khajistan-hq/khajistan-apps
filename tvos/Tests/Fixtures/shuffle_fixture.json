@@ -1,469 +1,153 @@
 {
+  "name": "Khajistan receiver surf shuffle",
+  "version": 1,
+  "purpose": "Shared contract for the site receiver and the iOS/tvOS apps. Deal these channels with these seeds and the draws must match. Copy this file as-is.",
   "algorithm": {
     "prng": "mulberry32",
-    "unit": "UInt32 word / 4294967296",
-    "fisherYates": "i from n-1 down to 1; no draw at i = 0; j = floor(unit * (i + 1)); swap i, j",
-    "boundary": "if the first card is the channel already playing and the deck has more than one channel, swap index 0 with index 1; do not reshuffle",
-    "playing": "a channel already playing when a deck is built counts as last-played",
-    "beyond": "a selected region wins over Beyond; Beyond with no region is extension channels only",
-    "filters": "country, language, genre and search do not narrow the deck",
-    "repeat": "one playable channel may repeat; zero playable channels deals nothing"
+    "prngRange": "[0, 1)",
+    "mulberry32": "function mulberry32(seed) { var a = seed >>> 0; return function () { a |= 0; a = (a + 0x6D2B79F5) | 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }",
+    "fisherYates": "Copy the scope's ids, preserving channels-array order. Do not sort. For i from length-1 down to 1 inclusive, j = floor(rand() * (i + 1)), then swap i and j. Do not call rand for i = 0.",
+    "deck": "One deck is one Fisher-Yates permutation. Draw from index 0 upward, without replacement. A directory click is not a draw. If the card at the cursor is the channel already playing and the pool has more than one channel, skip that card and draw the next one. If the skip exhausts the deck, reshuffle with the reshuffle boundary rule, treating the playing channel as the last id drawn. Pure Surf does not click between draws, so this skip does not change the seeded orders below.",
+    "reshuffle": "When the deck is exhausted, deal again with the same PRNG stream. Do not reseed. If the new deck has more than one id and its first id equals the last id drawn, swap index 0 with index 1. A one-channel deck may repeat.",
+    "firstDeck": "The first deck is dealt with no channel already playing, so the boundary swap does not apply to it. Each scope below is two full decks: the permutation, then one reshuffle.",
+    "scopes": {
+      "main": "beyond === false. Every channel in the main atlas, including one also filed to an extension region.",
+      "region": "regions contains regionScope. A selected region uses this scope even when the beyond toggle is on.",
+      "beyond": "beyond === true. Channels outside the main atlas only. Not main+extension."
+    },
+    "excluded": "Drop a channel health marks offline or denylisted before dealing. This list is already the playable set. An empty playable scope shows a message and does not fall back to another scope."
   },
-  "filters": {
-    "country": "Pakistan",
-    "language": "Urdu",
-    "genre": "News",
-    "query": "quran"
-  },
+  "regionScope": "horn",
   "channels": [
     {
-      "id": "indus-tv-a",
-      "region": "indus",
-      "tier": "heartbeat",
-      "medium": "tv",
-      "country": "Pakistan",
-      "language": "Urdu",
-      "genre": "News"
-    },
-    {
-      "id": "indus-tv-b",
-      "region": "indus",
-      "tier": "heartbeat",
-      "medium": "tv",
-      "country": "Pakistan",
-      "language": "Punjabi",
-      "genre": "Music"
-    },
-    {
-      "id": "indus-radio-a",
-      "region": "indus",
-      "tier": "heartbeat",
-      "medium": "radio",
-      "country": "Pakistan",
-      "language": "Urdu",
-      "genre": "News"
-    },
-    {
-      "id": "indus-tv-off",
-      "region": "indus",
-      "tier": "heartbeat",
-      "medium": "tv",
-      "country": "Pakistan",
-      "language": "Urdu",
-      "genre": "News",
-      "offline": true
-    },
-    {
-      "id": "anatolia-tv-a",
-      "region": "anatolia",
-      "tier": "core",
-      "medium": "tv",
-      "country": "Turkiye",
-      "language": "Turkish",
-      "genre": "News"
-    },
-    {
-      "id": "anatolia-tv-b",
-      "region": "anatolia",
-      "tier": "core",
-      "medium": "tv",
-      "country": "Turkiye",
-      "language": "Turkish",
-      "genre": "Music"
-    },
-    {
-      "id": "anatolia-radio-a",
-      "region": "anatolia",
-      "tier": "core",
-      "medium": "radio",
-      "country": "Turkiye",
-      "language": "Turkish",
-      "genre": "Music"
-    },
-    {
-      "id": "levant-tv-a",
-      "region": "levant",
-      "tier": "core",
-      "medium": "tv",
-      "country": "Lebanon",
-      "language": "Arabic",
-      "genre": "News"
-    },
-    {
-      "id": "levant-radio-a",
-      "region": "levant",
-      "tier": "core",
-      "medium": "radio",
-      "country": "Lebanon",
-      "language": "Arabic",
-      "genre": "Music"
-    },
-    {
-      "id": "levant-radio-b",
-      "region": "levant",
-      "tier": "core",
-      "medium": "radio",
-      "country": "Palestine",
-      "language": "Arabic",
-      "genre": "Talk"
-    },
-    {
-      "id": "qafqaz-tv-a",
-      "region": "qafqaz",
-      "tier": "heartbeat",
-      "medium": "tv",
-      "country": "Azerbaijan",
-      "language": "Azerbaijani",
-      "genre": "News"
-    },
-    {
-      "id": "qafqaz-tv-b",
-      "region": "qafqaz",
-      "tier": "heartbeat",
-      "medium": "tv",
-      "country": "Georgia",
-      "language": "Georgian",
-      "genre": "Music"
-    },
-    {
-      "id": "arabia-tv-a",
-      "region": "arabia",
-      "tier": "core",
-      "medium": "tv",
-      "country": "Qatar",
-      "language": "Arabic",
-      "genre": "News"
-    },
-    {
-      "id": "arabia-radio-a",
-      "region": "arabia",
-      "tier": "core",
-      "medium": "radio",
-      "country": "Saudi Arabia",
-      "language": "Arabic",
-      "genre": "Quran"
-    },
-    {
-      "id": "nusantara-tv-a",
-      "region": "nusantara",
-      "tier": "islamicate",
-      "medium": "tv",
-      "country": "Indonesia",
-      "language": "Indonesian",
-      "genre": "News"
-    },
-    {
-      "id": "nusantara-tv-b",
-      "region": "nusantara",
-      "tier": "islamicate",
-      "medium": "tv",
-      "country": "Indonesia",
-      "language": "Indonesian",
-      "genre": "Music"
-    },
-    {
-      "id": "nusantara-radio-a",
-      "region": "nusantara",
-      "tier": "islamicate",
-      "medium": "radio",
-      "country": "Indonesia",
-      "language": "Indonesian",
-      "genre": "Music"
-    },
-    {
-      "id": "horn-tv-a",
-      "region": "horn",
-      "tier": "islamicate",
-      "medium": "tv",
-      "country": "Somalia",
-      "language": "Somali",
-      "genre": "News"
-    },
-    {
-      "id": "horn-radio-a",
-      "region": "horn",
-      "tier": "islamicate",
-      "medium": "radio",
-      "country": "Somalia",
-      "language": "Somali",
-      "genre": "Talk"
-    },
-    {
-      "id": "rumelia-radio-a",
-      "region": "rumelia",
-      "tier": "islamicate",
-      "medium": "radio",
-      "country": "Bosnia",
-      "language": "Bosnian",
-      "genre": "Music"
-    },
-    {
-      "id": "solo-tv",
-      "region": "maghreb",
-      "tier": "core",
-      "medium": "tv",
-      "country": "Morocco",
-      "language": "Arabic",
-      "genre": "News"
-    }
-  ],
-  "mulberry32": [
-    {
-      "seed": 1,
-      "words": [
-        2693262067,
-        11749833,
-        2265367787,
-        4213581821,
-        4159151403,
-        1207330352,
-        2632122864,
-        3095568220
-      ]
-    },
-    {
-      "seed": 7,
-      "words": [
-        50271532,
-        266108690,
-        4195786334,
-        3002305430,
-        2239590375,
-        1741702388,
-        2002453909,
-        1030470827
-      ]
-    }
-  ],
-  "orders": [
-    {
-      "name": "main television, seed 1",
-      "seed": 1,
-      "medium": "tv",
-      "scope": "main",
-      "region": "indus",
-      "playing": null,
-      "ids": [
-        "arabia-tv-a",
-        "anatolia-tv-a",
-        "qafqaz-tv-b",
-        "indus-tv-b",
-        "levant-tv-a",
-        "solo-tv",
-        "anatolia-tv-b",
-        "indus-tv-a",
-        "qafqaz-tv-a"
+      "id": "horn-news",
+      "regions": [
+        "horn"
       ],
-      "filters": {
-        "country": "Pakistan",
-        "language": "Urdu",
-        "genre": "News",
-        "query": "quran"
-      }
+      "beyond": false
     },
     {
-      "name": "main radio, seed 7",
-      "seed": 7,
-      "medium": "radio",
-      "scope": "main",
-      "region": "indus",
-      "playing": null,
-      "ids": [
-        "levant-radio-b",
-        "anatolia-radio-a",
-        "levant-radio-a",
-        "arabia-radio-a",
-        "indus-radio-a"
-      ]
-    },
-    {
-      "name": "Indus only, seed 42",
-      "seed": 42,
-      "medium": "tv",
-      "scope": "region",
-      "region": "indus",
-      "playing": null,
-      "ids": [
-        "indus-tv-a",
-        "indus-tv-b"
-      ]
-    },
-    {
-      "name": "Levant radio only, seed 99",
-      "seed": 99,
-      "medium": "radio",
-      "scope": "region",
-      "region": "levant",
-      "playing": null,
-      "ids": [
-        "levant-radio-b",
-        "levant-radio-a"
-      ]
-    },
-    {
-      "name": "Beyond with Indus selected is Indus, seed 42",
-      "seed": 42,
-      "medium": "tv",
-      "scope": "beyond",
-      "region": "indus",
-      "playing": null,
-      "ids": [
-        "indus-tv-a",
-        "indus-tv-b"
-      ]
-    },
-    {
-      "name": "Beyond with Horn selected is Horn, seed 3",
-      "seed": 3,
-      "medium": "tv",
-      "scope": "beyond",
-      "region": "horn",
-      "playing": null,
-      "ids": [
-        "horn-tv-a"
-      ]
-    },
-    {
-      "name": "Beyond with no region, television, seed 42",
-      "seed": 42,
-      "medium": "tv",
-      "scope": "beyond",
-      "region": null,
-      "playing": null,
-      "ids": [
-        "horn-tv-a",
-        "nusantara-tv-a",
-        "nusantara-tv-b"
-      ]
-    },
-    {
-      "name": "Beyond with no region, radio, seed 3",
-      "seed": 3,
-      "medium": "radio",
-      "scope": "beyond",
-      "region": null,
-      "playing": null,
-      "ids": [
-        "horn-radio-a",
-        "nusantara-radio-a",
-        "rumelia-radio-a"
-      ]
-    },
-    {
-      "name": "already playing is not dealt first",
-      "seed": 1,
-      "medium": "tv",
-      "scope": "main",
-      "region": null,
-      "playing": "arabia-tv-a",
-      "ids": [
-        "anatolia-tv-a",
-        "arabia-tv-a",
-        "qafqaz-tv-b",
-        "indus-tv-b",
-        "levant-tv-a",
-        "solo-tv",
-        "anatolia-tv-b",
-        "indus-tv-a",
-        "qafqaz-tv-a"
-      ]
-    }
-  ],
-  "boundary": [
-    {
-      "name": "main television wraps the deck",
-      "seed": 16,
-      "medium": "tv",
-      "scope": "main",
-      "region": null,
-      "tail": "qafqaz-tv-a",
-      "head": "anatolia-tv-a"
-    },
-    {
-      "name": "a two-channel region wraps the deck",
-      "seed": 1,
-      "medium": "tv",
-      "scope": "region",
-      "region": "indus",
-      "tail": "indus-tv-b",
-      "head": "indus-tv-a"
-    }
-  ],
-  "regionChange": [
-    {
-      "name": "main atlas discards when the region changes",
-      "seed": 2,
-      "medium": "tv",
-      "scope": "main",
-      "from": "indus",
-      "take": 2,
-      "to": "anatolia",
-      "openingOrder": [
-        "qafqaz-tv-a",
-        "indus-tv-a",
-        "solo-tv",
-        "arabia-tv-a",
-        "levant-tv-a",
-        "anatolia-tv-b",
-        "indus-tv-b",
-        "anatolia-tv-a",
-        "qafqaz-tv-b"
+      "id": "horn-music",
+      "regions": [
+        "horn"
       ],
-      "wouldHaveContinued": "solo-tv",
-      "resetOrder": [
-        "levant-tv-a",
-        "solo-tv",
-        "qafqaz-tv-b",
-        "anatolia-tv-b",
-        "anatolia-tv-a",
-        "indus-tv-b",
-        "qafqaz-tv-a",
-        "indus-tv-a",
-        "arabia-tv-a"
-      ]
+      "beyond": false
     },
     {
-      "name": "region scope deals only the region switched to",
-      "seed": 1,
-      "medium": "tv",
-      "scope": "region",
-      "from": "indus",
-      "take": 1,
-      "to": "anatolia",
-      "openingOrder": [
-        "indus-tv-a",
-        "indus-tv-b"
+      "id": "horn-diaspora",
+      "regions": [
+        "horn",
+        "nusantara"
       ],
-      "wouldHaveContinued": "indus-tv-b",
-      "resetOrder": [
-        "anatolia-tv-b",
-        "anatolia-tv-a"
-      ]
-    }
-  ],
-  "repeat": [
-    {
-      "name": "the only playable channel may repeat",
-      "seed": 1,
-      "medium": "tv",
-      "scope": "region",
-      "region": "maghreb",
-      "first": "solo-tv",
-      "second": "solo-tv"
-    }
-  ],
-  "empty": [
-    {
-      "name": "a region with nothing of this medium",
-      "medium": "tv",
-      "scope": "region",
-      "region": "rumelia"
+      "beyond": false
     },
     {
-      "name": "Beyond with a region that is not on the list",
-      "medium": "radio",
-      "scope": "beyond",
-      "region": "missing"
+      "id": "indus-one",
+      "regions": [
+        "indus"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "indus-two",
+      "regions": [
+        "indus"
+      ],
+      "beyond": false
+    },
+    {
+      "id": "nusantara-one",
+      "regions": [
+        "nusantara"
+      ],
+      "beyond": true
+    },
+    {
+      "id": "nusantara-two",
+      "regions": [
+        "nusantara"
+      ],
+      "beyond": true
+    },
+    {
+      "id": "rumelia-one",
+      "regions": [
+        "rumelia"
+      ],
+      "beyond": true
     }
-  ]
+  ],
+  "pools": {
+    "main": [
+      "horn-news",
+      "horn-music",
+      "horn-diaspora",
+      "indus-one",
+      "indus-two"
+    ],
+    "region": [
+      "horn-news",
+      "horn-music",
+      "horn-diaspora"
+    ],
+    "beyond": [
+      "nusantara-one",
+      "nusantara-two",
+      "rumelia-one"
+    ]
+  },
+  "seeds": {
+    "main": 2,
+    "region": 3,
+    "beyond": 5
+  },
+  "boundaryNote": "Each seed is one where a second Fisher-Yates with the same stream would open on the previous deck's last id. The second deck recorded here has index 0 swapped with index 1, so the boundary does not repeat.",
+  "draws": {
+    "main": {
+      "decks": [
+        [
+          "horn-diaspora",
+          "indus-two",
+          "horn-news",
+          "horn-music",
+          "indus-one"
+        ],
+        [
+          "horn-news",
+          "indus-one",
+          "horn-music",
+          "horn-diaspora",
+          "indus-two"
+        ]
+      ]
+    },
+    "region": {
+      "decks": [
+        [
+          "horn-music",
+          "horn-news",
+          "horn-diaspora"
+        ],
+        [
+          "horn-news",
+          "horn-diaspora",
+          "horn-music"
+        ]
+      ]
+    },
+    "beyond": {
+      "decks": [
+        [
+          "nusantara-one",
+          "nusantara-two",
+          "rumelia-one"
+        ],
+        [
+          "nusantara-two",
+          "rumelia-one",
+          "nusantara-one"
+        ]
+      ]
+    }
+  }
 }

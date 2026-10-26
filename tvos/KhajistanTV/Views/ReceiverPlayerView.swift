@@ -389,6 +389,7 @@ struct ReceiverPlayerView: View {
     /// The card after this permutation. The channel on screen is not dealt first again.
     private func dealNext(after from: Channel) async {
         guard let shuffle, let index = model.receiver.index else { return }
+        shuffle.noteListEnded(on: from.id)
         let (medium, scope, regionId) = shuffle.settings(openRegion: model.receiverPath.last?.id)
         guard let pick = await shuffle.pick(
             index: index, medium: medium, scope: scope, regionId: regionId, playingId: from.id,

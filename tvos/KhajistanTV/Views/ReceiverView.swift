@@ -28,7 +28,7 @@ struct ReceiverView: View {
                 .background(palette.ground.ignoresSafeArea())
                 .foregroundStyle(palette.ink)
                 .navigationDestination(for: ReceiverIndex.Region.self) { region in
-                    ChannelsView(region: region, camerasFirst: model.camerasFirst == region.id)
+                    ChannelsView(region: region, camerasFirst: model.camerasFirst == region.id, shuffle: shuffle)
                 }
         }
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.

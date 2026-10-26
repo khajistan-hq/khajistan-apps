@@ -5,124 +5,117 @@ import XCTest
 /// These cases assert its id lists character for character.
 final class ShuffleTests: XCTestCase {
     func testMulberry32Words() throws {
-        let fixture = try Self.fixture()
-        for row in fixture.mulberry32 {
-            var rng = Mulberry32(seed: row.seed)
-            let got = (0..<row.words.count).map { _ in rng.nextWord() }
-            XCTAssertEqual(got, row.words, "seed \(row.seed)")
+        let words: [UInt32: [UInt32]] = [
+            2: [3153583793, 1395857638, 1225337227, 2310499808],
+            3: [3093350482, 166052715, 1959330548, 321813351],
+            5: [2962560684, 3318907087, 943874942, 2676532661],
+        ]
+        for (seed, expected) in words {
+            var rng = Mulberry32(seed: seed)
+            XCTAssertEqual(expected.map { _ in rng.nextWord() }, expected, "seed \(seed)")
         }
     }
 
-    func testFixtureOrdersByteForByte() throws {
+    func testFixtureOrdersCharacterForCharacter() throws {
         let fixture = try Self.fixture()
         let entries = Self.entries(fixture)
-        XCTAssertFalse(fixture.filters.country.isEmpty)
-        XCTAssertFalse(fixture.filters.query.isEmpty)
-        for row in fixture.orders {
-            var deck = ShuffleDeck(seed: row.seed)
-            let dealt = try XCTUnwrap(Self.deal(&deck, entries, row), row.name)
-            XCTAssertEqual(dealt.order, row.ids, row.name)
-            XCTAssertEqual(dealt.id, row.ids[0], row.name)
-            XCTAssertEqual(Set(dealt.order).count, dealt.order.count, row.name)
-            let pool = Set(ShuffleDeck.playableIDs(
-                entries,
-                medium: ShuffleMedium(rawValue: row.medium) ?? .tv,
-                scope: ShuffleScope(rawValue: row.scope) ?? .main,
-                regionId: row.region
-            ))
-            XCTAssertEqual(Set(dealt.order), pool, row.name)
-            if let playing = row.playing, row.ids.count > 1 {
-                XCTAssertNotEqual(dealt.order[0], playing, row.name)
-            }
+        for (name, pool) in fixture.pools {
+            let region = name == "region" ? fixture.regionScope : nil
+            let ids = ShuffleDeck.playableIDs(entries, medium: .tv, scope: Self.scope(name), regionId: region)
+            XCTAssertEqual(ids, pool, name)
         }
-        let main = try XCTUnwrap(fixture.orders.first { $0.filters != nil })
-        XCTAssertEqual(main.filters?.country, fixture.filters.country)
-        XCTAssertTrue(main.ids.contains("levant-tv-a"))
-        XCTAssertTrue(main.ids.contains("anatolia-tv-a"))
-        XCTAssertTrue(main.ids.contains("solo-tv"))
-        XCTAssertFalse(main.ids.contains("indus-tv-off"))
-        let beyondIndus = try XCTUnwrap(fixture.orders.first { $0.scope == "beyond" && $0.region == "indus" })
-        let regionIndus = try XCTUnwrap(fixture.orders.first { $0.scope == "region" && $0.region == "indus" && $0.seed == beyondIndus.seed })
-        XCTAssertEqual(beyondIndus.ids, regionIndus.ids)
-        let beyondOpen = try XCTUnwrap(fixture.orders.first { $0.scope == "beyond" && $0.region == nil && $0.medium == "tv" })
-        let tiers = Dictionary(uniqueKeysWithValues: fixture.channels.map { ($0.id, $0.tier) })
-        XCTAssertTrue(beyondOpen.ids.allSatisfy { tiers[$0] == "islamicate" })
+        let beyond = ShuffleDeck.playableIDs(entries, medium: .tv, scope: .beyond, regionId: fixture.regionScope)
+        XCTAssertEqual(beyond, fixture.pools["beyond"])
+        XCTAssertTrue(fixture.pools["main"]?.contains("horn-diaspora") == true)
+        XCTAssertTrue(fixture.pools["beyond"]?.contains("horn-diaspora") == false)
+        for (name, draw) in fixture.draws {
+            var deck = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds[name]))
+            let region = name == "region" ? fixture.regionScope : nil
+            for expected in draw.decks {
+                var got: [String] = []
+                var order: [String] = []
+                for _ in expected {
+                    let dealt = try XCTUnwrap(Self.deal(&deck, entries, scope: name, region: region, playing: nil))
+                    got.append(dealt.id)
+                    order = dealt.order
+                }
+                XCTAssertEqual(got, expected, name)
+                XCTAssertEqual(order, expected, name)
+                XCTAssertEqual(Set(order).count, order.count, name)
+            }
+            let decks = draw.decks
+            XCTAssertNotEqual(decks[0].last, decks[1].first, name)
+            XCTAssertEqual(decks[1][1], decks[0].last ?? "", name)
+        }
     }
 
-    func testNoRepeatInsideADeckAndTheBoundarySwapsTheFirstTwo() throws {
+    func testDirectoryClickSkipsTheCardAtTheCursor() throws {
         let fixture = try Self.fixture()
         let entries = Self.entries(fixture)
-        for row in fixture.boundary {
-            var deck = ShuffleDeck(seed: row.seed)
-            let first = try XCTUnwrap(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-            XCTAssertEqual(Set(first.order).count, first.order.count)
-            var last = first
-            for _ in 1..<first.order.count {
-                last = try XCTUnwrap(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-            }
-            let next = try XCTUnwrap(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-            XCTAssertEqual(last.id, row.tail)
-            XCTAssertEqual(next.id, row.head)
-            XCTAssertNotEqual(row.tail, row.head)
-            XCTAssertEqual(next.order[0], row.head)
-            XCTAssertEqual(next.order[1], row.tail)
+        let main = try XCTUnwrap(fixture.draws["main"])
+        var deck = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["main"]))
+        let opened = try XCTUnwrap(Self.deal(&deck, entries, scope: "main", region: nil, playing: nil))
+        XCTAssertEqual(opened.id, "horn-diaspora")
+        XCTAssertEqual(opened.order, main.decks[0])
+        deck.observe("indus-two")
+        let surfed = try XCTUnwrap(Self.deal(&deck, entries, scope: "main", region: nil, playing: "indus-two"))
+        XCTAssertEqual(surfed.id, "horn-news")
+        XCTAssertEqual(surfed.order, main.decks[0])
+        var cold = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["main"]))
+        let coldDraw = try XCTUnwrap(Self.deal(&cold, entries, scope: "main", region: nil, playing: "indus-two"))
+        XCTAssertEqual(coldDraw.id, "horn-diaspora")
+        var tail = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["main"]))
+        for _ in 0..<4 {
+            _ = try XCTUnwrap(Self.deal(&tail, entries, scope: "main", region: nil, playing: nil))
         }
+        let wrapped = try XCTUnwrap(Self.deal(&tail, entries, scope: "main", region: nil, playing: "indus-one"))
+        XCTAssertEqual(wrapped.id, "horn-news")
+        XCTAssertEqual(wrapped.order, main.decks[1])
     }
 
     func testRegionChangeDealsANewDeck() throws {
         let fixture = try Self.fixture()
         let entries = Self.entries(fixture)
-        for row in fixture.regionChange {
-            var left = ShuffleDeck(seed: row.seed)
-            var right = left
-            var opening: [String] = []
-            for index in 0..<row.take {
-                let dealt = try XCTUnwrap(Self.deal(&left, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil))
-                _ = Self.deal(&right, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil)
-                if index == 0 { opening = dealt.order }
-            }
-            let continued = try XCTUnwrap(Self.deal(&left, entries, medium: row.medium, scope: row.scope, region: row.from, playing: nil))
-            let reset = try XCTUnwrap(Self.deal(&right, entries, medium: row.medium, scope: row.scope, region: row.to, playing: nil))
-            XCTAssertEqual(opening, row.openingOrder)
-            XCTAssertEqual(continued.id, row.wouldHaveContinued)
-            XCTAssertEqual(reset.order, row.resetOrder)
-            XCTAssertNotEqual(reset.id, row.wouldHaveContinued)
-            var fresh = ShuffleDeck(seed: row.seed)
-            let reseeded = try XCTUnwrap(Self.deal(&fresh, entries, medium: row.medium, scope: row.scope, region: row.to, playing: nil))
-            XCTAssertNotEqual(reset.order, reseeded.order)
-            XCTAssertNotEqual(reset.order, opening)
-        }
+        var kept = ShuffleDeck(seed: 3)
+        let opening = try XCTUnwrap(Self.deal(&kept, entries, scope: "region", region: "horn", playing: nil))
+        let continued = try XCTUnwrap(Self.deal(&kept, entries, scope: "region", region: "horn", playing: nil))
+        var switched = ShuffleDeck(seed: 3)
+        _ = Self.deal(&switched, entries, scope: "region", region: "horn", playing: nil)
+        let reset = try XCTUnwrap(Self.deal(&switched, entries, scope: "region", region: "indus", playing: nil))
+        XCTAssertEqual(opening.order, try XCTUnwrap(fixture.draws["region"]).decks[0])
+        XCTAssertNotEqual(reset.order, continued.order)
+        XCTAssertEqual(Set(reset.order), Set(["indus-one", "indus-two"]))
+        var fresh = ShuffleDeck(seed: 3)
+        let reseeded = try XCTUnwrap(Self.deal(&fresh, entries, scope: "region", region: "indus", playing: nil))
+        XCTAssertNotEqual(reset.order, reseeded.order)
     }
 
     func testOneChannelMayRepeatAndNoneDealsNothing() throws {
-        let fixture = try Self.fixture()
-        let entries = Self.entries(fixture)
-        for row in fixture.repeats {
-            var deck = ShuffleDeck(seed: row.seed)
-            let first = try XCTUnwrap(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-            let second = try XCTUnwrap(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-            XCTAssertEqual(first.id, row.first)
-            XCTAssertEqual(second.id, row.second)
-        }
-        for row in fixture.empty {
-            var deck = ShuffleDeck(seed: 1)
-            XCTAssertNil(Self.deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: nil))
-        }
+        let solo = [ShuffleEntry(id: "only", regionIds: ["indus"], beyond: false, medium: "tv")]
+        var deck = ShuffleDeck(seed: 1)
+        let first = try XCTUnwrap(Self.deal(&deck, solo, scope: "region", region: "indus", playing: nil))
+        let second = try XCTUnwrap(Self.deal(&deck, solo, scope: "region", region: "indus", playing: "only"))
+        XCTAssertEqual(first.id, "only")
+        XCTAssertEqual(second.id, "only")
+        var empty = ShuffleDeck(seed: 1)
+        XCTAssertNil(Self.deal(&empty, solo, scope: "region", region: "kashmir", playing: nil))
         XCTAssertEqual(ShuffleScope.main.emptyNote(medium: .tv, regionSelected: true), "No television to surf on the main atlas right now.")
+        XCTAssertEqual(ShuffleScope.region.emptyNote(medium: .radio, regionSelected: true), "No radio in this region right now.")
         XCTAssertEqual(ShuffleScope.beyond.emptyNote(medium: .tv, regionSelected: false), "No television beyond the atlas right now.")
-        XCTAssertEqual(ShuffleScope.beyond.emptyNote(medium: .radio, regionSelected: true), "No radio in this region right now.")
+        XCTAssertEqual(ShuffleScope.beyond.emptyNote(medium: .radio, regionSelected: true), "No radio beyond the atlas right now.")
         XCTAssertEqual(ShuffleScope.resolved("extended"), .beyond)
         XCTAssertEqual(ShuffleScope.resolved("everywhere"), .main)
+        XCTAssertEqual(ShuffleScope.resolved(nil), .main)
     }
 
     func testScopeChoosesRegions() throws {
         let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(Self.sampleIndex.utf8))
         XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .main, selected: "indus"), ["indus", "anatolia"])
         XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: nil), ["nusantara"])
-        XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "anatolia"), ["anatolia"])
+        XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "anatolia"), ["nusantara"])
         XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: "nusantara"), ["nusantara"])
         XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .region, selected: "kashmir"), [])
-        XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "missing"), [])
+        XCTAssertEqual(ShuffleDeck.regionIds(index: index, scope: .beyond, selected: "missing"), ["nusantara"])
         XCTAssertEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
         XCTAssertEqual(CameraRegions.total(index), 400)
     }
@@ -202,84 +195,31 @@ final class ShuffleTests: XCTestCase {
 
     private static func entries(_ fixture: ShuffleFixture) -> [ShuffleEntry] {
         fixture.channels.map {
-            ShuffleEntry(id: $0.id, regionId: $0.region, tier: $0.tier, medium: $0.medium, offline: $0.offline ?? false)
+            ShuffleEntry(id: $0.id, regionIds: $0.regions, beyond: $0.beyond, medium: "tv")
         }
     }
 
-    private static func deal(_ deck: inout ShuffleDeck, _ entries: [ShuffleEntry], _ row: ShuffleFixture.Order) -> ShuffleDraw? {
-        deal(&deck, entries, medium: row.medium, scope: row.scope, region: row.region, playing: row.playing)
+    private static func scope(_ name: String) -> ShuffleScope {
+        ShuffleScope(rawValue: name) ?? .main
     }
 
-    private static func deal(_ deck: inout ShuffleDeck, _ entries: [ShuffleEntry], medium: String, scope: String, region: String?, playing: String?) -> ShuffleDraw? {
-        deck.draw(
-            entries: entries,
-            medium: ShuffleMedium(rawValue: medium) ?? .tv,
-            scope: ShuffleScope(rawValue: scope) ?? .main,
-            regionId: region,
-            playing: playing
-        )
+    private static func deal(_ deck: inout ShuffleDeck, _ entries: [ShuffleEntry], scope: String, region: String?, playing: String?) -> ShuffleDraw? {
+        deck.draw(entries: entries, medium: .tv, scope: Self.scope(scope), regionId: region, playing: playing)
     }
 }
 
 private struct ShuffleFixture: Decodable {
     struct Channel: Decodable {
         let id: String
-        let region: String
-        let tier: String
-        let medium: String
-        let offline: Bool?
+        let regions: [String]
+        let beyond: Bool
     }
-    struct Words: Decodable { let seed: UInt32; let words: [UInt32] }
-    struct Filters: Decodable { let country: String; let language: String; let genre: String; let query: String }
-    struct Order: Decodable {
-        let name: String
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let playing: String?
-        let ids: [String]
-        let filters: Filters?
+    struct Draw: Decodable {
+        let decks: [[String]]
     }
-    struct Boundary: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let tail: String
-        let head: String
-    }
-    struct RegionChange: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let from: String
-        let take: Int
-        let to: String
-        let openingOrder: [String]
-        let wouldHaveContinued: String
-        let resetOrder: [String]
-    }
-    struct RepeatRow: Decodable {
-        let seed: UInt32
-        let medium: String
-        let scope: String
-        let region: String?
-        let first: String
-        let second: String
-    }
-    struct Empty: Decodable { let medium: String; let scope: String; let region: String? }
-    let filters: Filters
+    let regionScope: String
     let channels: [Channel]
-    let mulberry32: [Words]
-    let orders: [Order]
-    let boundary: [Boundary]
-    let regionChange: [RegionChange]
-    let repeats: [RepeatRow]
-    let empty: [Empty]
-
-    enum CodingKeys: String, CodingKey {
-        case filters, channels, mulberry32, orders, boundary, regionChange, empty
-        case repeats = "repeat"
-    }
+    let pools: [String: [String]]
+    let seeds: [String: UInt32]
+    let draws: [String: Draw]
 }

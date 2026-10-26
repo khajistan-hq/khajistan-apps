@@ -32,10 +32,12 @@ struct Mulberry32: Sendable {
 
 /// One channel the deck may deal. `offline` is the health and denylist grade already decided by
 /// `ReceiverRules.eligible`; the deck does not read country, language, genre or search text.
+/// `beyond` is false for a main-atlas channel, including one that is also filed to an extension
+/// region. `regionIds` is every region the channel is filed to.
 struct ShuffleEntry: Equatable, Sendable {
     var id: String
-    var regionId: String
-    var tier: String
+    var regionIds: [String]
+    var beyond: Bool
     var medium: String
     var offline: Bool = false
 }
@@ -46,13 +48,17 @@ struct ShuffleDraw: Equatable, Sendable {
     var order: [String]
 }
 
-/// One Fisher-Yates deck for a medium, a scope and a region.
+/// One Fisher-Yates deck for a medium and a scope.
 ///
-/// The permutation is dealt from the front. When it is used up, a new one is dealt. If that deck
-/// has more than one channel and its first card is the channel already playing, index 0 swaps with
-/// index 1. That swap is the whole of the boundary rule: there is no second shuffle and no extra
-/// random number. A channel already playing when a deck is first built counts the same way.
-/// One playable channel may repeat. None deals nothing.
+/// The permutation is dealt from the front. The first deck is not rearranged. When it is used
+/// up, the same generator deals another. If that deck has more than one channel and its first
+/// card is the last id drawn, index 0 swaps with index 1. There is no second shuffle and no
+/// extra random number.
+///
+/// A directory or remote pick is not a draw and does not move the cursor. If the card at the
+/// cursor is the channel already playing and the pool has more than one channel, that card is
+/// skipped and the next one is drawn. If the skip uses the deck up, the reshuffle treats the
+/// playing channel as the last id drawn. One playable channel may repeat. None deals nothing.
 struct ShuffleDeck: Sendable {
     private var rng: Mulberry32
     private var key: String?
@@ -72,9 +78,17 @@ struct ShuffleDeck: Sendable {
     /// The channel last dealt, or the one the screen reported with `observe`.
     var lastPlayed: String? { observed }
 
-    /// The channel now on screen. A later deal treats it as already playing.
+    /// The channel now on screen. This is not a draw and does not move the cursor.
     mutating func observe(_ id: String) {
         observed = id
+    }
+
+    /// The player stepped past the end of the permutation on screen. The next draw deals another,
+    /// and `id` (the last card of that permutation) is the last id drawn.
+    mutating func noteListEnded(on id: String) {
+        observed = id
+        guard !order.isEmpty, order.last == id else { return }
+        cursor = order.count
     }
 
     /// True when `ids` is the permutation now being dealt, in that order.
@@ -82,8 +96,8 @@ struct ShuffleDeck: Sendable {
         !order.isEmpty && ids == order
     }
 
-    /// The next card. `playing` is the channel on screen. Nil leaves the cursor where the last
-    /// deal put it, and a new deck then avoids `observed` instead.
+    /// The next card. `playing` is the channel on screen. A pick of that channel is not a draw.
+    /// When it is the card at the cursor and the pool has more than one channel, it is skipped.
     mutating func draw(entries: [ShuffleEntry], medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, playing: String?) -> ShuffleDraw? {
         let ids = Self.playableIDs(entries, medium: medium, scope: scope, regionId: regionId)
         let nextKey = Self.deckKey(medium: medium, scope: scope, regionId: regionId)
@@ -95,14 +109,19 @@ struct ShuffleDeck: Sendable {
         }
         if !samePool(key: nextKey, ids: ids) {
             key = nextKey
-            order = Self.avoidFirst(Self.permute(ids, rng: &rng), lastPlayed: playing ?? observed)
+            order = Self.permute(ids, rng: &rng)
             cursor = 0
-        } else if let playing, let index = order.firstIndex(of: playing) {
-            cursor = index + 1
+        }
+        // The card at the cursor is the one already on screen: skip it. Do not search the deck
+        // for that channel, and do not skip again after a reshuffle.
+        var skippedPlaying = false
+        if let playing, order.count > 1, cursor < order.count, order[cursor] == playing {
+            cursor += 1
+            skippedPlaying = true
         }
         if cursor >= order.count {
-            let last = playing ?? observed ?? order.last
-            order = Self.avoidFirst(Self.permute(ids, rng: &rng), lastPlayed: last)
+            let lastDrawn: String? = skippedPlaying ? playing : order.last
+            order = Self.avoidFirst(Self.permute(ids, rng: &rng), lastPlayed: lastDrawn)
             cursor = 0
         }
         let id = order[cursor]
@@ -121,15 +140,11 @@ struct ShuffleDeck: Sendable {
             seen.insert(entry.id)
             switch scope {
             case .main:
-                if !ReceiverRules.tiersOnByDefault.contains(entry.tier) { continue }
+                if entry.beyond { continue }
             case .region:
-                if selected == nil || entry.regionId != selected { continue }
+                guard let selected, entry.regionIds.contains(selected) else { continue }
             case .beyond:
-                if let selected {
-                    if entry.regionId != selected { continue }
-                } else if ReceiverRules.tiersOnByDefault.contains(entry.tier) {
-                    continue
-                }
+                if !entry.beyond { continue }
             }
             ids.append(entry.id)
         }
@@ -138,7 +153,7 @@ struct ShuffleDeck: Sendable {
 
     /// The shards a scope has to load, in index order. A region with no shard is not among them.
     /// Main is the heartbeat and core regions. Region is the selected region, whatever its tier.
-    /// Beyond with a selected region is that region. Beyond with none is the extension regions.
+    /// Beyond is the extension regions. A selected region does not narrow it.
     static func regionIds(index: ReceiverIndex, scope: ShuffleScope, selected: String?) -> [String] {
         let listed = index.listedRegions
         let chosen = selectedRegion(selected)
@@ -149,9 +164,6 @@ struct ShuffleDeck: Sendable {
             guard let chosen, listed.contains(where: { $0.id == chosen }) else { return [] }
             return [chosen]
         case .beyond:
-            if let chosen {
-                return listed.contains(where: { $0.id == chosen }) ? [chosen] : []
-            }
             return listed.filter { !ReceiverRules.tiersOnByDefault.contains($0.tier) }.map(\.id)
         }
     }
@@ -184,7 +196,7 @@ struct ShuffleDeck: Sendable {
         return shuffled
     }
 
-    /// The channel already playing moves off the front by swapping with the second card.
+    /// On a reshuffle, the last id drawn moves off the front by swapping with the second card.
     private static func avoidFirst(_ order: [String], lastPlayed: String?) -> [String] {
         var order = order
         if order.count > 1, let lastPlayed, order[0] == lastPlayed {
@@ -204,8 +216,9 @@ enum ShuffleMedium: String, CaseIterable, Identifiable, Sendable {
     static let key = "kj.shuffle.medium"
 }
 
-/// Where Shuffle draws. Main is the main atlas. Region is the selected region. Beyond is that
-/// region when one is selected, and the extension channels when none is.
+/// Where Shuffle draws. Main is every main-atlas channel. Region is the channels filed to the
+/// selected region. Beyond is only the channels outside the main atlas. A selected region does
+/// not narrow Beyond.
 enum ShuffleScope: String, CaseIterable, Identifiable, Sendable {
     case main, region, beyond
     var id: String { rawValue }
@@ -227,18 +240,14 @@ enum ShuffleScope: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Said when the scope has nothing left that can play. A selected region wins over Beyond,
-    /// so Beyond then says "this region" too.
-    func emptyNote(medium: ShuffleMedium, regionSelected: Bool) -> String {
+    /// Said when the scope has nothing left that can play.
+    func emptyNote(medium: ShuffleMedium, regionSelected _: Bool) -> String {
         switch self {
         case .main:
             return "No \(medium.sentence) to surf on the main atlas right now."
         case .region:
             return "No \(medium.sentence) in this region right now."
         case .beyond:
-            if regionSelected {
-                return "No \(medium.sentence) in this region right now."
-            }
             return "No \(medium.sentence) beyond the atlas right now."
         }
     }
@@ -286,9 +295,14 @@ final class ShuffleSession {
         note = nil
     }
 
-    /// The channel now on screen. The next deck treats it as already playing.
+    /// The channel now on screen. A directory or remote pick is not a draw and does not move the cursor.
     func observe(_ id: String) {
         deck.observe(id)
+    }
+
+    /// The player stepped past the end of the permutation Surf dealt. The next draw deals another.
+    func noteListEnded(on id: String) {
+        deck.noteListEnded(on: id)
     }
 
     /// True when the player's list is the deck's current order, so the step past the end deals again.
@@ -327,14 +341,17 @@ final class ShuffleSession {
                 note = error.localizedDescription
                 return nil
             }
-            let tier = index.regions.first { $0.id == id }?.tier ?? ""
             for channel in channels where channel.mediaType == medium.rawValue {
                 guard seen.insert(channel.id).inserted else { continue }
-                entries.append(ShuffleEntry(id: channel.id, regionId: id, tier: tier, medium: channel.mediaType, offline: false))
+                let filed = (channel.regionIds?.isEmpty == false) ? channel.regionIds! : [id]
+                let beyond = !filed.contains { regionId in
+                    guard let region = index.regions.first(where: { $0.id == regionId }) else { return false }
+                    return ReceiverRules.tiersOnByDefault.contains(region.tier)
+                }
+                entries.append(ShuffleEntry(id: channel.id, regionIds: filed, beyond: beyond, medium: channel.mediaType, offline: false))
                 byID[channel.id] = channel
             }
         }
-        // No channel was named: the one already on screen, or the last card dealt, counts.
         guard let dealt = deck.draw(entries: entries, medium: medium, scope: scope, regionId: regionId, playing: playingId ?? deck.lastPlayed) else {
             note = scope.emptyNote(medium: medium, regionSelected: regionSelected)
             blocked = true

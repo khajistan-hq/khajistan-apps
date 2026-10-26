@@ -66,6 +66,8 @@ final class ReceiverTuner {
     // MARK: - Choosing
 
     func play(_ channel: Channel, in list: [Channel]) {
+        // A directory pick is not a draw. Surf skips it only when it is the card at the cursor.
+        shuffle.observe(channel.id)
         stop()
         self.list = list
         source = .live(channel)
@@ -266,10 +268,11 @@ final class ReceiverTuner {
         settledAt = Date()
     }
 
-    /// The card after the permutation on screen. The channel that was playing is the last-played
-    /// card of the new deck.
+    /// The card after the permutation on screen. The channel that was playing is the last id of
+    /// that deck, so the new one does not open on it.
     private func dealNext(after from: Channel) async {
         guard let index = receiver.index else { return }
+        shuffle.noteListEnded(on: from.id)
         let (medium, scope, regionId) = shuffle.settings()
         guard let pick = await shuffle.pick(
             index: index, medium: medium, scope: scope, regionId: regionId, playingId: from.id,

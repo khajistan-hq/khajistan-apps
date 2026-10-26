@@ -222,20 +222,29 @@ struct ReceiverView: View {
         surfNote = nil
         defer { shuffling = false }
         let (medium, scope, regionId) = shuffle.settings(openRegion: model.receiverPath.last?.id)
-        guard let pick = await shuffle.pick(
-            index: index, medium: medium, scope: scope, regionId: regionId, playingId: nil,
-            load: { try await model.receiver.channels(regionId: $0, cameras: false) }
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else {
+            guard !Task.isCancelled else { return }
             surfNote = shuffle.note
             surfBlocked = shuffle.blocked
             return
         }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: nil, playingId: nil) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        guard !Task.isCancelled else { return }
         surfBlocked = false
         shuffled = pick
     }
 
-    /// The strip's region is the one Surf's deck belongs to. Moving it lets a scope that had
-    /// nothing be tried again.
+    /// The strip's region is the one Region scope draws from. Main and Beyond keep the deck
+    /// they were dealing. Moving the strip lets an empty region be tried again.
     private func rememberRegion(_ id: String) {
         let previous = UserDefaults.standard.string(forKey: ShuffleSession.regionKey)
         UserDefaults.standard.set(id, forKey: ShuffleSession.regionKey)

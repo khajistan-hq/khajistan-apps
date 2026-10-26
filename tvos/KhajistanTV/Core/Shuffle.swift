@@ -50,6 +50,10 @@ struct ShuffleDraw: Equatable, Sendable {
 
 /// One Fisher-Yates deck for a medium and a scope.
 ///
+/// Each key keeps its own order, cursor and mulberry32 stream. Main and Beyond are keyed by
+/// medium and scope, so a region change leaves them where they were. Region includes the
+/// selected region. Coming back to a key resumes it. The streams do not feed each other.
+///
 /// The permutation is dealt from the front. The first deck is not rearranged. When it is used
 /// up, the same generator deals another. If that deck has more than one channel and its first
 /// card is the last id drawn, index 0 swaps with index 1. There is no second shuffle and no
@@ -60,14 +64,18 @@ struct ShuffleDraw: Equatable, Sendable {
 /// skipped and the next one is drawn. If the skip uses the deck up, the reshuffle treats the
 /// playing channel as the last id drawn. One playable channel may repeat. None deals nothing.
 struct ShuffleDeck: Sendable {
-    private var rng: Mulberry32
-    private var key: String?
-    private var order: [String] = []
-    private var cursor = 0
+    private struct Hand {
+        var rng: Mulberry32
+        var order: [String] = []
+        var cursor = 0
+    }
+
+    private let seed: UInt32
+    private var hands: [String: Hand] = [:]
     private var observed: String?
 
     init(seed: UInt32) {
-        rng = Mulberry32(seed: seed)
+        self.seed = seed
     }
 
     /// The live receiver. Tests pass a seed so the deal can be compared with the website.
@@ -83,17 +91,20 @@ struct ShuffleDeck: Sendable {
         observed = id
     }
 
-    /// The player stepped past the end of the permutation on screen. The next draw deals another,
-    /// and `id` (the last card of that permutation) is the last id drawn.
-    mutating func noteListEnded(on id: String) {
+    /// The player stepped past the end of this permutation. The next draw of that same deck
+    /// deals another, and `id` is the last id drawn. Any other deck is left alone.
+    mutating func noteListEnded(on id: String, order ids: [String]) {
         observed = id
-        guard !order.isEmpty, order.last == id else { return }
-        cursor = order.count
+        guard let key = hands.first(where: { $0.value.order == ids })?.key else { return }
+        var hand = hands[key]!
+        guard hand.order.last == id else { return }
+        hand.cursor = hand.order.count
+        hands[key] = hand
     }
 
-    /// True when `ids` is the permutation now being dealt, in that order.
+    /// True when `ids` is a permutation now being dealt, in that order.
     func plays(_ ids: [String]) -> Bool {
-        !order.isEmpty && ids == order
+        hands.values.contains { !$0.order.isEmpty && $0.order == ids }
     }
 
     /// The next card. `playing` is the channel on screen. A pick of that channel is not a draw.
@@ -101,33 +112,34 @@ struct ShuffleDeck: Sendable {
     mutating func draw(entries: [ShuffleEntry], medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, playing: String?) -> ShuffleDraw? {
         let ids = Self.playableIDs(entries, medium: medium, scope: scope, regionId: regionId)
         let nextKey = Self.deckKey(medium: medium, scope: scope, regionId: regionId)
+        var hand = hands[nextKey] ?? Hand(rng: Mulberry32(seed: seed))
         guard !ids.isEmpty else {
-            key = nextKey
-            order = []
-            cursor = 0
+            hand.order = []
+            hand.cursor = 0
+            hands[nextKey] = hand
             return nil
         }
-        if !samePool(key: nextKey, ids: ids) {
-            key = nextKey
-            order = Self.permute(ids, rng: &rng)
-            cursor = 0
+        if !Self.samePool(hand.order, ids) {
+            hand.order = Self.permute(ids, rng: &hand.rng)
+            hand.cursor = 0
         }
         // The card at the cursor is the one already on screen: skip it. Do not search the deck
         // for that channel, and do not skip again after a reshuffle.
         var skippedPlaying = false
-        if let playing, order.count > 1, cursor < order.count, order[cursor] == playing {
-            cursor += 1
+        if let playing, hand.order.count > 1, hand.cursor < hand.order.count, hand.order[hand.cursor] == playing {
+            hand.cursor += 1
             skippedPlaying = true
         }
-        if cursor >= order.count {
-            let lastDrawn: String? = skippedPlaying ? playing : order.last
-            order = Self.avoidFirst(Self.permute(ids, rng: &rng), lastPlayed: lastDrawn)
-            cursor = 0
+        if hand.cursor >= hand.order.count {
+            let lastDrawn: String? = skippedPlaying ? playing : hand.order.last
+            hand.order = Self.avoidFirst(Self.permute(ids, rng: &hand.rng), lastPlayed: lastDrawn)
+            hand.cursor = 0
         }
-        let id = order[cursor]
-        cursor += 1
+        let id = hand.order[hand.cursor]
+        hand.cursor += 1
+        hands[nextKey] = hand
         observed = id
-        return ShuffleDraw(id: id, order: order)
+        return ShuffleDraw(id: id, order: hand.order)
     }
 
     /// Playable ids in list order. The first copy of an id is the one that counts.
@@ -173,12 +185,18 @@ struct ShuffleDeck: Sendable {
         return regionId
     }
 
-    private static func deckKey(medium: ShuffleMedium, scope: ShuffleScope, regionId: String?) -> String {
-        "\(medium.rawValue)|\(scope.rawValue)|\(selectedRegion(regionId) ?? "")"
+    /// Main and Beyond ignore the region. Region is the only scope whose deck is per region.
+    static func deckKey(medium: ShuffleMedium, scope: ShuffleScope, regionId: String?) -> String {
+        switch scope {
+        case .main, .beyond:
+            return "\(medium.rawValue)|\(scope.rawValue)"
+        case .region:
+            return "\(medium.rawValue)|\(scope.rawValue)|\(selectedRegion(regionId) ?? "")"
+        }
     }
 
-    private func samePool(key nextKey: String, ids: [String]) -> Bool {
-        guard key == nextKey, order.count == ids.count else { return false }
+    private static func samePool(_ order: [String], _ ids: [String]) -> Bool {
+        guard order.count == ids.count else { return false }
         let have = Set(order)
         return ids.allSatisfy { have.contains($0) }
     }
@@ -253,6 +271,25 @@ enum ShuffleScope: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Where Previous and Next go on a channel list. A Surf list does not wrap: Previous on the
+/// first card stays, and Next on the last card deals again. A shelf opened by hand still wraps.
+enum SurfStep: Equatable {
+    case stay
+    case deal
+    case move(Int)
+}
+
+enum SurfNavigation {
+    static func step(delta: Int, from position: Int, count: Int, surfList: Bool) -> SurfStep {
+        guard count > 1, (0..<count).contains(position) else { return .stay }
+        if surfList {
+            if delta > 0, position + 1 == count { return .deal }
+            if delta < 0, position == 0 { return .stay }
+        }
+        return .move((position + delta + count) % count)
+    }
+}
+
 /// The deck the two apps share, and the note when a scope has nothing to play.
 /// The apps use it from the main actor.
 final class ShuffleSession {
@@ -261,6 +298,8 @@ final class ShuffleSession {
 
     private var deck: ShuffleDeck
     private var selection = ""
+    /// Bumped at the start of each pick. A load that finishes after a newer one does not deal.
+    private var generation = 0
     /// Why the last draw found nothing.
     private(set) var note: String?
     /// True when the scope has no playable channel, until the medium, the scope or the region changes.
@@ -300,47 +339,48 @@ final class ShuffleSession {
         deck.observe(id)
     }
 
-    /// The player stepped past the end of the permutation Surf dealt. The next draw deals another.
-    func noteListEnded(on id: String) {
-        deck.noteListEnded(on: id)
-    }
-
-    /// True when the player's list is the deck's current order, so the step past the end deals again.
+    /// True when the player's list is a deck's current order, so the step past the end deals again.
     func plays(_ ids: [String]) -> Bool {
         deck.plays(ids)
     }
 
-    /// The next card of this medium and scope.
-    ///
-    /// `load` returns one region's channels. The store has already applied `ReceiverRules.eligible`,
-    /// which drops a channel the health feed or the denylist has taken off air. A load that throws
-    /// is reported and the deck is left as it was. An empty pool sets `blocked` and `note`.
+    /// The next card of this medium and scope. The load runs first. The deck changes only in
+    /// `commit`, and only while this pick is still the current one.
     func pick(index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, playingId: String?, load: (String) async throws -> [Channel]) async -> ShufflePick? {
-        let selectionKey = "\(medium.rawValue)|\(scope.rawValue)|\(regionId ?? "")"
+        guard let prepared = await prepare(index: index, medium: medium, scope: scope, regionId: regionId, load: load) else { return nil }
+        return commit(prepared, finishList: nil, playingId: playingId)
+    }
+
+    /// Load the scope's channels without dealing. A newer `prepare` makes this one stale.
+    func prepare(index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, load: (String) async throws -> [Channel]) async -> ShufflePrepared? {
+        let token = beginPick()
+        let selectionKey = ShuffleDeck.deckKey(medium: medium, scope: scope, regionId: regionId)
         if selectionKey != selection {
             selection = selectionKey
             blocked = false
+            note = nil
         }
-        if blocked { return nil }
+        if blocked || Task.isCancelled { return nil }
         let regionSelected = regionId.map { !$0.isEmpty && $0 != "all" } ?? false
         let ids = ShuffleDeck.regionIds(index: index, scope: scope, selected: regionId)
         guard !ids.isEmpty else {
-            _ = deck.draw(entries: [], medium: medium, scope: scope, regionId: regionId, playing: playingId)
-            note = scope.emptyNote(medium: medium, regionSelected: regionSelected)
-            blocked = true
-            return nil
+            guard current(token) else { return nil }
+            return ShufflePrepared(token: token, medium: medium, scope: scope, regionId: regionId, regionSelected: regionSelected, entries: [], byID: [:])
         }
         var entries: [ShuffleEntry] = []
         var byID: [String: Channel] = [:]
         var seen = Set<String>()
         for id in ids {
+            guard current(token) else { return nil }
             let channels: [Channel]
             do {
                 channels = try await load(id)
             } catch {
+                guard current(token) else { return nil }
                 note = error.localizedDescription
                 return nil
             }
+            guard current(token) else { return nil }
             for channel in channels where channel.mediaType == medium.rawValue {
                 guard seen.insert(channel.id).inserted else { continue }
                 let filed = (channel.regionIds?.isEmpty == false) ? channel.regionIds! : [id]
@@ -352,17 +392,48 @@ final class ShuffleSession {
                 byID[channel.id] = channel
             }
         }
-        guard let dealt = deck.draw(entries: entries, medium: medium, scope: scope, regionId: regionId, playing: playingId ?? deck.lastPlayed) else {
-            note = scope.emptyNote(medium: medium, regionSelected: regionSelected)
+        guard current(token) else { return nil }
+        return ShufflePrepared(token: token, medium: medium, scope: scope, regionId: regionId, regionSelected: regionSelected, entries: entries, byID: byID)
+    }
+
+    /// Deal from a load that is still the current pick. `finishList` is the permutation the
+    /// player walked off the end of. Passed only once the task has not been cancelled.
+    func commit(_ prepared: ShufflePrepared, finishList: [String]?, playingId: String?) -> ShufflePick? {
+        guard current(prepared.token) else { return nil }
+        if let finishList {
+            deck.noteListEnded(on: playingId ?? finishList.last ?? "", order: finishList)
+        }
+        guard let dealt = deck.draw(entries: prepared.entries, medium: prepared.medium, scope: prepared.scope, regionId: prepared.regionId, playing: playingId ?? deck.lastPlayed) else {
+            note = prepared.scope.emptyNote(medium: prepared.medium, regionSelected: prepared.regionSelected)
             blocked = true
             return nil
         }
-        let list = dealt.order.compactMap { byID[$0] }
-        guard let channel = byID[dealt.id], list.count == dealt.order.count else { return nil }
+        let list = dealt.order.compactMap { prepared.byID[$0] }
+        guard let channel = prepared.byID[dealt.id], list.count == dealt.order.count else { return nil }
         note = nil
         blocked = false
         return ShufflePick(channel: channel, list: list)
     }
+
+    private func beginPick() -> Int {
+        generation += 1
+        return generation
+    }
+
+    private func current(_ token: Int) -> Bool {
+        token == generation && !Task.isCancelled
+    }
+}
+
+/// A load that has not been dealt yet. `commit` deals it only while its token is still current.
+struct ShufflePrepared {
+    fileprivate let token: Int
+    let medium: ShuffleMedium
+    let scope: ShuffleScope
+    let regionId: String?
+    let regionSelected: Bool
+    let entries: [ShuffleEntry]
+    let byID: [String: Channel]
 }
 
 /// The Receiver's Cameras: every region with a camera list, the main atlas first, then the

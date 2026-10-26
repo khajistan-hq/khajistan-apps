@@ -367,34 +367,38 @@ struct ReceiverPlayerView: View {
         channel.mediaType == "radio" && !channel.isReverent && !reduceMotion
     }
 
-    /// The neighbour of the channel last asked for, reached behind the pigeon. A list Surf dealt
-    /// deals a new deck at its end. Any other list wraps. A press while a flight is on screen
-    /// ends that flight and takes over from it.
+    /// The neighbour of the channel last asked for, reached behind the pigeon. On a list Surf
+    /// dealt, Previous on the first card stays and Next past the end deals again. Any other list
+    /// wraps. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
         let from = destination ?? current
         guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-        if delta > 0, position + 1 == list.count, let shuffle, shuffle.plays(list.map(\.id)) {
+        switch SurfNavigation.step(delta: delta, from: position, count: list.count, surfList: shuffle?.plays(list.map(\.id)) ?? false) {
+        case .stay:
+            return
+        case .deal:
             changeTask?.cancel()
             changeTask = Task { await dealNext(after: from) }
-            return
+        case .move(let index):
+            let target = list[index]
+            shuffle?.observe(target.id)
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
         }
-        guard list.count > 1 else { return }
-        let target = list[(position + delta + list.count) % list.count]
-        shuffle?.observe(target.id)
-        destination = target
-        changeTask?.cancel()
-        changeTask = Task { await change(to: target) }
     }
 
     /// The card after this permutation. The channel on screen is not dealt first again.
     private func dealNext(after from: Channel) async {
         guard let shuffle, let index = model.receiver.index else { return }
-        shuffle.noteListEnded(on: from.id)
         let (medium, scope, regionId) = shuffle.settings(openRegion: model.receiverPath.last?.id)
-        guard let pick = await shuffle.pick(
-            index: index, medium: medium, scope: scope, regionId: regionId, playingId: from.id,
-            load: { try await model.receiver.channels(regionId: $0, cameras: false) }
+        let order = list.map(\.id)
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            load: { try await model.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else { return }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: order, playingId: from.id) else { return }
         guard !Task.isCancelled else { return }
         list = pick.list
         destination = pick.channel

@@ -13,6 +13,7 @@
 // the next. If that skip exhausts the deck, reshuffle with the boundary rule,
 // treating the playing channel as the last id drawn.
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -144,6 +145,70 @@ for (const scope of ["main", "region", "beyond"]) {
   cursor = 0;
   same(order[cursor], "horn-news", "the reshuffle opens on horn-news");
   same(order, fixture.draws.main.decks[1], "skip-exhaust matches the second deck");
+}
+
+const fixtureHash = createHash("sha256").update(readFileSync(fixturePath)).digest("hex");
+assert(
+  fixtureHash === "3912779bf179b5cabc38e3c63b1bb775db7793d03b1fa219e2640c58e21d2f08",
+  `fixture sha256 ${fixtureHash}`
+);
+
+// One mulberry32 stream per key. Main and Beyond ignore the region and resume.
+// A region's stream does not feed another region's stream.
+function hand(seed) {
+  return { rand: mulberry32(seed), order: null, cursor: 0 };
+}
+
+function drawHand(state, ids, playing) {
+  if (!state.order || state.order.length !== ids.length || ids.some((id) => !state.order.includes(id))) {
+    state.order = permute(ids, state.rand);
+    state.cursor = 0;
+  }
+  let skipped = false;
+  if (playing && state.order.length > 1 && state.cursor < state.order.length && state.order[state.cursor] === playing) {
+    state.cursor += 1;
+    skipped = true;
+  }
+  if (state.cursor >= state.order.length) {
+    state.order = avoidFirst(permute(ids, state.rand), skipped ? playing : state.order.at(-1));
+    state.cursor = 0;
+  }
+  const id = state.order[state.cursor];
+  state.cursor += 1;
+  return { id, order: state.order.slice() };
+}
+
+{
+  const state = hand(fixture.seeds.main);
+  const first = drawHand(state, fixture.pools.main, null);
+  const second = drawHand(state, fixture.pools.main, null);
+  same(first.order, fixture.draws.main.decks[0], "main survives a region change");
+  same(second.id, first.order[1], "main continues");
+  same(second.order, first.order, "main order held");
+}
+
+{
+  const state = hand(fixture.seeds.beyond);
+  const first = drawHand(state, fixture.pools.beyond, null);
+  const second = drawHand(state, fixture.pools.beyond, null);
+  same(first.order, fixture.draws.beyond.decks[0], "beyond survives a region change");
+  same(second.id, first.order[1], "beyond continues");
+  same(second.order, first.order, "beyond order held");
+}
+
+{
+  const horn = hand(fixture.seeds.region);
+  const indus = hand(fixture.seeds.region);
+  const opened = drawHand(horn, fixture.pools.region, null);
+  const indusPool = ["indus-one", "indus-two"];
+  const switched = drawHand(indus, indusPool, null);
+  const resumed = drawHand(horn, fixture.pools.region, null);
+  same(opened.order, fixture.draws.region.decks[0], "horn opening");
+  same(resumed.id, opened.order[1], "horn resumes");
+  same(resumed.order, opened.order, "horn order held");
+  const again = drawHand(hand(fixture.seeds.region), indusPool, null);
+  same(switched.order, again.order, "indus does not continue horn's stream");
+  same(switched.id, again.id, "indus opens on its own stream");
 }
 
 if (process.exitCode) {

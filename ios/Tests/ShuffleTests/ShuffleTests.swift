@@ -76,18 +76,146 @@ final class ShuffleTests: XCTestCase {
     func testRegionChangeDealsANewDeck() throws {
         let fixture = try Self.fixture()
         let entries = Self.entries(fixture)
-        var kept = ShuffleDeck(seed: 3)
-        let opening = try XCTUnwrap(Self.deal(&kept, entries, scope: "region", region: "horn", playing: nil))
-        let continued = try XCTUnwrap(Self.deal(&kept, entries, scope: "region", region: "horn", playing: nil))
-        var switched = ShuffleDeck(seed: 3)
-        _ = Self.deal(&switched, entries, scope: "region", region: "horn", playing: nil)
-        let reset = try XCTUnwrap(Self.deal(&switched, entries, scope: "region", region: "indus", playing: nil))
-        XCTAssertEqual(opening.order, try XCTUnwrap(fixture.draws["region"]).decks[0])
-        XCTAssertNotEqual(reset.order, continued.order)
-        XCTAssertEqual(Set(reset.order), Set(["indus-one", "indus-two"]))
+        var deck = ShuffleDeck(seed: 3)
+        let horn = try XCTUnwrap(Self.deal(&deck, entries, scope: "region", region: "horn", playing: nil))
+        let indus = try XCTUnwrap(Self.deal(&deck, entries, scope: "region", region: "indus", playing: nil))
+        let hornAgain = try XCTUnwrap(Self.deal(&deck, entries, scope: "region", region: "horn", playing: nil))
+        XCTAssertEqual(horn.order, try XCTUnwrap(fixture.draws["region"]).decks[0])
+        XCTAssertEqual(hornAgain.id, horn.order[1])
+        XCTAssertEqual(hornAgain.order, horn.order)
         var fresh = ShuffleDeck(seed: 3)
-        let reseeded = try XCTUnwrap(Self.deal(&fresh, entries, scope: "region", region: "indus", playing: nil))
-        XCTAssertNotEqual(reset.order, reseeded.order)
+        let indusFresh = try XCTUnwrap(Self.deal(&fresh, entries, scope: "region", region: "indus", playing: nil))
+        XCTAssertEqual(indus.order, indusFresh.order)
+        XCTAssertEqual(indus.id, indusFresh.id)
+        XCTAssertEqual(Set(indus.order), Set(["indus-one", "indus-two"]))
+    }
+
+    func testMainAndBeyondSurviveARegionChange() throws {
+        XCTAssertEqual(ShuffleDeck.deckKey(medium: .tv, scope: .main, regionId: "horn"), "tv|main")
+        XCTAssertEqual(ShuffleDeck.deckKey(medium: .tv, scope: .main, regionId: "indus"), "tv|main")
+        XCTAssertEqual(ShuffleDeck.deckKey(medium: .tv, scope: .beyond, regionId: "horn"), "tv|beyond")
+        XCTAssertEqual(ShuffleDeck.deckKey(medium: .tv, scope: .region, regionId: "horn"), "tv|region|horn")
+        let fixture = try Self.fixture()
+        let entries = Self.entries(fixture)
+        var main = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["main"]))
+        let first = try XCTUnwrap(Self.deal(&main, entries, scope: "main", region: "horn", playing: nil))
+        let next = try XCTUnwrap(Self.deal(&main, entries, scope: "main", region: "indus", playing: nil))
+        XCTAssertEqual(first.order, try XCTUnwrap(fixture.draws["main"]).decks[0])
+        XCTAssertEqual(next.id, first.order[1])
+        XCTAssertEqual(next.order, first.order)
+        var beyond = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["beyond"]))
+        let opened = try XCTUnwrap(Self.deal(&beyond, entries, scope: "beyond", region: "horn", playing: nil))
+        let followed = try XCTUnwrap(Self.deal(&beyond, entries, scope: "beyond", region: "anatolia", playing: nil))
+        XCTAssertEqual(opened.order, try XCTUnwrap(fixture.draws["beyond"]).decks[0])
+        XCTAssertEqual(followed.id, opened.order[1])
+        XCTAssertEqual(followed.order, opened.order)
+        var split = ShuffleDeck(seed: try XCTUnwrap(fixture.seeds["main"]))
+        let television = try XCTUnwrap(split.draw(entries: entries, medium: .tv, scope: .main, regionId: nil, playing: nil))
+        let radio = entries.map { ShuffleEntry(id: $0.id, regionIds: $0.regionIds, beyond: $0.beyond, medium: "radio") }
+        _ = split.draw(entries: radio, medium: .radio, scope: .main, regionId: "indus", playing: nil)
+        let again = try XCTUnwrap(split.draw(entries: entries, medium: .tv, scope: .main, regionId: "nusantara", playing: nil))
+        XCTAssertEqual(again.id, television.order[1])
+        XCTAssertEqual(again.order, television.order)
+    }
+
+    func testPreviousOnASurfListStaysPut() {
+        XCTAssertEqual(SurfNavigation.step(delta: -1, from: 0, count: 5, surfList: true), .stay)
+        XCTAssertEqual(SurfNavigation.step(delta: 1, from: 4, count: 5, surfList: true), .deal)
+        XCTAssertEqual(SurfNavigation.step(delta: -1, from: 0, count: 5, surfList: false), .move(4))
+        XCTAssertEqual(SurfNavigation.step(delta: 1, from: 4, count: 5, surfList: false), .move(0))
+    }
+
+    func testPoolKeepsFileOrder() {
+        let entries = [
+            ShuffleEntry(id: "zeta", regionIds: ["horn"], beyond: false, medium: "tv"),
+            ShuffleEntry(id: "alpha", regionIds: ["horn"], beyond: false, medium: "tv"),
+            ShuffleEntry(id: "mu", regionIds: ["horn"], beyond: false, medium: "tv"),
+        ]
+        XCTAssertEqual(ShuffleDeck.playableIDs(entries, medium: .tv, scope: .main, regionId: "indus"), ["zeta", "alpha", "mu"])
+    }
+
+    func testFixtureSha256() throws {
+        var url = URL(fileURLWithPath: #filePath).resolvingSymlinksInPath()
+        let name = "tvos/Tests/Fixtures/shuffle_fixture.json"
+        while url.path != "/" {
+            let candidate = url.appendingPathComponent(name)
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                let binary = FileManager.default.isExecutableFile(atPath: "/usr/bin/sha256sum") ? "/usr/bin/sha256sum" : "/usr/bin/shasum"
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: binary)
+                process.arguments = binary.hasSuffix("shasum") ? ["-a", "256", candidate.path] : [candidate.path]
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                try process.run()
+                process.waitUntilExit()
+                let text = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                let digest = text.split(whereSeparator: { $0 == " " || $0 == "\n" }).first.map(String.init) ?? ""
+                XCTAssertEqual(digest, "3912779bf179b5cabc38e3c63b1bb775db7793d03b1fa219e2640c58e21d2f08")
+                return
+            }
+            url.deleteLastPathComponent()
+        }
+        XCTFail("fixture missing")
+    }
+
+    func testAStaleOrCancelledPickDoesNotDeal() async throws {
+        let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(Self.sampleIndex.utf8))
+        let session = ShuffleSession(seed: 1)
+        let channel = "{\"id\":\"%@\",\"name\":\"%@\",\"mediaType\":\"tv\",\"streams\":[{\"id\":\"s\"}],\"activeStreamId\":\"s\"}"
+        func parsed(_ id: String) throws -> Channel {
+            try JSONDecoder().decode(Channel.self, from: Data(String(format: channel, id, id).utf8))
+        }
+        let load: (String) async throws -> [Channel] = { id in [try parsed(id)] }
+        let openedPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: load)
+        let opened = try XCTUnwrap(openedPick)
+        let order = opened.list.map(\.id)
+
+        let gate = PickGate()
+        let hanging = Task { () -> ShufflePrepared? in
+            await session.prepare(index: index, medium: .tv, scope: .main, regionId: "indus") { id in
+                await gate.enter()
+                return [try parsed(id)]
+            }
+        }
+        await gate.arrived()
+        let secondPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "anatolia", playingId: nil, load: load)
+        let second = try XCTUnwrap(secondPick)
+        gate.release()
+        let stale = await hanging.value
+        XCTAssertNil(stale)
+        XCTAssertEqual(second.list.map(\.id), order)
+        XCTAssertEqual(second.channel.id, order[1])
+
+        let later = ShuffleSession(seed: 1)
+        let openedLaterPick = await later.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: load)
+        let openedLater = try XCTUnwrap(openedLaterPick)
+        let laterOrder = openedLater.list.map(\.id)
+        let staleLoad = await later.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: load)
+        let stalePrepared = try XCTUnwrap(staleLoad)
+        let newerLoad = await later.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: load)
+        let newer = try XCTUnwrap(newerLoad)
+        XCTAssertNil(later.commit(stalePrepared, finishList: laterOrder, playingId: laterOrder.last))
+        let resumed = try XCTUnwrap(later.commit(newer, finishList: nil, playingId: nil))
+        XCTAssertEqual(resumed.list.map(\.id), laterOrder)
+        XCTAssertEqual(resumed.channel.id, laterOrder[1])
+
+        let third = ShuffleSession(seed: 1)
+        let openedThirdPick = await third.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: load)
+        let openedThird = try XCTUnwrap(openedThirdPick)
+        let thirdOrder = openedThird.list.map(\.id)
+        let heldLoad = await third.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: load)
+        let held = try XCTUnwrap(heldLoad)
+        let cancelled = Task { () -> ShufflePick? in
+            while !Task.isCancelled { await Task.yield() }
+            return third.commit(held, finishList: thirdOrder, playingId: thirdOrder.last)
+        }
+        cancelled.cancel()
+        let cancelledPick = await cancelled.value
+        XCTAssertNil(cancelledPick)
+        let afterPick = await third.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: load)
+        let after = try XCTUnwrap(afterPick)
+        XCTAssertEqual(after.list.map(\.id), thirdOrder)
+        XCTAssertEqual(after.channel.id, thirdOrder[1])
     }
 
     func testOneChannelMayRepeatAndNoneDealsNothing() throws {
@@ -161,6 +289,44 @@ final class ShuffleTests: XCTestCase {
         XCTAssertEqual(only.channel.id, "anatolia")
         XCTAssertEqual(again.channel.id, "anatolia")
         XCTAssertFalse(session.blocked)
+    }
+
+    private final class PickGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entered: CheckedContinuation<Void, Never>?
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func enter() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                entered = continuation
+                let pending = waiters
+                waiters = []
+                lock.unlock()
+                for waiter in pending { waiter.resume() }
+            }
+        }
+
+        func arrived() async {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if entered != nil {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    waiters.append(continuation)
+                    lock.unlock()
+                }
+            }
+        }
+
+        func release() {
+            lock.lock()
+            let continuation = entered
+            entered = nil
+            lock.unlock()
+            continuation?.resume()
+        }
     }
 
     private struct LoadFailure: LocalizedError {

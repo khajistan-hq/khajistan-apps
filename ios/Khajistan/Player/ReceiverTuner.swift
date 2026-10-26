@@ -86,19 +86,22 @@ final class ReceiverTuner {
         case .live(let current):
             let from = destination ?? current
             guard let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-            // The list Surf dealt is the permutation. The step past its end deals the next one,
-            // and the channel on screen is not dealt first again.
-            if delta > 0, position + 1 == list.count, shuffle.plays(list.map(\.id)) {
+            // The list Surf dealt does not wrap. Previous on its first card stays. Next past
+            // its end deals the next permutation. A shelf opened by hand still wraps.
+            switch SurfNavigation.step(delta: delta, from: position, count: list.count, surfList: shuffle.plays(list.map(\.id))) {
+            case .stay:
+                return
+            case .deal:
                 changeTask?.cancel()
                 changeTask = Task { await dealNext(after: from) }
                 return
+            case .move(let index):
+                let target = list[index]
+                shuffle.observe(target.id)
+                destination = target
+                changeTask?.cancel()
+                changeTask = Task { await change(to: target) }
             }
-            guard list.count > 1 else { return }
-            let target = list[(position + delta + list.count) % list.count]
-            shuffle.observe(target.id)
-            destination = target
-            changeTask?.cancel()
-            changeTask = Task { await change(to: target) }
         case .transmission:
             changeTask?.cancel()
             changeTask = Task { await switchTransmission() }
@@ -164,15 +167,23 @@ final class ReceiverTuner {
             return
         }
         let (medium, scope, regionId) = shuffle.settings()
-        guard let pick = await shuffle.pick(
+        guard let prepared = await shuffle.prepare(
             index: index, medium: medium, scope: scope, regionId: regionId,
-            playingId: destination?.id ?? channel?.id,
-            load: { try await self.receiver.channels(regionId: $0, cameras: false) }
+            load: { try await self.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else {
+            guard !Task.isCancelled else { return }
             surfNote = shuffle.note
             surfBlocked = shuffle.blocked
             return
         }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: nil, playingId: destination?.id ?? channel?.id) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        guard !Task.isCancelled else { return }
         surfBlocked = false
         play(pick.channel, in: pick.list)
     }
@@ -272,12 +283,20 @@ final class ReceiverTuner {
     /// that deck, so the new one does not open on it.
     private func dealNext(after from: Channel) async {
         guard let index = receiver.index else { return }
-        shuffle.noteListEnded(on: from.id)
         let (medium, scope, regionId) = shuffle.settings()
-        guard let pick = await shuffle.pick(
-            index: index, medium: medium, scope: scope, regionId: regionId, playingId: from.id,
-            load: { try await self.receiver.channels(regionId: $0, cameras: false) }
+        let order = list.map(\.id)
+        guard let prepared = await shuffle.prepare(
+            index: index, medium: medium, scope: scope, regionId: regionId,
+            load: { try await self.receiver.channels(regionId: $0, cameras: false, fileOrder: true) }
         ) else {
+            guard !Task.isCancelled else { return }
+            surfNote = shuffle.note
+            surfBlocked = shuffle.blocked
+            return
+        }
+        guard !Task.isCancelled else { return }
+        guard let pick = shuffle.commit(prepared, finishList: order, playingId: from.id) else {
+            guard !Task.isCancelled else { return }
             surfNote = shuffle.note
             surfBlocked = shuffle.blocked
             return

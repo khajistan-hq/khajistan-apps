@@ -141,7 +141,10 @@ struct ReceiverPlayerView: View {
             stopEverything()
             dismiss()
         }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) {
+            wake()
+            noteShownIfPlaying()
+        }
         .task {
             await open()
             #if DEBUG
@@ -408,6 +411,13 @@ struct ReceiverPlayerView: View {
         listDeck = pick.deck
         destination = pick.channel
         await change(to: pick.channel)
+        noteShownIfPlaying()
+    }
+
+    /// The deal counts once its picture is up. Menu before that leaves the card for the next Surf.
+    private func noteShownIfPlaying() {
+        guard case .playing = controller.state, let deck = listDeck, destination == nil else { return }
+        shuffle?.confirmShown(key: deck.key, channelId: current.id)
     }
 
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
@@ -418,6 +428,7 @@ struct ReceiverPlayerView: View {
         await controller.settled()
         guard !Task.isCancelled else { return }
         model.clips.uncover()
+        noteShownIfPlaying()
     }
 
     /// The pigeon flies over the picture while the next channel tunes behind it, out of sight and

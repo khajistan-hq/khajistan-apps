@@ -406,10 +406,88 @@ final class ShuffleTests: XCTestCase {
         let firstPick = session.commit(prepared, finishList: nil, playingId: nil)
         let first = try XCTUnwrap(firstPick)
         XCTAssertNil(session.commit(prepared, finishList: nil, playingId: nil))
+        session.confirmShown(key: first.deck.key, channelId: first.channel.id)
         let nextPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "anatolia", playingId: nil, load: Self.oneEach)
         let next = try XCTUnwrap(nextPick)
         XCTAssertEqual(next.list.map(\.id), first.list.map(\.id))
         XCTAssertEqual(next.channel.id, first.list[1].id)
+    }
+
+    /// A Surf cancelled while the channels are still loading does not spend a card.
+    /// The next Surf deals the channel that was loading.
+    @MainActor
+    func testCancelledBeforeCommitDealsTheLoadingChannel() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let gate = PickGate()
+        let flight = Task { @MainActor () -> ShufflePick? in
+            let prepared = await session.prepare(index: index, medium: .tv, scope: .main, regionId: "indus", load: { id in
+                await gate.enter()
+                return try await Self.oneEach(id)
+            })
+            guard !Task.isCancelled, let prepared else { return nil }
+            return session.commit(prepared, finishList: nil, playingId: nil)
+        }
+        await gate.arrived()
+        flight.cancel()
+        gate.release()
+        let missed = await flight.value
+        XCTAssertNil(missed)
+        let dealtPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.oneEach)
+        let dealt = try XCTUnwrap(dealtPick)
+        let fresh = ShuffleSession(seed: 1)
+        let firstPick = await fresh.pick(index: index, medium: .tv, scope: .main, regionId: "indus", playingId: nil, load: Self.oneEach)
+        let first = try XCTUnwrap(firstPick)
+        XCTAssertEqual(dealt.channel.id, first.channel.id)
+        XCTAssertEqual(dealt.list.map(\.id), first.list.map(\.id))
+    }
+
+    /// Next dealt a card, then the tune was cancelled before that card was confirmed on screen.
+    /// The next Surf returns that card. Once it has been shown, Surf draws the card after it.
+    @MainActor
+    func testCancelledAfterCommitReturnsTheDealtChannel() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let openedPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        let opened = try XCTUnwrap(openedPick)
+        let gate = PickGate()
+        let flight = Task { @MainActor () -> ShufflePick? in
+            let prepared = await session.prepare(
+                index: index, medium: opened.deck.medium, scope: opened.deck.scope, regionId: opened.deck.regionId, load: Self.atlas
+            )
+            guard !Task.isCancelled, let prepared else { return nil }
+            guard let pick = session.commit(prepared, finishList: opened.deck, playingId: opened.list.last?.id) else { return nil }
+            await gate.enter()
+            guard !Task.isCancelled else { return nil }
+            session.confirmShown(key: pick.deck.key, channelId: pick.channel.id)
+            return pick
+        }
+        await gate.arrived()
+        flight.cancel()
+        gate.release()
+        let missed = await flight.value
+        XCTAssertNil(missed)
+        let reference = ShuffleSession(seed: 1)
+        let referenceOpenedPick = await reference.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        let referenceOpened = try XCTUnwrap(referenceOpenedPick)
+        let referencePrepared = await reference.prepare(
+            index: index, medium: referenceOpened.deck.medium, scope: referenceOpened.deck.scope, regionId: referenceOpened.deck.regionId, load: Self.atlas
+        )
+        let referenceLoad = try XCTUnwrap(referencePrepared)
+        let dealtPick = reference.commit(referenceLoad, finishList: referenceOpened.deck, playingId: referenceOpened.list.last?.id)
+        let dealt = try XCTUnwrap(dealtPick)
+        let replayLoad = await session.prepare(index: index, medium: dealt.deck.medium, scope: dealt.deck.scope, regionId: dealt.deck.regionId, load: Self.atlas)
+        let replayPrepared = try XCTUnwrap(replayLoad)
+        let replayPick = session.commit(replayPrepared, finishList: nil, playingId: nil)
+        let replay = try XCTUnwrap(replayPick)
+        XCTAssertEqual(replay.channel.id, dealt.channel.id)
+        XCTAssertEqual(replay.list.map(\.id), dealt.list.map(\.id))
+        session.confirmShown(key: dealt.deck.key, channelId: dealt.channel.id)
+        let afterPick = await session.pick(index: index, medium: dealt.deck.medium, scope: dealt.deck.scope, regionId: dealt.deck.regionId, playingId: nil, load: Self.atlas)
+        let after = try XCTUnwrap(afterPick)
+        XCTAssertEqual(after.list.map(\.id), dealt.list.map(\.id))
+        XCTAssertEqual(after.channel.id, dealt.list[1].id)
+        XCTAssertNotEqual(after.channel.id, dealt.channel.id)
     }
 
     /// The tvOS app model keeps the session. Leaving Receiver used to rebuild it with the view.

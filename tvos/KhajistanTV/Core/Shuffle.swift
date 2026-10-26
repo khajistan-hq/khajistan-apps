@@ -326,6 +326,9 @@ final class ShuffleSession {
     private var generation = 0
     /// Surf, or the step off the end of a Surf list. Starting one cancels the other.
     private var flight: Task<Void, Never>?
+    /// A card that was dealt and not shown. The next deal of that deck returns it,
+    /// so leaving before the picture comes up does not skip it.
+    private var unshown: [String: ShufflePick] = [:]
     /// Why the last draw found nothing.
     private(set) var note: String?
     /// True when the scope has no playable channel, until the medium, the scope or the region changes.
@@ -371,11 +374,26 @@ final class ShuffleSession {
         flight = task
     }
 
+    /// The screen that started the flight is gone. A load that has not dealt yet stops.
+    /// A card already dealt stays unshown until `confirmShown`, so the next Surf returns it.
+    func cancelFlight() {
+        flight?.cancel()
+        flight = nil
+    }
+
+    /// `channelId` is on screen for `key`. That deal is kept, and the next Surf draws the card after it.
+    func confirmShown(key: String, channelId: String) {
+        guard unshown[key]?.channel.id == channelId else { return }
+        unshown[key] = nil
+    }
+
     /// The next card of this medium and scope. The load runs first. The deck changes only in
     /// `commit`, and only while this pick is still the current one.
     func pick(index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, playingId: String?, load: (String) async throws -> [Channel]) async -> ShufflePick? {
         guard let prepared = await prepare(index: index, medium: medium, scope: scope, regionId: regionId, load: load) else { return nil }
-        return commit(prepared, finishList: nil, playingId: playingId)
+        guard let dealt = commit(prepared, finishList: nil, playingId: playingId) else { return nil }
+        confirmShown(key: dealt.deck.key, channelId: dealt.channel.id)
+        return dealt
     }
 
     /// Load the scope's channels without dealing. A newer `prepare` makes this one stale.
@@ -430,6 +448,10 @@ final class ShuffleSession {
         guard current(prepared.token) else { return nil }
         let preparedKey = ShuffleDeck.deckKey(medium: prepared.medium, scope: prepared.scope, regionId: prepared.regionId)
         if let finishList, finishList.key != preparedKey { return nil }
+        if let waiting = unshown[preparedKey] {
+            generation += 1
+            return waiting
+        }
         generation += 1
         if let finishList {
             deck.noteListEnded(on: playingId ?? "", key: finishList.key)
@@ -443,7 +465,9 @@ final class ShuffleSession {
         guard let channel = prepared.byID[dealt.id], list.count == dealt.order.count else { return nil }
         note = nil
         blocked = false
-        return ShufflePick(channel: channel, list: list, medium: prepared.medium, scope: prepared.scope, regionId: prepared.regionId)
+        let pick = ShufflePick(channel: channel, list: list, medium: prepared.medium, scope: prepared.scope, regionId: prepared.regionId)
+        unshown[preparedKey] = pick
+        return pick
     }
 
     private func beginPick() -> Int {

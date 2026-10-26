@@ -35,6 +35,9 @@ struct ReceiverView: View {
         .fullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, deck: pick.deck, shuffle: model.shuffle)
         }
+        // Leaving Receiver (the top bar, for instance) drops this screen. Cancel a Surf that
+        // has not dealt yet. A card already dealt stays unshown until its picture is up.
+        .onDisappear { model.shuffle.cancelFlight() }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         // vod.json opens with the preview password, so a password entered later loads it.
@@ -241,6 +244,9 @@ struct ReceiverView: View {
             surfBlocked = model.shuffle.blocked
             return
         }
+        // Leaving Receiver cancels this task. The deal is already held, so the next Surf
+        // returns it. Presenting it here would be on a screen that is going away.
+        guard !Task.isCancelled else { return }
         surfBlocked = false
         shuffled = pick
     }

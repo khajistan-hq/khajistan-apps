@@ -313,6 +313,47 @@ enum SurfList {
     }
 }
 
+/// How the tune ended, as far as the deck cares. A failure and a timeout spend the card.
+/// The player's 30 second timeout publishes a failure, and `.timedOut` spends it the same way.
+enum SurfTune: Equatable {
+    case presented
+    case playing
+    case failed
+    case timedOut
+    case cancelled
+}
+
+/// Whether the viewer has been given the dealt card.
+enum SurfArrival: Equatable {
+    /// This channel is the one on screen. The card is spent.
+    case onScreen(String)
+    /// The previous picture is still showing. The card stays held.
+    case notYet
+}
+
+/// The rule both screens use before they tell the session a card was shown.
+enum SurfPresentation {
+    /// Apple TV spends a card when that channel becomes the current one: the cover opened on it,
+    /// or the cut landed, whether the tune plays, fails, or times out. Menu before the cut does not.
+    /// A neighbour that has reached `.playing` is still not this channel: `currentId` differs, so the card stays held.
+    static func television(currentId: String, dealtId: String, tune: SurfTune) -> SurfArrival {
+        switch tune {
+        case .cancelled:
+            return .notYet
+        case .presented, .playing, .failed, .timedOut:
+            guard currentId == dealtId else { return .notYet }
+            return .onScreen(dealtId)
+        }
+    }
+
+    /// iPhone spends a card when the channel is installed as the live source, before the fade and the settle.
+    /// A cancel after that still spends it. A cancel before install does not.
+    static func phone(sourceId: String?, dealtId: String, installed: Bool) -> SurfArrival {
+        guard installed, sourceId == dealtId else { return .notYet }
+        return .onScreen(dealtId)
+    }
+}
+
 /// The deck the two apps share, and the note when a scope has nothing to play.
 /// One flight at a time: Surf cancels an end-of-list deal, and that deal cancels Surf.
 @MainActor
@@ -326,8 +367,8 @@ final class ShuffleSession {
     private var generation = 0
     /// Surf, or the step off the end of a Surf list. Starting one cancels the other.
     private var flight: Task<Void, Never>?
-    /// A card that was dealt and not shown. The next deal of that deck returns it,
-    /// so leaving before the picture comes up does not skip it.
+    /// A card that was dealt and not yet on screen. The next deal of that deck returns it,
+    /// so leaving before the cover, or Menu before the cut, does not skip it.
     private var unshown: [String: ShufflePick] = [:]
     /// Why the last draw found nothing.
     private(set) var note: String?
@@ -375,10 +416,17 @@ final class ShuffleSession {
     }
 
     /// The screen that started the flight is gone. A load that has not dealt yet stops.
-    /// A card already dealt stays unshown until `confirmShown`, so the next Surf returns it.
+    /// A card already dealt stays held until that channel is the one on screen.
     func cancelFlight() {
         flight?.cancel()
         flight = nil
+    }
+
+    /// Spend the held card when `arrival` says that channel is on screen. A neighbour playing,
+    /// or Menu before the cut, arrives as `.notYet` and leaves the card held.
+    func noteArrival(_ arrival: SurfArrival, key: String?) {
+        guard let key, case .onScreen(let channelId) = arrival else { return }
+        confirmShown(key: key, channelId: channelId)
     }
 
     /// `channelId` is on screen for `key`. That deal is kept, and the next Surf draws the card after it.
@@ -392,7 +440,7 @@ final class ShuffleSession {
     func pick(index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope, regionId: String?, playingId: String?, load: (String) async throws -> [Channel]) async -> ShufflePick? {
         guard let prepared = await prepare(index: index, medium: medium, scope: scope, regionId: regionId, load: load) else { return nil }
         guard let dealt = commit(prepared, finishList: nil, playingId: playingId) else { return nil }
-        confirmShown(key: dealt.deck.key, channelId: dealt.channel.id)
+        noteArrival(SurfPresentation.television(currentId: dealt.channel.id, dealtId: dealt.channel.id, tune: .presented), key: dealt.deck.key)
         return dealt
     }
 

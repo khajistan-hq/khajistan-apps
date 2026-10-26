@@ -36,7 +36,7 @@ struct ReceiverView: View {
             ReceiverPlayerView(channel: pick.channel, list: pick.list, deck: pick.deck, shuffle: model.shuffle)
         }
         // Leaving Receiver (the top bar, for instance) drops this screen. Cancel a Surf that
-        // has not dealt yet. A card already dealt stays unshown until its picture is up.
+        // has not dealt yet. A card already dealt stays held until that channel is on screen.
         .onDisappear { model.shuffle.cancelFlight() }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }

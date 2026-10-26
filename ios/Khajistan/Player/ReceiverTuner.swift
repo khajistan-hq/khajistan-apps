@@ -205,14 +205,14 @@ final class ReceiverTuner {
             surfBlocked = shuffle.blocked
             return
         }
-        // Cancelled after the deal: the card stays unshown and the next Surf returns it.
+        // Cancelled after the deal, before the channel is the source: the card stays held.
         // A tab change does not cancel this task. The tuner is still here, so the channel
-        // goes on screen now and the next Surf is the card after it.
+        // is installed now and the next Surf is the card after it.
         guard !Task.isCancelled else { return }
         surfBlocked = false
         play(pick.channel, in: pick.list)
         listDeck = pick.deck
-        shuffle.confirmShown(key: pick.deck.key, channelId: pick.channel.id)
+        shuffle.noteArrival(SurfPresentation.phone(sourceId: pick.channel.id, dealtId: pick.channel.id, installed: true), key: pick.deck.key)
     }
 
     /// Turns the receiver off.
@@ -277,6 +277,8 @@ final class ReceiverTuner {
         controller.stop()
         controller.state = .tuning
         source = .live(target)
+        // Spent at install, before the fade and the settle. A cancel during those still keeps the spend.
+        shuffle.noteArrival(SurfPresentation.phone(sourceId: target.id, dealtId: target.id, installed: true), key: listDeck?.key)
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -330,12 +332,9 @@ final class ReceiverTuner {
         list = pick.list
         listDeck = pick.deck
         destination = pick.channel
+        // `change` installs the source inside the tune, before the fade and the settle.
+        // That spend stands if Next, Surf, or power cancels the rest.
         await change(to: pick.channel)
-        // Cancelled before the tune lands: the deal stays unshown and the next Surf returns it.
-        // A tune that installed this channel spent the card.
-        if !Task.isCancelled, channel?.id == pick.channel.id {
-            shuffle.confirmShown(key: pick.deck.key, channelId: pick.channel.id)
-        }
     }
 
     private func change(to target: Channel) async {

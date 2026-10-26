@@ -406,7 +406,7 @@ final class ShuffleTests: XCTestCase {
         let firstPick = session.commit(prepared, finishList: nil, playingId: nil)
         let first = try XCTUnwrap(firstPick)
         XCTAssertNil(session.commit(prepared, finishList: nil, playingId: nil))
-        session.confirmShown(key: first.deck.key, channelId: first.channel.id)
+        session.noteArrival(SurfPresentation.television(currentId: first.channel.id, dealtId: first.channel.id, tune: .presented), key: first.deck.key)
         let nextPick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "anatolia", playingId: nil, load: Self.oneEach)
         let next = try XCTUnwrap(nextPick)
         XCTAssertEqual(next.list.map(\.id), first.list.map(\.id))
@@ -459,7 +459,7 @@ final class ShuffleTests: XCTestCase {
             guard let pick = session.commit(prepared, finishList: opened.deck, playingId: opened.list.last?.id) else { return nil }
             await gate.enter()
             guard !Task.isCancelled else { return nil }
-            session.confirmShown(key: pick.deck.key, channelId: pick.channel.id)
+            session.noteArrival(SurfPresentation.television(currentId: pick.channel.id, dealtId: pick.channel.id, tune: .presented), key: pick.deck.key)
             return pick
         }
         await gate.arrived()
@@ -482,12 +482,91 @@ final class ShuffleTests: XCTestCase {
         let replay = try XCTUnwrap(replayPick)
         XCTAssertEqual(replay.channel.id, dealt.channel.id)
         XCTAssertEqual(replay.list.map(\.id), dealt.list.map(\.id))
-        session.confirmShown(key: dealt.deck.key, channelId: dealt.channel.id)
+        session.noteArrival(SurfPresentation.television(currentId: dealt.channel.id, dealtId: dealt.channel.id, tune: .presented), key: dealt.deck.key)
         let afterPick = await session.pick(index: index, medium: dealt.deck.medium, scope: dealt.deck.scope, regionId: dealt.deck.regionId, playingId: nil, load: Self.atlas)
         let after = try XCTUnwrap(afterPick)
         XCTAssertEqual(after.list.map(\.id), dealt.list.map(\.id))
         XCTAssertEqual(after.channel.id, dealt.list[1].id)
         XCTAssertNotEqual(after.channel.id, dealt.channel.id)
+    }
+
+    /// The cut landed on the dealt channel and the stream failed. That spends the card.
+    /// A neighbour that is already playing does not.
+    @MainActor
+    func testFailedTuneSpendsTheCard() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let dealt = try await Self.held(session, index: index)
+        let neighbour = SurfPresentation.television(currentId: "still-on-the-previous", dealtId: dealt.channel.id, tune: .playing)
+        XCTAssertEqual(neighbour, .notYet)
+        session.noteArrival(neighbour, key: dealt.deck.key)
+        let still = try await Self.again(session, dealt, index: index)
+        XCTAssertEqual(still.channel.id, dealt.channel.id)
+        let failed = SurfPresentation.television(currentId: dealt.channel.id, dealtId: dealt.channel.id, tune: .failed)
+        XCTAssertEqual(failed, .onScreen(dealt.channel.id))
+        session.noteArrival(failed, key: dealt.deck.key)
+        let next = try await Self.drawn(session, index: index)
+        XCTAssertEqual(next.list.map(\.id), dealt.list.map(\.id))
+        XCTAssertEqual(next.channel.id, dealt.list[1].id)
+        XCTAssertNotEqual(next.channel.id, dealt.channel.id)
+    }
+
+    /// The 30 second tune timeout spends the card the same way a failure does.
+    @MainActor
+    func testTimeoutSpendsTheCard() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let dealt = try await Self.held(session, index: index)
+        let timedOut = SurfPresentation.television(currentId: dealt.channel.id, dealtId: dealt.channel.id, tune: .timedOut)
+        XCTAssertEqual(timedOut, .onScreen(dealt.channel.id))
+        session.noteArrival(timedOut, key: dealt.deck.key)
+        let next = try await Self.drawn(session, index: index)
+        XCTAssertEqual(next.list.map(\.id), dealt.list.map(\.id))
+        XCTAssertEqual(next.channel.id, dealt.list[1].id)
+        XCTAssertNotEqual(next.channel.id, dealt.channel.id)
+    }
+
+    /// Down off the end after a failed tune deals the next permutation.
+    /// While the failed card is still held, that press returns the same card.
+    @MainActor
+    func testDownOffTheEndAfterAFailureStartsANewPermutation() async throws {
+        let index = try Self.decodedIndex()
+        let stuck = ShuffleSession(seed: 1)
+        let stuckOpened = try await Self.drawn(stuck, index: index)
+        let stuckDealt = try await Self.offTheEnd(stuck, after: stuckOpened, index: index)
+        let rewound = try await Self.offTheEnd(stuck, after: stuckDealt, index: index)
+        XCTAssertEqual(rewound.channel.id, stuckDealt.channel.id)
+        XCTAssertEqual(rewound.list.map(\.id), stuckDealt.list.map(\.id))
+
+        let session = ShuffleSession(seed: 1)
+        let opened = try await Self.drawn(session, index: index)
+        let dealt = try await Self.offTheEnd(session, after: opened, index: index)
+        let failed = SurfPresentation.television(currentId: dealt.channel.id, dealtId: dealt.channel.id, tune: .failed)
+        session.noteArrival(failed, key: dealt.deck.key)
+        let forward = try await Self.offTheEnd(session, after: dealt, index: index)
+        XCTAssertEqual(forward.channel.id, forward.list.first?.id)
+        XCTAssertNotEqual(forward.list.map(\.id), dealt.list.map(\.id))
+    }
+
+    /// iPhone installs the channel as the source, then Next, Surf, or power cancels the fade.
+    /// The card is spent at install. A cancel before install leaves it held.
+    @MainActor
+    func testIOSCancelAfterInstallSpendsTheCard() async throws {
+        let index = try Self.decodedIndex()
+        let session = ShuffleSession(seed: 1)
+        let dealt = try await Self.held(session, index: index)
+        let before = SurfPresentation.phone(sourceId: nil, dealtId: dealt.channel.id, installed: false)
+        XCTAssertEqual(before, .notYet)
+        session.noteArrival(before, key: dealt.deck.key)
+        let still = try await Self.again(session, dealt, index: index)
+        XCTAssertEqual(still.channel.id, dealt.channel.id)
+        let installed = SurfPresentation.phone(sourceId: dealt.channel.id, dealtId: dealt.channel.id, installed: true)
+        XCTAssertEqual(installed, .onScreen(dealt.channel.id))
+        session.noteArrival(installed, key: dealt.deck.key)
+        let next = try await Self.drawn(session, index: index)
+        XCTAssertEqual(next.list.map(\.id), dealt.list.map(\.id))
+        XCTAssertEqual(next.channel.id, dealt.list[1].id)
+        XCTAssertNotEqual(next.channel.id, dealt.channel.id)
     }
 
     /// The tvOS app model keeps the session. Leaving Receiver used to rebuild it with the view.
@@ -510,6 +589,35 @@ final class ShuffleTests: XCTestCase {
 
     private static func decodedIndex() throws -> ReceiverIndex {
         try JSONDecoder().decode(ReceiverIndex.self, from: Data(sampleIndex.utf8))
+    }
+
+    /// A deal that has not been shown yet.
+    @MainActor
+    private static func held(_ session: ShuffleSession, index: ReceiverIndex) async throws -> ShufflePick {
+        let prepared = await session.prepare(index: index, medium: .tv, scope: .main, regionId: "horn", load: Self.atlas)
+        return try XCTUnwrap(session.commit(try XCTUnwrap(prepared), finishList: nil, playingId: nil))
+    }
+
+    /// The next Surf while the previous deal is still held. It returns that same card.
+    @MainActor
+    private static func again(_ session: ShuffleSession, _ dealt: ShufflePick, index: ReceiverIndex) async throws -> ShufflePick {
+        let prepared = await session.prepare(index: index, medium: dealt.deck.medium, scope: dealt.deck.scope, regionId: dealt.deck.regionId, load: Self.atlas)
+        return try XCTUnwrap(session.commit(try XCTUnwrap(prepared), finishList: nil, playingId: nil))
+    }
+
+    /// The next card, through the same arrival `pick` uses once the previous card is on screen.
+    @MainActor
+    private static func drawn(_ session: ShuffleSession, index: ReceiverIndex) async throws -> ShufflePick {
+        let pick = await session.pick(index: index, medium: .tv, scope: .main, regionId: "horn", playingId: nil, load: Self.atlas)
+        return try XCTUnwrap(pick)
+    }
+
+    /// Down on the last card of this list.
+    @MainActor
+    private static func offTheEnd(_ session: ShuffleSession, after list: ShufflePick, index: ReceiverIndex) async throws -> ShufflePick {
+        let prepared = await session.prepare(index: index, medium: list.deck.medium, scope: list.deck.scope, regionId: list.deck.regionId, load: Self.atlas)
+        let dealt = session.commit(try XCTUnwrap(prepared), finishList: list.deck, playingId: list.list.last?.id)
+        return try XCTUnwrap(dealt)
     }
 
     /// One television channel per shard, id equal to the region id. Main is indus then anatolia.

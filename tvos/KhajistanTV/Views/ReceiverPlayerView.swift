@@ -141,10 +141,8 @@ struct ReceiverPlayerView: View {
             stopEverything()
             dismiss()
         }
-        .onChange(of: controller.state) {
-            wake()
-            noteShownIfPlaying()
-        }
+        .onChange(of: controller.state) { wake() }
+        .onAppear { noteOnScreen(current, tune: .presented) }
         .task {
             await open()
             #if DEBUG
@@ -411,13 +409,23 @@ struct ReceiverPlayerView: View {
         listDeck = pick.deck
         destination = pick.channel
         await change(to: pick.channel)
-        noteShownIfPlaying()
     }
 
-    /// The deal counts once its picture is up. Menu before that leaves the card for the next Surf.
-    private func noteShownIfPlaying() {
-        guard case .playing = controller.state, let deck = listDeck, destination == nil else { return }
-        shuffle?.confirmShown(key: deck.key, channelId: current.id)
+    /// The dealt channel is now the one on screen. A failure and a timeout spend it, the same as a picture.
+    /// Menu before the cut never calls this: the previous picture is still current, so the card stays held.
+    /// A neighbour reaching `.playing` is not passed here.
+    private func noteOnScreen(_ channel: Channel, tune: SurfTune) {
+        guard let deck = listDeck else { return }
+        shuffle?.noteArrival(SurfPresentation.television(currentId: channel.id, dealtId: channel.id, tune: tune), key: deck.key)
+    }
+
+    /// The state the cut landed on. A dead stream and the 30 second timeout both publish `.failed`.
+    private func tuneOnScreen(_ state: PlayerController.State) -> SurfTune {
+        switch state {
+        case .failed: return .failed
+        case .playing, .paused: return .playing
+        case .tuning, .idle: return .presented
+        }
     }
 
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
@@ -428,7 +436,6 @@ struct ReceiverPlayerView: View {
         await controller.settled()
         guard !Task.isCancelled else { return }
         model.clips.uncover()
-        noteShownIfPlaying()
     }
 
     /// The pigeon flies over the picture while the next channel tunes behind it, out of sight and
@@ -491,6 +498,7 @@ struct ReceiverPlayerView: View {
             current = target
         }
         if destination?.id == target.id { destination = nil }
+        noteOnScreen(target, tune: tuneOnScreen(next.state))
         outgoing.stop()
         next.releaseSound()
         model.captions.attach(target, player: next)

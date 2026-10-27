@@ -583,5 +583,19 @@ final class KhajistanUITests: XCTestCase {
         waitFor(shop.staticTexts["bagSubtotal"], 5, "the bag states a subtotal")
         XCTAssertTrue(shop.buttons["bagCheckout"].exists, "checkout is offered, and not pressed here")
         shot("bazaar-bag", shop)
+
+        shop.buttons["tab-search"].tap()
+        let field = shop.textFields["archiveSearch"]
+        field.tap()
+        field.typeText("khwaja")
+        waitFor(shop.descendants(matching: .any)["searchRoom-Madrassa"], 30, "the Madrassa answers by name")
+        waitFor(shop.descendants(matching: .any)["searchRoom-Street Dictionary"], 30, "the dictionary answers by name")
+        XCTAssertTrue(shop.descendants(matching: .any)["searchRoom-Reading Room"].exists, "the Reading Room is searched")
+        shot("search-rooms", shop)
+
+        shop.buttons["tab-library"].tap()
+        let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'place-reading|'")).firstMatch
+        waitFor(place, 10, "a reading place kept on this device is listed in Library")
+        shot("library-places", shop)
     }
 }

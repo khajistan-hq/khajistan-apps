@@ -19,7 +19,9 @@ struct YoursView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                PageHead(kicker: "Account", "Your Khajistan", line: "Account, downloads and saved work")
+                PageHead(kicker: "Library", "Your Khajistan", line: "Account, downloads and saved work")
+                if !places.isEmpty { placesBlock }
+                savedTitlesBlock
                 accountBlock
                 skinBlock
                 libraryBlock
@@ -41,6 +43,78 @@ struct YoursView: View {
         .quickLookPreview($preview)
         .onAppear(perform: readFiles)
         .onChange(of: model.isShowingBrowser) { if !model.isShowingBrowser { readFiles() } }
+    }
+
+    // MARK: - Places and saved titles
+
+    /// Where reading and watching stopped, on this device only (never synced), newest first.
+    private var places: [Resume] {
+        model.library.resume.filter { $0.position > 0 || $0.kind == .reading }
+    }
+
+    private var placesBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HouseRule()
+            Kicker("On this device").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+            ForEach(places.prefix(12)) { place in
+                Button { open(place) } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(place.title).kjName().lineLimit(2)
+                            Text(detail(place)).kjSmall(faint: true)
+                        }
+                        Spacer(minLength: 0)
+                        Text("\u{2192}").kjName().accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                .accessibilityIdentifier("place-\(place.id)")
+            }
+        }
+    }
+
+    private func detail(_ place: Resume) -> String {
+        switch place.kind {
+        case .reading: return ["Reading Room", place.detail, "p. \(Int(place.position))"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        case .film: return "Screening Room \u{00B7} stopped at \(FilmPlayback.clock(place.position))"
+        }
+    }
+
+    private func open(_ place: Resume) {
+        switch place.kind {
+        case .reading: model.open(.reading, at: [.readingTitle(place.ref, resume: true)])
+        case .film: model.open(.screening, at: [.film(place.ref)])
+        }
+    }
+
+    /// Reading Room titles saved to the account, the same saves the website's dashboard lists.
+    @ViewBuilder
+    private var savedTitlesBlock: some View {
+        let saved = model.reading.titles.filter { model.saves.isSaved($0) }
+        Group {
+            if model.auth.isSignedIn && !saved.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    HouseRule()
+                    Kicker("Saved to your account").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+                    ForEach(saved) { title in
+                        Button { model.open(.reading, at: [.readingTitle(title.slug)]) } label: {
+                            HStack {
+                                Text(title.name).kjName().lineLimit(2)
+                                Spacer(minLength: 0)
+                                Text("\u{2192}").kjName().accessibilityHidden(true)
+                            }
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                    }
+                }
+            }
+        }
+        .task(id: model.auth.email) {
+            guard model.auth.isSignedIn else { return }
+            await model.saves.load()
+            await model.reading.start()
+        }
     }
 
     // MARK: - Skin

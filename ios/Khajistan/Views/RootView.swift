@@ -47,7 +47,11 @@ struct RootView: View {
         .tint(palette.accent)
         // What iOS draws itself (the status bar, the keyboard) follows the skin's lightness.
         .preferredColorScheme(model.skin == .day ? .light : .dark)
-        .onChange(of: model.tab, initial: true) { mounted.insert(model.tab) }
+        .onChange(of: model.tab, initial: true) {
+            mounted.insert(model.tab)
+            // A field left focused behind another door would keep the keyboard over this one.
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
         .fullScreenCover(isPresented: $model.isShowingBrowser) {
             BrowserView(model: model)
         }

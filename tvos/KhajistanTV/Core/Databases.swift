@@ -261,7 +261,11 @@ enum DBRead {
                      fields: [(String, String?)], image: URL? = nil, link: URL?, linkLabel: String? = "Source") -> DBRecord? {
         // No record is dropped for want of a title: the databases' own pages say so instead.
         let title = (title?.isEmpty == false ? title : nil) ?? "[untitled \u{2014} source gives no title]"
-        let kept = fields.compactMap { label, value in value.map { DBRecord.Field(label: label, value: $0) } }
+        // A code-style value ("strong_source_verified") is shown with spaces; no word is changed.
+        func readable(_ value: String) -> String {
+            value.range(of: #"^[a-z]+(_[a-z]+)+$"#, options: .regularExpression) != nil ? value.replacingOccurrences(of: "_", with: " ") : value
+        }
+        let kept = fields.compactMap { label, value in value.map { DBRecord.Field(label: label, value: readable($0)) } }
         let facetValues = facets.compactMapValues { $0 }
         let search = ([title, native ?? ""] + kept.map(\.value)).joined(separator: " ")
         return DBRecord(id: id, title: title, native: native, subtitle: subtitle.compactMap { $0 }.joined(separator: " \u{00B7} "),
@@ -279,14 +283,21 @@ enum DBRead {
                     link: nil)
     }
 
+    /// national-broadcasts.html's service card, in its own words: the evidence state named, the
+    /// reception line it prints for every service, the jurisdiction, notes and the source checked.
     static func service(_ r: [String: Any]) -> DBRecord? {
-        make(id: text(r["id"]) ?? UUID().uuidString, title: text(r["name"]),
-             subtitle: [text(r["broadcaster"]), text(r["country_name"]), text(r["medium"])?.uppercased()],
-             facets: ["Country": text(r["country_name"]), "Medium": text(r["medium"])?.capitalized],
-             fields: [("Broadcaster", text(r["broadcaster"])), ("Country", text(r["country_name"])), ("Medium", text(r["medium"])?.capitalized),
-                      ("Scope", text(r["service_scope"])), ("Distribution", text(r["distribution"])), ("Evidence", text(r["evidence_status"])),
-                      ("Reception", text(r["reception_status"])), ("Note", text(r["note"]))],
-             link: url(r["official_source_url"]), linkLabel: text(r["source_label"]) ?? "Official source")
+        let medium = text(r["medium"]) == "television" ? "Television" : "Radio"
+        let evidence = text(r["evidence_status"]) == "verified_national_terrestrial" ? "Terrestrial evidence reviewed" : "Official service \u{00B7} carriage review"
+        let source = [text(r["source_label"]), text(r["source_checked_at"])].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        return make(id: text(r["id"]) ?? UUID().uuidString, title: text(r["name"]),
+                    subtitle: [text(r["broadcaster"]), text(r["country_name"]), medium],
+                    facets: ["Country": text(r["country_name"]), "Medium": medium],
+                    fields: [("Broadcaster", text(r["broadcaster"])), ("Service", "\(medium) \u{00B7} \(text(r["country_name"]) ?? "")"),
+                             ("Evidence", evidence), ("Reception", "Directory only \u{00B7} no stream asserted"),
+                             ("Broadcast jurisdiction", text(r["broadcast_jurisdiction"])), ("Source checked", text(r["source_checked_at"])),
+                             ("Review note", text(r["note"])), ("Editorial territory", text(r["country_scope_note"])),
+                             ("Source", source.isEmpty ? nil : source)],
+                    link: url(r["official_source_url"]), linkLabel: "Official source")
     }
 
     /// logos.html: only `review == false` with an image file; level-2 files have a WebP thumb,

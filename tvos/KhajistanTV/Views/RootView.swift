@@ -62,6 +62,7 @@ struct RootView: View {
         case .transmission: TransmissionView()
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()
+        case .rooms: RoomsTVView()
         case .chat: ChatView()
         case .account: AccountView()
         }

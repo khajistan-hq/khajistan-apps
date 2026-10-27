@@ -3943,6 +3943,8 @@ func databaseQuery() throws {
     try expectEqual(DBRead.text(1945.0), "1945")
     try expectEqual(DBRead.year("1979-04-01"), 1979)
     try expectEqual(DBRead.year("0"), nil)
+    let coded = DBRead.make(id: "x", title: "T", subtitle: [], facets: [:], fields: [("Status", "strong_source_verified"), ("Path", "a_b/c")], link: nil)!
+    try expectEqual(coded.fields.map(\.value), ["strong source verified", "a_b/c"], "only a whole code-style value is spaced")
 }
 
 /// The Madrassa reads its sources as the pages do, at the counts site-counts.json states, and an

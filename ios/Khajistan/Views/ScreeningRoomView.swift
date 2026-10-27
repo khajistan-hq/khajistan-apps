@@ -116,6 +116,8 @@ struct LockedNote: View {
             Button(kicker: "Set it under Library \u{2192}") { model.tab = .library }
                 .accessibilityIdentifier("lockedToLibrary")
         }
+        // A container, so the button inside stays its own element for VoiceOver.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("roomLocked")
     }
 }

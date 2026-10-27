@@ -715,6 +715,7 @@ enum Section: String, CaseIterable, Identifiable {
     case transmission
     case reading
     case picsvids
+    case rooms
     case chat
     case account
 
@@ -728,6 +729,8 @@ enum Section: String, CaseIterable, Identifiable {
         case .reading: return "Reading Room"
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
+        // The Screening Room, the Bazaar, the Madrassa and the databases, under one door.
+        case .rooms: return "Rooms"
         case .chat: return "Chat"
         case .account: return "Account"
         }

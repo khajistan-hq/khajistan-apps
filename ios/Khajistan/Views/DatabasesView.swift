@@ -168,13 +168,14 @@ private struct RecordRow: View {
 
 private struct RecordPicture: View {
     let url: URL
+    @Environment(AppModel.self) private var model
     @State private var image: UIImage?
 
     var body: some View {
         Color.clear
             .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
             .accessibilityHidden(true)
-            .task(id: url) { image = await PnvImages.shared.image([url], maxPixel: 480) }
+            .task(id: url) { image = await PnvImages.shared.image([url], maxPixel: 480, authorization: model.siteAuthorization(for: url)) }
     }
 }
 

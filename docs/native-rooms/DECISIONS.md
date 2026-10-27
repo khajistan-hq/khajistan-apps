@@ -20,3 +20,20 @@ Each entry: what was chosen, and why, in one or two lines.
 7. **Room copy is not taken from stale website lines.** The site menu still says "The 32 films — on
    demand" and "the Khajistan Radio mixes"; both are out of date (sales paused 2026-10-05, mixes
    removed). Native room headers use plain accurate lines instead.
+8. **Gated data is read with the preview password, or the room says it is locked.** Almost every
+   room file is behind the site password until launch (measured: only
+   `data/signal-room/national-services.json` answers without it). `SiteFeed` never turns a 401 into
+   an empty room.
+9. **The Storefront token is the website's own public token**, copied by script from
+   `kj-storefront-config.js` into both configs (it is read-and-cart-only and shipped to every
+   visitor). Checkout opens on the shop's own host; the app never takes payment details.
+10. **Madrassa's entries are evaluated out of `madrassa.html` with JavaScriptCore**, so the page stays
+    the only list. The evaluation has no bridge to the app: plain data in, JSON out.
+11. **Essays are drawn natively from the feed's HTML** (headings, paragraphs with links, transcript
+    rows, pictures); an embedded player is named and sent to the website. A core test checks that no
+    words are lost.
+12. **On Apple TV the new rooms share one "Rooms" door**; the bar keeps seven items. Buying is named
+    as an address on khajistan.com; there is no QR code (the owner removed QR codes from the TV on
+    2026-10-06 for membership, and a product code was not asked for).
+13. **Films use the system player on phone and Mac** (scrubber, manifest subtitles, PiP, AirPlay);
+    starting a film turns the Receiver off so one source plays.

@@ -83,8 +83,9 @@ final class KhajistanUITests: XCTestCase {
             app.buttons["destination-picsnvids"].tap()
             waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "the Born Digital stream loads")
             shot("\(skin)-07-pics-vids", app)
-            app.buttons["stackBack"].tap()
-            waitFor(app.buttons["destination-reading"], 5, "Back returns to the rooms")
+            // A phone pushes the room over the list; a wide window shows it beside the list.
+            if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
+            waitFor(app.buttons["destination-reading"], 5, "the rooms are reachable again")
 
             app.buttons["tab-search"].tap()
             waitFor(app.textFields["archiveSearch"], 5, "SEARCH carries the field")
@@ -333,7 +334,7 @@ final class KhajistanUITests: XCTestCase {
         shot("store-build-rooms", app)
 #else
         waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "a Pics/Vids launch opens the stream in ROOMS")
-        app.buttons["stackBack"].tap()
+        if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")

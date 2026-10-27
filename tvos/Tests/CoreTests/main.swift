@@ -3997,6 +3997,14 @@ func articleHTMLRules() throws {
     } else { try expect(false, "second block is a paragraph") }
     if case .image(_, let alt) = blocks[2] { try expectEqual(alt, "A \"scan\"") } else { try expect(false, "third block is the image") }
     try expectEqual(ArticleHTML.decodeEntities("&amp;lt; &#1606; &#x645;"), "&lt; \u{0646} \u{0645}", "an escaped entity stays escaped")
+    // A link around a picture leaves no tag text behind (refute pass, 2026-10-27).
+    let linked = ArticleHTML.blocks(#"<p><a href="https://cdn.shopify.com/x"><img src="https://cdn.shopify.com/y.jpg"></a></p><p>After.</p>"#)
+    try expectEqual(linked, [.image(URL(string: "https://cdn.shopify.com/y.jpg")!, alt: nil), .paragraph(AttributedString("After."))])
+    // Text before the first cell does not run into it; a quote or list item keeps its shape around a <p>.
+    try expectEqual(ArticleHTML.blocks(#"<table><tr>stray<td>A</td><td>B</td></tr></table>"#), [.paragraph(AttributedString("stray")), .row(["A", "B"])])
+    try expectEqual(ArticleHTML.blocks(#"<blockquote><p>Said.</p></blockquote><ul><li><p>Item</p></li></ul>"#),
+                    [.quote(AttributedString("Said.")), .item(AttributedString("Item"))])
+    try expectEqual(DBRead.text(NSNumber(value: 1e20)), "1e+20", "a number too big for Int is shown, not a crash")
 }
 
 let tests: [(String, () throws -> Void)] = [

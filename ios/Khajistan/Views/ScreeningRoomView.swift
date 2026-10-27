@@ -296,6 +296,7 @@ struct FilmPlayerScreen: View {
     @State private var player = AVPlayer()
     @State private var observer: Any?
     @State private var failed: String?
+    @State private var watch: Task<Void, Never>?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -331,7 +332,7 @@ struct FilmPlayerScreen: View {
                 MainActor.assumeIsolated { remember(time.seconds) }
             }
         }
-        Task {
+        watch = Task {
             for await status in item.publisher(for: \.status).values where status == .failed {
                 failed = Films.faultText
             }
@@ -348,6 +349,8 @@ struct FilmPlayerScreen: View {
     }
 
     private func stop() {
+        watch?.cancel()
+        watch = nil
         if let observer { player.removeTimeObserver(observer) }
         observer = nil
         if playback.isFull { remember(player.currentTime().seconds) }

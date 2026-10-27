@@ -116,12 +116,13 @@ struct MadrassaEntryScreen: View {
                     Kicker(entry.cat)
                     Text(entry.title).kjDisplay(KJType.headline, tracking: -0.05).accessibilityAddTraits(.isHeader)
                     if let sub = entry.sub { Text(sub).kjName() }
-                    if let img = entry.img, let url = URL(string: img), url.scheme == "https" {
+                    // A site path ("assets/…") is the archive's own picture, as the page resolves it.
+                    if let img = entry.img, let url = siteURL(img), url.scheme == "https" {
                         ArticleImage(url: url, alt: entry.alt)
                     }
                     if let desc = entry.desc { Text(desc).kjBody().fixedSize(horizontal: false, vertical: true) }
                     if let href = entry.href {
-                        Button(kicker: "The full entry \u{2197}") { model.open(siteURL(href)) }
+                        Button(kicker: "The full entry \u{2197}") { if let url = siteURL(href) { model.open(url) } }
                             .accessibilityIdentifier("entryFull")
                     }
                     if let press = entry.press, !press.isEmpty {
@@ -150,9 +151,9 @@ struct MadrassaEntryScreen: View {
     }
 
     /// An entry's own page: a site path opens in the house browser, an outside address in Safari.
-    private func siteURL(_ href: String) -> URL {
+    private func siteURL(_ href: String) -> URL? {
         if let url = URL(string: href), url.scheme == "https" { return url }
-        return URL(string: href, relativeTo: ArchiveURL.base)?.absoluteURL ?? ArchiveURL.base
+        return URL(string: href, relativeTo: ArchiveURL.base)?.absoluteURL
     }
 }
 
@@ -226,6 +227,12 @@ struct PostScreen: View {
             .kjColumn()
             .textSelection(.enabled)
         }
+        // A link in the text to an archive page opens in the app; any other in Safari.
+        .environment(\.openURL, OpenURLAction { url in
+            guard ArchiveURL.isArchive(url) else { return .systemAction }
+            model.open(url)
+            return .handled
+        })
         .task { await model.madrassaPosts.load() }
     }
 
@@ -271,6 +278,7 @@ struct PostScreen: View {
 struct ArticleImage: View {
     let url: URL
     let alt: String?
+    @Environment(AppModel.self) private var model
     @State private var image: UIImage?
 
     var body: some View {
@@ -285,7 +293,7 @@ struct ArticleImage: View {
         .accessibilityElement()
         .accessibilityLabel(alt ?? "")
         .accessibilityHidden(alt == nil)
-        .task(id: url) { image = await PnvImages.shared.image([url], maxPixel: 1400) }
+        .task(id: url) { image = await PnvImages.shared.image([url], maxPixel: 1400, authorization: model.siteAuthorization(for: url)) }
     }
 }
 

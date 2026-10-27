@@ -236,7 +236,8 @@ enum DBRead {
         case let number as NSNumber:
             if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
             let double = number.doubleValue
-            return double == double.rounded() ? String(Int(double)) : String(double)
+            if double == double.rounded(), let whole = Int(exactly: double) { return String(whole) }
+            return String(double)
         case let list as [Any]:
             let parts = list.compactMap { text($0) }
             return parts.isEmpty ? nil : parts.joined(separator: ", ")

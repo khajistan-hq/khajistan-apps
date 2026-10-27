@@ -58,23 +58,48 @@ final class SiteFeed<Value: Sendable> {
     func url(_ path: String) -> URL { origin.appendingPathComponent(path) }
 
     /// The preview gate's header, when a password is held and the origin is the site itself.
-    var authorization: String? {
-        guard origin == KJConfig.site, let password = auth.previewPassword else { return nil }
+    var authorization: String? { header(auth.previewPassword) }
+
+    /// The header for a picture or file at `url`: only for the site's own host, never sent to a
+    /// CDN or anywhere else.
+    func authorization(for url: URL) -> String? {
+        url.host == KJConfig.site.host && url.scheme == "https" ? header(auth.previewPassword) : nil
+    }
+
+    private func header(_ password: String?) -> String? {
+        guard origin == KJConfig.site, let password else { return nil }
         return Transmission.basicAuthorization(user: KJConfig.previewUser, password: password)
     }
 
-    /// Reads the file once per preview password. Safe to call again; `force` reads again anyway.
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var loadingWith: String??
+
+    /// Reads the files once per preview password. A call while a read with the same password is
+    /// on its way waits for it; a new password cancels that read and starts again, so a password
+    /// set mid-read is never answered by the read made without it. `force` reads again anyway.
     func load(force: Bool = false) async {
         let password = auth.previewPassword
-        if state == .loading { return }
+        if !force, state == .loading, loadingWith == .some(password), let running = loadTask {
+            await running.value
+            return
+        }
         if !force, state == .ready || state == .locked, loadedWith == .some(password) { return }
+        loadTask?.cancel()
+        let task = Task { await self.read(password) }
+        loadTask = task
+        loadingWith = .some(password)
+        await task.value
+    }
+
+    private func read(_ password: String?) async {
         state = .loading
         do {
             var files: [Data] = []
             for path in paths {
                 var request = URLRequest(url: url(path))
-                if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+                if let header = header(password) { request.setValue(header, forHTTPHeaderField: "Authorization") }
                 let (data, response) = try await urlSession.data(for: request)
+                guard !Task.isCancelled else { return }
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if code == 401 {
                     loadedWith = .some(password)
@@ -85,11 +110,15 @@ final class SiteFeed<Value: Sendable> {
                 guard code == 200 else { throw SiteFeedError.status(code) }
                 files.append(data)
             }
-            loadedWith = .some(password)
             let decode = self.decode
-            value = try await Task.detached(priority: .userInitiated) { try decode(files) }.value
+            let decoded = try await Task.detached(priority: .userInitiated) { try decode(files) }.value
+            guard !Task.isCancelled else { return }
+            value = decoded
+            loadedWith = .some(password)
             state = .ready
         } catch {
+            // A read replaced by a newer one says nothing; the newer one answers.
+            guard !Task.isCancelled else { return }
             loadedWith = nil
             state = value == nil ? .failed(SiteFeedError.describe(error)) : .ready
         }

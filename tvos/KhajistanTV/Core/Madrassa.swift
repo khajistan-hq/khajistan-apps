@@ -125,22 +125,28 @@ enum ArticleHTML {
         let ns = cleaned as NSString
         var out: [ArticleBlock] = []
         var buffer = ""
-        var kind = "p"
+        /// The open block elements, innermost last: a <p> inside a <blockquote> is still a quote.
+        var open: [String] = []
         var cells: [String]?
         var cell = ""
+        var inCell = false
         var lastEmbed = false
 
         func flush() {
             let text = inline(buffer)
             buffer = ""
             guard !String(text.characters).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            if cells != nil { cell += String(text.characters); return }
+            if cells != nil, inCell { cell += String(text.characters); return }
             lastEmbed = false
-            switch kind {
-            case "h1", "h2", "h3", "h4", "h5", "h6", "summary": out.append(.heading(String(text.characters).trimmingCharacters(in: .whitespacesAndNewlines)))
-            case "blockquote": out.append(.quote(text))
-            case "li": out.append(.item(text))
-            default: out.append(.paragraph(text))
+            if open.contains(where: { ["h1", "h2", "h3", "h4", "h5", "h6", "summary"].contains($0) }) {
+                out.append(.heading(String(text.characters).trimmingCharacters(in: .whitespacesAndNewlines)))
+            } else if open.contains("li") {
+                out.append(.item(text))
+            } else if open.contains("blockquote") {
+                out.append(.quote(text))
+            } else {
+                // Text in a row but outside its cells is shown before it, as a browser shows it.
+                out.append(.paragraph(text))
             }
         }
 
@@ -164,18 +170,27 @@ enum ArticleHTML {
                 } else {
                     cells = []
                 }
+                cell = ""
+                inCell = false
             } else if tag == "td" || tag == "th" {
                 flush()
                 if closing, cells != nil {
                     cells?.append(cell.trimmingCharacters(in: .whitespacesAndNewlines))
                     cell = ""
+                    inCell = false
+                } else if !closing {
+                    inCell = true
                 }
             } else if tag == "hr" {
                 flush()
                 out.append(.rule)
             } else if blockTags.contains(tag) {
                 flush()
-                kind = closing ? "p" : tag
+                if closing {
+                    if let index = open.lastIndex(of: tag) { open.removeSubrange(index...) }
+                } else {
+                    open.append(tag)
+                }
             } else if tag == "br" {
                 buffer += "<br>"
             } else if tag == "a" {
@@ -209,7 +224,8 @@ enum ArticleHTML {
             result += AttributedString(plain(String(rest[..<open.lowerBound])))
             let afterOpen = rest[open.upperBound...]
             guard let close = afterOpen.firstIndex(of: ">"), let end = afterOpen.range(of: "</a>", options: .caseInsensitive) else {
-                rest = afterOpen
+                // An opening tag with no closing one in this run: the tag goes, its text stays.
+                rest = afterOpen.firstIndex(of: ">").map { afterOpen[afterOpen.index(after: $0)...] } ?? afterOpen
                 continue
             }
             let attributes = String(afterOpen[..<close])

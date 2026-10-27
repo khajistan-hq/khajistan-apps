@@ -134,7 +134,7 @@ private struct TVScreeningRoom: View {
             case .failed(let message): Text(message).kjBody()
             case .ready:
                 let films = model.films.films
-                let countries = Dictionary(grouping: films) { $0.country ?? "Elsewhere" }
+                let countries = Dictionary(grouping: films) { $0.country ?? "Without a country on record" }
                 ForEach(countries.keys.sorted { (countries[$0]!.count, $1) > (countries[$1]!.count, $0) }, id: \.self) { country in
                     FilmShelf(title: country, count: countries[country]!.count.formatted(), films: countries[country]!)
                 }
@@ -191,7 +191,7 @@ private struct TVProductCard: View {
         }
         .task(id: item.id) {
             guard let url = Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 400) else { return }
-            image = await PnvImages.shared.image([url], maxPixel: 640)
+            image = await PnvImages.shared.image([url], maxPixel: 640, authorization: model.siteAuthorization(for: url))
         }
     }
 }
@@ -219,8 +219,9 @@ private struct TVProductScreen: View {
                         let available = product.variants.filter(\.availableForSale)
                         if available.isEmpty {
                             Text("Sold out").kjName(40)
-                        } else if let price = Bazaar.priceLine(item.product) {
-                            Text(price).kjName(40)
+                        } else if let price = available.first?.price, let amount = price.value {
+                            // The shop's live price, not the catalogue's note of it.
+                            Text(Bazaar.priceText(amount, currency: price.currencyCode)).kjName(40)
                             if product.variants.count > 1 {
                                 Text(available.map(\.title).joined(separator: " \u{00B7} ")).kjSmall(faint: true).lineLimit(4)
                             }
@@ -242,7 +243,7 @@ private struct TVProductScreen: View {
         .foregroundStyle(palette.ink)
         .task {
             if let url = Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) {
-                image = await PnvImages.shared.image([url], maxPixel: 1200)
+                image = await PnvImages.shared.image([url], maxPixel: 1200, authorization: model.siteAuthorization(for: url))
             }
             if let (data, response) = try? await URLSession.shared.data(for: ShopStorefront.productRequest(handle: item.product.h)),
                (response as? HTTPURLResponse)?.statusCode == 200 {

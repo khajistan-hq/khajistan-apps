@@ -43,6 +43,9 @@ final class AppModel {
     let lughat: SiteFeed<[LughatEntry]>
     @ObservationIgnored private var databaseFeeds: [ArchiveDatabase: SiteFeed<[DBRecord]>] = [:]
 
+    /// The preview password's header for a picture on the site's own host, nil anywhere else.
+    func siteAuthorization(for url: URL) -> String? { bazaar.authorization(for: url) }
+
     /// A research database's records, read the first time it is opened.
     func database(_ db: ArchiveDatabase) -> SiteFeed<[DBRecord]> {
         if let feed = databaseFeeds[db] { return feed }

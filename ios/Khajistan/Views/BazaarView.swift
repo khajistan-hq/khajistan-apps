@@ -105,6 +105,7 @@ struct BazaarView: View {
 /// A product picture at its own shape, square plate held while it loads, never cropped.
 struct ProductPicture: View {
     let url: URL?
+    @Environment(AppModel.self) private var model
     @State private var image: UIImage?
 
     var body: some View {
@@ -116,7 +117,7 @@ struct ProductPicture: View {
             .accessibilityHidden(true)
             .task(id: url) {
                 guard let url else { return }
-                image = await PnvImages.shared.image([url], maxPixel: 800)
+                image = await PnvImages.shared.image([url], maxPixel: 800, authorization: model.siteAuthorization(for: url))
             }
     }
 }

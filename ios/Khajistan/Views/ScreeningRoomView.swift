@@ -19,7 +19,8 @@ struct ScreeningRoomView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
-                PageHead("Screening Room", line: "Films Khajistan holds and distributes, and institutional licensing.")
+                LargeTitle(title: "Screening Room",
+                           line: store.state == .ready ? "\(store.films.count.formatted()) films Khajistan holds and distributes" : nil)
                 switch store.state {
                 case .idle, .loading:
                     TuningLoader("Loading the Screening Room\u{2026}").frame(maxWidth: .infinity).padding(.top, 40)
@@ -28,9 +29,26 @@ struct ScreeningRoomView: View {
                 case .failed(let message):
                     ReadingProblem(message: message) { Task { await store.load() } }
                 case .ready:
-                    watchlistRow
-                    filters
-                    grid
+                    SearchField(prompt: "Title, country, language", text: $query, id: "filmSearch")
+                    if countries.count > 1 {
+                        ChipRow(chips: [Chip(id: "", title: "All", identifier: "filmCountry-all")]
+                                    + countries.map { Chip(id: $0, title: $0, identifier: "filmCountry-\($0)") },
+                                selected: country ?? "") { country = $0.isEmpty ? nil : $0 }
+                    }
+                    if trimmed.isEmpty && country == nil {
+                        upNextRow
+                        watchlistRow
+                        ForEach(countries, id: \.self) { name in
+                            row(name, films: store.films.filter { $0.country?.trimmingCharacters(in: .whitespaces) == name })
+                        }
+                        let unfiled = store.films.filter { ($0.country ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+                        if !unfiled.isEmpty { row("Other films", films: unfiled, opens: false) }
+                    } else {
+                        Text("\(shown.count.formatted()) of \(store.films.count.formatted()) films")
+                            .kjSmall(faint: true)
+                            .accessibilityIdentifier("filmCount")
+                        grid
+                    }
                 }
             }
             .padding(.horizontal, KJLayout.inset)
@@ -44,27 +62,59 @@ struct ScreeningRoomView: View {
         .task(id: model.auth.email) { await model.saves.load() }
     }
 
+    private var posterWidth: CGFloat { sizeClass == .regular ? 160 : 128 }
+
+    /// A shelf of posters, as the Apple TV app sets a row; its heading opens the whole shelf.
+    private func row(_ name: String, films: [Film], opens: Bool = true) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ShelfHeader(title: name, count: films.count, action: opens ? { country = name } : nil)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 14) {
+                    ForEach(films) { FilmCard(film: $0, width: posterWidth) }
+                }
+            }
+            .scrollClipDisabled()
+        }
+    }
+
+    /// Up Next: the full films stopped on this device, with how far in, as the Apple TV app's row.
+    @ViewBuilder
+    private var upNextRow: some View {
+        let stopped: [(Film, Resume)] = model.library.resume.filter { $0.kind == .film && $0.position > 30 }.compactMap { place in
+            store.films.first { $0.handle == place.ref }.map { ($0, place) }
+        }
+        if !stopped.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ShelfHeader(title: "Up Next")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 14) {
+                        ForEach(stopped, id: \.0.id) { film, place in
+                            FilmCard(film: film, width: posterWidth * 1.15,
+                                     progress: film.runtime_minutes.flatMap { $0 > 0 ? place.position / Double($0 * 60) : nil },
+                                     line: "Stopped at \(FilmPlayback.clock(place.position))")
+                        }
+                    }
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
     /// The account's watchlist, as films still in the catalogue, when there is one.
     @ViewBuilder
     private var watchlistRow: some View {
         let listed = model.saves.watchlist.compactMap { handle in store.films.first { $0.handle == handle } }
         if model.auth.isSignedIn && !listed.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Kicker("Your watchlist").accessibilityAddTraits(.isHeader)
+                ShelfHeader(title: "Your watchlist", count: listed.count)
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 14) {
                         ForEach(listed) { film in
-                            NavigationLink(value: RoomRoute.film(film.handle)) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    FilmPoster(film: film).frame(width: 110)
-                                    Text(Films.displayTitle(film)).kjSmall().lineLimit(2).frame(width: 110, alignment: .leading)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("watchlist-\(film.handle)")
+                            FilmCard(film: film, width: posterWidth).accessibilityIdentifier("watchlist-\(film.handle)")
                         }
                     }
                 }
+                .scrollClipDisabled()
             }
             .task { await model.saves.load() }
         }
@@ -85,51 +135,38 @@ struct ScreeningRoomView: View {
         }
     }
 
-    private var filters: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HouseInputField("Find a film") {
-                TextField("", text: $query, prompt: Text("Title, country, language").foregroundStyle(palette.faint))
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("filmSearch")
-            }
-            if countries.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        chip("All", value: nil)
-                        ForEach(countries, id: \.self) { chip($0, value: $0) }
-                    }
-                }
-                .padding(.horizontal, -12)
-            }
-            Text("\(shown.count.formatted()) of \(store.films.count.formatted()) films")
-                .kjSmall(faint: true)
-                .accessibilityIdentifier("filmCount")
-        }
-    }
-
-    private func chip(_ title: String, value: String?) -> some View {
-        Button { country = value } label: { Text(title).kjKicker() }
-            .buttonStyle(HouseTabStyle(isCurrent: country == value))
-            .accessibilityIdentifier("filmCountry-\(value ?? "all")")
-    }
-
     private var grid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 170 : 140), spacing: 16, alignment: .top)],
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 160 : 104), spacing: 14, alignment: .top)],
                   alignment: .leading, spacing: 22) {
-            ForEach(shown) { film in
-                NavigationLink(value: RoomRoute.film(film.handle)) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        FilmPoster(film: film)
-                        Text(Films.displayTitle(film)).kjName().lineLimit(3).multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let country = film.country { Text(country).kjSmall(faint: true) }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("film-\(film.handle)")
-            }
+            ForEach(shown) { FilmCard(film: $0, width: nil) }
         }
+    }
+}
+
+/// A film on a shelf: the poster at its own shape, then the title and a faint line.
+struct FilmCard: View {
+    let film: Film
+    @Environment(AppModel.self) private var model
+    let width: CGFloat?
+    var progress: Double?
+    var line: String?
+    /// True on Home, which is not on the room's stack.
+    var fromHome = false
+
+    var body: some View {
+        RoomLink(route: .film(film.handle), in: fromHome ? .screening : nil) {
+            VStack(alignment: .leading, spacing: 6) {
+                FilmPoster(film: film)
+                if let progress { ProgressLine(value: progress) }
+                Text(Films.displayTitle(film)).font(.system(.subheadline, weight: .semibold)).lineLimit(2)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                if let text = line ?? film.country { Text(text).kjSmall(faint: true).lineLimit(1) }
+            }
+            .frame(width: width, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("film-\(film.handle)")
     }
 }
 
@@ -157,12 +194,17 @@ private struct FilmPoster: View {
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
 
+    /// The poster at its own shape, standing on the row's line; the plate holds the space until then.
     var body: some View {
-        Rectangle()
-            .fill(palette.lift)
+        Color.clear
             .aspectRatio(0.68, contentMode: .fit)
-            .overlay {
-                if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) }
+            .overlay(alignment: .bottom) {
+                if let image {
+                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                } else {
+                    RoundedRectangle(cornerRadius: 4, style: .continuous).fill(palette.lift)
+                }
             }
             .accessibilityHidden(true)
             .task(id: film.handle) {
@@ -214,78 +256,104 @@ struct FilmScreen: View {
         .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
     }
 
+    /// The Apple TV app's film page: the poster, the title and its line, one Play, the smaller
+    /// actions under it, then the information the record carries.
     @ViewBuilder
     private func content(_ film: Film) -> some View {
-        let wide = sizeClass == .regular
-        let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 28)) : AnyLayout(VStackLayout(alignment: .leading, spacing: 18))
-        layout {
-            FilmPoster(film: film).frame(maxWidth: wide ? 300 : 220)
-            VStack(alignment: .leading, spacing: 12) {
-                Kicker("Screening Room")
-                Text(Films.displayTitle(film)).kjDisplay(KJType.headline, tracking: -0.055).accessibilityAddTraits(.isHeader)
-                let detail = Films.detail(film)
-                if !detail.isEmpty { Text(detail).kjBody() }
-                if let publisher = film.publisher, !publisher.isEmpty { Text(publisher).kjSmall(faint: true) }
-                Text(Films.attribution).kjSmall(faint: true)
-                if film.licence_price != nil {
-                    Text("Institutional licence \u{00B7} by inquiry on the film's page").kjSmall()
+        VStack(spacing: 14) {
+            FilmPoster(film: film).frame(maxWidth: sizeClass == .regular ? 300 : 230)
+            VStack(spacing: 4) {
+                Text(Films.displayTitle(film)).font(.system(.title2, weight: .bold)).multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                let line = [film.year.map(String.init), film.runtime_minutes.map(Self.runtime), film.country]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+                if !line.isEmpty { Text(line).kjSmall(faint: true).multilineTextAlignment(.center) }
+                if let languages = film.languages?.text, !languages.isEmpty {
+                    Text(languages).kjSmall(faint: true).multilineTextAlignment(.center)
                 }
-                actions(film)
             }
+            actions(film)
         }
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+        information(film)
+    }
+
+    static func runtime(_ minutes: Int) -> String {
+        minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
     }
 
     @ViewBuilder
     private func actions(_ film: Film) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let place = model.library.place(.film, film.handle), place.position > 30 {
-                Text("Stopped at \(FilmPlayback.clock(place.position)) on this device").kjSmall(faint: true)
-                    .accessibilityIdentifier("filmStoppedAt")
+        let place = model.library.place(.film, film.handle).flatMap { $0.position > 30 ? $0 : nil }
+        VStack(spacing: 12) {
+            Button { Task { await watchFull(film) } } label: {
+                Label(checking ? "Asking\u{2026}" : (place.map { "Resume from \(FilmPlayback.clock($0.position))" } ?? "Play"),
+                      systemImage: "play.fill")
             }
-            HStack(spacing: 18) {
+            .buttonStyle(SolidActionStyle())
+            .disabled(checking)
+            .accessibilityIdentifier("filmWatchFull")
+            if let place, let minutes = film.runtime_minutes, minutes > 0 {
+                ProgressLine(value: place.position / Double(minutes * 60))
+            }
+            if let refusal {
+                Text(Self.refusalText(film, status: refusal)).kjBody().multilineTextAlignment(.center)
+                    .accessibilityIdentifier("filmRefusal")
+                if refusal == 401 {
+                    Button(kicker: "Sign in") { showSignIn = true }.accessibilityIdentifier("filmSignIn")
+                }
+            }
+            HStack(spacing: 8) {
                 watchlistButton(film)
-                Button(kicker: checking ? "Asking\u{2026}" : "Watch the full film") { Task { await watchFull(film) } }
-                    .disabled(checking)
-                    .accessibilityIdentifier("filmWatchFull")
                 if let url = Films.previewURL(film) {
-                    Button(kicker: "Preview") {
+                    IconAction(title: "Preview", symbol: "play.rectangle") {
                         model.tuner.stop()
                         playing = FilmPlayback(film: film, url: url, isFull: false, line: "Preview", startAt: 0)
                     }
                     .accessibilityIdentifier("filmPreview")
                 }
+                IconAction(title: "Website", symbol: "safari") { model.open(Films.pageURL(film)) }
+                    .accessibilityIdentifier("filmOnWebsite")
             }
-            if let refusal {
-                Text(Self.refusalText(film, status: refusal)).kjBody().accessibilityIdentifier("filmRefusal")
-                if refusal == 401 {
-                    Button(kicker: "Sign in") { showSignIn = true }.accessibilityIdentifier("filmSignIn")
-                }
+            if PassportSaves.filmRef(film.handle) == nil {
+                Text("This film cannot be kept on a watchlist yet.").kjSmall(faint: true).multilineTextAlignment(.center)
             }
-            Button(kicker: "The film's page on the website \u{2197}") { model.open(Films.pageURL(film)) }
-                .accessibilityIdentifier("filmOnWebsite")
+            if let watchNote { Text(watchNote).kjSmall(faint: true) }
         }
-        .padding(.top, 6)
+    }
+
+    /// What the record says, label over value, as the Apple TV app's Information section.
+    @ViewBuilder
+    private func information(_ film: Film) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ShelfHeader(title: "Information")
+            if let publisher = film.publisher, !publisher.isEmpty { InfoRow(label: "Publisher", value: publisher) }
+            if let country = film.country, !country.isEmpty { InfoRow(label: "Country", value: country) }
+            if let year = film.year { InfoRow(label: "Year", value: String(year)) }
+            if let minutes = film.runtime_minutes { InfoRow(label: "Running time", value: Self.runtime(minutes)) }
+            if let languages = film.languages?.text, !languages.isEmpty { InfoRow(label: "Languages", value: languages) }
+            if film.licence_price != nil {
+                InfoRow(label: "Licensing", value: "Institutional licence, by inquiry on the film's page")
+            }
+            Text(Films.attribution).kjSmall(faint: true)
+        }
+        .padding(.top, 8)
     }
 
     /// The watchlist is on the account, with the other saves the website's profile page lists.
-    @ViewBuilder
     private func watchlistButton(_ film: Film) -> some View {
         let listed = model.saves.isSaved(film: film.handle)
         // The account's saves take Latin-script ids only; a film filed under another script
-        // cannot be kept there, and the control says so rather than doing nothing.
-        let savable = PassportSaves.filmRef(film.handle) != nil
-        VStack(alignment: .leading, spacing: 4) {
-            Button(kicker: listed ? "On your watchlist" : "Add to watchlist") {
-                guard model.saves.canSave else { showSignIn = true; return }
-                Task {
-                    await model.saves.load()
-                    watchNote = await model.saves.toggle(film: film.handle, title: Films.displayTitle(film)) ? nil : "That did not save. Try again."
-                }
+        // cannot be kept there, and the page says so rather than the button doing nothing.
+        return IconAction(title: "Watchlist", symbol: listed ? "checkmark" : "plus") {
+            guard model.saves.canSave else { showSignIn = true; return }
+            Task {
+                await model.saves.load()
+                watchNote = await model.saves.toggle(film: film.handle, title: Films.displayTitle(film)) ? nil : "That did not save. Try again."
             }
-            .disabled(!savable)
-            if !savable { Text("This film cannot be kept on a watchlist yet.").kjSmall(faint: true) }
-            if let watchNote { Text(watchNote).kjSmall(faint: true) }
         }
+        .disabled(PassportSaves.filmRef(film.handle) == nil)
         .accessibilityIdentifier("filmWatchlist")
         .accessibilityValue(listed ? "On" : "Off")
         .task { await model.saves.load() }

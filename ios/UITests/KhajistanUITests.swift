@@ -298,12 +298,12 @@ final class KhajistanUITests: XCTestCase {
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Account to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")
         app.buttons["receiverCC"].tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "Fullscreen CC also responds to one tap")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Account to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
         app.buttons["closePlayer"].tap()
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
@@ -364,7 +364,7 @@ final class KhajistanUITests: XCTestCase {
         let shown = NSPredicate { _, _ in line.exists || none.exists }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 20), .completed,
                        "the room shows its lines or says it has none")
-        XCTAssertTrue(app.staticTexts["Sign in under Account to write in a room."].exists, "a signed-out reader is told how to write")
+        XCTAssertTrue(app.staticTexts["Sign in under Library to write in a room."].exists, "a signed-out reader is told how to write")
         shot("chat-room", app)
         app.buttons["chatBack"].tap()
         waitFor(room, 10, "back returns to the rooms")
@@ -566,10 +566,14 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(count.label.hasSuffix("of 829 entries"), "every entry is counted (\(count.label))")
 
         app.buttons["madrassa-databases"].tap()
-        app.buttons["db-censorCertificates"].tap()
+        // The shelves list runs past the screen on a phone: scroll to the database first.
+        let censor = app.buttons["db-censorCertificates"]
+        for _ in 0..<8 where !censor.exists { app.swipeUp() }
+        censor.tap()
         let records = app.staticTexts["dbCount"]
         expectation(for: NSPredicate(format: "label == '52 of 52 records'"), evaluatedWith: records)
         waitForExpectations(timeout: 30)
+        app.buttons["dbSortMenu"].tap()
         app.buttons["dbSort-newest"].tap()
         let newest = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'record-'")).firstMatch
         waitFor(newest, 10, "sorted records are listed")

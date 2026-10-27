@@ -64,6 +64,20 @@ enum NativeRoom: String, CaseIterable, Sendable {
         }
     }
 
+    /// The room's icon on Home (SF Symbols: monochrome, in the text's colour).
+    var symbol: String {
+        switch self {
+        case .receiver: return "dot.radiowaves.left.and.right"
+        case .picsVids: return "photo.on.rectangle"
+        case .yours: return "books.vertical"
+        case .chat: return "bubble.left.and.bubble.right"
+        case .reading: return "book"
+        case .screening: return "film"
+        case .bazaar: return "bag"
+        case .madrassa: return "graduationcap"
+        }
+    }
+
     /// Whether the room opens inside ROOMS (pushed on its stack) rather than on a bar door of its
     /// own (Receiver, Library) or over the whole app (Chat).
     var opensInRooms: Bool {

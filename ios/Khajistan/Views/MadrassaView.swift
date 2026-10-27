@@ -24,17 +24,9 @@ struct MadrassaView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 18) {
-                PageHead("Madrassa", line: "The reference wing \u{2014} street dictionary, indices and writings")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        ForEach(Section.allCases) { item in
-                            Button { section = item } label: { Text(item.title).kjKicker() }
-                                .buttonStyle(HouseTabStyle(isCurrent: section == item))
-                                .accessibilityIdentifier("madrassa-\(item.rawValue)")
-                        }
-                    }
-                }
-                .padding(.horizontal, -12)
+                LargeTitle(title: "Madrassa", line: "The reference wing \u{2014} street dictionary, indices and writings")
+                ChipRow(chips: Section.allCases.map { Chip(id: $0.rawValue, title: $0.title, identifier: "madrassa-\($0.rawValue)") },
+                        selected: section.rawValue) { id in section = Section(rawValue: id) ?? .reference }
                 switch section {
                 case .reference: ReferenceList()
                 case .writings: WritingsList(forensics: false)
@@ -82,14 +74,17 @@ private struct ReferenceList: View {
             if let entries = feed.value {
                 ForEach(entries) { entry in
                     NavigationLink(value: RoomRoute.madrassaEntry(entry.id)) {
-                        HStack(alignment: .top, spacing: 14) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Kicker(entry.cat)
-                                Text(entry.title).kjName(KJType.title)
-                                if let sub = entry.sub { Text(sub).kjSmall(faint: true) }
+                        HStack(alignment: .center, spacing: 14) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.title).font(.system(.title3, design: .serif, weight: .semibold))
+                                    .multilineTextAlignment(.leading)
+                                if let sub = entry.sub { Text(sub).kjSmall(faint: true).multilineTextAlignment(.leading) }
+                                Text(entry.cat).kjSmall(faint: true)
                             }
                             Spacer(minLength: 0)
-                            Text("\u{2192}").kjName().accessibilityHidden(true)
+                            if let img = entry.img, let url = MadrassaEntryScreen.siteURL(img), url.scheme == "https" {
+                                EntryThumb(url: url)
+                            }
                         }
                         .padding(.vertical, 8)
                         .contentShape(Rectangle())
@@ -113,27 +108,37 @@ struct MadrassaEntryScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let entry = model.madrassaEntries.value?.first(where: { $0.id == id }) {
-                    Kicker(entry.cat)
-                    Text(entry.title).kjDisplay(KJType.headline, tracking: -0.05).accessibilityAddTraits(.isHeader)
-                    if let sub = entry.sub { Text(sub).kjName() }
-                    // A site path ("assets/…") is the archive's own picture, as the page resolves it.
-                    if let img = entry.img, let url = siteURL(img), url.scheme == "https" {
+                    // Wikipedia's article: the lead picture, the title in a serif, its short
+                    // description, a row of actions, then the text.
+                    if let img = entry.img, let url = Self.siteURL(img), url.scheme == "https" {
                         ArticleImage(url: url, alt: entry.alt)
                     }
-                    if let desc = entry.desc { Text(desc).kjBody().fixedSize(horizontal: false, vertical: true) }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(entry.title).font(.system(.largeTitle, design: .serif)).accessibilityAddTraits(.isHeader)
+                        if let sub = entry.sub { Text(sub).kjSmall(faint: true) }
+                        Text(entry.cat).kjSmall(faint: true)
+                    }
                     if let href = entry.href {
-                        Button(kicker: "The full entry \u{2197}") { if let url = siteURL(href) { model.open(url) } }
-                            .accessibilityIdentifier("entryFull")
+                        HStack(spacing: 8) {
+                            IconAction(title: "Full entry", symbol: "doc.text") { if let url = Self.siteURL(href) { model.open(url) } }
+                                .accessibilityIdentifier("entryFull")
+                        }
+                    }
+                    if let desc = entry.desc {
+                        Text(desc).font(.system(.body, design: .serif)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
                     }
                     if let press = entry.press, !press.isEmpty {
-                        HouseRule()
-                        Kicker("Press")
+                        ShelfHeader(title: "Press")
                         ForEach(press, id: \.u) { item in
                             if let url = URL(string: item.u), url.scheme == "https" {
                                 Link(destination: url) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(item.h).kjName().multilineTextAlignment(.leading)
-                                        if let s = item.s { Text(s).kjSmall(faint: true) }
+                                    HStack(alignment: .firstTextBaseline) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.h).font(.system(.body, weight: .semibold)).multilineTextAlignment(.leading)
+                                            if let s = item.s { Text(s).kjSmall(faint: true) }
+                                        }
+                                        Spacer(minLength: 0)
+                                        Image(systemName: "arrow.up.right").accessibilityHidden(true)
                                     }
                                 }
                             }
@@ -151,9 +156,26 @@ struct MadrassaEntryScreen: View {
     }
 
     /// An entry's own page: a site path opens in the house browser, an outside address in Safari.
-    private func siteURL(_ href: String) -> URL? {
+    static func siteURL(_ href: String) -> URL? {
         if let url = URL(string: href), url.scheme == "https" { return url }
         return URL(string: href, relativeTo: ArchiveURL.base)?.absoluteURL
+    }
+}
+
+/// An entry's picture beside its row, as a reference app lists results: small, square, fitted whole.
+private struct EntryThumb: View {
+    let url: URL
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+    @State private var image: UIImage?
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6, style: .continuous).fill(palette.lift)
+            .frame(width: 64, height: 64)
+            .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityHidden(true)
+            .task(id: url) { image = await PnvImages.shared.image([url], maxPixel: 200, authorization: model.siteAuthorization(for: url)) }
     }
 }
 
@@ -162,6 +184,7 @@ struct MadrassaEntryScreen: View {
 private struct WritingsList: View {
     let forensics: Bool
     @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
 
     var body: some View {
         let feed = model.madrassaPosts
@@ -170,14 +193,17 @@ private struct WritingsList: View {
                 if posts.isEmpty { Text("Nothing here yet.").kjBody() }
                 ForEach(posts) { post in
                     NavigationLink(value: RoomRoute.post(post.id)) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Kicker([MadrassaWritings.label(post), post.publishedAt].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                            Text(MadrassaWritings.listTitle(post)).kjName(KJType.title).multilineTextAlignment(.leading)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Kicker(MadrassaWritings.label(post))
+                            Text(MadrassaWritings.listTitle(post)).font(.system(.title3, design: .serif, weight: .bold))
+                                .multilineTextAlignment(.leading)
                             if let summary = post.summary.map(ArticleHTML.text), !summary.isEmpty {
-                                Text(summary).kjSmall(faint: true).lineLimit(3)
+                                Text(summary).font(.system(.subheadline, design: .serif)).foregroundStyle(palette.faint).lineLimit(3)
+                                    .multilineTextAlignment(.leading)
                             }
+                            if let date = post.publishedAt { Text(date).kjSmall(faint: true) }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                     }
@@ -209,9 +235,15 @@ struct PostScreen: View {
             VStack(alignment: .leading, spacing: 14) {
                 if let post {
                     let blocks = ArticleHTML.blocks(post.body ?? "")
-                    Kicker([MadrassaWritings.label(post), post.publishedAt].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    Text(post.title).kjDisplay(KJType.headline, tracking: -0.05).accessibilityAddTraits(.isHeader)
-                    saveRow(post)
+                    // The Atlantic's article head: the section, the headline in a serif, the date,
+                    // and Save beside it.
+                    Kicker(MadrassaWritings.label(post))
+                    Text(post.title).font(.system(.largeTitle, design: .serif, weight: .bold)).accessibilityAddTraits(.isHeader)
+                    HStack(alignment: .center) {
+                        if let date = post.publishedAt { Text(date).kjSmall(faint: true) }
+                        Spacer()
+                        saveRow(post)
+                    }
                     contents(blocks, reader: reader)
                     if let image = post.image, let url = URL(string: image), url.scheme == "https" {
                         ArticleImage(url: url, alt: post.imageAlt)
@@ -252,7 +284,7 @@ struct PostScreen: View {
         }
         if headings.count >= 3 {
             VStack(alignment: .leading, spacing: 2) {
-                Kicker("Contents").accessibilityAddTraits(.isHeader)
+                ShelfHeader(title: "Contents")
                 ForEach(headings, id: \.0) { index, text in
                     Button { withAnimation(.kjPush) { reader.scrollTo(index, anchor: .top) } } label: {
                         Text(text).kjSmall().multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
@@ -269,8 +301,8 @@ struct PostScreen: View {
     private func saveRow(_ post: MadrassaPost) -> some View {
         let pageID = (post.blog ?? "announcements") + "/" + post.handle
         let saved = model.saves.isSaved(page: pageID)
-        return VStack(alignment: .leading, spacing: 4) {
-            Button(kicker: saved ? "Saved" : "Save") {
+        return VStack(alignment: .trailing, spacing: 4) {
+            IconAction(title: saved ? "Saved" : "Save", symbol: saved ? "bookmark.fill" : "bookmark") {
                 guard model.saves.canSave else { showSignIn = true; return }
                 Task {
                     await model.saves.load()
@@ -290,13 +322,16 @@ struct PostScreen: View {
     private func blockView(_ block: ArticleBlock, post: MadrassaPost) -> some View {
         switch block {
         case .heading(let text):
-            Text(text).kjName(KJType.title).padding(.top, 8).accessibilityAddTraits(.isHeader)
+            Text(text).font(.system(.title2, design: .serif, weight: .bold)).padding(.top, 10).accessibilityAddTraits(.isHeader)
         case .paragraph(let text):
-            Text(text).kjBody().fixedSize(horizontal: false, vertical: true)
+            Text(text).font(.system(.body, design: .serif)).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
         case .quote(let text):
-            Text(text).kjBody().italic().padding(.leading, 16).fixedSize(horizontal: false, vertical: true)
+            Text(text).font(.system(.title3, design: .serif)).italic().padding(.leading, 16).fixedSize(horizontal: false, vertical: true)
         case .item(let text):
-            HStack(alignment: .firstTextBaseline, spacing: 8) { Text("\u{2022}").kjBody(); Text(text).kjBody() }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\u{2022}").font(.system(.body, design: .serif))
+                Text(text).font(.system(.body, design: .serif)).lineSpacing(5)
+            }
         case .row(let cells):
             VStack(alignment: .leading, spacing: 2) {
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
@@ -361,18 +396,10 @@ private struct DictionaryList: View {
         Group {
             if let entries = feed.value {
                 let shown = entries.filter { (language == nil || $0.lang == language) && Lughat.matches($0, query) }
-                HouseInputField("Find a word") {
-                    TextField("", text: $query, prompt: Text("Word, meaning, region").foregroundStyle(palette.faint))
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("lughatSearch")
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        chip("All", nil)
-                        ForEach(Lughat.languages(entries), id: \.self) { chip($0, $0) }
-                    }
-                }
-                .padding(.horizontal, -12)
+                SearchField(prompt: "Word, meaning, region", text: $query, id: "lughatSearch")
+                ChipRow(chips: [Chip(id: "", title: "All", identifier: "lughatLang-all")]
+                            + Lughat.languages(entries).map { Chip(id: $0, title: $0, identifier: "lughatLang-\($0)") },
+                        selected: language ?? "") { language = $0.isEmpty ? nil : $0 }
                 Text("\(shown.count.formatted()) of \(entries.count.formatted()) entries").kjSmall(faint: true)
                     .accessibilityIdentifier("lughatCount")
                 ForEach(shown.filter { !Lughat.isSetApart($0) }) { row($0) }
@@ -390,18 +417,13 @@ private struct DictionaryList: View {
         .task(id: model.auth.previewPassword) { await feed.load() }
     }
 
-    private func chip(_ title: String, _ value: String?) -> some View {
-        Button { language = value } label: { Text(title).kjKicker() }
-            .buttonStyle(HouseTabStyle(isCurrent: language == value))
-    }
-
     /// A word, opened in place: every field its record gives, its review state named.
     private func row(_ entry: LughatEntry) -> some View {
         let isOpen = open == entry.id
         return Button { open = isOpen ? nil : entry.id } label: {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(entry.word ?? entry.id).kjName(KJType.title)
+                    Text(entry.word ?? entry.id).font(.system(.title3, design: .serif, weight: .semibold))
                     if let translit = entry.translit, translit != entry.word { Text(translit).kjSmall(faint: true) }
                 }
                 if let meaning = entry.meaning ?? entry.gloss { Text(meaning).kjBody().multilineTextAlignment(.leading) }

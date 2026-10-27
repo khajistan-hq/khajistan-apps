@@ -4,6 +4,9 @@ import Foundation
 /// literal the site ships in scripts/kj-chrome.js (payload role "anon"), so it grants a
 /// signed-out visitor nothing a browser does not already have. No other key belongs here.
 enum KJConfig {
+    /// Where sign-in lives, as this app's bar names it. Shared messages name it through this.
+    static let signInDoor = "Library"
+
     static let site = URL(string: "https://khajistan-archive.pages.dev")!
     static let supabase = URL(string: "https://qojysegeddztsxdmhjfb.supabase.co")!
     static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvanlzZWdlZGR6dHN4ZG1oamZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE2Nzc1MjM5MjQsImV4cCI6MTk5MzA5OTkyNH0.iz8hhr1TYYLWk9HyI0b_yxqlzGJgyuXKsBO_2_kuQ94"

@@ -40,7 +40,7 @@ struct ChatScreen: View {
     private var roomList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                PageHead(kicker: "Chat", "Rooms", line: "Chat rooms by region")
+                LargeTitle(title: "Chat", line: "Chat rooms by region")
                 switch model.chat.phase {
                 case .idle, .loading:
                     TuningLoader("Loading the rooms\u{2026}")
@@ -273,7 +273,7 @@ struct ChatRoomView: View {
     @ViewBuilder
     private var composer: some View {
         if !model.auth.isSignedIn {
-            Text("Sign in under Account to write in a room.").kjSmall(faint: true)
+            Text("Sign in under \(KJConfig.signInDoor) to write in a room.").kjSmall(faint: true)
         } else if store.handle == "" {
             HouseInputField("Choose a handle") {
                 TextField("", text: $wantHandle)

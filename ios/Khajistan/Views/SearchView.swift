@@ -17,7 +17,7 @@ struct SearchView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                PageHead(kicker: "Search", "Search the archive", line: nil)
+                LargeTitle(title: "Search", line: "Every room the app draws, and the website")
                 field
                 if settled.count >= 2 { results }
                 websiteRow
@@ -44,14 +44,31 @@ struct SearchView: View {
     }
 
     private var field: some View {
-        HouseInputField("Titles, places, people") {
+        // The system's search bar shape: a magnifier on the lift colour, the field, a clear button.
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(palette.faint).accessibilityHidden(true)
             TextField("", text: $query, prompt: Text("Titles, places, people").foregroundStyle(palette.faint))
+                .textFieldStyle(.plain)
+                .kjBody()
+                .foregroundStyle(palette.ink)
+                .tint(palette.accent)
                 .submitLabel(.search)
                 .autocorrectionDisabled()
                 .focused($focused)
                 .onSubmit { settled = trimmed }
+                .accessibilityLabel("Titles, places, people")
                 .accessibilityIdentifier("archiveSearch")
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(palette.faint).frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear")
+            }
         }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+        .background(palette.lift, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     // MARK: - Results by room

@@ -3,19 +3,24 @@ import SwiftUI
 /// The eight research systems as databases.html lists them; Cinema of the Middle World opens on its
 /// four indexes. A record shows every field its database gives, named in that database's terms.
 struct DatabaseShelves: View {
+    @Environment(\.palette) private var palette
+
     var body: some View {
         ForEach(DatabaseShelf.allCases) { shelf in
-            VStack(alignment: .leading, spacing: 4) {
-                Kicker("DB \(String(format: "%02d", shelf.rawValue)) \u{00B7} \(shelf.kicker)")
-                Text(shelf.title).kjName(KJType.title).accessibilityAddTraits(.isHeader)
-                Text(shelf.line).kjSmall(faint: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("DB \(String(format: "%02d", shelf.rawValue)) \u{00B7} \(shelf.kicker)").kjSmall(faint: true)
+                Text(shelf.title).font(.system(.title3, weight: .bold)).accessibilityAddTraits(.isHeader)
+                Text(shelf.line).kjSmall(faint: true).padding(.bottom, 4)
                 ForEach(shelf.databases) { db in
                     NavigationLink(value: RoomRoute.database(db.rawValue)) {
-                        HStack {
-                            Text(shelf.databases.count > 1 ? db.title : "Open the index").kjKicker()
-                            Text("\u{2192}").kjKicker().accessibilityHidden(true)
+                        HStack(spacing: 10) {
+                            Image(systemName: "tablecells").foregroundStyle(palette.accent).accessibilityHidden(true)
+                            Text(shelf.databases.count > 1 ? db.title : "Open the index").font(.system(.body, weight: .semibold))
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold))
+                                .foregroundStyle(palette.faint).accessibilityHidden(true)
                         }
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 10)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -23,7 +28,7 @@ struct DatabaseShelves: View {
                     .accessibilityIdentifier("db-\(db.rawValue)")
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
         }
     }
 }
@@ -54,7 +59,7 @@ struct DatabaseScreen: View {
         HStack(alignment: .top, spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
-                    PageHead(kicker: "Databases", db.title, line: db.isMetadataOnly ? "Metadata only; no playable audio." : nil)
+                    LargeTitle(title: db.title, line: db.isMetadataOnly ? "Metadata only; no playable audio." : nil)
                     if let records = feed.value {
                         controls(records)
                         list
@@ -98,55 +103,85 @@ struct DatabaseScreen: View {
         }
     }
 
+    /// Notion's database toolbar: search, then Filter and Sort as menus, the filters in force as
+    /// pills that take themselves off, and the count.
     @ViewBuilder
     private func controls(_ records: [DBRecord]) -> some View {
-        HouseInputField("Search \(db.title)") {
-            TextField("", text: $query, prompt: Text("Every word must match").foregroundStyle(palette.faint))
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-                .accessibilityIdentifier("dbSearch")
-        }
-        ForEach(db.facetNames, id: \.self) { name in
-            let values = DBQuery.values(name, in: records)
-            if values.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 0) {
-                        Text(name).kjSmall(faint: true).padding(.trailing, 4)
-                        facetChip(name, nil, title: "All")
-                        ForEach(values.prefix(40), id: \.value) { facetChip(name, $0.value, title: "\($0.value) \u{00B7} \($0.count.formatted())") }
-                    }
-                    .padding(.leading, 12)
-                }
-                .padding(.horizontal, -12)
-            }
-        }
+        SearchField(prompt: "Every word must match", text: $query, id: "dbSearch")
+            .textInputAutocapitalization(.never)
+        let names = db.facetNames.filter { DBQuery.values($0, in: records).count > 1 }
         // Year orders are offered only where the records carry a year.
         let orders = DBSort.allCases.filter { $0 == .listed || $0 == .title || hasYears }
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                Text("Sort").kjSmall(faint: true).padding(.trailing, 4)
+        HStack(spacing: 8) {
+            if !names.isEmpty {
+                Menu {
+                    ForEach(names, id: \.self) { name in
+                        Menu(name) {
+                            Button("All") { facets[name] = nil }
+                            ForEach(DBQuery.values(name, in: records).prefix(60), id: \.value) { value in
+                                Button { facets[name] = value.value } label: {
+                                    if facets[name] == value.value { Label("\(value.value) \u{00B7} \(value.count.formatted())", systemImage: "checkmark") }
+                                    else { Text("\(value.value) \u{00B7} \(value.count.formatted())") }
+                                }
+                                .accessibilityIdentifier("dbFacet-\(name)-\(value.value)")
+                            }
+                        }
+                    }
+                } label: { toolbarPill("Filter", symbol: "line.3.horizontal.decrease", on: !facets.isEmpty) }
+                .accessibilityIdentifier("dbFilterMenu")
+            }
+            Menu {
                 ForEach(orders) { order in
-                    Button { sort = order } label: { Text(order.title).kjKicker() }
-                        .buttonStyle(HouseTabStyle(isCurrent: sort == order))
-                        .accessibilityIdentifier("dbSort-\(order.rawValue)")
+                    Button { sort = order } label: {
+                        if sort == order { Label(order.title, systemImage: "checkmark") } else { Text(order.title) }
+                    }
+                    .accessibilityIdentifier("dbSort-\(order.rawValue)")
+                }
+            } label: { toolbarPill(sort == .listed ? "Sort" : sort.title, symbol: "arrow.up.arrow.down", on: sort != .listed) }
+            .accessibilityIdentifier("dbSortMenu")
+            Spacer(minLength: 0)
+        }
+        if !facets.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(facets.keys.sorted(), id: \.self) { name in
+                        Button { facets[name] = nil } label: {
+                            HStack(spacing: 6) {
+                                Text("\(name): \(facets[name] ?? "")").font(.system(.subheadline, weight: .semibold)).lineLimit(1)
+                                Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
+                            }
+                            .padding(.horizontal, 12).frame(minHeight: 34)
+                            .foregroundStyle(palette.ground)
+                            .background(palette.ink, in: Capsule())
+                            .frame(minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Remove the filter \(name), \(facets[name] ?? "")")
+                    }
                 }
             }
-            .padding(.leading, 12)
+            .scrollClipDisabled()
         }
-        .padding(.horizontal, -12)
         if filtered { HStack {
             Text("\(results.count.formatted()) of \(records.count.formatted()) records").kjSmall(faint: true)
                 .accessibilityIdentifier("dbCount")
+            Spacer()
             if !facets.isEmpty || !query.isEmpty {
                 Button(kicker: "Clear") { query = ""; facets = [:] }.accessibilityIdentifier("dbClear")
             }
         } }
     }
 
-    private func facetChip(_ name: String, _ value: String?, title: String) -> some View {
-        Button { facets[name] = value } label: { Text(title).kjKicker().lineLimit(1) }
-            .buttonStyle(HouseTabStyle(isCurrent: facets[name] == value))
-            .accessibilityIdentifier("dbFacet-\(name)-\(value ?? "all")")
+    private func toolbarPill(_ title: String, symbol: String, on: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 13, weight: .bold))
+            Text(title).font(.system(.subheadline, weight: .semibold)).lineLimit(1)
+        }
+        .padding(.horizontal, 12).frame(minHeight: 34)
+        .foregroundStyle(on ? palette.ground : palette.ink)
+        .background(on ? palette.ink : palette.lift, in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -154,7 +189,7 @@ struct DatabaseScreen: View {
         if filtered, results.isEmpty {
             Text("No record matches.").kjBody().accessibilityIdentifier("dbNone")
         }
-        ForEach(results.prefix(limit)) { record in
+        LazyVStack(spacing: 0) { ForEach(results.prefix(limit)) { record in
             if sizeClass == .regular {
                 Button { selected = record } label: { RecordRow(record: record, isSelected: selected?.id == record.id) }
                     .buttonStyle(.plain)
@@ -164,7 +199,7 @@ struct DatabaseScreen: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("record-\(record.id)")
             }
-        }
+        } }
         if results.count > limit {
             Button(kicker: "Show \(min(Self.page, results.count - limit)) more") { limit += Self.page }
                 .accessibilityIdentifier("dbMore")
@@ -178,17 +213,21 @@ private struct RecordRow: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            if let image = record.image { RecordPicture(url: image).frame(width: 64, height: 48) }
+        // A table row, as Notion draws one: the title, its other columns faint beside it, a hairline under.
+        HStack(alignment: .center, spacing: 12) {
+            if let image = record.image { RecordPicture(url: image).frame(width: 56, height: 42) }
             VStack(alignment: .leading, spacing: 2) {
-                Text(record.title).kjName().foregroundStyle(isSelected ? palette.accent : palette.ink)
+                Text(record.title).font(.system(.body, weight: .semibold)).foregroundStyle(isSelected ? palette.accent : palette.ink)
                     .multilineTextAlignment(.leading).lineLimit(3)
                 if let native = record.native { Text(native).kjSmall() }
-                if !record.subtitle.isEmpty { Text(record.subtitle).kjSmall(faint: true).lineLimit(2) }
+                if !record.subtitle.isEmpty { Text(record.subtitle).kjSmall(faint: true).lineLimit(2).multilineTextAlignment(.leading) }
             }
             Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.ink.opacity(0.12)).frame(height: 1) }
+        .background(isSelected ? palette.lift : Color.clear)
         .contentShape(Rectangle())
     }
 }
@@ -214,23 +253,29 @@ struct RecordDetail: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        // A Notion page: the title large, then each property as a label column and its value.
         VStack(alignment: .leading, spacing: 12) {
-            Kicker(db.title)
-            Text(record.title).kjDisplay(KJType.headline, tracking: -0.04).accessibilityAddTraits(.isHeader)
+            Text(db.title).kjSmall(faint: true)
+            Text(record.title).font(.system(.largeTitle, weight: .bold)).accessibilityAddTraits(.isHeader)
             if let native = record.native { Text(native).kjName(KJType.title) }
             if let image = record.image { RecordPicture(url: image).frame(maxWidth: 400, maxHeight: 240) }
-            ForEach(record.fields, id: \.self) { field in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(field.label).kjSmall(faint: true)
-                    Text(field.value).kjBody().fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(record.fields, id: \.self) { field in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(field.label).kjSmall(faint: true).frame(width: 112, alignment: .leading)
+                        Text(field.value).kjBody().fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
             if db.isMetadataOnly { Text("Metadata only; no playable audio.").kjSmall(faint: true) }
             if let link = record.link {
-                Button(kicker: "\(record.linkLabel ?? "Source") \u{2197}") {
+                Button {
                     // A page of the archive opens in the house browser; any other source in Safari.
                     if ArchiveURL.isArchive(link) { model.open(link) } else { openURL(link) }
-                }
+                } label: { Label(record.linkLabel ?? "Source", systemImage: "doc.text.magnifyingglass") }
+                .buttonStyle(SolidActionStyle())
                 .accessibilityIdentifier("recordLink")
             }
             Button(kicker: "This database on the website \u{2197}") {

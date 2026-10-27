@@ -293,9 +293,7 @@ struct ReceiverDevice: View {
                 key(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause", enabled: true) {
                     tuner.playPause()
                 }
-                if tuner.channel != nil {
-                    key("captions.bubble", model.captions.isOn ? "Turn captions off" : "Turn captions on", "receiverCC", enabled: true) { model.captions.toggle() }
-                }
+                if tuner.channel != nil { ccKey }
                 key("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen", enabled: true) { fullScreen = true }
                 key("power", "Turn the receiver off", "receiverOff", enabled: true) { tuner.stop() }
             } else {
@@ -308,6 +306,23 @@ struct ReceiverDevice: View {
         .padding(.horizontal, 4)
         .background(palette.band)
         .environment(\.palette, palette.onBandPlate)
+    }
+
+    /// Captions, said as every player says them: CC, filled in while they are on.
+    private var ccKey: some View {
+        let on = model.captions.isOn
+        return Button { model.captions.toggle() } label: {
+            Text("CC")
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(on ? palette.band : palette.onBand)
+                .frame(width: 32, height: 22)
+                .background(on ? palette.onBand : Color.clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay { if !on { RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(palette.onBand, lineWidth: 2) } }
+                .frame(width: 46, height: 44)
+        }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+        .accessibilityLabel(on ? "Turn captions off" : "Turn captions on")
+        .accessibilityIdentifier("receiverCC")
     }
 
     private func key(_ symbol: String, _ label: String, _ id: String, enabled: Bool, action: @escaping () -> Void) -> some View {

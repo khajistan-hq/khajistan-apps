@@ -20,6 +20,7 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | 12 Apple TV | complete for the new rooms | Rooms door; remote test passes on live register data |
 | 13 Release candidate | partial | refute pass run and its ten findings fixed; HANDOFF.md written; no upload (owner-only) |
 | Mobbin pieces | complete on phone/Mac | watchlist, Pics/Vids saves + collections (read only), Madrassa contents + save, database sort, reader rail, now-playing bar; second refute pass, its findings fixed; iPad found the RR catalogue load cancelled by a rebuilt screen — the store now owns its load |
+| Reference-app layouts | built on iPhone/iPad/Mac | every native room restyled to its reference app (DECISIONS 17); CC key; see TEST_MATRIX for the runs |
 
 ## Resume here
 

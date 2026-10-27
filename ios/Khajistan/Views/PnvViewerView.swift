@@ -137,7 +137,7 @@ struct PnvViewerView: View {
         let saved = model.saves.isSaved(pnvKey: current.media_key)
         return Button {
             // Said in place, beside the control: the viewer stays on the object.
-            guard model.saves.canSave else { saveNote = "Sign in under Library to save to your account."; return }
+            guard model.saves.canSave else { saveNote = "Sign in under \(KJConfig.signInDoor) to save to your account."; return }
             Task {
                 await model.saves.load()
                 saveNote = await model.saves.toggle(pnvKey: current.media_key) ? nil : "That did not save. Try again."

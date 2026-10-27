@@ -23,8 +23,8 @@ tests check the locked note instead.
 | TV core (real site data, Bazaar fixture) | 149 passed, 2 skipped (a camera shard absent from the checkout; the full RR grouping fixture) |
 | iOS core | 74 passed, 1 skipped |
 | iOS package | 8 passed |
-| iPhone UI (iPhone 17, `KJ_SITE`) | 19 of 19, one run, after the second review's fixes |
-| iPad UI (iPad Pro 11-inch (M5), `KJ_SITE`) | 19 of 19, one run, after the same fixes |
+| iPhone UI (iPhone 17, `KJ_SITE`) | 19 of 19 after the reference-app layouts and their review fixes (one test now scrolls to the database it opens) |
+| iPad UI (iPad Pro 11-inch (M5), `KJ_SITE`) | 19 of 19, same build |
 | `KJ_APP_STORE` builds | iPhone and tvOS both build |
 | Apple TV Rooms remote test (live register) | passed |
 | Apple TV rights-held title (`-kjrrheldfirst`) | passed in all three skins; failed without the flag on the same shelf |
@@ -42,6 +42,8 @@ three other branches' runs (`cursor/*`, 2026-10-26).
 - Mac Catalyst not driven by a UI test; keyboard and pointer not exercised by hand.
 - Full-film playback with an entitled account (no test account held).
 - Physical devices: none.
+- The Databases Sort and Filter are menus; on Mac Catalyst their items are menu items, so the
+  iPhone database test would need its own Catalyst path if one is written.
 - Scrubbing the Receiver map between stations (the press-and-drag that plays the hiss) is not in a
   UI test. On a simulator with no audio device, the first hiss opens the device and can abort the
   app (the CI failure of 2026-10-27). A test that adds it needs the runner to have audio, or a flag

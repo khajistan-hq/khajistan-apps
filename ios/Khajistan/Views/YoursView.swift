@@ -19,7 +19,7 @@ struct YoursView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                PageHead(kicker: "Library", "Your Khajistan", line: "Account, downloads and saved work")
+                LargeTitle(title: "Library", line: "Account, downloads and saved work")
                 if !places.isEmpty { placesBlock }
                 savedTitlesBlock
                 accountBlock
@@ -54,17 +54,16 @@ struct YoursView: View {
 
     private var placesBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HouseRule()
-            Kicker("On this device").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+            ShelfHeader(title: "On this device")
             ForEach(places.prefix(12)) { place in
                 Button { open(place) } label: {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(place.title).kjName().lineLimit(2)
+                            Text(place.title).font(.system(.body, weight: .semibold)).lineLimit(2)
                             Text(detail(place)).kjSmall(faint: true)
                         }
                         Spacer(minLength: 0)
-                        Text("\u{2192}").kjName().accessibilityHidden(true)
+                        Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -96,14 +95,13 @@ struct YoursView: View {
         Group {
             if model.auth.isSignedIn && !films.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    HouseRule()
-                    Kicker("Your watchlist").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+                    ShelfHeader(title: "Your watchlist")
                     ForEach(films) { film in
                         Button { model.open(.screening, at: [.film(film.handle)]) } label: {
                             HStack {
-                                Text(Films.displayTitle(film)).kjName().lineLimit(2)
+                                Text(Films.displayTitle(film)).font(.system(.body, weight: .semibold)).lineLimit(2)
                                 Spacer(minLength: 0)
-                                Text("\u{2192}").kjName().accessibilityHidden(true)
+                                Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
                             }
                         }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
@@ -112,14 +110,13 @@ struct YoursView: View {
             }
             if model.auth.isSignedIn && !saved.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
-                    HouseRule()
-                    Kicker("Saved to your account").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+                    ShelfHeader(title: "Saved to your account")
                     ForEach(saved) { title in
                         Button { model.open(.reading, at: [.readingTitle(title.slug)]) } label: {
                             HStack {
-                                Text(title.name).kjName().lineLimit(2)
+                                Text(title.name).font(.system(.body, weight: .semibold)).lineLimit(2)
                                 Spacer(minLength: 0)
-                                Text("\u{2192}").kjName().accessibilityHidden(true)
+                                Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
                             }
                         }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
@@ -139,15 +136,14 @@ struct YoursView: View {
 
     private var skinBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HouseRule()
-            Kicker("Skin").padding(.top, 10)
+            ShelfHeader(title: "Skin")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     skinTab("Automatic", pick: nil)
                     ForEach(Skin.allCases, id: \.self) { skin in skinTab(skin.label, pick: skin) }
                 }
             }
-            .padding(.horizontal, -12)
+            .scrollClipDisabled()
             Text(model.skinPick == nil
                  ? "Following the sun where you are: \(model.skin.label) now. Day in daylight, Smut at dawn and dusk, Grove at night."
                  : "\(model.skin.label), until the sky moves to its next band. Then Automatic again, as on the website.")
@@ -160,9 +156,10 @@ struct YoursView: View {
         Button {
             model.chooseSkin(pick)
         } label: {
-            Text(title).kjKicker()
+            Text(title)
         }
-        .buttonStyle(HouseTabStyle(isCurrent: model.skinPick == pick))
+        .buttonStyle(ChipStyle(on: model.skinPick == pick))
+        .padding(.trailing, 8)
         .accessibilityIdentifier("skin-\(pick?.rawValue ?? "auto")")
     }
 
@@ -170,8 +167,7 @@ struct YoursView: View {
 
     private var accountBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HouseRule()
-            Kicker("Your account").padding(.top, 10)
+            ShelfHeader(title: "Your account")
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName(KJType.title)
@@ -179,8 +175,8 @@ struct YoursView: View {
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
             } else {
                 Text("Khajistan Transmission plays under your website account.").kjBody()
-                Button(kicker: "Sign in") { showSignIn = true }
-                    .buttonStyle(HouseButtonStyle(solid: true))
+                Button { showSignIn = true } label: { Label("Sign in", systemImage: "person.crop.circle") }
+                    .buttonStyle(SolidActionStyle())
                     .accessibilityIdentifier("accountSignIn")
             }
             webRow("Your Khajistan on the website", path: "dashboard.html", id: "web-dashboard")
@@ -194,9 +190,9 @@ struct YoursView: View {
             model.open(ArchiveURL.base.appendingPathComponent(path))
         } label: {
             HStack {
-                Text(title).kjName()
+                Text(title).font(.system(.body, weight: .semibold))
                 Spacer()
-                Text("\u{2197}").kjName().accessibilityHidden(true)
+                Image(systemName: "arrow.up.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
             }
         }
         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
@@ -207,7 +203,7 @@ struct YoursView: View {
     private var previewBlock: some View {
         let isSet = model.auth.previewPassword != nil
         VStack(alignment: .leading, spacing: 8) {
-            Kicker("Preview password")
+            ShelfHeader(title: "Preview password")
             Text(isSet ? "Set on this device, for Transmission, the Screening Room and the Reading Room shelves until launch." : "Not set. Transmission, the Screening Room and the Reading Room shelves ask for it until launch.")
                 .kjSmall(faint: true)
             if editingPassword {
@@ -237,8 +233,7 @@ struct YoursView: View {
 
     private var libraryBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HouseRule()
-            Kicker("On this device").padding(.top, 10)
+            ShelfHeader(title: "On this device")
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
@@ -263,8 +258,9 @@ struct YoursView: View {
     }
 
     private func shelfTab(_ title: String, _ value: Int) -> some View {
-        Button { shelf = value; if value == 2 { readFiles() } } label: { Text(title).kjKicker() }
-            .buttonStyle(HouseTabStyle(isCurrent: shelf == value))
+        Button { shelf = value; if value == 2 { readFiles() } } label: { Text(title) }
+            .buttonStyle(ChipStyle(on: shelf == value))
+            .padding(.trailing, 8)
             .accessibilityIdentifier("shelf-\(title.lowercased())")
     }
 

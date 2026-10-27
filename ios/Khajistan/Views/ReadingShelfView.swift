@@ -18,8 +18,10 @@ struct ReadingShelfView: View {
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 24) {
-                PageHead(RRWords.heading, line: RRWords.lede)
+            LazyVStack(alignment: .leading, spacing: 22) {
+                LargeTitle(title: RRWords.heading,
+                           line: store.phase == .ready && store.tabs.count > 1 ? RRShelves.depthLine(store.titles, rights: store.rights) : RRWords.lede)
+                    .accessibilityIdentifier("rrTotal")
                 switch store.phase {
                 case .idle, .loading:
                     TuningLoader("Loading the Reading Room\u{2026}")
@@ -28,16 +30,15 @@ struct ReadingShelfView: View {
                 case .failed(let message):
                     ReadingProblem(message: message) { Task { await store.retry() } }
                 case .ready:
-                    if store.tabs.count > 1 {
-                        Text(RRShelves.depthLine(store.titles, rights: store.rights))
-                            .kjSmall(faint: true)
-                            .accessibilityIdentifier("rrTotal")
-                    }
-                    search
+                    SearchField(prompt: "Titles, in any script", text: $query, id: "rrSearch")
                     if !trimmed.isEmpty {
                         results
                     } else {
-                        if store.tabs.count > 1 { tabRow }
+                        ContinueShelf()
+                        if store.tabs.count > 1 {
+                            ChipRow(chips: store.tabs.map { Chip(id: $0.id, title: $0.name, identifier: "rr-tab-\($0.id)") },
+                                    selected: tab?.id ?? "") { tabID = $0 }
+                        }
                         if let tab { shelf(tab) }
                     }
                 }
@@ -49,15 +50,6 @@ struct ReadingShelfView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .task { await store.start() }
-    }
-
-    private var search: some View {
-        HouseInputField("Find a title") {
-            TextField("", text: $query, prompt: Text("Name, in any script").foregroundStyle(palette.faint))
-                .autocorrectionDisabled()
-                .submitLabel(.search)
-                .accessibilityIdentifier("rrSearch")
-        }
     }
 
     // MARK: - Search
@@ -82,11 +74,11 @@ struct ReadingShelfView: View {
         LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(found) { title in
                 NavigationLink(value: RoomRoute.readingTitle(title.slug)) {
-                    HStack(alignment: .top, spacing: 14) {
-                        RRCover(state: store.card(for: title))
-                            .frame(width: 64, height: 88)
+                    HStack(alignment: .center, spacing: 14) {
+                        RRCover(state: store.card(for: title)).frame(width: 64, height: 88)
                         ReadingCardText(title: title, access: store.access(for: title))
                         Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").foregroundStyle(palette.faint).accessibilityHidden(true)
                     }
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
@@ -98,41 +90,19 @@ struct ReadingShelfView: View {
         }
     }
 
-    // MARK: - Tabs and shelves
-
-    private var tabRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(store.tabs) { item in
-                    Button { tabID = item.id } label: { Text(item.name).kjKicker() }
-                        .buttonStyle(HouseTabStyle(isCurrent: item.id == tab?.id))
-                        .accessibilityIdentifier("rr-tab-\(item.id)")
-                }
-            }
-        }
-        .padding(.horizontal, -12)
-    }
+    // MARK: - Shelves
 
     @ViewBuilder
     private func shelf(_ tab: RRTab) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text(tab.name).kjName(KJType.title)
-                if let native = tab.native, !native.isEmpty {
-                    Text(native).kjName(KJType.title).foregroundStyle(palette.faint)
-                }
-            }
+        if store.tabs.count > 1 {
             Text(tab.depth).kjSmall(faint: true).accessibilityIdentifier("rrDepth")
         }
         ForEach(tab.rows) { row in
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Kicker(row.name).accessibilityAddTraits(.isHeader)
-                    Text(row.titles.count.formatted()).kjSmall(faint: true)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                ShelfHeader(title: row.name, count: row.titles.count, route: .readingShelf(tab: tab.id, row: row.id))
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: 16) {
-                        ForEach(row.titles) { card($0) }
+                        ForEach(row.titles) { ReadingCard(title: $0, width: coverWidth) }
                     }
                 }
                 .scrollClipDisabled()
@@ -142,21 +112,116 @@ struct ReadingShelfView: View {
         }
     }
 
-    private var coverWidth: CGFloat { sizeClass == .regular ? 150 : 116 }
+    private var coverWidth: CGFloat { sizeClass == .regular ? 150 : 124 }
+}
 
-    private func card(_ title: RRTitle) -> some View {
+/// A title on a shelf, as Apple Books sets a book: the cover at its own shape, then the name and a
+/// faint line, and what the page server said about access.
+struct ReadingCard: View {
+    let title: RRTitle
+    let width: CGFloat
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let store = model.reading
         NavigationLink(value: RoomRoute.readingTitle(title.slug)) {
-            VStack(alignment: .leading, spacing: 6) {
-                RRCover(state: store.card(for: title))
-                    .frame(width: coverWidth, height: coverWidth * 1.36)
+            VStack(alignment: .leading, spacing: 8) {
+                RRCover(state: store.card(for: title)).frame(width: width, height: width * 1.38)
                 ReadingCardText(title: title, access: store.access(for: title))
             }
-            .frame(width: coverWidth, alignment: .leading)
+            .frame(width: width, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onAppear { store.want(title) }
         .accessibilityIdentifier("rr-title-\(title.slug)")
+    }
+}
+
+/// Where reading stopped on this device, as Apple Books' Continue: the issue's own cover, the page,
+/// and how far into the issue that is. Nothing shows until something has been read here.
+struct ContinueShelf: View {
+    /// True on Home, which is not on the room's stack: a card then opens the room at the title.
+    var fromHome = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    private var places: [(Resume, RRTitle, RRIssue)] {
+        model.library.resume.filter { $0.kind == .reading }.compactMap { place in
+            guard let title = model.reading.titles.first(where: { $0.slug == place.ref }),
+                  !model.reading.isRights(title),
+                  let issue = title.issues.first(where: { $0.key == place.part }) else { return nil }
+            return (place, title, issue)
+        }
+    }
+
+    var body: some View {
+        let found = places
+        if !found.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ShelfHeader(title: "Continue")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 18) {
+                        ForEach(found, id: \.0.id) { place, title, issue in card(place, title, issue) }
+                    }
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
+    private var width: CGFloat { sizeClass == .regular ? 190 : 164 }
+
+    private func card(_ place: Resume, _ title: RRTitle, _ issue: RRIssue) -> some View {
+        let page = Int(place.position)
+        let route = RoomRoute.readingTitle(title.slug, resume: true)
+        return RoomLink(route: route, in: fromHome ? .reading : nil) {
+            VStack(alignment: .leading, spacing: 8) {
+                RRCover(state: model.reading.issueCard(title, issue)).frame(width: width, height: width * 1.38)
+                ProgressLine(value: Double(page) / Double(max(issue.pages, 1))).frame(width: width)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title.name).kjName().lineLimit(2).multilineTextAlignment(.leading)
+                    Text([issue.label, "p. \(page) of \(issue.pages)"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                        .kjSmall(faint: true).lineLimit(1)
+                }
+            }
+            .frame(width: width, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onAppear { model.reading.want(title, issue: issue) }
+        .accessibilityIdentifier("rr-continue-\(title.slug)")
+    }
+}
+
+/// One shelf whole, as Apple Books opens a collection: its covers in a grid.
+struct ReadingRowScreen: View {
+    let tabID: String
+    let rowID: String
+    @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    var body: some View {
+        let row = model.reading.tabs.first { $0.id == tabID }?.rows.first { $0.id == rowID }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                LargeTitle(title: row?.name ?? RRWords.heading,
+                           line: row.map { "\($0.titles.count.formatted()) title\($0.titles.count == 1 ? "" : "s")" })
+                if let row {
+                    let width: CGFloat = sizeClass == .regular ? 150 : 104
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: width), spacing: 16, alignment: .top)], alignment: .leading, spacing: 22) {
+                        ForEach(row.titles) { ReadingCard(title: $0, width: width) }
+                    }
+                } else {
+                    Text("This shelf is not in the Reading Room now.").kjBody()
+                }
+            }
+            .padding(.horizontal, KJLayout.inset)
+            .padding(.vertical, 12)
+            .frame(maxWidth: KJLayout.wideWidth, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .task { await model.reading.start() }
     }
 }
 
@@ -168,32 +233,34 @@ private struct ReadingCardText: View {
     var body: some View {
         let meta = [title.byline, "\(title.issues.count) issue\(title.issues.count == 1 ? "" : "s")"]
             .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title.name).kjName().lineLimit(3).multilineTextAlignment(.leading)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.name).font(.system(.subheadline, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             if !title.native.isEmpty { Text(title.native).kjSmall().lineLimit(1) }
             Text(meta).kjSmall(faint: true).lineLimit(1)
-            if let tag = access?.tag { Text(tag).kjKicker().lineLimit(2) }
+            if let tag = access?.tag { Text(tag).font(.system(.caption, weight: .semibold)).lineLimit(2) }
         }
         .accessibilityElement(children: .combine)
     }
 }
 
-/// A cover at its own shape on the lift colour, fitted whole and never cropped. The plate holds
-/// the space until the page arrives; a cover that cannot be had leaves the plate.
+/// A cover at its own shape, never cropped, standing on the shelf's line as a book does. A plate
+/// on the lift colour holds the space until the page arrives; a cover that cannot be had leaves it.
 struct RRCover: View {
     let state: RRCardState
     @Environment(\.palette) private var palette
 
     var body: some View {
-        Rectangle()
-            .fill(palette.lift)
-            .overlay {
-                if let image = state.image {
-                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
-                }
+        Group {
+            if let image = state.image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 3, style: .continuous).fill(palette.lift)
             }
-            .accessibilityHidden(true)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        .accessibilityHidden(true)
     }
 }
 
@@ -266,52 +333,81 @@ struct ReadingTitleScreen: View {
     @ViewBuilder
     private func content(_ title: RRTitle) -> some View {
         header(title)
-        if let place = model.library.place(.reading, title.slug), !held,
-           let issue = title.issues.first(where: { $0.key == place.part }) {
-            Button {
-                reading = ReaderTarget(title: title, issue: issue, page: Int(place.position))
-            } label: {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Continue \u{2192}").kjKicker()
-                    Text([issue.label, "p. \(Int(place.position))"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")).kjName()
-                }
-            }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)))
-            .accessibilityIdentifier("rrContinue")
-        }
         if held { rightsBanner(title) }
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 16, alignment: .top)], alignment: .leading, spacing: 20) {
-            ForEach(title.issues) { issueCard(title, $0) }
+        VStack(alignment: .leading, spacing: 10) {
+            ShelfHeader(title: "Issues", count: title.issues.count)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 16, alignment: .top)], alignment: .leading, spacing: 22) {
+                ForEach(title.issues) { issueCard(title, $0) }
+            }
         }
     }
 
+    /// Where this device stopped in the title, when that issue is still on it.
+    private func place(_ title: RRTitle) -> (Resume, RRIssue)? {
+        guard !held, let place = model.library.place(.reading, title.slug),
+              let issue = title.issues.first(where: { $0.key == place.part }) else { return nil }
+        return (place, issue)
+    }
+
+    /// Apple Books' book page: the cover, the name, one action, and the smaller ones under it.
     private func header(_ title: RRTitle) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Kicker(RRWords.heading)
-            Text(title.name).kjDisplay(KJType.headline, tracking: -0.055).accessibilityAddTraits(.isHeader)
-            if !title.native.isEmpty { Text(title.native).kjName(KJType.title) }
-            Text(summary(title)).kjBody().accessibilityIdentifier("rrTitleSummary")
-            HStack(spacing: 18) {
+        let stopped = place(title)
+        let lead = stopped?.1 ?? title.issues.first
+        return VStack(spacing: 14) {
+            if let lead {
+                RRCover(state: store.issueCard(title, lead))
+                    .frame(width: 190, height: 262)
+                    .onAppear { store.want(title, issue: lead) }
+            }
+            VStack(spacing: 4) {
+                Text(title.name).font(.system(.title2, weight: .bold)).multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                if !title.native.isEmpty { Text(title.native).kjName(KJType.title).multilineTextAlignment(.center) }
+                Text(summary(title)).kjSmall(faint: true).multilineTextAlignment(.center).accessibilityIdentifier("rrTitleSummary")
+            }
+            if !held {
+                if let stopped {
+                    Button {
+                        reading = ReaderTarget(title: title, issue: stopped.1, page: Int(stopped.0.position))
+                    } label: {
+                        Label("Continue \u{00B7} \(stopped.1.label), p. \(Int(stopped.0.position))", systemImage: "book.fill")
+                    }
+                    .buttonStyle(SolidActionStyle())
+                    .accessibilityIdentifier("rrContinue")
+                } else if let first = title.issues.first {
+                    Button {
+                        reading = ReaderTarget(title: title, issue: first, page: 1)
+                    } label: { Label("Read", systemImage: "book.fill") }
+                    .buttonStyle(SolidActionStyle())
+                    .accessibilityIdentifier("rrRead")
+                }
+            }
+            HStack(spacing: 8) {
                 saveButton(title)
                 if !store.provenanceLines(for: title).isEmpty {
-                    Button(kicker: showProvenance ? "Hide provenance" : "Provenance") { showProvenance.toggle() }
+                    IconAction(title: "Provenance", symbol: showProvenance ? "info.circle.fill" : "info.circle") { showProvenance.toggle() }
                         .accessibilityIdentifier("rrProvenance")
                 }
-                Button(kicker: "On the website \u{2197}") { model.openWebsite(ReadingLinks.title(title)) }
+                IconAction(title: "Website", symbol: "safari") { model.openWebsite(ReadingLinks.title(title)) }
                     .accessibilityIdentifier("rrOnWebsite")
             }
             if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("rrSaveNote") }
             if showProvenance {
-                ForEach(store.provenanceLines(for: title), id: \.self) { Text($0).kjSmall(faint: true) }
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(store.provenanceLines(for: title), id: \.self) { Text($0).kjSmall(faint: true) }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
     }
 
     /// Save, as the website's Save control: on the account, so the title is on the dashboard and
     /// on every device signed in to it.
     private func saveButton(_ title: RRTitle) -> some View {
         let saved = model.saves.isSaved(title)
-        return Button(kicker: saved ? "Saved" : "Save") {
+        return IconAction(title: saved ? "Saved" : "Save", symbol: saved ? "bookmark.fill" : "bookmark") {
             guard model.saves.canSave else {
                 saveNote = "Sign in to save titles to your account."
                 showSignIn = true
@@ -343,13 +439,15 @@ struct ReadingTitleScreen: View {
     }
 
     private func issueCard(_ title: RRTitle, _ issue: RRIssue) -> some View {
-        Button {
+        let spot = place(title).flatMap { $0.1.key == issue.key ? $0.0 : nil }
+        return Button {
             // A rights-held issue is not opened: the website's card is inert, and the page server answers 451.
             if !held { reading = ReaderTarget(title: title, issue: issue, page: 1) }
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 RRCover(state: store.issueCard(title, issue)).aspectRatio(0.74, contentMode: .fit)
-                Text(issue.label).kjName().lineLimit(2).multilineTextAlignment(.leading)
+                if let spot { ProgressLine(value: spot.position / Double(max(issue.pages, 1))) }
+                Text(issue.label).font(.system(.subheadline, weight: .semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 Text("\(issue.pages) pages").kjSmall(faint: true)
             }
             .contentShape(Rectangle())

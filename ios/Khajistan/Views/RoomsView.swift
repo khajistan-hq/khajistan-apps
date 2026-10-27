@@ -8,6 +8,8 @@ enum RoomRoute: Hashable, Sendable {
     case readingTitle(String, resume: Bool = false)
     /// A Reading Room page: title slug, issue id (as the website's `issue=`) and page number.
     case readingPage(String, issue: String, page: Int)
+    /// One Reading Room shelf whole: the tab and the row it sits in.
+    case readingShelf(tab: String, row: String)
     /// A Screening Room film by handle.
     case film(String)
     /// A Bazaar product by handle, and the bag.
@@ -123,8 +125,8 @@ struct RoomList: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PageHead(kicker: "Rooms", "The archive", line: nil)
-                    .padding(.bottom, 20)
+                LargeTitle(title: "Rooms", line: "The archive, as the website's menu has it")
+                    .padding(.bottom, 16)
                 ForEach(Self.doors, id: \.door) { group in
                     RoomDoor(name: group.door, rooms: group.rooms, selected: selected)
                 }
@@ -137,7 +139,8 @@ struct RoomList: View {
     }
 }
 
-/// One door of the menu and its rooms.
+/// One door of the menu and its rooms, as a grouped list: the door's name, then a row per room
+/// with its icon, its line, and a chevron (in the app) or an arrow (the website).
 struct RoomDoor: View {
     let name: String
     let rooms: [ArchiveDestination]
@@ -146,13 +149,13 @@ struct RoomDoor: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HouseRule()
+        VStack(alignment: .leading, spacing: 2) {
             // A door with one room of its own name is named once, by the room.
             if !(rooms.count == 1 && rooms[0].title.caseInsensitiveCompare(name) == .orderedSame) {
-                Kicker(name)
-                    .padding(.top, 14)
-                    .padding(.bottom, 4)
+                Text(name.capitalized(with: nil))
+                    .font(.system(.subheadline, weight: .semibold))
+                    .foregroundStyle(palette.faint)
+                    .padding(.top, 6)
                     .accessibilityAddTraits(.isHeader)
             }
             ForEach(rooms) { room in
@@ -160,15 +163,23 @@ struct RoomDoor: View {
                 Button {
                     model.open(room)
                 } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(room.title).kjName(KJType.title)
+                    HStack(alignment: .center, spacing: 14) {
+                        Image(systemName: room.nativeRoom?.symbol ?? "globe")
+                            .font(.system(.title3, weight: .semibold))
+                            .foregroundStyle(palette.accent)
+                            .frame(width: 30)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(room.title).font(.system(.body, weight: .semibold))
                                 .foregroundStyle(isCurrent ? palette.accent : palette.ink)
-                            Text(room.subtitle).kjSmall(faint: true)
+                            Text(room.subtitle).kjSmall(faint: true).multilineTextAlignment(.leading)
                         }
                         Spacer(minLength: 0)
                         // In the app, or the live website.
-                        Text(room.nativeRoom == nil ? "\u{2197}" : "\u{2192}").kjName().accessibilityHidden(true)
+                        Image(systemName: room.nativeRoom == nil ? "arrow.up.right" : "chevron.right")
+                            .font(.system(.subheadline, weight: .bold))
+                            .foregroundStyle(palette.faint)
+                            .accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -178,7 +189,7 @@ struct RoomDoor: View {
                 .accessibilityAddTraits(isCurrent ? .isSelected : [])
             }
         }
-        .padding(.bottom, 18)
+        .padding(.bottom, 14)
     }
 }
 
@@ -209,6 +220,7 @@ struct RouteScreen: View {
             case .room(let room): RoomScreen(room: room)
             case .readingTitle(let slug, let resume): ReadingTitleScreen(slug: slug, resume: resume)
             case .readingPage(let slug, let issue, let page): ReadingTitleScreen(slug: slug, openIssue: issue, openPage: page)
+            case .readingShelf(let tab, let row): ReadingRowScreen(tabID: tab, rowID: row)
             case .film(let handle): FilmScreen(handle: handle)
             case .product(let handle): ProductScreen(handle: handle)
             case .bag: BagScreen()
@@ -241,8 +253,12 @@ private struct StackScreen: ViewModifier {
     func body(content: Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if back {
-                Button { dismiss() } label: { Text("\u{2190} Back").kjKicker() }
-                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: KJLayout.inset, bottom: 6, trailing: 16)))
+                Button { dismiss() } label: {
+                    Label("Back", systemImage: "chevron.left")
+                        .font(.system(.body, weight: .semibold))
+                        .foregroundStyle(palette.accent)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 6, leading: KJLayout.inset - 4, bottom: 2, trailing: 16)))
                     .keyboardShortcut("[", modifiers: .command)
                     .accessibilityIdentifier("stackBack")
                     .accessibilityLabel("Back")

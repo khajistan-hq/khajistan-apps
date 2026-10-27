@@ -10,6 +10,17 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The tab bar's icon (SF Symbols: monochrome, in the text's colour).
+    var symbol: String {
+        switch self {
+        case .home: return "house"
+        case .rooms: return "square.grid.2x2"
+        case .receiver: return "dot.radiowaves.left.and.right"
+        case .library: return "books.vertical"
+        case .search: return "magnifyingglass"
+        }
+    }
+
     var title: String {
         switch self {
         case .home: return "Home"

@@ -110,38 +110,61 @@ struct NowPlayingBar: View {
         }
     }
 
+    private var symbol: String {
+        switch model.tuner.source {
+        case .live(let channel): return ChannelRow.symbol(channel.mediaType)
+        case .transmission: return "dot.radiowaves.left.and.right"
+        case nil: return "tv"
+        }
+    }
+
+    /// Sonos's small player while you browse: a floating plate in the band's colour, the source's
+    /// mark, what is on and its state, and play/pause and off as icons.
     var body: some View {
-        VStack(spacing: 0) {
-            HouseRule()
-            HStack(spacing: 14) {
-                Button {
-                    var instant = Transaction()
-                    instant.disablesAnimations = true
-                    withTransaction(instant) { model.tab = .receiver }
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(name.title).kjName().lineLimit(1)
-                        Text("\(name.detail) \u{00B7} \(stateWord)").kjSmall(faint: true).lineLimit(1)
+        let playing = state == .playing || state == .tuning
+        HStack(spacing: 12) {
+            Button {
+                var instant = Transaction()
+                instant.disablesAnimations = true
+                withTransaction(instant) { model.tab = .receiver }
+            } label: {
+                HStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(palette.onBand.opacity(0.16))
+                        .frame(width: 44, height: 44)
+                        .overlay { Image(systemName: symbol).font(.system(size: 18, weight: .semibold)) }
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(name.title).font(.system(.subheadline, weight: .bold)).lineLimit(1)
+                        Text("\(name.detail) \u{00B7} \(stateWord)").font(.caption).opacity(0.85).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens the Receiver")
-                .accessibilityIdentifier("nowPlayingName")
-                Button { model.tuner.playPause() } label: {
-                    Text(state == .playing || state == .tuning ? "Pause" : "Play").kjKicker().frame(minWidth: 44, minHeight: 44)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("nowPlayingToggle")
-                Button { model.tuner.stop() } label: { Text("Off").kjKicker().frame(minWidth: 44, minHeight: 44) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Turn the Receiver off")
-                    .accessibilityIdentifier("nowPlayingOff")
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, KJLayout.inset)
-            .padding(.vertical, 6)
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the Receiver")
+            .accessibilityIdentifier("nowPlayingName")
+            Button { model.tuner.playPause() } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: 20, weight: .bold)).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(playing ? "Pause" : "Play")
+            .accessibilityIdentifier("nowPlayingToggle")
+            Button { model.tuner.stop() } label: {
+                Image(systemName: "xmark").font(.system(size: 16, weight: .bold)).frame(width: 44, height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Turn the Receiver off")
+            .accessibilityIdentifier("nowPlayingOff")
         }
+        .foregroundStyle(palette.onBand)
+        .padding(.leading, 8)
+        .padding(.trailing, 4)
+        .padding(.vertical, 6)
+        .background(palette.band, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
         .background(palette.ground)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("nowPlaying")
@@ -163,13 +186,17 @@ struct HouseTabBar: View {
                     Button {
                         select(tab)
                     } label: {
-                        Text(tab.title).kjKicker().lineLimit(1)
-                            .padding(.vertical, 14)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Rectangle())
-                            .overlay(alignment: .bottom) {
-                                if tab == current { Rectangle().fill(palette.accent).frame(height: 3).padding(.horizontal, 12) }
-                            }
+                        // An icon over its name, as the system's tab bars are; the current one in the accent.
+                        VStack(spacing: 3) {
+                            Image(systemName: tab.symbol).font(.system(size: 21, weight: tab == current ? .bold : .regular))
+                                .frame(height: 26)
+                            Text(tab.title).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                        }
+                        .foregroundStyle(tab == current ? palette.accent : palette.faint)
+                        .padding(.top, 8)
+                        .padding(.bottom, 4)
+                        .frame(maxWidth: .infinity, minHeight: 49)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)

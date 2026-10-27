@@ -46,3 +46,15 @@ Each entry: what was chosen, and why, in one or two lines.
 16. **Nothing opens an audio device until it makes a sound.** The Receiver's tuning hiss wires its
     engine on the first sound; SwiftUI builds a view's state object on every rebuild, and a device
     with no audio output hung and aborted in `init`.
+17. **Each room copies the layout of the app chosen for it (owner, 2026-10-27: "copy the workflow
+    and UX/UI of the apps we landed on").** Reading Room and Home follow Apple Books, the Screening
+    Room the Apple TV app, Bazaar Etsy and On, Pics/Vids Cosmos, Madrassa Wikipedia and The
+    Atlantic, the databases Notion, the Receiver's list YouTube TV, and the small player Sonos. What
+    is copied is layout, hierarchy and flow: large titles as written, search fields, filter chips,
+    shelves headed "Name ›", one solid action per screen, icon tab bar, "‹ Back". What stays the
+    house's: the three skins' colours (never white), artwork fitted whole and never cropped, no
+    outlined boxes (filled plates and form fields only), Home showing only this device's history
+    and the rooms. The shared pieces are ios/Khajistan/Views/Shelves.swift.
+18. **CC is a text key.** The Receiver's caption control reads "CC" on every live channel, filled
+    while captions are on; the shared caption and chat messages name each app's own sign-in door
+    (`KJConfig.signInDoor`: Library on the phone, Account on the television).

@@ -15,8 +15,8 @@ struct BazaarView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .firstTextBaseline) {
-                    PageHead("Bazaar", line: "Prints, objects, apparel and stickers")
+                HStack(alignment: .top) {
+                    LargeTitle(title: "Bazaar", line: "Prints, objects, apparel and stickers")
                     BagLink()
                 }
                 switch feed.state {
@@ -55,43 +55,31 @@ struct BazaarView: View {
     }
 
     private var filters: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HouseInputField("Find in the Bazaar") {
-                TextField("", text: $query, prompt: Text("Title or region").foregroundStyle(palette.faint))
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("bazaarSearch")
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    chip("All", nil)
-                    // The shelves the catalogue fills, in the page's order (CAT_LABELS).
-                    ForEach([BazaarShelf.apparel, .prints, .stickers, .objects].filter { s in items.contains { $0.shelf == s } }, id: \.self) {
-                        chip($0.title, $0)
-                    }
-                }
-            }
-            .padding(.horizontal, -12)
+        VStack(alignment: .leading, spacing: 12) {
+            SearchField(prompt: "Title or region", text: $query, id: "bazaarSearch")
+            // The shelves the catalogue fills, in the page's order (CAT_LABELS).
+            let shelves = [BazaarShelf.apparel, .prints, .stickers, .objects].filter { s in items.contains { $0.shelf == s } }
+            ChipRow(chips: [Chip(id: "", title: "All", identifier: "bazaarShelf-all")]
+                        + shelves.map { Chip(id: $0.rawValue, title: $0.title, identifier: "bazaarShelf-\($0.rawValue)") },
+                    selected: shelf?.rawValue ?? "") { id in shelf = shelves.first { $0.rawValue == id } }
             Text("\(shown.count.formatted()) of \(items.count.formatted())").kjSmall(faint: true)
                 .accessibilityIdentifier("bazaarCount")
         }
     }
 
-    private func chip(_ title: String, _ value: BazaarShelf?) -> some View {
-        Button { shelf = value } label: { Text(title).kjKicker() }
-            .buttonStyle(HouseTabStyle(isCurrent: shelf == value))
-            .accessibilityIdentifier("bazaarShelf-\(value?.rawValue ?? "all")")
-    }
-
+    /// Etsy's listing grid: two to a row on a phone, the picture on a soft plate, the name, the price.
     private var grid: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 180 : 150), spacing: 16, alignment: .top)],
-                  alignment: .leading, spacing: 22) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 200 : 150), spacing: 14, alignment: .top)],
+                  alignment: .leading, spacing: 20) {
             ForEach(shown) { item in
                 NavigationLink(value: RoomRoute.product(item.product.h)) {
                     VStack(alignment: .leading, spacing: 6) {
                         ProductPicture(url: Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 400))
-                        Text(item.product.title).kjName().lineLimit(3).multilineTextAlignment(.leading)
+                        Text(item.product.title).font(.subheadline).lineLimit(2).multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
-                        if let price = Bazaar.priceLine(item.product) { Text(price).kjSmall() }
+                        if let price = Bazaar.priceLine(item.product) {
+                            Text(price).font(.system(.subheadline, weight: .bold))
+                        }
                     }
                     .contentShape(Rectangle())
                 }
@@ -106,13 +94,16 @@ struct BazaarView: View {
 struct ProductPicture: View {
     let url: URL?
     @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
     @State private var image: UIImage?
 
+    /// A square soft plate, as a shop's listing photo sits, with the picture fitted whole inside it.
     var body: some View {
-        Color.clear
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(palette.lift)
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) }
+                if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit).padding(10) }
             }
             .accessibilityHidden(true)
             .task(id: url) {
@@ -125,13 +116,24 @@ struct ProductPicture: View {
 /// "Bag · 2", where the bag holds anything.
 private struct BagLink: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
 
     var body: some View {
         if model.bag.count > 0 {
             NavigationLink(value: RoomRoute.bag) {
-                Text("Bag \u{00B7} \(model.bag.count)").kjKicker()
+                Image(systemName: "bag")
+                    .font(.system(.title2, weight: .semibold))
+                    .frame(width: 44, height: 44)
+                    .overlay(alignment: .topTrailing) {
+                        Text("\(model.bag.count)")
+                            .font(.system(size: 11, weight: .bold)).monospacedDigit()
+                            .foregroundStyle(palette.onBand)
+                            .padding(.horizontal, 5).frame(minWidth: 18, minHeight: 18)
+                            .background(palette.band, in: Capsule())
+                    }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Bag, \(model.bag.count)")
             .accessibilityIdentifier("bagLink")
         }
     }
@@ -145,6 +147,7 @@ struct ProductScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.openURL) private var openURL
+    @Environment(\.palette) private var palette
     @State private var live: StorefrontProduct?
     @State private var failed = false
     @State private var notForSale = false
@@ -181,16 +184,22 @@ struct ProductScreen: View {
         variants.first { $0.id == chosen } ?? (variants.count == 1 ? variants.first : nil)
     }
 
+    /// Etsy's listing page: the price first, the name, the options, one Add to bag, then the rest.
     @ViewBuilder
     private var details: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack { Kicker(item?.shelf.title ?? "Bazaar"); Spacer(); BagLink() }
-            Text(live?.title ?? item?.product.title ?? "").kjDisplay(KJType.headline, tracking: -0.05).accessibilityAddTraits(.isHeader)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack { Text(item?.shelf.title ?? "Bazaar").kjSmall(faint: true); Spacer(); BagLink() }
+            if live != nil, !failed, variants.contains(where: \.availableForSale) {
+                price
+            }
+            Text(live?.title ?? item?.product.title ?? "").font(.system(.title3, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             if let region = item?.product.r, !region.isEmpty { Text(region).kjSmall(faint: true) }
             if notForSale {
                 Text("Not for sale online now.").kjName().accessibilityIdentifier("productNotForSale")
             } else if live == nil && !failed {
-                Kicker("Asking the shop\u{2026}")
+                Text("Asking the shop\u{2026}").kjSmall(faint: true)
             } else if failed {
                 Text("The shop did not answer, so nothing can be added now.").kjBody().accessibilityIdentifier("productFailed")
                 Button(kicker: "Try again") { Task { await load() } }
@@ -200,49 +209,61 @@ struct ProductScreen: View {
                 Text("Sold out").kjName().accessibilityIdentifier("productSoldOut")
             } else {
                 if variants.count > 1 { variantPicker }
-                price
-                Button(kicker: "Add to bag") {
+                Button {
                     guard let selected, let live else { return }
                     model.bag.add(selected, handle: handle, title: live.title, singleVariant: variants.count == 1)
                     note = "In your bag."
-                }
-                .buttonStyle(HouseButtonStyle(solid: true))
+                } label: { Label("Add to bag", systemImage: "bag.badge.plus") }
+                .buttonStyle(SolidActionStyle())
                 .disabled(selected?.availableForSale != true)
                 .accessibilityIdentifier("addToBag")
                 if let note { Text(note).kjSmall(faint: true).accessibilityIdentifier("bagNote") }
             }
             if let body = live?.descriptionHtml, !body.isEmpty {
-                Text(ArticleHTML.text(body)).kjBody().fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    ShelfHeader(title: "Item details")
+                    Text(ArticleHTML.text(body)).kjBody().fixedSize(horizontal: false, vertical: true)
+                }
             }
-            Button(kicker: "On khajistan.com \u{2197}") {
+            Button {
                 if let url = URL(string: "https://khajistan.com/products/\(KJURL.encodeQueryValue(handle))") { openURL(url) }
-            }
+            } label: { Label("On khajistan.com", systemImage: "arrow.up.right") .font(.system(.body, weight: .semibold)) }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
             .accessibilityIdentifier("productOnShop")
         }
     }
 
+    /// On's option grid: each option a soft plate, the chosen one in ink, a sold-out one struck through.
     private var variantPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Kicker("Choose")
-            FlowRow(spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose").font(.system(.subheadline, weight: .semibold))
+            FlowRow(spacing: 8) {
                 ForEach(variants) { variant in
+                    let on = selected?.id == variant.id
                     Button { chosen = variant.id } label: {
-                        Text(variant.title).kjKicker().strikethrough(!variant.availableForSale)
+                        Text(variant.title).font(.system(.subheadline, weight: .semibold))
+                            .strikethrough(!variant.availableForSale)
+                            .padding(.horizontal, 14).frame(minHeight: 44)
+                            .foregroundStyle(on ? palette.ground : palette.ink)
+                            .background(on ? palette.ink : palette.lift, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
-                    .buttonStyle(HouseTabStyle(isCurrent: selected?.id == variant.id))
+                    .buttonStyle(.plain)
                     .disabled(!variant.availableForSale)
+                    .opacity(variant.availableForSale ? 1 : palette.faintAlpha)
+                    .accessibilityAddTraits(on ? .isSelected : [])
                     .accessibilityLabel(variant.availableForSale ? variant.title : "\(variant.title), sold out")
                     .accessibilityIdentifier("variant-\(variant.title)")
                 }
             }
-            .padding(.horizontal, -12)
         }
     }
 
     @ViewBuilder
     private var price: some View {
         if let selected, let amount = selected.price.value {
-            Text(Bazaar.priceText(amount, currency: selected.price.currencyCode)).kjStat().accessibilityIdentifier("productPrice")
+            Text(Bazaar.priceText(amount, currency: selected.price.currencyCode))
+                .font(.system(.title, weight: .bold)).monospacedDigit()
+                .accessibilityIdentifier("productPrice")
         } else {
             Text("Choose an option to see its price.").kjSmall(faint: true)
         }
@@ -278,26 +299,40 @@ struct ProductScreen: View {
 struct BagScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.palette) private var palette
     @State private var problem: String?
 
+    /// On's bag: a line per item with a stepper, the summary, one Checkout.
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                PageHead(kicker: "Bazaar", "Your bag", line: nil)
+                LargeTitle(title: "Bag", line: model.bag.lines.isEmpty ? nil : "\(model.bag.count) item\(model.bag.count == 1 ? "" : "s")")
                 if model.bag.lines.isEmpty {
                     Text("Nothing in the bag.").kjBody().accessibilityIdentifier("bagEmpty")
                 } else {
                     ForEach(model.bag.lines) { line in row(line) }
-                    HouseRule()
-                    if let subtotal = model.bag.subtotal {
-                        Text("Subtotal \(Bazaar.priceText(subtotal.amount, currency: subtotal.currency))").kjName()
-                            .accessibilityIdentifier("bagSubtotal")
+                    VStack(alignment: .leading, spacing: 8) {
+                        ShelfHeader(title: "Summary")
+                        if let subtotal = model.bag.subtotal {
+                            HStack {
+                                Text("Subtotal").kjBody()
+                                Spacer()
+                                Text(Bazaar.priceText(subtotal.amount, currency: subtotal.currency)).font(.system(.body, weight: .bold)).monospacedDigit()
+                                    .accessibilityLabel("Subtotal \(Bazaar.priceText(subtotal.amount, currency: subtotal.currency))")
+                                    .accessibilityIdentifier("bagSubtotal")
+                            }
+                        }
+                        HStack {
+                            Text("Delivery and taxes").kjBody()
+                            Spacer()
+                            Text("At checkout").kjSmall(faint: true)
+                        }
+                        Text("The shop sets delivery, taxes and the total at checkout, on khajistan.com.").kjSmall(faint: true)
                     }
-                    Text("Delivery, taxes and the total are set by the shop at checkout, on khajistan.com.").kjSmall(faint: true)
-                    Button(kicker: model.bag.checkingOut ? "Opening checkout\u{2026}" : "Checkout on khajistan.com \u{2197}") {
-                        Task { await checkout() }
+                    Button { Task { await checkout() } } label: {
+                        Label(model.bag.checkingOut ? "Opening checkout\u{2026}" : "Checkout", systemImage: "lock.fill")
                     }
-                    .buttonStyle(HouseButtonStyle(solid: true))
+                    .buttonStyle(SolidActionStyle())
                     .disabled(model.bag.checkingOut)
                     .accessibilityIdentifier("bagCheckout")
                     if let problem { Text(problem).kjBody().accessibilityIdentifier("bagProblem") }
@@ -310,20 +345,31 @@ struct BagScreen: View {
     }
 
     private func row(_ line: BagLine) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(line.title).kjName()
+                Text(line.title).font(.system(.body, weight: .semibold))
                 if let option = line.option { Text(option).kjSmall(faint: true) }
                 Text(Bazaar.priceText(line.unitPrice, currency: line.currency)).kjSmall()
             }
             Spacer()
-            Button(kicker: "\u{2212}") { model.bag.setQuantity(line, line.quantity - 1) }
-                .accessibilityLabel("One fewer \(line.title)")
-            Text("\(line.quantity)").kjName().monospacedDigit().accessibilityLabel("\(line.quantity) in the bag")
-            Button(kicker: "+") { model.bag.setQuantity(line, line.quantity + 1) }
+            HStack(spacing: 0) {
+                Button { model.bag.setQuantity(line, line.quantity - 1) } label: {
+                    Image(systemName: line.quantity == 1 ? "trash" : "minus").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel(line.quantity == 1 ? "Remove \(line.title)" : "One fewer \(line.title)")
+                Text("\(line.quantity)").font(.system(.body, weight: .bold)).monospacedDigit().frame(minWidth: 22)
+                    .accessibilityLabel("\(line.quantity) in the bag")
+                Button { model.bag.setQuantity(line, line.quantity + 1) } label: {
+                    Image(systemName: "plus").frame(width: 44, height: 44)
+                }
                 .disabled(line.quantity >= BagStore.maxQuantity)
                 .accessibilityLabel("One more \(line.title)")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.ink)
+            .background(palette.lift, in: Capsule())
         }
+        .padding(.vertical, 4)
         .accessibilityIdentifier("bagLine-\(line.handle)")
     }
 

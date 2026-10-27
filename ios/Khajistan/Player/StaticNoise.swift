@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreAudio
 
 /// The hiss between stations, made here rather than played from a file: white noise through a
 /// one-pole low-pass, so it reads as a dial between frequencies rather than a fault. Its level

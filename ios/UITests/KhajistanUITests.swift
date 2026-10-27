@@ -185,7 +185,16 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: maghreb, evaluatedWith: title)
         waitForExpectations(timeout: 10)
         shot("map-tap-maghreb", app)
-        app.buttons["region-anatolia"].tap()
+        // Choosing a region scrolls the strip to centre it, animated. On a slow runner the chips
+        // are still sliding when the next tap is placed, and it lands where Anatolia was (CI,
+        // 2026-10-27). Tap once the chip has stopped moving.
+        let anatolia = app.buttons["region-anatolia"]
+        for _ in 0..<20 {
+            let before = anatolia.frame
+            usleep(250_000)
+            if anatolia.isHittable && anatolia.frame == before { break }
+        }
+        anatolia.tap()
         expectation(for: NSPredicate(format: "label CONTAINS[c] %@", "Anatolia"), evaluatedWith: title)
         waitForExpectations(timeout: 10)
     }

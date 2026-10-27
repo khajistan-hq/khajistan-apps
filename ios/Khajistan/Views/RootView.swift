@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The four doors and the house bar under them. There is no system tab bar: its tint, its glass
+/// The five doors and the house bar under them. There is no system tab bar: its tint, its glass
 /// and its selection pill are not the house's. A door is mounted the first time it is opened and
 /// then kept, so going back to it finds it where it was left.
 struct RootView: View {
@@ -11,7 +11,7 @@ struct RootView: View {
         let palette = Palette(model.skin)
         VStack(spacing: 0) {
             ZStack {
-                ForEach(AppTab.available) { tab in
+                ForEach(AppTab.allCases) { tab in
                     if mounted.contains(tab) || tab == model.tab {
                         page(tab)
                             .opacity(tab == model.tab ? 1 : 0)
@@ -65,9 +65,10 @@ struct RootView: View {
     private func page(_ tab: AppTab) -> some View {
         switch tab {
         case .home: HomeView()
+        case .rooms: RoomsView()
         case .receiver: ReceiverView()
-        case .picsVids: PicsVidsView()
-        case .yours: YoursView()
+        case .library: YoursView()
+        case .search: SearchView()
         }
     }
 }
@@ -83,7 +84,7 @@ struct HouseTabBar: View {
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {
-                ForEach(AppTab.available) { tab in
+                ForEach(AppTab.allCases) { tab in
                     Button {
                         select(tab)
                     } label: {

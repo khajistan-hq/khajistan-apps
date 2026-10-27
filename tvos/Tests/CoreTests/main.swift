@@ -3815,6 +3815,85 @@ func receiverPauseInvalidatesPendingResolver() throws {
     try expect(!intent.admits(changed), "pause during channel change blocks incoming playback")
 }
 
+/// The app's direction rule is the site's: the same region set, read out of reading-room-app.js,
+/// and the per-issue override both ways.
+func readingDirectionMatchesTheSite() throws {
+    let js = String(decoding: try realFile("scripts/reading-room-app.js"), as: UTF8.self)
+    let start = try require(js.range(of: "const RR_RTL_REGIONS = new Set(["), "RR_RTL_REGIONS in reading-room-app.js")
+    let block = String(js[start.upperBound...].prefix { $0 != "]" })
+    let site = Set(block.components(separatedBy: ",").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \n'\"")) }.filter { !$0.isEmpty })
+    try expectEqual(site, RRDirection.rightToLeftRegions)
+    try expect(site != RRDirection.rightToLeftRegions.subtracting(["persia"]), "the comparator can fail")
+    for slug in RRDirection.byIssue["molla-nasraddin"]!.except {
+        try expect(js.contains("'\(slug)'"), "the override lists \(slug)")
+    }
+}
+
+func readingDirectionRules() throws {
+    func title(_ slug: String, _ region: String) -> RRTitle {
+        RRTitle(slug: slug, name: slug, native: "", region: region, memberSlugs: [slug], issues: [])
+    }
+    func issue(_ slug: String) -> RRIssue { RRIssue(slug: slug, id: "1", label: "", pages: 4, index: 0) }
+    try expect(RRDirection.isRightToLeft(title("kayhan", "persia"), nil), "Persia reads right to left")
+    try expect(!RRDirection.isRightToLeft(title("ses", "anatolia"), nil), "Anatolia reads left to right")
+    let molla = title("molla-nasraddin", "persia")
+    try expect(!RRDirection.isRightToLeft(molla, issue("molla-nasraddin-3-molla-nasredin-1911-1-2")), "the reprint runs left to right")
+    try expect(RRDirection.isRightToLeft(molla, issue("molla-nasraddin-3-molla-nasredin-1906-1-39")), "the 1906 volume runs right to left")
+}
+
+/// Every product of the real catalogue stands on the shelf the website's own code puts it on
+/// (scripts/bazaar-shelf-fixture.mjs runs kj-typetag.js and writes KJ_BAZAAR_EXPECTED).
+func bazaarShelvesMatchTheSite() throws {
+    guard let expectedPath = ProcessInfo.processInfo.environment["KJ_BAZAAR_EXPECTED"] else {
+        throw Skip(reason: "set KJ_BAZAAR_EXPECTED (scripts/bazaar-shelf-fixture.mjs writes it)")
+    }
+    let catalogue = try JSONDecoder().decode(BazaarCatalogue.self, from: try realFile(Bazaar.cataloguePath))
+    let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: expectedPath))) as? [String: Any] ?? [:]
+    let expected = raw.mapValues { $0 as? String }
+    try expectEqual(expected.count, catalogue.products.count, "the fixture covers the same catalogue")
+    var mismatched: [String] = []
+    for product in catalogue.products {
+        let mine = Bazaar.shelf(product)?.rawValue
+        if mine != (expected[product.h] ?? nil) { mismatched.append(product.h) }
+    }
+    try expect(mismatched.isEmpty, "\(mismatched.count) shelves differ, e.g. \(mismatched.prefix(5))")
+    try expect(catalogue.products.contains { Bazaar.shelf($0) != nil }, "the shelf is not empty")
+}
+
+func bazaarRules() throws {
+    func product(_ type: String?, _ title: String, tags: [String] = [], pp: Double? = 18, pd: Double? = nil, o: Int? = nil, so: Int? = nil, image: String? = "https://cdn.shopify.com/s/files/1/x.jpg") -> BazaarProduct {
+        BazaarProduct(h: "h", t: title, i: image, p: pp, c: "USD", pt: type, r: nil, l: nil, tags: tags, pp: pp, pd: pd, so: so, o: o)
+    }
+    try expectEqual(Bazaar.shelf(product("T-Shirt", "Lollywood Tee")), .apparel)
+    try expectEqual(Bazaar.shelf(product("Poster", "Film poster", o: 1)), nil, "an original holding is not sold on the Bazaar")
+    try expectEqual(Bazaar.shelf(product("Book", "A Press title")), nil, "printed matter is not on the Bazaar")
+    try expectEqual(Bazaar.shelf(product("Apparel & Accessories", "Mujra Masti Iron-on Embroidered Patch")), nil, "a patch typed apparel is retired")
+    try expectEqual(Bazaar.shelf(product("Accessories", "I Am Pure Canvas Tote Bag")), .objects, "a canvas tote bag is still for sale")
+    try expectEqual(Bazaar.shelf(product("Paper products", "Allah Hoo", tags: ["type:sticker"])), .stickers)
+    try expectEqual(Bazaar.shelf(product("Home Decor", "Maula Jatt Movie Poster \u{2014} Metal Panel")), .objects, "metal stays an object")
+    try expectEqual(Bazaar.shelf(product("Home Decor", "Maula Jatt Matte Print")), .prints)
+    try expectEqual(Bazaar.shelf(product("Stickers", "Sticker", pp: nil, pd: 3)), nil, "digital-only leaves the shelf")
+    try expectEqual(Bazaar.shelf(product("Stickers", "Sticker", image: nil)), nil, "no image, no card")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 18)), "$18")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 4.5)), "$4.50")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 2800)), "$2,800")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 2800.01)), "Price on request")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", so: 1)), "Sold out")
+    try expect(Bazaar.imageURL("assets/products/350cabf9dbe894ad.webp") != nil)
+    try expectEqual(Bazaar.imageURL("https://evil.example/s/files/x.jpg"), nil)
+    try expectEqual(Bazaar.imageURL("assets/products/../../x.webp\u{0000}"), nil)
+    try expectEqual(Bazaar.imageURL("https://cdn.shopify.com/s/files/1/a.jpg?v=2", width: 320)?.absoluteString,
+                    "https://cdn.shopify.com/s/files/1/a.jpg?v=2&width=320")
+    try expectEqual(ShopStorefront.safeCheckout("https://khajistan.myshopify.com/cart/c/abc?key=1")?.absoluteString,
+                    "https://khajistan.myshopify.com/cart/c/abc?key=1&skip_shop_pay=true")
+    try expectEqual(ShopStorefront.safeCheckout("https://khajistan.myshopify.com.evil.example/cart"), nil)
+    try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
+    let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
+    try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
+    let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)
+    try expectEqual(ShopStorefront.checkout(from: ok), .success(URL(string: "https://khajistan.com/cart/c/1?skip_shop_pay=true")!))
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
     ("Caption continuation rejects stale paid work after token refresh", captionContinuationRejectsStalePaidWork),
@@ -3936,6 +4015,10 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
+    ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
+    ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
+    ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
+    ("Reading Room: direction by region and by issue", readingDirectionRules),
     ("Reading Room: titles group as the site groups them (sample, from the site's own code)", readingGroupingMatchesTheSite),
     ("Reading Room: titles group as the site groups them (full feed)", readingGroupingMatchesTheSiteOnTheFullFeed),
     ("Reading Room: title splitting and keys", readingTitleSplitting),

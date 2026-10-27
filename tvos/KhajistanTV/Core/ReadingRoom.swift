@@ -916,6 +916,36 @@ enum RRShelves {
     }
 }
 
+// MARK: - Reading direction
+
+/// Which way an issue's pages run (rrRtlFor in reading-room-app.js). The region decides for a
+/// title, and an issue named in `byIssue` overrides it, because one title can hold issues that run
+/// both ways (Molla Nasredin: a Latin-script reprint, and three volumes photographed from the
+/// Arabic-script originals).
+enum RRDirection {
+    static let rightToLeftRegions: Set<String> = [
+        "arabia", "british-india", "egypt", "indus", "iran", "khorasan", "levant", "mesopotamia", "persia",
+    ]
+
+    /// The title's default (left to right when `ltr`) and the issue slugs that run the other way.
+    static let byIssue: [String: (ltr: Bool, except: Set<String>)] = [
+        "molla-nasraddin": (true, [
+            "molla-nasraddin-3-molla-nasredin-1906-1-39",
+            "molla-nasraddin-3-molla-nasredin-1907-1-49",
+            "molla-nasraddin-3-molla-nasredin-1908-1-52",
+        ]),
+    ]
+
+    static func isRightToLeft(_ title: RRTitle, _ issue: RRIssue?) -> Bool {
+        let issueSlug = issue?.slug ?? ""
+        if let key = byIssue.keys.sorted().first(where: { title.slug == $0 || title.slug.hasPrefix($0 + "-") || issueSlug.hasPrefix($0 + "-") }),
+           let rule = byIssue[key] {
+            return rule.ltr == rule.except.contains(issueSlug)
+        }
+        return rightToLeftRegions.contains(title.region)
+    }
+}
+
 // MARK: - The site's own words
 
 enum RRWords {

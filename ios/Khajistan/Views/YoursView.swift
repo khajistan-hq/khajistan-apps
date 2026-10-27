@@ -116,7 +116,7 @@ struct YoursView: View {
         let isSet = model.auth.previewPassword != nil
         VStack(alignment: .leading, spacing: 8) {
             Kicker("Preview password")
-            Text(isSet ? "Set on this device, for the Transmission schedule until launch." : "Not set. Khajistan Transmission asks for it until launch.")
+            Text(isSet ? "Set on this device, for Transmission, the Screening Room and the Reading Room shelves until launch." : "Not set. Transmission, the Screening Room and the Reading Room shelves ask for it until launch.")
                 .kjSmall(faint: true)
             if editingPassword {
                 HouseInputField("Password") { SecureField("", text: $draft) }

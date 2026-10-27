@@ -54,10 +54,11 @@ final class KhajistanUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
-            waitFor(app.textFields["archiveSearch"], 10, "HOME carries the site's search")
+            waitFor(app.buttons["homeAllRooms"], 10, "HOME leads to every room")
             shot("\(skin)-01-home", app)
-            app.swipeUp()
-            shot("\(skin)-02-home-doors", app)
+            app.buttons["tab-rooms"].tap()
+            waitFor(app.buttons["destination-reading"], 10, "ROOMS lists the website's menu")
+            shot("\(skin)-02-rooms", app)
 
             app.buttons["tab-receiver"].tap()
             _ = firstReceiverChannel(app)
@@ -78,25 +79,32 @@ final class KhajistanUITests: XCTestCase {
             // (owner, 2026-10-06).
             XCTAssertFalse(app.buttons["part-radio"].exists, "there is no Khajistan Radio section")
 
-            app.buttons["tab-picsVids"].tap()
+            app.buttons["tab-rooms"].tap()
+            app.buttons["destination-picsnvids"].tap()
             waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "the Born Digital stream loads")
             shot("\(skin)-07-pics-vids", app)
+            app.buttons["stackBack"].tap()
+            waitFor(app.buttons["destination-reading"], 5, "Back returns to the rooms")
 
-            app.buttons["tab-yours"].tap()
+            app.buttons["tab-search"].tap()
+            waitFor(app.textFields["archiveSearch"], 5, "SEARCH carries the field")
+            shot("\(skin)-06-search", app)
+
+            app.buttons["tab-library"].tap()
             waitFor(app.buttons["skin-\(skin)"], 5, "the skin control is on the account page")
             shot("\(skin)-08-account", app)
             app.swipeUp()
             shot("\(skin)-09-account-lower", app)
 
-            app.buttons["tab-home"].tap()
-            app.buttons["destination-reading"].tap()
+            app.buttons["tab-rooms"].tap()
+            app.buttons["destination-publications"].tap()
             waitFor(app.buttons["closeBrowser"], 10, "the house browser opens")
             let web = app.webViews.firstMatch
             let gate = web.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Enter the archive")).firstMatch
-            let reading = web.staticTexts["Reading Room"].firstMatch
-            let loaded = NSPredicate { _, _ in gate.exists || reading.exists }
+            let page = web.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Publications")).firstMatch
+            let loaded = NSPredicate { _, _ in gate.exists || page.exists }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: loaded, object: nil)], timeout: 45), .completed,
-                           "The website renders its password gate or the Reading Room, not merely a mounted WebKit")
+                           "The website renders its password gate or Publications, not merely a mounted WebKit")
             sleep(2)
             shot("\(skin)-10-browser", app)
             app.buttons["closeBrowser"].tap()
@@ -104,12 +112,11 @@ final class KhajistanUITests: XCTestCase {
         }
     }
 
-    /// iPad: the rows of HOME and ACCOUNT hold to the reading column (KJLayout.readingWidth, 720)
-    /// and sit centred, in portrait and in landscape, and the Receiver still draws its map and
-    /// regions. iPhone: the same row spans the screen less the page margins, exactly as before,
-    /// which is the case the column must never touch.
+    /// iPad: ROOMS keeps its list as a sidebar beside the open room, LIBRARY holds to the reading
+    /// column, in portrait and in landscape, and the Receiver still draws its map and regions.
+    /// iPhone: a ROOMS row spans the screen less the page margins.
     func testRowsHoldToAColumnOnIPadAndSpanTheIPhone() {
-        let app = launch(skin: "day")
+        let app = launch(skin: "day", tab: "rooms")
         let row = app.buttons["destination-reading"]
         waitFor(row, 10, "HOME lists the Reading Room door")
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
@@ -117,22 +124,21 @@ final class KhajistanUITests: XCTestCase {
         for orientation in orientations {
             XCUIDevice.shared.orientation = orientation
             sleep(1)
-            app.buttons["tab-home"].tap()
+            app.buttons["tab-rooms"].tap()
             waitFor(row, 10, "the door row after rotating")
             let screen = app.windows.firstMatch.frame
             let frame = row.frame
             if isPad {
-                XCTAssertLessThanOrEqual(frame.width, 721, "a HOME row stays in the reading column (\(orientation.rawValue))")
-                XCTAssertEqual(frame.midX, screen.midX, accuracy: 2, "the column is centred (\(orientation.rawValue))")
-                shot("ipad-\(orientation.rawValue)-home", app)
-                app.buttons["tab-yours"].tap()
+                XCTAssertLessThanOrEqual(frame.maxX, 321, "ROOMS is a sidebar on iPad (\(orientation.rawValue))")
+                shot("ipad-\(orientation.rawValue)-rooms", app)
+                app.buttons["tab-library"].tap()
                 waitFor(app.staticTexts["Khajistan for iPad 1.0"], 5, "ACCOUNT names the device it runs on")
                 shot("ipad-\(orientation.rawValue)-account", app)
                 app.buttons["tab-receiver"].tap()
                 waitFor(app.buttons["region-indus"], 40, "the Receiver keeps its region strip")
                 shot("ipad-\(orientation.rawValue)-receiver", app)
             } else {
-                XCTAssertEqual(frame.width, screen.width - 40, accuracy: 1, "on iPhone a HOME row spans the screen less its 20pt margins")
+                XCTAssertEqual(frame.width, screen.width - 40, accuracy: 1, "on iPhone a ROOMS row spans the screen less its 20pt margins")
             }
         }
         XCUIDevice.shared.orientation = .portrait
@@ -143,9 +149,9 @@ final class KhajistanUITests: XCTestCase {
     func testNoMembershipCardOutsideTheReadingRoom() {
         for code in ["USA", "GBR"] {
             let app = launch(skin: "day", extra: ["-kjstorefront", code])
-            waitFor(app.buttons["destination-reading"], 10, "HOME still lists its doors (\(code))")
+            waitFor(app.buttons["homeAllRooms"], 10, "HOME loads (\(code))")
             XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership card on HOME (\(code))")
-            app.buttons["tab-yours"].tap()
+            app.buttons["tab-library"].tap()
             waitFor(app.buttons["skin-day"], 10, "ACCOUNT loads (\(code))")
             XCTAssertFalse(app.buttons["join-monthly"].exists || app.buttons["join-annual"].exists,
                            "no membership card on ACCOUNT (\(code))")
@@ -263,7 +269,7 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-        waitFor(app.textFields["archiveSearch"], 5, "One edge tap selects Home")
+        waitFor(app.buttons["homeAllRooms"], 5, "One edge tap selects Home")
         app.buttons["tab-receiver"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         waitFor(state, 5, "One edge tap selects Receiver")
         XCTAssertEqual(state.label, "Standing by", "Navigation does not undo an explicit Stop")
@@ -273,7 +279,7 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
-        waitFor(app.textFields["archiveSearch"], 3, "Home opens with one tap")
+        waitFor(app.buttons["homeAllRooms"], 3, "Home opens with one tap")
         sleep(6)
         app.buttons["tab-receiver"].tap()
         let state = app.staticTexts["screenState"]
@@ -301,15 +307,14 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
 
-    /// A Pics/Vids object opens whole, and a swipe moves to the next.
     /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids, Chat and the Wall
-    /// out: no Pics/Vids tab, none of their doors on Home, and a stored Pics/Vids tab opens Home
-    /// instead. Builds for our own devices keep all of them. The same test runs in both builds and asserts the
-    /// opposite in each.
+    /// out: none of their doors in ROOMS or on HOME, and a stored Pics/Vids launch opens ROOMS
+    /// without it. Builds for our own devices keep all of them. The same test runs in both builds and
+    /// asserts the opposite in each.
     func testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly() {
         let app = launch(skin: "day", tab: "picsVids")
         waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
-        let tab = app.buttons["tab-picsVids"]
+        XCTAssertFalse(app.buttons["tab-picsVids"].exists, "Pics/Vids is a room, not a bar door")
         let pnvDoor = app.buttons["destination-picsnvids"]
         let chatDoor = app.buttons["destination-chat"]
         let wallDoor = app.buttons["destination-wall"]
@@ -317,35 +322,34 @@ final class KhajistanUITests: XCTestCase {
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
 #if KJ_APP_STORE
-        XCTAssertFalse(tab.exists, "a store build has no Pics/Vids tab")
-        waitFor(app.textFields["archiveSearch"], 10, "a stored Pics/Vids tab opens Home in a store build")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch.waitForExistence(timeout: 5),
+                       "a stored Pics/Vids launch does not open the stream in a store build")
+        app.buttons["tab-rooms"].tap()
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
-        XCTAssertTrue(marker.exists, "Home scrolled past where the Pics/Vids, Chat and Wall doors stood")
-        XCTAssertFalse(pnvDoor.exists, "a store build has no Pics/Vids door on Home")
-        XCTAssertFalse(chatDoor.exists, "a store build has no Chat door on Home")
-        XCTAssertFalse(wallDoor.exists, "a store build has no Wall door on Home")
-        shot("store-build-home", app)
+        XCTAssertTrue(marker.exists, "ROOMS scrolled past where the Pics/Vids, Chat and Wall doors stood")
+        XCTAssertFalse(pnvDoor.exists, "a store build has no Pics/Vids door")
+        XCTAssertFalse(chatDoor.exists, "a store build has no Chat door")
+        XCTAssertFalse(wallDoor.exists, "a store build has no Wall door")
+        shot("store-build-rooms", app)
 #else
-        XCTAssertTrue(tab.exists, "builds for our own devices keep the Pics/Vids tab")
-        app.buttons["tab-home"].tap()
+        waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "a Pics/Vids launch opens the stream in ROOMS")
+        app.buttons["stackBack"].tap()
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
-        // Pics/Vids is reached from its tab; Home no longer repeats it as a door (one control once,
-        // owner 2026-10-07). Chat and the Wall are not tabs and keep their doors.
-        XCTAssertFalse(pnvDoor.exists, "Home does not repeat a tab as a door")
-        XCTAssertFalse(app.buttons["destination-receiver"].exists, "nor the Receiver")
-        XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door on Home")
-        XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door on Home")
+        XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
+        XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
+        XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")
+        XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door")
 #endif
     }
 
-    /// Chat (own builds only; App Store builds leave it out): HOME's Chat door opens the rooms,
+    /// Chat (own builds only; App Store builds leave it out): ROOMS' Chat door opens the rooms,
     /// a room shows its lines or says there are none, a signed-out reader is told to sign in to
     /// write, and back and close return to HOME. Reads the live site's rooms.
     func testChatOpensFromHomeAndShowsARoom() throws {
 #if KJ_APP_STORE
         throw XCTSkip("App Store builds leave chat out")
 #else
-        let app = launch(skin: "grove")
+        let app = launch(skin: "grove", tab: "rooms")
         let door = app.buttons["destination-chat"]
         for _ in 0..<8 where !door.exists { app.swipeUp() }
         door.tap()
@@ -400,6 +404,7 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(settled { $0 == all }, "All returns to its full count")
     }
 
+    /// A Pics/Vids object opens whole, and a swipe moves to the next.
     func testPicsVidsViewer() {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
@@ -452,10 +457,58 @@ final class KhajistanUITests: XCTestCase {
         waitFor(remove, 5, "the page is saved")
         app.buttons["closeBrowser"].tap()
         app.terminate()
-        let again = launch(skin: "day", tab: "yours")
+        let again = launch(skin: "day", tab: "library")
         again.swipeUp()
         for _ in 0..<6 where !again.buttons["saved-/open-frequencies"].isHittable { again.swipeUp() }
         waitFor(again.buttons["saved-/open-frequencies"], 10, "the saved page survives relaunch")
         shot("saved-page", again)
+    }
+
+    /// The Reading Room on the phone: a free title opens, its first issue reads page by page,
+    /// and the place is kept; a members' title stops at the website's preview, two pages, and
+    /// never shows the third. Reads the live shelf and page server.
+    func testReadingRoomReadsAFreeTitleAndStopsAMembersTitleAtThePreview() {
+        let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the shelf loads")
+        shot("rr-shelf", app)
+
+        let free = titles.matching(NSPredicate(format: "label CONTAINS[c] 'read in full'")).firstMatch
+        waitFor(free, 30, "a free title is on the shelf")
+        free.tap()
+        waitFor(app.staticTexts["rrTitleSummary"], 20, "the title opens")
+        let issue = app.buttons["rr-issue-0"]
+        waitFor(issue, 10, "the title lists its issues")
+        shot("rr-title", app)
+        issue.tap()
+        let label = app.staticTexts["rrPageLabel"]
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
+        XCTAssertTrue(label.label.hasPrefix("p. 1 / "), "the band says page 1 (\(label.label))")
+        shot("rr-reader-p1", app)
+        app.buttons["rrNext"].tap()
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
+        waitForExpectations(timeout: 10)
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 2 is on screen")
+        app.buttons["rrReaderClose"].tap()
+        waitFor(app.buttons["rrContinue"], 10, "the title offers to continue where reading stopped")
+        app.buttons["stackBack"].tap()
+
+        let members = titles.matching(NSPredicate(format: "label CONTAINS[c] 'members'")).firstMatch
+        waitFor(members, 30, "a members' title is on the shelf")
+        members.tap()
+        waitFor(app.buttons["rr-issue-0"], 20, "the members' title lists its issues")
+        app.buttons["rr-issue-0"].tap()
+        waitFor(label, 45, "the reader opens")
+        let gate = app.descendants(matching: .any)["rrGate"]
+        for _ in 0..<3 where !gate.exists {
+            let next = app.buttons["rrNext"]
+            if next.isEnabled { next.tap() }
+            _ = gate.waitForExistence(timeout: 15)
+        }
+        XCTAssertTrue(gate.exists, "a signed-out reader meets the gate inside a members' issue")
+        XCTAssertTrue(label.label.hasPrefix("Preview \u{2014} "), "the band names the preview (\(label.label))")
+        XCTAssertFalse(app.buttons["rrNext"].isEnabled, "nothing past the gate can be turned to")
+        XCTAssertFalse(app.descendants(matching: .any)["rrReaderPage"].exists, "no page image stands behind the gate")
+        shot("rr-members-gate", app)
     }
 }

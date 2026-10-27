@@ -23,12 +23,12 @@ struct KhajistanApp: App {
         #if targetEnvironment(macCatalyst)
         .commands {
             CommandMenu("Khajistan") {
-                Button("Home") { model.tab = .home }.keyboardShortcut("1")
-                Button("Receiver") { model.tab = .receiver }.keyboardShortcut("2")
-                if AppTab.available.contains(.picsVids) {
-                    Button("Pics/Vids") { model.tab = .picsVids }.keyboardShortcut("3")
+                ForEach(Array(AppTab.allCases.enumerated()), id: \.element) { index, tab in
+                    Button(tab.title) { model.tab = tab }.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
                 }
-                Button("Account") { model.tab = .yours }.keyboardShortcut("4")
+            }
+            CommandGroup(after: .textEditing) {
+                Button("Find") { model.tab = .search }.keyboardShortcut("f")
             }
         }
         #endif

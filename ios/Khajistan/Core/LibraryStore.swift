@@ -10,9 +10,52 @@ struct SavedPage: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// Where reading or watching stopped, on this device. It names the object by its stable identity
+/// (a title slug and issue key, a film handle), never by a page or stream URL, which expire and
+/// carry access. Whether the viewer may still read or watch it is asked again on every open.
+struct Resume: Codable, Identifiable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable { case reading, film }
+    let kind: Kind
+    /// The title slug (reading) or film handle (film).
+    let ref: String
+    /// The issue key, for reading.
+    var part: String?
+    /// The page number (reading) or seconds in (film).
+    var position: Double
+    var title: String
+    var detail: String
+    var date: Date
+
+    var id: String { kind.rawValue + "|" + ref }
+}
+
 struct LibraryState: Codable, Equatable, Sendable {
     var bookmarks: [SavedPage] = []
     var history: [SavedPage] = []
+    /// Newest first, one per title or film.
+    var resume: [Resume] = []
+
+    init() {}
+
+    /// Every field is optional on reading, so a library written before a field existed still
+    /// opens (the file is never thrown away for being older than the app).
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        bookmarks = try values.decodeIfPresent([SavedPage].self, forKey: .bookmarks) ?? []
+        history = try values.decodeIfPresent([SavedPage].self, forKey: .history) ?? []
+        resume = try values.decodeIfPresent([Resume].self, forKey: .resume) ?? []
+    }
+
+    /// Keeps the newest place for this object, at the front, and at most forty places.
+    mutating func record(_ place: Resume) {
+        resume.removeAll { $0.id == place.id }
+        resume.insert(place, at: 0)
+        resume = Array(resume.prefix(40))
+    }
+
+    func place(_ kind: Resume.Kind, _ ref: String) -> Resume? {
+        resume.first { $0.kind == kind && $0.ref == ref }
+    }
 
     mutating func visit(_ url: URL, title: String) {
         guard ArchiveURL.isSaveable(url) else { return }

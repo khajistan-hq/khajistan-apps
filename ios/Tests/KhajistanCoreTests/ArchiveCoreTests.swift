@@ -192,7 +192,11 @@ func offPageOffersCarryTheAppFlag() throws {
 
 func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     let native = Dictionary(uniqueKeysWithValues: ArchiveDestination.all.compactMap { d in d.nativeRoom.map { (d.id, $0) } })
-    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat])
+    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat,
+                          "reading": .reading, "cinema": .screening])
+    // Every native room stands in for a door that exists, and no two rooms claim one door.
+    try expect(Set(NativeRoom.allCases.map(\.destinationID)).count == NativeRoom.allCases.count)
+    try expect(NativeRoom.allCases.allSatisfy { room in ArchiveDestination.all.contains { $0.id == room.destinationID } })
     for destination in ArchiveDestination.all {
         try expect(ArchiveURL.isArchive(destination.url))
     }

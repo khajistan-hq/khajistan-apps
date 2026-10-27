@@ -3937,6 +3937,14 @@ func databaseQuery() throws {
     try expectEqual(DBQuery.filter(all, text: "", facets: ["Language": "Punjabi"]).count, 2)
     try expectEqual(DBQuery.filter(all, text: "intezar", facets: ["Language": "Punjabi"]).count, 0, "facet and words together")
     try expectEqual(DBQuery.values("Language", in: all).map(\.value), ["Punjabi", "Urdu"])
+    func dated(_ title: String, _ year: String?) -> DBRecord {
+        DBRead.make(id: title, title: title, subtitle: [], facets: [:], fields: [("Year", year)], link: nil)!
+    }
+    let years = [dated("b", "1975"), dated("a", nil), dated("c", "1960")]
+    try expectEqual(DBQuery.sort(years, by: .newest).map(\.title), ["b", "c", "a"], "newest first, undated last")
+    try expectEqual(DBQuery.sort(years, by: .oldest).map(\.title), ["c", "b", "a"], "oldest first, undated last")
+    try expectEqual(DBQuery.sort(years, by: .title).map(\.title), ["a", "b", "c"])
+    try expectEqual(DBQuery.sort(years, by: .listed).map(\.title), ["b", "a", "c"], "as listed is the file's order")
     try expectEqual(DBRead.text("None"), nil)
     try expectEqual(DBRead.text(NSNumber(value: true)), nil, "a boolean is not a value to show")
     try expectEqual(DBRead.text(["Drama", "None", "Romance"]), "Drama, Romance")
@@ -4005,6 +4013,22 @@ func articleHTMLRules() throws {
     try expectEqual(ArticleHTML.blocks(#"<blockquote><p>Said.</p></blockquote><ul><li><p>Item</p></li></ul>"#),
                     [.quote(AttributedString("Said.")), .item(AttributedString("Item"))])
     try expectEqual(DBRead.text(NSNumber(value: 1e20)), "1e+20", "a number too big for Int is shown, not a crash")
+}
+
+func savesFilmAndPnvRefs() throws {
+    try expectEqual(PassportSaves.filmRef("zinda-laash"), "tv:zinda-laash")
+    try expectEqual(PassportSaves.filmHref("zinda laash"), "/film/zinda%20laash")
+    try expectEqual(PassportSaves.pnvRef("abc_123"), "pnv:abc_123")
+    try expectEqual(PassportSaves.pnvRef("bad key"), nil, "a key the table's check refuses is not sent")
+    let user = "6f0c2d2e-6b57-4e0f-9a64-1d2b3c4d5e6f"
+    let pnv = try require(PassportSaves.insertRequest(userId: user, ref: "pnv:abc", wing: PassportSaves.bornDigitalWing, title: nil, href: "/canvas?item=abc", accessToken: "t"))
+    let body = try JSONSerialization.jsonObject(with: try require(pnv.httpBody)) as? [String: Any] ?? [:]
+    try expect(body["title"] == nil, "a Pics/Vids save carries no title, as the website's")
+    try expectEqual(body["wing"] as? String, "born-digital")
+    try expect(PassportSaves.deleteRequest(userId: user, refs: ["tv:zinda-laash", "pnv:abc"], accessToken: "t") != nil, "film and Pics/Vids saves can be removed")
+    try expectEqual(PassportSaves.deleteRequest(userId: user, refs: ["poster:x"], accessToken: "t"), nil, "a ref this app never writes is not deleted from here")
+    let list = try require(PassportSaves.listRequest(userId: user, accessToken: "t")).url?.absoluteString ?? ""
+    try expect(list.contains("wing=in.(receiver,reading-room,born-digital,other)"))
 }
 
 let tests: [(String, () throws -> Void)] = [
@@ -4131,6 +4155,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
     ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
+    ("Saves: films and Pics/Vids, as the table allows", savesFilmAndPnvRefs),
     ("Databases: every file decodes, at the site's own counts", databasesDecodeTheRealFiles),
     ("Databases: search and facets", databaseQuery),
     ("Madrassa: entries, writings, dictionary from the real sources", madrassaReadsTheRealSources),

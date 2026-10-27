@@ -25,6 +25,10 @@ struct RootView: View {
             .overlay(alignment: .top) {
                 Color.clear.frame(height: 0).background(palette.ground, ignoresSafeAreaEdges: .top)
             }
+            // What the Receiver is playing, under every other door: it keeps playing while you browse.
+            if model.tab != .receiver, model.tuner.source != nil {
+                NowPlayingBar()
+            }
             HouseTabBar(current: model.tab) { tab in
                 // At once, as the system tab bar switches: no fade between pages (owner, 2026-10-07).
                 var instant = Transaction()
@@ -74,6 +78,73 @@ struct RootView: View {
         case .library: YoursView()
         case .search: SearchView()
         }
+    }
+}
+
+/// The Receiver's signal, small, while another door is open: what is on, play or pause, off, and
+/// a tap on the name goes back to the Receiver. One source plays at a time, so there is one bar.
+struct NowPlayingBar: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    private var state: PlayerController.State {
+        if case .transmission = model.tuner.source { return model.transmission.player.state }
+        return model.tuner.controller.state
+    }
+
+    private var name: (title: String, detail: String) {
+        switch model.tuner.source {
+        case .live(let channel): return (channel.name, channel.mediaType.lowercased() == "radio" ? "Radio" : "Television")
+        case .transmission(let number): return ("Khajistan Transmission", "Channel \(number)")
+        case nil: return ("", "")
+        }
+    }
+
+    private var stateWord: String {
+        switch state {
+        case .playing: return "On air"
+        case .tuning: return "Tuning\u{2026}"
+        case .paused: return "Paused"
+        case .failed: return "The signal stopped"
+        case .idle: return "Standing by"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HouseRule()
+            HStack(spacing: 14) {
+                Button {
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { model.tab = .receiver }
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name.title).kjName().lineLimit(1)
+                        Text("\(name.detail) \u{00B7} \(stateWord)").kjSmall(faint: true).lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the Receiver")
+                .accessibilityIdentifier("nowPlayingName")
+                Button { model.tuner.playPause() } label: {
+                    Text(state == .playing || state == .tuning ? "Pause" : "Play").kjKicker().frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("nowPlayingToggle")
+                Button { model.tuner.stop() } label: { Text("Off").kjKicker().frame(minWidth: 44, minHeight: 44) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Turn the Receiver off")
+                    .accessibilityIdentifier("nowPlayingOff")
+            }
+            .padding(.horizontal, KJLayout.inset)
+            .padding(.vertical, 6)
+        }
+        .background(palette.ground)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("nowPlaying")
     }
 }
 

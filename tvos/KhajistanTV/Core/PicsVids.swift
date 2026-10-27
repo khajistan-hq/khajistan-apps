@@ -217,6 +217,12 @@ enum PnvAPI {
         rest("pnv_media_mv?select=\(columns)&media_key=eq.\(PnvMedia.encodeComponent(mediaKey))&limit=1")
     }
 
+    /// Several objects by key, through the gated public view: a key the view no longer answers for
+    /// (taken down, hidden) simply does not come back, and nothing of it is drawn.
+    static func rowsRequest(mediaKeys keys: [String]) -> URLRequest {
+        rest("pnv_media?select=\(columns)&media_key=in.(" + keys.prefix(100).map(listMember).joined(separator: ",") + ")")
+    }
+
     /// The roster. A row is shown only if its account is on it (fail closed: no roster, nothing).
     static func accountsRequest() -> URLRequest {
         rest("pnv_accounts?select=slug,handle,url,platform,region,region_token,country,corpus,account_key")

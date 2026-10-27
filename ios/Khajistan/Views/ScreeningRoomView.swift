@@ -28,6 +28,7 @@ struct ScreeningRoomView: View {
                 case .failed(let message):
                     ReadingProblem(message: message) { Task { await store.load() } }
                 case .ready:
+                    watchlistRow
                     filters
                     grid
                 }
@@ -40,6 +41,33 @@ struct ScreeningRoomView: View {
         .scrollDismissesKeyboard(.interactively)
         // Loaded again when the preview password changes: the catalogue is behind it until launch.
         .task(id: model.auth.previewPassword) { await store.load() }
+        .task(id: model.auth.email) { await model.saves.load() }
+    }
+
+    /// The account's watchlist, as films still in the catalogue, when there is one.
+    @ViewBuilder
+    private var watchlistRow: some View {
+        let listed = model.saves.watchlist.compactMap { handle in store.films.first { $0.handle == handle } }
+        if model.auth.isSignedIn && !listed.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Kicker("Your watchlist").accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 14) {
+                        ForEach(listed) { film in
+                            NavigationLink(value: RoomRoute.film(film.handle)) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    FilmPoster(film: film).frame(width: 110)
+                                    Text(Films.displayTitle(film)).kjSmall().lineLimit(2).frame(width: 110, alignment: .leading)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("watchlist-\(film.handle)")
+                        }
+                    }
+                }
+            }
+            .task { await model.saves.load() }
+        }
     }
 
     /// The countries the catalogue itself names, in order of how many films each holds.
@@ -214,6 +242,7 @@ struct FilmScreen: View {
                     .accessibilityIdentifier("filmStoppedAt")
             }
             HStack(spacing: 18) {
+                watchlistButton(film)
                 Button(kicker: checking ? "Asking\u{2026}" : "Watch the full film") { Task { await watchFull(film) } }
                     .disabled(checking)
                     .accessibilityIdentifier("filmWatchFull")
@@ -235,6 +264,21 @@ struct FilmScreen: View {
                 .accessibilityIdentifier("filmOnWebsite")
         }
         .padding(.top, 6)
+    }
+
+    /// The watchlist is on the account, with the other saves the website's dashboard lists.
+    private func watchlistButton(_ film: Film) -> some View {
+        let listed = model.saves.isSaved(film: film.handle)
+        return Button(kicker: listed ? "On your watchlist" : "Add to watchlist") {
+            guard model.saves.canSave else { showSignIn = true; return }
+            Task {
+                await model.saves.load()
+                _ = await model.saves.toggle(film: film.handle, title: Films.displayTitle(film))
+            }
+        }
+        .accessibilityIdentifier("filmWatchlist")
+        .accessibilityValue(listed ? "On" : "Off")
+        .task { await model.saves.load() }
     }
 
     /// The site's denyText with sales paused: 401 is a sign-in, 403 is "not on your account" (or

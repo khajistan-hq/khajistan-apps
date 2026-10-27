@@ -16,6 +16,7 @@ struct PnvViewerView: View {
     @State private var showSignIn = false
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    @State private var saveNote: String?
 
     private enum Phase: Equatable {
         case loading, ready, needsSignIn
@@ -111,8 +112,9 @@ struct PnvViewerView: View {
                 TransportRow(isPlaying: controller.state == .playing, toggle: { controller.toggle() })
             }
             // Buttons as well as the swipe, for a viewer who cannot swipe (WCAG 2.5.1).
-            if steps {
-                HStack(spacing: 4) {
+            HStack(spacing: 4) {
+                saveButton
+                if steps {
                     Button { step(by: -1) } label: { Text("Previous").kjKicker() }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18)))
                         .accessibilityIdentifier("pnvPrevious")
@@ -121,11 +123,31 @@ struct PnvViewerView: View {
                         .accessibilityIdentifier("pnvNext")
                 }
             }
+            if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("pnvSaveNote") }
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 14)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Save, as the website's heart: on the account, with no title or picture kept, so an object
+    /// taken off the shelf leaves nothing of itself in a library.
+    private var saveButton: some View {
+        let saved = model.saves.isSaved(pnvKey: current.media_key)
+        return Button {
+            // Said in place, beside the control: the viewer stays on the object.
+            guard model.saves.canSave else { saveNote = "Sign in under Library to save to your account."; return }
+            Task {
+                await model.saves.load()
+                saveNote = await model.saves.toggle(pnvKey: current.media_key) ? nil : "That did not save. Try again."
+            }
+        } label: { Text(saved ? "Saved" : "Save").kjKicker() }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18)))
+        .disabled(PassportSaves.pnvRef(current.media_key) == nil)
+        .accessibilityIdentifier("pnvSave")
+        .accessibilityValue(saved ? "On" : "Off")
+        .task { await model.saves.load() }
     }
 
     private var stateText: String? {

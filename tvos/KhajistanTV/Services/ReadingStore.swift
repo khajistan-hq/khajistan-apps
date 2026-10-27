@@ -357,6 +357,49 @@ final class ReadingStore {
         }
     }
 
+    // MARK: - Thumbnails (the reader's page rail on a wide screen)
+
+    @ObservationIgnored private var thumbAnswers: [String: (answer: RRPageAnswer, until: Date)] = [:]
+    @ObservationIgnored private let thumbs = NSCache<NSString, UIImage>()
+
+    /// Asks the page server about a run of pages at the small size, in one call. Only what it
+    /// answers is used; nothing is fetched for a page it refuses.
+    func signThumbnails(_ issue: RRIssue, stored: [Int]) async {
+        let token = try? await auth.validAccessToken()
+        let now = Date()
+        let wanted = stored.map { endpoint(issue, page: $0) }
+            .filter { thumbAnswers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
+        for chunk in stride(from: 0, to: wanted.count, by: RRAPI.batchLimit).map({ Array(wanted[$0..<min($0 + RRAPI.batchLimit, wanted.count)]) }) {
+            guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: chunk, size: "sm", accessToken: token)),
+                  (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+            let answered = Date()
+            for (path, answer) in RRPageAnswer.parseBatch(data) {
+                guard let life = answer.reuseFor else { continue }
+                thumbAnswers[Self.pageKey(path, token: token)] = (answer, answered.addingTimeInterval(life))
+            }
+        }
+    }
+
+    /// A page at the small size, if the server allowed it to this viewer; nil otherwise.
+    func thumbnail(_ issue: RRIssue, stored: Int) async -> UIImage? {
+        let token = try? await auth.validAccessToken()
+        let key = Self.pageKey(endpoint(issue, page: stored), token: token)
+        if let held = thumbs.object(forKey: key as NSString) { return held }
+        guard let answer = thumbAnswers[key], answer.until > Date(), case .page(let url) = RRPageOutcome.decide(answer.answer) else { return nil }
+        let session = urlSession
+        let image: UIImage? = await Task.detached(priority: .utility) {
+            let path = url.path
+            if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 320) { return image }
+            guard let (data, response) = try? await session.data(from: url),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let image = PnvImages.downsample(data, maxPixel: 320) else { return nil }
+            RRPageDisk.write(data, path)
+            return image
+        }.value
+        if let image { thumbs.setObject(image, forKey: key as NSString) }
+        return image
+    }
+
     /// Warms a page at a lower priority, so pages ahead never decode before the one being read.
     func prefetch(_ issue: RRIssue, stored: Int) async {
         _ = await page(issue, stored: stored, priority: .utility)

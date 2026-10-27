@@ -197,8 +197,45 @@ enum DatabaseShelf: Int, CaseIterable, Identifiable, Sendable {
 
 enum DBError: Error { case unreadable }
 
+/// How a database's results are ordered. "As listed" is the file's own order, the one its page
+/// shows; a record with no year goes last when sorting by year.
+enum DBSort: String, CaseIterable, Identifiable, Sendable {
+    case listed, title, newest, oldest
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .listed: return "As listed"
+        case .title: return "A\u{2013}Z"
+        case .newest: return "Newest"
+        case .oldest: return "Oldest"
+        }
+    }
+}
+
 /// Searching and filtering a database's records.
 enum DBQuery {
+    /// The record's year, from its Year or From field.
+    static func year(_ record: DBRecord) -> Int? {
+        record.fields.first { $0.label == "Year" || $0.label == "From" }.flatMap { DBRead.year($0.value) }
+    }
+
+    static func sort(_ records: [DBRecord], by order: DBSort) -> [DBRecord] {
+        switch order {
+        case .listed: return records
+        case .title:
+            return records.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        case .newest, .oldest:
+            let keyed = records.map { ($0, year($0)) }
+            return keyed.sorted { a, b in
+                switch (a.1, b.1) {
+                case let (x?, y?): return order == .newest ? x > y : x < y
+                case (_?, nil): return true
+                default: return false
+                }
+            }.map(\.0)
+        }
+    }
+
     static func fold(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: nil)
     }

@@ -198,20 +198,26 @@ struct PostScreen: View {
     let id: String
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    @State private var saveNote: String?
+    @State private var showSignIn = false
 
     private var post: MadrassaPost? { model.madrassaPosts.value?.first { $0.id == id } }
 
     var body: some View {
+        ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let post {
+                    let blocks = ArticleHTML.blocks(post.body ?? "")
                     Kicker([MadrassaWritings.label(post), post.publishedAt].compactMap { $0 }.joined(separator: " \u{00B7} "))
                     Text(post.title).kjDisplay(KJType.headline, tracking: -0.05).accessibilityAddTraits(.isHeader)
+                    saveRow(post)
+                    contents(blocks, reader: reader)
                     if let image = post.image, let url = URL(string: image), url.scheme == "https" {
                         ArticleImage(url: url, alt: post.imageAlt)
                     }
-                    ForEach(Array(ArticleHTML.blocks(post.body ?? "").enumerated()), id: \.offset) { _, block in
-                        blockView(block, post: post)
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                        blockView(block, post: post).id(index)
                     }
                     HouseRule()
                     Button(kicker: "This piece on the website \u{2197}") {
@@ -227,6 +233,8 @@ struct PostScreen: View {
             .kjColumn()
             .textSelection(.enabled)
         }
+        }
+        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
         // A link in the text to an archive page opens in the app; any other in Safari.
         .environment(\.openURL, OpenURLAction { url in
             guard ArchiveURL.isArchive(url) else { return .systemAction }
@@ -234,6 +242,48 @@ struct PostScreen: View {
             return .handled
         })
         .task { await model.madrassaPosts.load() }
+    }
+
+    /// The piece's own headings, each a jump to its place. Only where there are three or more.
+    @ViewBuilder
+    private func contents(_ blocks: [ArticleBlock], reader: ScrollViewProxy) -> some View {
+        let headings = blocks.enumerated().compactMap { index, block -> (Int, String)? in
+            if case .heading(let text) = block { return (index, text) } else { return nil }
+        }
+        if headings.count >= 3 {
+            VStack(alignment: .leading, spacing: 2) {
+                Kicker("Contents").accessibilityAddTraits(.isHeader)
+                ForEach(headings, id: \.0) { index, text in
+                    Button { withAnimation(.kjPush) { reader.scrollTo(index, anchor: .top) } } label: {
+                        Text(text).kjSmall().multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 6, leading: 0, bottom: 6, trailing: 0)))
+                }
+            }
+            .accessibilityIdentifier("postContents")
+            HouseRule()
+        }
+    }
+
+    /// Save, on the account with the other saves the website's dashboard lists.
+    private func saveRow(_ post: MadrassaPost) -> some View {
+        let pageID = (post.blog ?? "announcements") + "/" + post.handle
+        let saved = model.saves.isSaved(page: pageID)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button(kicker: saved ? "Saved" : "Save") {
+                guard model.saves.canSave else { showSignIn = true; return }
+                Task {
+                    await model.saves.load()
+                    saveNote = await model.saves.toggle(page: pageID, title: post.title, href: "/" + MadrassaWritings.pagePath(post))
+                        ? nil : "That did not save. Try again."
+                }
+            }
+            .disabled(PassportSaves.pageRef(pageID) == nil)
+            .accessibilityIdentifier("postSave")
+            .accessibilityValue(saved ? "On" : "Off")
+            if let saveNote { Text(saveNote).kjSmall(faint: true) }
+        }
+        .task { await model.saves.load() }
     }
 
     @ViewBuilder

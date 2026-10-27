@@ -13,6 +13,8 @@ enum RoomRoute: Hashable, Sendable {
     /// A Bazaar product by handle, and the bag.
     case product(String)
     case bag
+    /// Pics/Vids saved on the account, and its collections.
+    case pnvSaved
     /// The Madrassa: a reference entry, a writing (blog/handle), a database and one of its records.
     case madrassaEntry(String)
     case post(String)
@@ -210,6 +212,7 @@ struct RouteScreen: View {
             case .film(let handle): FilmScreen(handle: handle)
             case .product(let handle): ProductScreen(handle: handle)
             case .bag: BagScreen()
+            case .pnvSaved: PnvSavedScreen()
             case .madrassaEntry(let id): MadrassaEntryScreen(id: id)
             case .post(let id): PostScreen(id: id)
             case .database(let raw):

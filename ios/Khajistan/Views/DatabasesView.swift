@@ -38,6 +38,7 @@ struct DatabaseScreen: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var query = ""
     @State private var facets: [String: String] = [:]
+    @State private var sort: DBSort = .listed
     @State private var results: [DBRecord] = []
     @State private var limit = Self.page
     @State private var selected: DBRecord?
@@ -74,11 +75,13 @@ struct DatabaseScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .task(id: model.auth.previewPassword) { await feed.load() }
         // Filtering runs a moment after the last keystroke, and a newer query replaces an older one.
-        .task(id: "\(query)|\(facets)|\(feed.value?.count ?? -1)") {
+        .task(id: "\(query)|\(facets)|\(sort.rawValue)|\(feed.value?.count ?? -1)") {
             try? await Task.sleep(for: .milliseconds(180))
             guard !Task.isCancelled, let records = feed.value else { return }
-            let text = query, chosen = facets
-            let found = await Task.detached(priority: .userInitiated) { DBQuery.filter(records, text: text, facets: chosen) }.value
+            let text = query, chosen = facets, order = sort
+            let found = await Task.detached(priority: .userInitiated) {
+                DBQuery.sort(DBQuery.filter(records, text: text, facets: chosen), by: order)
+            }.value
             guard !Task.isCancelled else { return }
             results = found
             limit = Self.page
@@ -107,6 +110,20 @@ struct DatabaseScreen: View {
                 .padding(.horizontal, -12)
             }
         }
+        // Year orders are offered only where the records carry a year.
+        let orders = DBSort.allCases.filter { $0 == .listed || $0 == .title || records.contains { DBQuery.year($0) != nil } }
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                Text("Sort").kjSmall(faint: true).padding(.trailing, 4)
+                ForEach(orders) { order in
+                    Button { sort = order } label: { Text(order.title).kjKicker() }
+                        .buttonStyle(HouseTabStyle(isCurrent: sort == order))
+                        .accessibilityIdentifier("dbSort-\(order.rawValue)")
+                }
+            }
+            .padding(.leading, 12)
+        }
+        .padding(.horizontal, -12)
         HStack {
             Text("\(results.count.formatted()) of \(records.count.formatted()) records").kjSmall(faint: true)
                 .accessibilityIdentifier("dbCount")

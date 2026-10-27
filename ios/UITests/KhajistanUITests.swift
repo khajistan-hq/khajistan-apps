@@ -485,6 +485,20 @@ final class KhajistanUITests: XCTestCase {
         let label = app.staticTexts["rrPageLabel"]
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
         XCTAssertTrue(label.label.hasPrefix("p. 1 / "), "the band says page 1 (\(label.label))")
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let rail = app.descendants(matching: .any)["rrPageRail"]
+            waitFor(rail, 10, "a wide screen keeps the page rail beside the page")
+            let pageTwo = rail.buttons["Page 2"]
+            waitFor(pageTwo, 10, "the rail lists the pages")
+            pageTwo.tap()
+            expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
+            waitForExpectations(timeout: 10)
+            sleep(3)
+            shot("rr-reader-rail", app)
+            app.buttons["rrPrevious"].tap()
+        } else {
+            XCTAssertFalse(app.descendants(matching: .any)["rrPageRail"].exists, "a phone keeps the page to itself")
+        }
         shot("rr-reader-p1", app)
         app.buttons["rrNext"].tap()
         expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
@@ -526,7 +540,7 @@ final class KhajistanUITests: XCTestCase {
             waitFor(app.buttons["skin-day"], 10, "the note leads to Library")
             return
         }
-        let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site])
+        let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site, "-kjtestsignedout", "YES"])
         waitFor(app.buttons["entry-omar-ali-khan"], 30, "the page's own entries are read")
         shot("madrassa-reference", app)
         app.buttons["entry-omar-ali-khan"].tap()
@@ -538,7 +552,12 @@ final class KhajistanUITests: XCTestCase {
         waitFor(post, 20, "the forensics pieces are listed")
         post.tap()
         waitFor(app.buttons["postOnWebsite"], 10, "an essay opens whole, with its page one step away")
+        waitFor(app.descendants(matching: .any)["postContents"], 5, "a long piece lists its contents")
         shot("madrassa-essay", app)
+        app.buttons["postSave"].tap()
+        waitFor(app.textFields["signInEmail"], 5, "Save asks a signed-out reader to sign in, and saves nothing on the device")
+        app.swipeDown(velocity: .fast)
+        XCTAssertTrue(app.textFields["signInEmail"].waitForNonExistence(timeout: 5), "the sign-in sheet closes")
         app.buttons["stackBack"].tap()
 
         app.buttons["madrassa-dictionary"].tap()
@@ -551,6 +570,11 @@ final class KhajistanUITests: XCTestCase {
         let records = app.staticTexts["dbCount"]
         expectation(for: NSPredicate(format: "label == '52 of 52 records'"), evaluatedWith: records)
         waitForExpectations(timeout: 30)
+        app.buttons["dbSort-newest"].tap()
+        let newest = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'record-'")).firstMatch
+        waitFor(newest, 10, "sorted records are listed")
+        XCTAssertTrue(newest.label.contains("1997") || newest.label.contains("199"), "newest first: the 1990s lead (\(newest.label))")
+        XCTAssertEqual(records.label, "52 of 52 records", "sorting changes the order, not the count")
         let record = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'record-'")).firstMatch
         record.tap()
         waitFor(app.buttons["recordLink"], 10, "a certificate links to its scan")
@@ -598,5 +622,53 @@ final class KhajistanUITests: XCTestCase {
         let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'place-reading|'")).firstMatch
         waitFor(place, 10, "a reading place kept on this device is listed in Library")
         shot("library-places", shop)
+    }
+
+    /// The Receiver keeps playing under the other doors, with a small bar that pauses it, turns it
+    /// off, and leads back to it.
+    func testNowPlayingBarFollowsTheReceiverAcrossDoors() {
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].exists, "no small player on the Receiver itself")
+        app.buttons["tab-rooms"].tap()
+        let bar = app.descendants(matching: .any)["nowPlaying"]
+        waitFor(bar, 5, "the small player shows under another door")
+        shot("now-playing-bar", app)
+        let toggle = app.buttons["nowPlayingToggle"]
+        if toggle.label == "Pause" {
+            toggle.tap()
+            expectation(for: NSPredicate(format: "label == 'Play'"), evaluatedWith: toggle)
+            waitForExpectations(timeout: 10)
+        }
+        app.buttons["nowPlayingOff"].tap()
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off leaves nothing playing and nothing on screen")
+        app.buttons["tab-receiver"].tap()
+        expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+    }
+
+    /// Signed out, the film watchlist and the Pics/Vids save ask to sign in and keep nothing on
+    /// the device: a save is on the account or nowhere.
+    func testSavesAskASignedOutReaderToSignIn() {
+        // The controls stay up, so the test does not race the viewer's 2.6 s fade.
+        let app = launch(skin: "day", extra: ["-kjroom", "picsVids", "-kjtestsignedout", "YES", "-kjcontrolsstay", "YES"])
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        XCTAssertFalse(app.buttons["pnvSavedLink"].exists, "no Saved link for a signed-out reader")
+        tile.tap()
+        waitFor(app.buttons["closePlayer"], 10, "the viewer opens")
+        let save = app.buttons["pnvSave"]
+        waitFor(save, 5, "the viewer offers Save")
+        save.tap()
+        let note = app.staticTexts["pnvSaveNote"]
+        waitFor(note, 5, "Save says where to sign in")
+        XCTAssertTrue(app.buttons["closePlayer"].exists, "the viewer stays open")
+        XCTAssertEqual((save.value as? String)?.lowercased(), "off", "nothing is saved on the device")
+        shot("pnv-save-signin", app)
     }
 }

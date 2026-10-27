@@ -8,6 +8,11 @@ import Observation
 final class SavesStore {
     /// Refs the account holds, as the server last said, with this device's changes on top.
     private(set) var refs: Set<String> = []
+    /// The account's saves as the server listed them, newest first.
+    private(set) var rows: [PassportSave] = []
+    /// The account's named Pics/Vids collections, read only: the table takes no new ones from a
+    /// signed-in account at present, so none is created here.
+    private(set) var collections: [PnvCollection] = []
     @ObservationIgnored private var loadedFor: String?
     @ObservationIgnored private var loading: Task<Void, Never>?
     /// Refs with a change on its way.
@@ -27,7 +32,7 @@ final class SavesStore {
     /// Reads the account's saves, once per account. One read at a time; a failed read leaves the
     /// saves unknown, and nothing is drawn or toggled on an unknown answer.
     func load() async {
-        guard let userId = auth.session?.userId else { refs = []; loadedFor = nil; return }
+        guard let userId = auth.session?.userId else { refs = []; rows = []; collections = []; loadedFor = nil; return }
         if loadedFor == userId { return }
         if let running = loading { return await running.value }
         let task = Task { await read(userId) }
@@ -44,7 +49,68 @@ final class SavesStore {
               let rows = try? JSONDecoder().decode([PassportSave].self, from: data),
               auth.session?.userId == userId else { return }
         refs = Set(rows.map(\.object_ref))
+        self.rows = rows
         loadedFor = userId
+        if let request = PassportSaves.collectionsRequest(userId: userId, accessToken: token),
+           let (data, response) = try? await urlSession.data(for: request),
+           (response as? HTTPURLResponse)?.statusCode == 200,
+           let found = try? JSONDecoder().decode([PnvCollection].self, from: data),
+           auth.session?.userId == userId {
+            collections = found
+        }
+    }
+
+    /// Pics/Vids keys the account saved, newest first.
+    var savedPnvKeys: [String] {
+        rows.filter { $0.object_ref.hasPrefix("pnv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(4)) }
+    }
+
+    /// Film handles on the account's watchlist, newest first.
+    var watchlist: [String] {
+        rows.filter { $0.object_ref.hasPrefix("tv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(3)) }
+    }
+
+    func isSaved(pnvKey key: String) -> Bool {
+        known && (PassportSaves.pnvRef(key).map(refs.contains) ?? false)
+    }
+
+    func isSaved(page id: String) -> Bool {
+        known && (PassportSaves.pageRef(id).map(refs.contains) ?? false)
+    }
+
+    /// Saved site pages (Madrassa essays): their ids, newest first.
+    var savedPages: [String] {
+        rows.filter { $0.object_ref.hasPrefix("page:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(5)) }
+    }
+
+    @discardableResult
+    func toggle(page id: String, title: String, href: String) async -> Bool {
+        guard let ref = PassportSaves.pageRef(id) else { return false }
+        return await change([ref]) { saved in
+            saved ? await self.remove([ref]) : await self.add(ref, wing: PassportSaves.otherWing, title: title, href: href)
+        }
+    }
+
+    func isSaved(film handle: String) -> Bool {
+        known && (PassportSaves.filmRef(handle).map(refs.contains) ?? false)
+    }
+
+    @discardableResult
+    func toggle(pnvKey key: String) async -> Bool {
+        guard let ref = PassportSaves.pnvRef(key) else { return false }
+        return await change([ref]) { saved in
+            saved ? await self.remove([ref])
+                  : await self.add(ref, wing: PassportSaves.bornDigitalWing, title: nil, href: PassportSaves.pnvHref(key))
+        }
+    }
+
+    @discardableResult
+    func toggle(film handle: String, title: String) async -> Bool {
+        guard let ref = PassportSaves.filmRef(handle) else { return false }
+        return await change([ref]) { saved in
+            saved ? await self.remove([ref])
+                  : await self.add(ref, wing: PassportSaves.otherWing, title: title, href: PassportSaves.filmHref(handle))
+        }
     }
 
     /// The saves are known for the account signed in now.
@@ -91,10 +157,13 @@ final class SavesStore {
         return await act(!refs.isDisjoint(with: all))
     }
 
-    private func add(_ ref: String, wing: String, title: String, href: String) async -> Bool {
+    private func add(_ ref: String, wing: String, title: String?, href: String) async -> Bool {
         guard let userId = auth.session?.userId, let token = try? await auth.validAccessToken(),
               let request = PassportSaves.insertRequest(userId: userId, ref: ref, wing: wing, title: title, href: href, accessToken: token) else { return false }
         refs.insert(ref)
+        if !rows.contains(where: { $0.object_ref == ref }) {
+            rows.insert(PassportSave(object_ref: ref, wing: wing, title: title, href: href), at: 0)
+        }
         let reply = try? await urlSession.data(for: request)
         let code = (reply?.1 as? HTTPURLResponse)?.statusCode ?? 0
         // A unique-key refusal (23505) means the account already holds it, the state wanted.

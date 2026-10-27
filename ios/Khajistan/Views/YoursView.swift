@@ -92,7 +92,24 @@ struct YoursView: View {
     @ViewBuilder
     private var savedTitlesBlock: some View {
         let saved = model.reading.titles.filter { model.saves.isSaved($0) }
+        let films = model.saves.watchlist.compactMap { handle in model.films.films.first { $0.handle == handle } }
         Group {
+            if model.auth.isSignedIn && !films.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    HouseRule()
+                    Kicker("Your watchlist").padding(.top, 10).padding(.bottom, 2).accessibilityAddTraits(.isHeader)
+                    ForEach(films) { film in
+                        Button { model.open(.screening, at: [.film(film.handle)]) } label: {
+                            HStack {
+                                Text(Films.displayTitle(film)).kjName().lineLimit(2)
+                                Spacer(minLength: 0)
+                                Text("\u{2192}").kjName().accessibilityHidden(true)
+                            }
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                    }
+                }
+            }
             if model.auth.isSignedIn && !saved.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     HouseRule()
@@ -114,6 +131,7 @@ struct YoursView: View {
             guard model.auth.isSignedIn else { return }
             await model.saves.load()
             await model.reading.start()
+            await model.films.load()
         }
     }
 

@@ -19,7 +19,14 @@ struct PicsVidsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if store.noticeVisible { notice }
-                PageHead(kicker: "Pics/Vids", "Born Digital Media", line: nil)
+                HStack(alignment: .firstTextBaseline) {
+                    PageHead(kicker: "Pics/Vids", "Born Digital Media", line: nil)
+                    if model.auth.isSignedIn {
+                        NavigationLink(value: RoomRoute.pnvSaved) { Text("Saved \u{2192}").kjKicker() }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("pnvSavedLink")
+                    }
+                }
                 if let summary = store.summary { Text(summary).kjSmall(faint: true).padding(.top, -8) }
                 if store.phase == .ready { filters }
                 stream
@@ -225,5 +232,109 @@ struct PnvPicture: View {
                 withAnimation(.easeOut(duration: 0.22)) { image = loaded }
             }
             .accessibilityHidden(true)
+    }
+}
+
+
+// MARK: - Saved
+
+/// What this account saved from Pics/Vids, and its named collections, read through the gated
+/// public view: an object taken off the shelf since it was saved is not drawn. Saved on the
+/// account, so the same on the website and every device signed in.
+struct PnvSavedScreen: View {
+    @Environment(AppModel.self) private var model
+    @State private var collection: String?
+    @State private var rows: [PnvRow] = []
+    @State private var phase: Phase = .loading
+    @State private var viewing: PnvRow?
+
+    private enum Phase: Equatable { case loading, ready, failed }
+
+    private var keys: [String] {
+        if let collection, let found = model.saves.collections.first(where: { $0.id == collection }) { return found.media_keys }
+        return model.saves.savedPnvKeys
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                PageHead(kicker: "Pics/Vids", "Saved", line: nil)
+                if !model.auth.isSignedIn {
+                    Text("Sign in to see what you saved.").kjBody()
+                } else {
+                    if !model.saves.collections.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 0) {
+                                chip("All saved", nil)
+                                ForEach(model.saves.collections) { chip($0.name, $0.id) }
+                            }
+                        }
+                        .padding(.horizontal, -12)
+                    }
+                    switch phase {
+                    case .loading: TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity)
+                    case .failed:
+                        ReadingProblem(message: "The archive did not answer.") { Task { await hydrate() } }
+                    case .ready:
+                        if rows.isEmpty {
+                            Text(keys.isEmpty ? "Nothing saved yet. Save an object from its viewer." : "None of these objects is on the shelf now.")
+                                .kjBody().accessibilityIdentifier("pnvSavedEmpty")
+                        } else {
+                            Text("\(rows.count.formatted()) object\(rows.count == 1 ? "" : "s")").kjSmall(faint: true)
+                                .accessibilityIdentifier("pnvSavedCount")
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
+                                ForEach(rows) { row in
+                                    Button { viewing = row } label: { SavedTile(row: row) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityIdentifier("saved-\(row.media_key)")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, KJLayout.inset)
+            .padding(.vertical, 12)
+        }
+        .task(id: "\(model.auth.email ?? "")|\(collection ?? "")|\(model.saves.savedPnvKeys.count)") { await hydrate() }
+        .fullScreenCover(item: $viewing) { row in PnvViewerView(row: row, steps: false).environment(model) }
+    }
+
+    private func chip(_ title: String, _ id: String?) -> some View {
+        Button { collection = id } label: { Text(title).kjKicker().lineLimit(1) }
+            .buttonStyle(HouseTabStyle(isCurrent: collection == id))
+    }
+
+    /// Keys to rows, in the saved order, a hundred at a time.
+    private func hydrate() async {
+        await model.saves.load()
+        let wanted = keys
+        guard !wanted.isEmpty else { rows = []; phase = .ready; return }
+        phase = .loading
+        var found: [String: PnvRow] = [:]
+        for start in stride(from: 0, to: min(wanted.count, 500), by: 100) {
+            let chunk = Array(wanted[start..<min(start + 100, wanted.count)])
+            guard let (data, response) = try? await URLSession.shared.data(for: PnvAPI.rowsRequest(mediaKeys: chunk)),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let page = try? JSONDecoder().decode([PnvRow].self, from: data) else { phase = .failed; return }
+            for row in page { found[row.media_key] = row }
+        }
+        rows = wanted.compactMap { found[$0] }
+        phase = .ready
+    }
+}
+
+private struct SavedTile: View {
+    let row: PnvRow
+    @Environment(\.palette) private var palette
+    @State private var image: UIImage?
+
+    var body: some View {
+        Rectangle().fill(palette.lift)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
+            .overlay(alignment: .bottomLeading) { if row.isVideo { Kicker("Video").padding(6) } }
+            .accessibilityLabel(row.isVideo ? "Saved video" : "Saved picture")
+            .task(id: row.media_key) { image = await PnvImages.shared.image(PnvMedia.pictureCandidates(row), maxPixel: 400) }
     }
 }

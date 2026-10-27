@@ -18,6 +18,7 @@ struct ReadingReaderScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     @State private var pages: Int
     @State private var map: [Int]?
@@ -50,6 +51,24 @@ struct ReadingReaderScreen: View {
     private var rightToLeft: Bool { RRDirection.isRightToLeft(title, issue) }
 
     var body: some View {
+        HStack(spacing: 0) {
+            // A wide screen keeps the issue's pages beside the one being read.
+            if sizeClass == .regular && pages > 1 {
+                PageRail(issue: issue, pages: pages, map: map, current: position) { show($0) }
+                    .frame(width: 132)
+            }
+            reader
+        }
+        .background(palette.ground.ignoresSafeArea())
+        .foregroundStyle(palette.ink)
+        .task { await open() }
+        .onDisappear { loadTask?.cancel() }
+        .sheet(isPresented: $showSignIn) {
+            SignInView(onSignedIn: { retryAfterSignIn() })
+        }
+    }
+
+    private var reader: some View {
         VStack(spacing: 0) {
             topBar
             ZStack {
@@ -75,13 +94,6 @@ struct ReadingReaderScreen: View {
             .contentShape(Rectangle())
             .gesture(turnGesture, including: zoomed ? .subviews : .all)
             bottomBar
-        }
-        .background(palette.ground.ignoresSafeArea())
-        .foregroundStyle(palette.ink)
-        .task { await open() }
-        .onDisappear { loadTask?.cancel() }
-        .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { retryAfterSignIn() })
         }
     }
 
@@ -338,6 +350,69 @@ struct ReadingReaderScreen: View {
             try? await Task.sleep(for: .milliseconds(450))
             model.openWebsite(url)
         }
+    }
+}
+
+/// The issue's pages as a column of small images. The page server is asked about them in runs, at
+/// the small size; a page it does not allow this viewer shows its number and no picture.
+private struct PageRail: View {
+    let issue: RRIssue
+    let pages: Int
+    let map: [Int]?
+    let current: Int
+    let choose: (Int) -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ScrollViewReader { reader in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(1...pages, id: \.self) { page in
+                        Button { choose(page) } label: {
+                            VStack(spacing: 4) {
+                                RailThumb(issue: issue, stored: RRPageMap.stored(page, map: map))
+                                    .frame(height: 140)
+                                Text("\(page)").kjSmall().monospacedDigit()
+                            }
+                            .padding(6)
+                            .background(page == current ? palette.lift : .clear)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .id(page)
+                        .accessibilityLabel("Page \(page)")
+                        .accessibilityAddTraits(page == current ? .isSelected : [])
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+            .onChange(of: current, initial: true) { withAnimation(.kj) { reader.scrollTo(current, anchor: .center) } }
+        }
+        .task(id: issue.key) {
+            await model.reading.signThumbnails(issue, stored: (1...pages).map { RRPageMap.stored($0, map: map) })
+        }
+        .accessibilityIdentifier("rrPageRail")
+    }
+}
+
+private struct RailThumb: View {
+    let issue: RRIssue
+    let stored: Int
+    @Environment(AppModel.self) private var model
+    @State private var image: UIImage?
+
+    var body: some View {
+        Color.clear
+            .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
+            .accessibilityHidden(true)
+            .task(id: stored) {
+                // The rail asks for its answers when it opens; a moment later the thumbnails follow.
+                for _ in 0..<3 where image == nil {
+                    image = await model.reading.thumbnail(issue, stored: stored)
+                    if image == nil { try? await Task.sleep(for: .milliseconds(700)) }
+                }
+            }
     }
 }
 

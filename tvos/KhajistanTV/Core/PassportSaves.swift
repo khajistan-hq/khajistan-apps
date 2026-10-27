@@ -3,6 +3,13 @@ import Foundation
 /// One saved thing, as `public.passport_saves` holds it. The website's Reading Room Save, the
 /// receiver's heart and the dashboard read and write these same rows, so a save made on one device
 /// is on every device the account signs in on.
+/// A named Pics/Vids collection on the account.
+struct PnvCollection: Decodable, Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let media_keys: [String]
+}
+
 struct PassportSave: Decodable, Equatable, Sendable {
     let object_ref: String
     let wing: String
@@ -16,6 +23,9 @@ struct PassportSave: Decodable, Equatable, Sendable {
 enum PassportSaves {
     static let receiverWing = "receiver"
     static let readingRoomWing = "reading-room"
+    static let bornDigitalWing = "born-digital"
+    /// The table's catch-all wing. A film is saved here: the table has no film wing.
+    static let otherWing = "other"
 
     /// The id part of a ref, as the table's check allows it: `[A-Za-z0-9._/-]{1,200}`.
     static func isRefSafe(_ text: String) -> Bool {
@@ -48,16 +58,38 @@ enum PassportSaves {
         "/reading-room.html?m=" + KJURL.encodeQueryValue(slug)
     }
 
-    /// The account's saves on the receiver and in the Reading Room.
+    /// A Pics/Vids object, as pnv-phone-likes.js writes it: `pnv:<media_key>`, linked to the canvas.
+    static func pnvRef(_ key: String) -> String? { isRefSafe(key) ? "pnv:" + key : nil }
+    static func pnvHref(_ key: String) -> String { "/canvas?item=" + KJURL.encodeQueryValue(key) }
+
+    /// A Screening Room film, by its Khajistan TV handle (`tv:<handle>`, the system:id the
+    /// archive's metadata rules name), linked to the film's own page.
+    static func filmRef(_ handle: String) -> String? { isRefSafe(handle) ? "tv:" + handle : nil }
+    static func filmHref(_ handle: String) -> String { "/film/" + KJURL.encodeQueryValue(handle) }
+
+    /// A page of the site (a Madrassa essay), by its own path, linked to that path.
+    static func pageRef(_ id: String) -> String? { isRefSafe(id) ? "page:" + id : nil }
+
+    /// The account's saves: the receiver, the Reading Room, Pics/Vids and films. Newest first.
     static func listRequest(userId: String, accessToken: String) -> URLRequest? {
         guard isUserId(userId) else { return nil }
-        return request("/rest/v1/passport_saves?select=object_ref,wing,title,href&user_id=eq.\(userId)&wing=in.(receiver,reading-room)&order=created_at.desc&limit=1000",
+        return request("/rest/v1/passport_saves?select=object_ref,wing,title,href&user_id=eq.\(userId)&wing=in.(receiver,reading-room,born-digital,other)&order=created_at.desc&limit=1000",
                        method: "GET", token: accessToken)
     }
 
-    static func insertRequest(userId: String, ref: String, wing: String, title: String, href: String, accessToken: String) -> URLRequest? {
+    /// The account's named Pics/Vids collections (`phone_media_collections`, the website's own).
+    static func collectionsRequest(userId: String, accessToken: String) -> URLRequest? {
         guard isUserId(userId) else { return nil }
-        let row: [String: Any] = ["user_id": userId, "object_ref": ref, "wing": wing, "title": String(title.prefix(200)), "href": href]
+        return request("/rest/v1/phone_media_collections?select=id,name,media_keys&user_id=eq.\(userId)&order=updated_at.desc&limit=200",
+                       method: "GET", token: accessToken)
+    }
+
+    /// `title` is left out where the website leaves it null (a Pics/Vids save carries no title or
+    /// picture, so a record taken off the shelf keeps nothing of itself in a library).
+    static func insertRequest(userId: String, ref: String, wing: String, title: String?, href: String, accessToken: String) -> URLRequest? {
+        guard isUserId(userId) else { return nil }
+        var row: [String: Any] = ["user_id": userId, "object_ref": ref, "wing": wing, "href": href]
+        if let title { row["title"] = String(title.prefix(200)) }
         guard let body = try? JSONSerialization.data(withJSONObject: row) else { return nil }
         var call = request("/rest/v1/passport_saves", method: "POST", token: accessToken, body: body)
         call.setValue("return=minimal", forHTTPHeaderField: "Prefer")
@@ -67,7 +99,7 @@ enum PassportSaves {
     static func deleteRequest(userId: String, refs: [String], accessToken: String) -> URLRequest? {
         guard isUserId(userId), !refs.isEmpty, refs.allSatisfy({ ref in
             let parts = ref.split(separator: ":", maxSplits: 1)
-            return parts.count == 2 && ["channel", "reading-room"].contains(String(parts[0])) && isRefSafe(String(parts[1]))
+            return parts.count == 2 && ["channel", "reading-room", "pnv", "tv", "page"].contains(String(parts[0])) && isRefSafe(String(parts[1]))
         }) else { return nil }
         let list = refs.map { "\"\($0)\"" }.joined(separator: ",")
         guard let encoded = list.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&+=#"))) else { return nil }

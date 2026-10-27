@@ -21,8 +21,9 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | 13 Release candidate | partial | refute pass run and its ten findings fixed; HANDOFF.md written; no upload (owner-only) |
 | Mobbin pieces | complete on phone/Mac | watchlist, Pics/Vids saves + collections (read only), Madrassa contents + save, database sort, reader rail, now-playing bar; second refute pass, its findings fixed; iPad found the RR catalogue load cancelled by a rebuilt screen — the store now owns its load |
 | Reference-app layouts | built on iPhone/iPad/Mac | every native room restyled to its reference app (DECISIONS 17); CC key; see TEST_MATRIX for the runs |
+| Reference-app layouts on Apple TV | not started (owner said stop, 2026-10-27) | baseline only; the plan and a launch to check first are in HANDOFF.md |
 
 ## Resume here
 
-Read this file, `DECISIONS.md` and `git log --oneline -20`, rebuild with the commands in
-`TEST_MATRIX.md`, and continue the first stage not marked complete.
+Read `HANDOFF.md` first, then this file, `DECISIONS.md` and `git log --oneline -20`; rebuild with
+the commands in `TEST_MATRIX.md`, and continue the first stage not marked complete.

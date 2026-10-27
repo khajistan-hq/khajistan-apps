@@ -47,7 +47,8 @@ final class StaticNoise {
     }
 
     deinit {
-        engine.stop()
+        // An engine never wired never reached the device; leave it untouched.
+        if wired { engine.stop() }
         levels.deallocate()
     }
 
@@ -69,6 +70,6 @@ final class StaticNoise {
     func stop() {
         levels[0] = 0
         levels[1] = 0
-        engine.stop()
+        if wired { engine.stop() }
     }
 }

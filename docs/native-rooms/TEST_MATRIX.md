@@ -42,3 +42,7 @@ three other branches' runs (`cursor/*`, 2026-10-26).
 - Mac Catalyst not driven by a UI test; keyboard and pointer not exercised by hand.
 - Full-film playback with an entitled account (no test account held).
 - Physical devices: none.
+- Scrubbing the Receiver map between stations (the press-and-drag that plays the hiss) is not in a
+  UI test. On a simulator with no audio device, the first hiss opens the device and can abort the
+  app (the CI failure of 2026-10-27). A test that adds it needs the runner to have audio, or a flag
+  that keeps the hiss silent.

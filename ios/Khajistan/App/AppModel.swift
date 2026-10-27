@@ -26,7 +26,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch room {
         case .receiver: self = .receiver
         case .yours: self = .library
-        case .picsVids, .chat, .reading, .screening: return nil
+        case .picsVids, .chat, .reading, .screening, .bazaar, .madrassa: return nil
         }
     }
 
@@ -87,6 +87,16 @@ final class AppModel {
     let reading: ReadingStore
     /// Saves on the account (`passport_saves`), shared with the website and the Apple TV.
     let saves: SavesStore
+    /// The Bazaar's shelf (data/catalog.json) and this device's bag for the shop's checkout.
+    let bazaar: SiteFeed<[BazaarItem]>
+    let bag = BagStore()
+    let bazaarSwap: SiteFeed<[String: String]>
+    /// The Madrassa: the page's reference entries, the writings feed and the Street Dictionary.
+    let madrassaEntries: SiteFeed<[MadrassaEntry]>
+    let madrassaPosts: SiteFeed<[MadrassaPost]>
+    let lughat: SiteFeed<[LughatEntry]>
+    /// The research databases, each read the first time it is opened.
+    @ObservationIgnored private var databaseFeeds: [ArchiveDatabase: SiteFeed<[DBRecord]>] = [:]
 
     private let libraryFile: LibraryFile
     private var libraryReadable = false
@@ -108,6 +118,18 @@ final class AppModel {
         self.films = films
         reading = ReadingStore(auth: auth, origin: films.origin)
         saves = SavesStore(auth: auth)
+        bazaar = SiteFeed(auth: auth, path: Bazaar.cataloguePath) { data in
+            Bazaar.offered(try JSONDecoder().decode(BazaarCatalogue.self, from: data).products)
+        }
+        bazaarSwap = SiteFeed(auth: auth, path: Bazaar.swapPath) { data in try Bazaar.swapMap(data) }
+        madrassaEntries = SiteFeed(auth: auth, path: MadrassaEntries.pagePath) { data in
+            guard let entries = MadrassaEntries.entries(fromPage: String(decoding: data, as: UTF8.self)) else { throw DBError.unreadable }
+            return entries
+        }
+        madrassaPosts = SiteFeed(auth: auth, path: MadrassaWritings.feedPath) { data in
+            MadrassaWritings.knowledge(try JSONDecoder().decode([MadrassaPost].self, from: data))
+        }
+        lughat = SiteFeed(auth: auth, path: Lughat.path) { data in try JSONDecoder().decode(LughatFile.self, from: data).entries }
         let defaults = UserDefaults.standard
         forcedSkin = defaults.string(forKey: "kjskin").flatMap(Skin.init(rawValue:))
         playsAtLaunch = defaults.object(forKey: "kjautoplay") == nil || defaults.bool(forKey: "kjautoplay")
@@ -205,6 +227,18 @@ final class AppModel {
     /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
+        // A Reading Room address (?m=title&issue=&p=) opens the native reader, as the site's does.
+        if let route = ReadingLinks.route(url), StoreBuild.includes(.reading) {
+            open(.reading, at: [route])
+            return
+        }
+        openWebsite(url)
+    }
+
+    /// A website page in the house browser, even where the app has a native room for it: for the
+    /// "on the website" controls, whose point is the page itself.
+    func openWebsite(_ url: URL) {
+        guard ArchiveURL.isArchive(url) else { return }
         browser.load(showsJoin ? url : JoinOffer.tagged(url))
         isShowingBrowser = true
     }
@@ -242,6 +276,15 @@ final class AppModel {
                 self.tab = .rooms
             }
         }
+    }
+
+    /// A research database's records, read once per preview password.
+    func database(_ db: ArchiveDatabase) -> SiteFeed<[DBRecord]> {
+        if let feed = databaseFeeds[db] { return feed }
+        let origin = SiteOrigin.current
+        let feed = SiteFeed<[DBRecord]>(auth: auth, paths: db.paths, origin: origin) { files in try db.records(files, origin: origin) }
+        databaseFeeds[db] = feed
+        return feed
     }
 
     /// Where reading or watching stopped, kept on this device.

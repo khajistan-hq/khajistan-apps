@@ -3888,10 +3888,113 @@ func bazaarRules() throws {
                     "https://khajistan.myshopify.com/cart/c/abc?key=1&skip_shop_pay=true")
     try expectEqual(ShopStorefront.safeCheckout("https://khajistan.myshopify.com.evil.example/cart"), nil)
     try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
+    try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"data":{"product":null}}"#.utf8)), .notForSale, "an unpublished product is not a fault")
+    try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"errors":[{"message":"x"}]}"#.utf8)), .unreadable, "an error is not 'not for sale'")
     let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
     try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
     let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)
     try expectEqual(ShopStorefront.checkout(from: ok), .success(URL(string: "https://khajistan.com/cart/c/1?skip_shop_pay=true")!))
+}
+
+/// Every database decodes from its real file, and the counts are the ones the website states for
+/// it (databases.html, cinema/ and television/ hubs, logos.html's review rule).
+func databasesDecodeTheRealFiles() throws {
+    func records(_ db: ArchiveDatabase) throws -> [DBRecord] {
+        try db.records(try db.paths.map { try realFile($0) })
+    }
+    let expected: [ArchiveDatabase: Int] = [
+        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 6_686, .persianMusic: 45_568,
+        .censorCertificates: 52, .iranianCinema: 1_437, .pakistaniCinema: 6_179, .turkishCinema: 65,
+        .screenMarks: 1_726, .pakistaniDramas: 1_599,
+    ]
+    for (db, count) in expected {
+        let all = try records(db)
+        try expectEqual(all.count, count, "\(db.title) record count")
+        try expectEqual(Set(all.map(\.id)).count, all.count, "\(db.title) ids are unique")
+    }
+    // logos.html shows review == false with an image file, and nothing else.
+    let raw = try JSONSerialization.jsonObject(with: try realFile("data/logos.json")) as? [String: Any]
+    let shown = ((raw?["records"] as? [[String: Any]]) ?? []).filter { ($0["review"] as? Bool) == false && ($0["image_file"] as? String)?.isEmpty == false }
+    let logos = try records(.logos)
+    try expectEqual(logos.count, shown.count, "Logos: the page's review rule")
+    try expect(logos.contains { $0.image?.path.contains("/thumb/") == true }, "level-2 logos use their WebP thumb")
+    try expect(!logos.contains { $0.image?.pathExtension.lowercased() == "svg" }, "no SVG is offered as a picture")
+    // The Persian index decodes its dictionaries: no record shows a bare index as a performer.
+    let persian = try records(.persianMusic)
+    try expect(persian.contains { $0.fields.contains { $0.label == "Performer" && Int($0.value) == nil } })
+    // Censor certificates link to their scan in the Reading Room.
+    let censor = try records(.censorCertificates)
+    try expect(censor.allSatisfy { $0.link?.absoluteString.contains("reading-room?m=censor-records") == true }, "every certificate has its scan")
+    try expect(censor.contains { $0.native != nil }, "Urdu titles are read")
+}
+
+func databaseQuery() throws {
+    func record(_ title: String, _ language: String) -> DBRecord {
+        DBRead.make(id: title, title: title, subtitle: [], facets: ["Language": language], fields: [("Performer", "Noor Jehan")], link: nil)!
+    }
+    let all = [record("Aa Intezar Hai Tera", "Urdu"), record("Sohni Mahiwal", "Punjabi"), record("Chan Kithan", "Punjabi")]
+    try expectEqual(DBQuery.filter(all, text: "noor intezar", facets: [:]).map(\.title), ["Aa Intezar Hai Tera"], "every word must match")
+    try expectEqual(DBQuery.filter(all, text: "", facets: ["Language": "Punjabi"]).count, 2)
+    try expectEqual(DBQuery.filter(all, text: "intezar", facets: ["Language": "Punjabi"]).count, 0, "facet and words together")
+    try expectEqual(DBQuery.values("Language", in: all).map(\.value), ["Punjabi", "Urdu"])
+    try expectEqual(DBRead.text("None"), nil)
+    try expectEqual(DBRead.text(NSNumber(value: true)), nil, "a boolean is not a value to show")
+    try expectEqual(DBRead.text(["Drama", "None", "Romance"]), "Drama, Romance")
+    try expectEqual(DBRead.text(1945.0), "1945")
+    try expectEqual(DBRead.year("1979-04-01"), 1979)
+    try expectEqual(DBRead.year("0"), nil)
+}
+
+/// The Madrassa reads its sources as the pages do, at the counts site-counts.json states, and an
+/// essay's body loses none of its words on the way to blocks.
+func madrassaReadsTheRealSources() throws {
+    let page = String(decoding: try realFile(MadrassaEntries.pagePath), as: UTF8.self)
+    let entries = try require(MadrassaEntries.entries(fromPage: page), "ENTRIES evaluates")
+    try expectEqual(entries.count, 15, "the page's reference entries")
+    try expect(entries.contains { $0.id == "omar-ali-khan" && ($0.press ?? []).count > 0 })
+    try expectEqual(MadrassaEntries.entries(fromPage: "<html>no list here</html>"), nil, "a page without the list is not read as empty")
+
+    let posts = try JSONDecoder().decode([MadrassaPost].self, from: try realFile(MadrassaWritings.feedPath))
+    let knowledge = MadrassaWritings.knowledge(posts)
+    let counts = try JSONSerialization.jsonObject(with: try realFile("data/site-counts.json")) as? [String: Any]
+    let figures = counts?["counts"] as? [String: Int] ?? [:]
+    try expectEqual(knowledge.filter(MadrassaWritings.isForensics).count, figures["madrassa_forensics"] ?? -1, "forensics")
+    try expectEqual(knowledge.filter { !MadrassaWritings.isForensics($0) }.count, figures["madrassa_writings"] ?? -1, "writings")
+    try expect(knowledge.filter(MadrassaWritings.isForensics).allSatisfy { !MadrassaWritings.listTitle($0).lowercased().hasPrefix("archive forensics") })
+
+    func words(_ text: String) -> Int { text.split(whereSeparator: { $0.isWhitespace }).count }
+    for post in knowledge {
+        let body = post.body ?? ""
+        let blocks = ArticleHTML.blocks(body)
+        try expect(!blocks.isEmpty, "\(post.handle) has blocks")
+        let kept = blocks.reduce(0) { total, block in
+            switch block {
+            case .heading(let t): return total + words(t)
+            case .paragraph(let a), .quote(let a), .item(let a): return total + words(String(a.characters))
+            case .row(let cells): return total + cells.reduce(0) { $0 + words($1) }
+            case .image, .embed, .rule: return total
+            }
+        }
+        let whole = words(ArticleHTML.text(body))
+        try expect(Double(kept) >= Double(whole) * 0.97, "\(post.handle): \(kept) of \(whole) words reach the screen")
+    }
+
+    let lughat = try JSONDecoder().decode(LughatFile.self, from: try realFile(Lughat.path))
+    try expectEqual(lughat.entries.count, figures["lughat_entries"] ?? -1, "dictionary entries")
+    try expectEqual(lughat.entries.filter(Lughat.isSetApart).count, 151, "High and Restricted are set apart, none removed")
+}
+
+func articleHTMLRules() throws {
+    let blocks = ArticleHTML.blocks(#"<h2>Head</h2><p>One <a href="https://example.org/a">link</a> &amp; more&nbsp;text.</p><script>alert(1)</script><p><img src="https://cdn.shopify.com/x.jpg" alt="A &quot;scan&quot;"></p><blockquote>Said.</blockquote><ul><li>Item</li></ul><p><img src="javascript:x"></p>"#)
+    try expectEqual(blocks.count, 5, "script and an unsafe image are dropped, the rest kept")
+    let table = ArticleHTML.blocks(#"<div>Loose text</div><table><tr><td><strong>t</strong></td><td>اردو</td></tr></table><iframe src="x"></iframe><audio></audio>"#)
+    try expectEqual(table, [.paragraph(AttributedString("Loose text")), .row(["t", "اردو"]), .embed], "div text, a row, one embed note")
+    if case .paragraph(let text) = blocks[1] {
+        try expectEqual(String(text.characters), "One link & more\u{00A0}text.")
+        try expect(text.runs.contains { $0.link == URL(string: "https://example.org/a") }, "the link survives")
+    } else { try expect(false, "second block is a paragraph") }
+    if case .image(_, let alt) = blocks[2] { try expectEqual(alt, "A \"scan\"") } else { try expect(false, "third block is the image") }
+    try expectEqual(ArticleHTML.decodeEntities("&amp;lt; &#1606; &#x645;"), "&lt; \u{0646} \u{0645}", "an escaped entity stays escaped")
 }
 
 let tests: [(String, () throws -> Void)] = [
@@ -4018,6 +4121,10 @@ let tests: [(String, () throws -> Void)] = [
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
     ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
+    ("Databases: every file decodes, at the site's own counts", databasesDecodeTheRealFiles),
+    ("Databases: search and facets", databaseQuery),
+    ("Madrassa: entries, writings, dictionary from the real sources", madrassaReadsTheRealSources),
+    ("Madrassa: article bodies to blocks", articleHTMLRules),
     ("Reading Room: direction by region and by issue", readingDirectionRules),
     ("Reading Room: titles group as the site groups them (sample, from the site's own code)", readingGroupingMatchesTheSite),
     ("Reading Room: titles group as the site groups them (full feed)", readingGroupingMatchesTheSiteOnTheFullFeed),

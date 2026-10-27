@@ -511,4 +511,77 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any)["rrReaderPage"].exists, "no page image stands behind the gate")
         shot("rr-members-gate", app)
     }
+
+    /// Madrassa, the databases and the Bazaar read the site's own files. The live site holds them
+    /// behind its password until launch, so without one the rooms say so and point to Library.
+    /// With `TEST_RUNNER_KJ_SITE` set to a local checkout (scripts/dev_server.py), the test walks the
+    /// real records: an entry, an essay, the dictionary, the censor certificates, and a product into
+    /// the bag. It stops before checkout: nothing is sent to the shop's checkout.
+    func testMadrassaDatabasesAndBazaarReadTheSiteData() {
+        guard let site = ProcessInfo.processInfo.environment["KJ_SITE"] else {
+            let app = launch(skin: "day", extra: ["-kjroom", "madrassa"])
+            waitFor(app.descendants(matching: .any)["roomLocked"], 30, "a gated room says it is behind the password")
+            app.buttons["lockedToLibrary"].tap()
+            waitFor(app.buttons["skin-day"], 10, "the note leads to Library")
+            return
+        }
+        let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site])
+        waitFor(app.buttons["entry-omar-ali-khan"], 30, "the page's own entries are read")
+        shot("madrassa-reference", app)
+        app.buttons["entry-omar-ali-khan"].tap()
+        waitFor(app.buttons["entryFull"], 10, "an entry opens with its full page one step away")
+        app.buttons["stackBack"].tap()
+
+        app.buttons["madrassa-forensics"].tap()
+        let post = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'post-'")).firstMatch
+        waitFor(post, 20, "the forensics pieces are listed")
+        post.tap()
+        waitFor(app.buttons["postOnWebsite"], 10, "an essay opens whole, with its page one step away")
+        shot("madrassa-essay", app)
+        app.buttons["stackBack"].tap()
+
+        app.buttons["madrassa-dictionary"].tap()
+        let count = app.staticTexts["lughatCount"]
+        waitFor(count, 20, "the dictionary loads")
+        XCTAssertTrue(count.label.hasSuffix("of 829 entries"), "every entry is counted (\(count.label))")
+
+        app.buttons["madrassa-databases"].tap()
+        app.buttons["db-censorCertificates"].tap()
+        let records = app.staticTexts["dbCount"]
+        expectation(for: NSPredicate(format: "label == '52 of 52 records'"), evaluatedWith: records)
+        waitForExpectations(timeout: 30)
+        let record = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'record-'")).firstMatch
+        record.tap()
+        waitFor(app.buttons["recordLink"], 10, "a certificate links to its scan")
+        shot("database-record", app)
+        app.buttons["recordLink"].tap()
+        let pageLabel = app.staticTexts["rrPageLabel"]
+        waitFor(pageLabel, 45, "the scan opens in the app's own reader, not the website")
+        XCTAssertTrue(pageLabel.label.hasPrefix("p. 1 / "), "on the page the link names (\(pageLabel.label))")
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the certificate's page is on screen")
+        shot("censor-scan", app)
+        app.terminate()
+
+        let shop = launch(skin: "day", extra: ["-kjroom", "bazaar", "-kjsite", site])
+        let total = shop.staticTexts["bazaarCount"]
+        waitFor(total, 30, "the Bazaar loads")
+        XCTAssertEqual(total.label, "1,335 of 1,335", "the shelf the site's own code builds")
+        let search = shop.textFields["bazaarSearch"]
+        search.tap()
+        search.typeText("Adam Khor")
+        let product = shop.buttons["product-adam-khor-man-eater-t-shirt-khajistan"]
+        waitFor(product, 10, "the search finds the product")
+        product.tap()
+        let size = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'variant-'")).firstMatch
+        waitFor(size, 30, "the shop answers with the product's variants")
+        XCTAssertFalse(shop.buttons["addToBag"].isEnabled, "nothing can be added before a choice is made")
+        size.tap()
+        waitFor(shop.staticTexts["productPrice"], 5, "a chosen variant shows its price")
+        shop.buttons["addToBag"].tap()
+        waitFor(shop.buttons["bagLink"], 5, "the bag holds it")
+        shop.buttons["bagLink"].tap()
+        waitFor(shop.staticTexts["bagSubtotal"], 5, "the bag states a subtotal")
+        XCTAssertTrue(shop.buttons["bagCheckout"].exists, "checkout is offered, and not pressed here")
+        shot("bazaar-bag", shop)
+    }
 }

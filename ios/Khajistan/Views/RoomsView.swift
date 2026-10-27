@@ -6,8 +6,18 @@ enum RoomRoute: Hashable, Sendable {
     case room(NativeRoom)
     /// A Reading Room title by slug; `resume` opens the reader where this device stopped.
     case readingTitle(String, resume: Bool = false)
+    /// A Reading Room page: title slug, issue id (as the website's `issue=`) and page number.
+    case readingPage(String, issue: String, page: Int)
     /// A Screening Room film by handle.
     case film(String)
+    /// A Bazaar product by handle, and the bag.
+    case product(String)
+    case bag
+    /// The Madrassa: a reference entry, a writing (blog/handle), a database and one of its records.
+    case madrassaEntry(String)
+    case post(String)
+    case database(String)
+    case record(String, String)
 }
 
 /// ROOMS: every room of the website's menu, door by door (ArchiveDestination, read off
@@ -179,6 +189,8 @@ struct RoomScreen: View {
         case .picsVids: PicsVidsView()
         case .reading: ReadingShelfView()
         case .screening: ScreeningRoomView()
+        case .bazaar: BazaarView()
+        case .madrassa: MadrassaView()
         // Rooms with a bar door or a cover of their own never open here (NativeRoom.opensInRooms).
         case .receiver, .yours, .chat: EmptyView()
         }
@@ -194,7 +206,16 @@ struct RouteScreen: View {
             switch route {
             case .room(let room): RoomScreen(room: room)
             case .readingTitle(let slug, let resume): ReadingTitleScreen(slug: slug, resume: resume)
+            case .readingPage(let slug, let issue, let page): ReadingTitleScreen(slug: slug, openIssue: issue, openPage: page)
             case .film(let handle): FilmScreen(handle: handle)
+            case .product(let handle): ProductScreen(handle: handle)
+            case .bag: BagScreen()
+            case .madrassaEntry(let id): MadrassaEntryScreen(id: id)
+            case .post(let id): PostScreen(id: id)
+            case .database(let raw):
+                if let db = ArchiveDatabase(rawValue: raw) { DatabaseScreen(db: db) }
+            case .record(let raw, let id):
+                if let db = ArchiveDatabase(rawValue: raw) { RecordScreen(db: db, id: id) }
             }
         }
         .stackScreen(back: true)

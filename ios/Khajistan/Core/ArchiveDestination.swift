@@ -48,7 +48,7 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
 /// A room of the website the app draws natively. A room is listed here only once its native
 /// screen exists; until then its door opens the live website, so no door leads to a stand-in.
 enum NativeRoom: String, CaseIterable, Sendable {
-    case receiver, picsVids, yours, chat, reading, screening
+    case receiver, picsVids, yours, chat, reading, screening, bazaar, madrassa
 
     /// The website menu entry (ArchiveDestination.id) the room stands in for.
     var destinationID: String {
@@ -59,6 +59,8 @@ enum NativeRoom: String, CaseIterable, Sendable {
         case .chat: return "chat"
         case .reading: return "reading"
         case .screening: return "cinema"
+        case .bazaar: return "bazaar"
+        case .madrassa: return "madrassa"
         }
     }
 
@@ -67,7 +69,7 @@ enum NativeRoom: String, CaseIterable, Sendable {
     var opensInRooms: Bool {
         switch self {
         case .receiver, .yours, .chat: return false
-        case .picsVids, .reading, .screening: return true
+        case .picsVids, .reading, .screening, .bazaar, .madrassa: return true
         }
     }
 }

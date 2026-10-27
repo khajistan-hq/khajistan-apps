@@ -336,7 +336,7 @@ struct ReadingReaderScreen: View {
         close()
         Task {
             try? await Task.sleep(for: .milliseconds(450))
-            model.open(url)
+            model.openWebsite(url)
         }
     }
 }

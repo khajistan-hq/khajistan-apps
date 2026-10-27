@@ -217,6 +217,9 @@ struct ReadingProblem: View {
 struct ReadingTitleScreen: View {
     let slug: String
     var resume = false
+    /// An issue to open at once, by the id the website's `issue=` names, and its page.
+    var openIssue: String?
+    var openPage = 1
 
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -294,7 +297,7 @@ struct ReadingTitleScreen: View {
                     Button(kicker: showProvenance ? "Hide provenance" : "Provenance") { showProvenance.toggle() }
                         .accessibilityIdentifier("rrProvenance")
                 }
-                Button(kicker: "On the website \u{2197}") { model.open(ReadingLinks.title(title)) }
+                Button(kicker: "On the website \u{2197}") { model.openWebsite(ReadingLinks.title(title)) }
                     .accessibilityIdentifier("rrOnWebsite")
             }
             if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("rrSaveNote") }
@@ -358,6 +361,12 @@ struct ReadingTitleScreen: View {
     }
 
     private func openResumeIfAsked() {
+        if let openIssue, !resumed, store.phase == .ready, let title, !held,
+           let issue = title.issues.first(where: { $0.id == openIssue }) {
+            resumed = true
+            reading = ReaderTarget(title: title, issue: issue, page: max(openPage, 1))
+            return
+        }
         guard resume, !resumed, store.phase == .ready, let title, !held,
               let place = model.library.place(.reading, title.slug),
               let issue = title.issues.first(where: { $0.key == place.part }) else { return }
@@ -379,6 +388,19 @@ enum ReadingLinks {
 
     static func page(_ title: RRTitle, _ issue: RRIssue, page: Int) -> URL {
         url(["m": title.slug, "issue": issue.id, "p": String(page)])
+    }
+
+    /// The room route for a website Reading Room address, nil for any other page.
+    static func route(_ url: URL) -> RoomRoute? {
+        let path = url.path.lowercased()
+        guard path == "/reading-room" || path == "/reading-room.html",
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let slug = items.first(where: { $0.name == "m" })?.value, !slug.isEmpty else { return nil }
+        if let issue = items.first(where: { $0.name == "issue" })?.value, !issue.isEmpty {
+            let page = items.first(where: { $0.name == "p" })?.value.flatMap(Int.init) ?? 1
+            return .readingPage(slug, issue: issue, page: page)
+        }
+        return .readingTitle(slug)
     }
 
     private static func url(_ items: [String: String]) -> URL {

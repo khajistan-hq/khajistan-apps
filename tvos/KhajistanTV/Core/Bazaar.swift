@@ -37,6 +37,13 @@ struct BazaarCatalogue: Decodable, Sendable {
     let products: [BazaarProduct]
 }
 
+/// A product the Bazaar sells, and the shelf it stands on.
+struct BazaarItem: Identifiable, Hashable, Sendable {
+    let product: BazaarProduct
+    let shelf: BazaarShelf
+    var id: String { product.h }
+}
+
 enum BazaarShelf: String, CaseIterable, Sendable {
     case prints, apparel, objects, stickers
 
@@ -121,8 +128,8 @@ enum Bazaar {
         return merchShelf(shelf, product)
     }
 
-    static func offered(_ products: [BazaarProduct]) -> [(product: BazaarProduct, shelf: BazaarShelf)] {
-        products.compactMap { product in shelf(product).map { (product, $0) } }
+    static func offered(_ products: [BazaarProduct]) -> [BazaarItem] {
+        products.compactMap { product in shelf(product).map { BazaarItem(product: product, shelf: $0) } }
     }
 
     /// The price line a card shows: sold out, a price, or "Price on request" above the gate.
@@ -136,6 +143,27 @@ enum Bazaar {
         guard amount <= priceOnRequestAbove else { return "Price on request" }
         let style = FloatingPointFormatStyle<Double>.Currency(code: currency ?? "USD", locale: Locale(identifier: "en_US"))
         return amount.formatted(style.precision(.fractionLength(amount == amount.rounded() ? 0 : 2)))
+    }
+
+    static let swapPath = "data/transparent-images.json"
+
+    /// fileKey() in bazaar.html: the URL's last path component, lower-cased, without query.
+    static func fileKey(_ url: String) -> String {
+        (url.split(whereSeparator: { $0 == "?" || $0 == "#" }).first.map(String.init) ?? url)
+            .split(separator: "/").last.map { $0.lowercased() } ?? ""
+    }
+
+    /// transparent-images.json keyed as the page keys it, so a white-background mockup is shown
+    /// as the clean local scan the site shows instead.
+    static func swapMap(_ data: Data) throws -> [String: String] {
+        let raw = try JSONDecoder().decode([String: String].self, from: data)
+        return Dictionary(raw.map { (fileKey($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The picture a card shows: the swap if there is one, else the record's own image.
+    static func picture(_ product: BazaarProduct, swap: [String: String], width: Int) -> URL? {
+        guard let raw = product.i else { return nil }
+        return imageURL(swap[fileKey(raw)] ?? raw, width: width)
     }
 
     /// bazaar.html's image allowlist: the site's own product assets and Shopify's CDN, nothing
@@ -202,6 +230,21 @@ enum ShopStorefront {
         query($h:String!){product(handle:$h){title descriptionHtml images(first:12){nodes{url}}\
          variants(first:50){nodes{id title availableForSale price{amount currencyCode}}}}}
         """, variables: ["h": handle])
+    }
+
+    /// The shop's answer for a handle: the product, or that the shop does not sell it online now
+    /// (a record the catalogue lists but the shop's channel does not publish), or an unreadable reply.
+    enum ProductAnswer: Equatable {
+        case found(StorefrontProduct)
+        case notForSale
+        case unreadable
+    }
+
+    static func productAnswer(from data: Data) -> ProductAnswer {
+        if let product = product(from: data) { return .found(product) }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let box = root["data"] as? [String: Any], box.keys.contains("product"), box["product"] is NSNull else { return .unreadable }
+        return .notForSale
     }
 
     static func product(from data: Data) -> StorefrontProduct? {

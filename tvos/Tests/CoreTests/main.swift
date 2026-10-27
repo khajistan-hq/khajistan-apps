@@ -85,7 +85,10 @@ guard CommandLine.arguments.count > 1 else {
 }
 let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
 /// <root>/tvos/Tests/Fixtures/<file> -> <root>
-let repoRoot = fixtureURL.deletingLastPathComponent().deletingLastPathComponent()
+/// The site checkout the parity tests read. The app repo no longer sits inside it, so the old
+/// <root>/tvos/... walk found nothing and every parity test skipped; KJ_ARCHIVE names it.
+let repoRoot = ProcessInfo.processInfo.environment["KJ_ARCHIVE"].map { URL(fileURLWithPath: $0) }
+    ?? fixtureURL.deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 
 func realFile(_ relative: String) throws -> Data {

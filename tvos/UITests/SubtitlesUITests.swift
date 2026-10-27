@@ -41,7 +41,7 @@ final class SubtitlesUITests: XCTestCase {
         for skin in ["day", "smut"] {
             let app = XCUIApplication()
             app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjsubtitlefile", subtitleFile]
-            app.launch()
+            kjLaunch(app)
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))
             _ = waitFor(20) { (page.value as? String) == "Ready" }
@@ -86,8 +86,8 @@ final class SubtitlesUITests: XCTestCase {
 
     func testReceiverCaptionsSignedOut() {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver"]
-        app.launch()
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES"]
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
@@ -134,9 +134,24 @@ final class SubtitlesUITests: XCTestCase {
         kjPause(8)
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
-        XCTAssertFalse(app.buttons["captionsControl"].exists, "no control for a language that cannot be captioned")
+        XCTAssertTrue(app.buttons["captionsControl"].exists, "CC remains discoverable for unsupported channels")
+        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.select)
+        XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")
         XCTAssertTrue(app.staticTexts["No captions: Kashmiri is not on the live recogniser."].exists, "the line says why")
         kjScreenshot("live-3-kashmiri-no-control", app: app)
+    }
+
+    func testReceiverStartsWithoutSelectAndDoesNotRestartOnDismissal() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "receiver"]
+        kjLaunch(app, autoplay: true)
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 90), "opening Receiver presents a tuning player without Select")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.buttons["shuffle"].waitForExistence(timeout: 10))
+        kjPause(3)
+        XCTAssertFalse(state.exists, "dismissing the player does not surf again")
     }
 
     func testFilmPreviewEnglishTrack() throws {
@@ -145,7 +160,7 @@ final class SubtitlesUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = ["-kjfilms", origin, "-kjskin", "day"]
-        app.launch()
+        kjLaunch(app)
         // Filmfarsi Trailers vol. 1: its public preview announces an English track.
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
         // The films are a shelf, and a lazy one: a card far along does not exist until focus

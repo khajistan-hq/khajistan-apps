@@ -33,6 +33,22 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
     }
 
+    /// An active dock occupies the top of the screen. The lazy channel rows only enter the
+    /// accessibility tree after the reader scrolls the catalogue past the map.
+    private func firstReceiverChannel(_ app: XCUIApplication) -> XCUIElement {
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        waitFor(catalogue, 10, "Receiver exposes its scrollable catalogue")
+        waitFor(app.buttons["region-indus"], 40, "The region strip lists Indus")
+        let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
+        for _ in 0..<8 {
+            if channel.exists && channel.isHittable { return channel }
+            catalogue.swipeUp()
+        }
+        waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
+        XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
+        return channel
+    }
+
     /// The house bar is the app's own: no system tab bar anywhere.
     func testEveryDoorInEverySkin() {
         for skin in skins {
@@ -44,8 +60,7 @@ final class KhajistanUITests: XCTestCase {
             shot("\(skin)-02-home-doors", app)
 
             app.buttons["tab-receiver"].tap()
-            waitFor(app.buttons["region-indus"], 40, "the region strip lists Indus")
-            waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch, 40, "Indus lists its channels")
+            _ = firstReceiverChannel(app)
             shot("\(skin)-03-receiver", app)
             app.swipeUp()
             shot("\(skin)-04-receiver-channels", app)
@@ -187,9 +202,8 @@ final class KhajistanUITests: XCTestCase {
         // The full-screen controls stay up (-kjcontrolsstay, debug only): on the iOS 26 runner the
         // close button never reports a hit point, so it is tapped by its frame, and a hide racing
         // the tap would turn that tap into a wake.
-        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES"])
-        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
-        waitFor(first, 40, "Indus lists its channels")
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let first = firstReceiverChannel(app)
         first.tap()
         let state = app.staticTexts["screenState"]
         waitFor(state, 10, "the receiver is on the page")
@@ -232,6 +246,59 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
         shot("player-off", app)
+    }
+
+    /// Real controls receive one tap each: connecting Pause cancels tuning; Stop survives tab navigation.
+    func testReceiverAutoplaysAndOneTapStopStaysOff() {
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let pause = app.buttons["screenPlayPause"]
+        waitFor(pause, 60, "Opening Receiver chooses a live signal without a channel tap")
+        XCTAssertFalse(app.buttons["closePlayer"].exists)
+        pause.tap()
+        let state = app.staticTexts["screenState"]
+        expectation(for: NSPredicate(format: "label == 'Paused'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+        app.buttons["receiverOff"].tap()
+        expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+        // Tap near a tab cell's edge, away from its text; the whole cell must work.
+        app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        waitFor(app.textFields["archiveSearch"], 5, "One edge tap selects Home")
+        app.buttons["tab-receiver"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        waitFor(state, 5, "One edge tap selects Receiver")
+        XCTAssertEqual(state.label, "Standing by", "Navigation does not undo an explicit Stop")
+    }
+
+    func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
+        waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
+        app.buttons["tab-home"].tap()
+        waitFor(app.textFields["archiveSearch"], 3, "Home opens with one tap")
+        sleep(6)
+        app.buttons["tab-receiver"].tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 2, "Receiver reopens")
+        XCTAssertEqual(state.label, "Standing by", "Leaving canceled the first selection; nothing started under Home")
+        waitFor(app.buttons["screenPlayPause"], 60, "Canceled opening can retry when Receiver opens again")
+        app.buttons["receiverOff"].tap()
+        XCTAssertEqual(state.label, "Standing by")
+    }
+
+    /// A signed-out viewer receives a visible reason on the first CC tap; this never spends allowance.
+    func testReceiverCCRespondsInDockAndFullScreen() {
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let cc = app.buttons["receiverCC"]
+        waitFor(cc, 60, "A live signal exposes CC")
+        cc.tap()
+        waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Account to use live captions.")
+        app.buttons["fullScreen"].tap()
+        waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")
+        app.buttons["receiverCC"].tap()
+        waitFor(app.staticTexts["receiverCaptionStatus"], 5, "Fullscreen CC also responds to one tap")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Account to use live captions.")
+        app.buttons["closePlayer"].tap()
+        waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.

@@ -152,6 +152,7 @@ final class PlayerController {
 
     private func liveEvent(_ event: LiveRadio.Event, generation gen: Int, url: URL, title: String, subtitle: String?) {
         guard gen == generation else { return }
+        guard state != .paused else { liveRadio?.pause(); return }
         switch event {
         case .started:
             timeoutTask?.cancel()
@@ -183,7 +184,15 @@ final class PlayerController {
         }
     }
 
+    /// A Receiver pause while connecting tears down readiness callbacks and shows Paused now.
+    func cancelPendingPlayback() {
+        stop()
+        state = .paused
+    }
+
     func pause() {
+        fadeTask?.cancel()
+        fadeInPending = false
         if let liveRadio { liveRadio.pause() } else { player.pause() }
         state = .paused
     }
@@ -197,6 +206,7 @@ final class PlayerController {
             fadeInPending = false
             Task { await ramp(to: 1, over: 0.5) }
         } else {
+            state = .tuning
             player.play()
         }
     }
@@ -351,6 +361,7 @@ final class PlayerController {
     /// Seeks a ready item to where the transmission has got to, then plays. An item with no
     /// start offset was already told to play in `attach`.
     private func begin(at start: Double?, generation gen: Int) {
+        guard gen == generation, state != .paused else { return }
         #if DEBUG
         print("KJTUNE ready after=\(ContinuousClock.now - attachedAt) seekTo=\(start.map { String(format: "%.0f", $0) } ?? "-")")
         #endif
@@ -360,7 +371,7 @@ final class PlayerController {
         // the subtitles read the player's own clock, so they stay in step.
         player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: CMTime(seconds: 2, preferredTimescale: 600), toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in
-                guard let self, gen == self.generation else { return }
+                guard let self, gen == self.generation, self.state != .paused else { return }
                 #if DEBUG
                 print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
                 #endif
@@ -375,6 +386,8 @@ final class PlayerController {
         guard liveRadio == nil else { return }
         switch player.timeControlStatus {
         case .playing:
+            // A queued ready/seek callback cannot override a newer explicit Pause.
+            guard state != .paused else { player.pause(); return }
             timeoutTask?.cancel()
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }

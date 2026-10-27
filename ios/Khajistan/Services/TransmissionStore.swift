@@ -199,6 +199,12 @@ final class TransmissionStore {
         await tune(channel: channelNumber)
     }
 
+    /// Cancel pending carriers as well as AV playback. A late URL must not undo Pause.
+    func pause() {
+        _ = beginTune()
+        player.pause()
+    }
+
     func stop() {
         _ = beginTune()
         player.stop()

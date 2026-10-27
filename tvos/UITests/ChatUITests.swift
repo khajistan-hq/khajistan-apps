@@ -6,7 +6,7 @@ final class ChatUITests: XCTestCase {
     func testRoomsLoadAndTheHouseRoomShowsItsLines() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "chat", "-kjskin", "day"]
-        app.launch()
+        kjLaunch(app)
         let house = app.buttons["chat-room-khajistan"]
         XCTAssertTrue(house.waitForExistence(timeout: 60), "the rooms must load, the house room first")
         // No Partners (18+) room is offered.

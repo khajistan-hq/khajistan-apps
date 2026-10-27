@@ -5,7 +5,7 @@ import XCTest
 final class MapNavigationUITests: XCTestCase {
     func testMapWalksInEveryDirection() {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch

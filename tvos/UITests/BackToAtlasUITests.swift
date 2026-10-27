@@ -4,7 +4,7 @@ import XCTest
 final class BackToAtlasUITests: XCTestCase {
     func testBackFromEverySectionReturnsToTheAtlas() {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         for section in ["Transmission", "Pics/Vids", "Account"] {
@@ -25,7 +25,7 @@ final class BackToAtlasUITests: XCTestCase {
     /// outside the Receiver's stack, and this press used to leave the app (QA, 2026-10-06).
     func testBackFromTheTopBarOverARegionPopsToTheMap() {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch

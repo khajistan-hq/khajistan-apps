@@ -88,8 +88,14 @@ struct HouseTabBar: View {
                         select(tab)
                     } label: {
                         Text(tab.title).kjKicker().lineLimit(1)
+                            .padding(.vertical, 14)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .bottom) {
+                                if tab == current { Rectangle().fill(palette.accent).frame(height: 3).padding(.horizontal, 12) }
+                            }
                     }
-                    .buttonStyle(HouseTabStyle(isCurrent: tab == current, padding: EdgeInsets(top: 14, leading: 6, bottom: 14, trailing: 6)))
+                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("tab-\(tab.rawValue)")

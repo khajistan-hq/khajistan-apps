@@ -11,7 +11,7 @@ final class PicsVidsUITests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids"]
-        app.launch()
+        kjLaunch(app)
         return app
     }
 
@@ -80,13 +80,15 @@ final class PicsVidsUITests: XCTestCase {
         var onShelves = Set<String>()
         var log: [String] = []
         let walk: [XCUIRemote.Button] = [.right, .right, .right, .down, .right, .down, .left, .left, .down, .right]
-        seen.insert(focusedTile(app).identifier)
+        var lastTileID = focusedTile(app).identifier
+        seen.insert(lastTileID)
         if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
         for press in walk {
             XCUIRemote.shared.press(press)
             kjPause(0.8)
             let id = focusedTile(app).exists ? focusedTile(app).identifier : "(off the shelves)"
             seen.insert(id)
+            if id != "(off the shelves)" { lastTileID = id }
             if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
             log.append("\(press == .left ? "L" : press == .right ? "R" : press == .up ? "U" : "D")->\(id)")
         }
@@ -96,7 +98,11 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(onShelves.count, 2, "down must move from one region's shelf to the next; shelves: \(onShelves)")
         kjScreenshot("pv-03-walked", app: app)
 
-        // Open the focused one, move on with right, back out.
+        // Live shelves can end on a loading/retry control. Choose the last visited tile
+        // explicitly; one Select on a focused tile must open its viewer.
+        let chosenTile = app.buttons[lastTileID]
+        XCTAssertTrue(kjFocus(chosenTile, app: app), "The chosen tile must take focus before Select: \(lastTileID)")
+        XCTAssertTrue(chosenTile.hasFocus)
         XCUIRemote.shared.press(.select)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 20), "Select must open the viewer")

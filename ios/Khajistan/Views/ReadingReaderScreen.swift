@@ -390,7 +390,9 @@ private struct PageRail: View {
             .onChange(of: current, initial: true) { withAnimation(.kj) { reader.scrollTo(current, anchor: .center) } }
         }
         .task(id: issue.key) {
-            await model.reading.signThumbnails(issue, stored: (1...pages).map { RRPageMap.stored($0, map: map) })
+            // Nearest the page being read first, so a resumed issue's rail fills where you are.
+            let order = (1...pages).sorted { abs($0 - current) < abs($1 - current) }
+            await model.reading.signThumbnails(issue, stored: order.map { RRPageMap.stored($0, map: map) })
         }
         .accessibilityIdentifier("rrPageRail")
     }
@@ -406,13 +408,7 @@ private struct RailThumb: View {
         Color.clear
             .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
             .accessibilityHidden(true)
-            .task(id: stored) {
-                // The rail asks for its answers when it opens; a moment later the thumbnails follow.
-                for _ in 0..<3 where image == nil {
-                    image = await model.reading.thumbnail(issue, stored: stored)
-                    if image == nil { try? await Task.sleep(for: .milliseconds(700)) }
-                }
-            }
+            .task(id: stored) { image = await model.reading.thumbnail(issue, stored: stored) }
     }
 }
 

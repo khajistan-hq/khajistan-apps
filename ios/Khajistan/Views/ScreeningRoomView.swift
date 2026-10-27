@@ -184,6 +184,7 @@ struct FilmScreen: View {
     @State private var checking = false
     @State private var refusal: Int?
     @State private var showSignIn = false
+    @State private var watchNote: String?
 
     private var film: Film? { model.films.films.first { $0.handle == handle } }
 
@@ -266,15 +267,24 @@ struct FilmScreen: View {
         .padding(.top, 6)
     }
 
-    /// The watchlist is on the account, with the other saves the website's dashboard lists.
+    /// The watchlist is on the account, with the other saves the website's profile page lists.
+    @ViewBuilder
     private func watchlistButton(_ film: Film) -> some View {
         let listed = model.saves.isSaved(film: film.handle)
-        return Button(kicker: listed ? "On your watchlist" : "Add to watchlist") {
-            guard model.saves.canSave else { showSignIn = true; return }
-            Task {
-                await model.saves.load()
-                _ = await model.saves.toggle(film: film.handle, title: Films.displayTitle(film))
+        // The account's saves take Latin-script ids only; a film filed under another script
+        // cannot be kept there, and the control says so rather than doing nothing.
+        let savable = PassportSaves.filmRef(film.handle) != nil
+        VStack(alignment: .leading, spacing: 4) {
+            Button(kicker: listed ? "On your watchlist" : "Add to watchlist") {
+                guard model.saves.canSave else { showSignIn = true; return }
+                Task {
+                    await model.saves.load()
+                    watchNote = await model.saves.toggle(film: film.handle, title: Films.displayTitle(film)) ? nil : "That did not save. Try again."
+                }
             }
+            .disabled(!savable)
+            if !savable { Text("This film cannot be kept on a watchlist yet.").kjSmall(faint: true) }
+            if let watchNote { Text(watchNote).kjSmall(faint: true) }
         }
         .accessibilityIdentifier("filmWatchlist")
         .accessibilityValue(listed ? "On" : "Off")

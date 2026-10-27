@@ -47,6 +47,9 @@ final class ReadingStore {
     @ObservationIgnored private var answers: [String: (answer: RRPageAnswer, until: Date)] = [:]
     /// A page on its way, so a turn that lands on a page being prefetched waits for it instead of fetching it twice.
     @ObservationIgnored private var inflight: [String: Task<RRPageResult, Never>] = [:]
+    /// The catalogue load, owned here rather than by the screen that asked: a screen rebuilt or
+    /// closed while the room loads must not cancel the load every other screen is waiting on.
+    @ObservationIgnored private var loading: Task<Void, Never>?
 
     private unowned let auth: AuthStore
     private let urlSession: URLSession
@@ -84,10 +87,18 @@ final class ReadingStore {
     /// Loads the shelf. Safe to call on every appearance: a shelf already open is left alone.
     func start() async {
         switch phase {
-        case .loading, .ready: return
+        case .ready: return
+        case .loading: await loading?.value; return
         case .idle, .failed: break
         }
         phase = .loading
+        let task = Task { await load() }
+        loading = task
+        await task.value
+        loading = nil
+    }
+
+    private func load() async {
         async let feed = loadFeed()
         async let rightsHeld = loadRights()
         async let index = loadModules()
@@ -380,11 +391,15 @@ final class ReadingStore {
         }
     }
 
-    /// A page at the small size, if the server allowed it to this viewer; nil otherwise.
+    /// A page at the small size, if the server allowed it to this viewer; nil otherwise. A missing
+    /// or expired answer is asked for once, for this page alone.
     func thumbnail(_ issue: RRIssue, stored: Int) async -> UIImage? {
         let token = try? await auth.validAccessToken()
         let key = Self.pageKey(endpoint(issue, page: stored), token: token)
         if let held = thumbs.object(forKey: key as NSString) { return held }
+        if thumbAnswers[key].map({ $0.until <= Date() }) ?? true {
+            await signThumbnails(issue, stored: [stored])
+        }
         guard let answer = thumbAnswers[key], answer.until > Date(), case .page(let url) = RRPageOutcome.decide(answer.answer) else { return nil }
         let session = urlSession
         let image: UIImage? = await Task.detached(priority: .utility) {

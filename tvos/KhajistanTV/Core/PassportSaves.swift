@@ -89,7 +89,8 @@ enum PassportSaves {
     static func insertRequest(userId: String, ref: String, wing: String, title: String?, href: String, accessToken: String) -> URLRequest? {
         guard isUserId(userId) else { return nil }
         var row: [String: Any] = ["user_id": userId, "object_ref": ref, "wing": wing, "href": href]
-        if let title { row["title"] = String(title.prefix(200)) }
+        // The table counts characters as code points, so the cut is made the same way.
+        if let title { row["title"] = String(String.UnicodeScalarView(title.unicodeScalars.prefix(200))) }
         guard let body = try? JSONSerialization.data(withJSONObject: row) else { return nil }
         var call = request("/rest/v1/passport_saves", method: "POST", token: accessToken, body: body)
         call.setValue("return=minimal", forHTTPHeaderField: "Prefer")

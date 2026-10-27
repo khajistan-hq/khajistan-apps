@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 /// The signed-in account's saves on the receiver and in the Reading Room, read from and written to
-/// `passport_saves`, the table the website and the dashboard use. Signed out there is nothing to
+/// `passport_saves`, the table the website and the profile use. Signed out there is nothing to
 /// save to: the screens say so rather than keep a save only on this device.
 @MainActor @Observable
 final class SavesStore {
@@ -42,6 +42,8 @@ final class SavesStore {
     }
 
     private func read(_ userId: String) async {
+        // Another account's saves are never shown while this one's are read.
+        if loadedFor != userId { refs = []; rows = []; collections = [] }
         guard let token = try? await auth.validAccessToken(),
               let request = PassportSaves.listRequest(userId: userId, accessToken: token),
               let (data, response) = try? await urlSession.data(for: request),
@@ -62,12 +64,14 @@ final class SavesStore {
 
     /// Pics/Vids keys the account saved, newest first.
     var savedPnvKeys: [String] {
-        rows.filter { $0.object_ref.hasPrefix("pnv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(4)) }
+        guard known else { return [] }
+        return rows.filter { $0.object_ref.hasPrefix("pnv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(4)) }
     }
 
     /// Film handles on the account's watchlist, newest first.
     var watchlist: [String] {
-        rows.filter { $0.object_ref.hasPrefix("tv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(3)) }
+        guard known else { return [] }
+        return rows.filter { $0.object_ref.hasPrefix("tv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(3)) }
     }
 
     func isSaved(pnvKey key: String) -> Bool {
@@ -80,7 +84,8 @@ final class SavesStore {
 
     /// Saved site pages (Madrassa essays): their ids, newest first.
     var savedPages: [String] {
-        rows.filter { $0.object_ref.hasPrefix("page:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(5)) }
+        guard known else { return [] }
+        return rows.filter { $0.object_ref.hasPrefix("page:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(5)) }
     }
 
     @discardableResult
@@ -170,6 +175,7 @@ final class SavesStore {
         if code == 201 || code == 204 { return true }
         if code == 409, let body = reply?.0, String(decoding: body, as: UTF8.self).contains("23505") { return true }
         refs.remove(ref)
+        rows.removeAll { $0.object_ref == ref }
         return false
     }
 

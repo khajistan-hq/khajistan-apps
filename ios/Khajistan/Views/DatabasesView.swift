@@ -39,7 +39,11 @@ struct DatabaseScreen: View {
     @State private var query = ""
     @State private var facets: [String: String] = [:]
     @State private var sort: DBSort = .listed
+    /// Whether any record carries a year, worked out once when the records arrive.
+    @State private var hasYears = false
     @State private var results: [DBRecord] = []
+    /// False until the first filter has run, so an empty list never reads as "no match" while it fills.
+    @State private var filtered = false
     @State private var limit = Self.page
     @State private var selected: DBRecord?
 
@@ -73,7 +77,12 @@ struct DatabaseScreen: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .task(id: model.auth.previewPassword) { await feed.load() }
+        .task(id: model.auth.previewPassword) {
+            await feed.load()
+            if let records = feed.value {
+                hasYears = await Task.detached(priority: .utility) { records.contains { DBQuery.year($0) != nil } }.value
+            }
+        }
         // Filtering runs a moment after the last keystroke, and a newer query replaces an older one.
         .task(id: "\(query)|\(facets)|\(sort.rawValue)|\(feed.value?.count ?? -1)") {
             try? await Task.sleep(for: .milliseconds(180))
@@ -84,6 +93,7 @@ struct DatabaseScreen: View {
             }.value
             guard !Task.isCancelled else { return }
             results = found
+            filtered = true
             limit = Self.page
         }
     }
@@ -111,7 +121,7 @@ struct DatabaseScreen: View {
             }
         }
         // Year orders are offered only where the records carry a year.
-        let orders = DBSort.allCases.filter { $0 == .listed || $0 == .title || records.contains { DBQuery.year($0) != nil } }
+        let orders = DBSort.allCases.filter { $0 == .listed || $0 == .title || hasYears }
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 Text("Sort").kjSmall(faint: true).padding(.trailing, 4)
@@ -124,13 +134,13 @@ struct DatabaseScreen: View {
             .padding(.leading, 12)
         }
         .padding(.horizontal, -12)
-        HStack {
+        if filtered { HStack {
             Text("\(results.count.formatted()) of \(records.count.formatted()) records").kjSmall(faint: true)
                 .accessibilityIdentifier("dbCount")
             if !facets.isEmpty || !query.isEmpty {
                 Button(kicker: "Clear") { query = ""; facets = [:] }.accessibilityIdentifier("dbClear")
             }
-        }
+        } }
     }
 
     private func facetChip(_ name: String, _ value: String?, title: String) -> some View {
@@ -141,7 +151,7 @@ struct DatabaseScreen: View {
 
     @ViewBuilder
     private var list: some View {
-        if results.isEmpty, feed.value != nil {
+        if filtered, results.isEmpty {
             Text("No record matches.").kjBody().accessibilityIdentifier("dbNone")
         }
         ForEach(results.prefix(limit)) { record in

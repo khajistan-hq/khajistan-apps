@@ -95,7 +95,7 @@ struct NowPlayingBar: View {
     private var name: (title: String, detail: String) {
         switch model.tuner.source {
         case .live(let channel): return (channel.name, channel.mediaType.lowercased() == "radio" ? "Radio" : "Television")
-        case .transmission(let number): return ("Khajistan Transmission", "Channel \(number)")
+        case .transmission(let number): return (model.transmission.channelName(number), "Khajistan Transmission")
         case nil: return ("", "")
         }
     }

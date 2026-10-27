@@ -265,7 +265,7 @@ struct PostScreen: View {
         }
     }
 
-    /// Save, on the account with the other saves the website's dashboard lists.
+    /// Save, on the account with the other saves the website's profile page lists.
     private func saveRow(_ post: MadrassaPost) -> some View {
         let pageID = (post.blog ?? "announcements") + "/" + post.handle
         let saved = model.saves.isSaved(page: pageID)

@@ -280,7 +280,7 @@ struct PnvSavedScreen: View {
                             Text(keys.isEmpty ? "Nothing saved yet. Save an object from its viewer." : "None of these objects is on the shelf now.")
                                 .kjBody().accessibilityIdentifier("pnvSavedEmpty")
                         } else {
-                            Text("\(rows.count.formatted()) object\(rows.count == 1 ? "" : "s")").kjSmall(faint: true)
+                            Text("\(rows.count.formatted()) object\(rows.count == 1 ? "" : "s")" + (keys.count > 500 ? " \u{00B7} the newest 500" : "")).kjSmall(faint: true)
                                 .accessibilityIdentifier("pnvSavedCount")
                             LazyVGrid(columns: [GridItem(.adaptive(minimum: 110), spacing: 8)], spacing: 8) {
                                 ForEach(rows) { row in
@@ -316,9 +316,14 @@ struct PnvSavedScreen: View {
             let chunk = Array(wanted[start..<min(start + 100, wanted.count)])
             guard let (data, response) = try? await URLSession.shared.data(for: PnvAPI.rowsRequest(mediaKeys: chunk)),
                   (response as? HTTPURLResponse)?.statusCode == 200,
-                  let page = try? JSONDecoder().decode([PnvRow].self, from: data) else { phase = .failed; return }
+                  let page = try? JSONDecoder().decode([PnvRow].self, from: data) else {
+                // A fetch cancelled by a newer one says nothing; the newer one answers.
+                if !Task.isCancelled { phase = .failed }
+                return
+            }
             for row in page { found[row.media_key] = row }
         }
+        guard !Task.isCancelled else { return }
         rows = wanted.compactMap { found[$0] }
         phase = .ready
     }

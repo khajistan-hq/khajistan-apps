@@ -20,20 +20,25 @@ tests check the locked note instead.
 
 | Suite | Result |
 |---|---|
-| TV core (real site data, Bazaar fixture) | 148 passed, 2 skipped (a camera shard absent from the checkout; the full RR grouping fixture) |
+| TV core (real site data, Bazaar fixture) | 149 passed, 2 skipped (a camera shard absent from the checkout; the full RR grouping fixture) |
 | iOS core | 74 passed, 1 skipped |
 | iOS package | 8 passed |
-| iPhone UI (iPhone 17, live site) | 17 of 17 passed across the last two runs (the locked-room path was fixed and re-run alone) |
-| iPhone UI, site-data walk (iPhone 18 Pro, `KJ_SITE`) | passed, again after the review fixes |
-| iPad UI (iPad Pro 11-inch) | 17 of 17 (two tests made layout-aware and re-run) |
-| `KJ_APP_STORE` iPhone build and its exclusion test | builds; exclusion test passed, Chat test skipped as designed |
-| Apple TV Rooms remote test (live register) | passed, again after the review fixes |
+| iPhone UI (iPhone 17, `KJ_SITE`) | 19 of 19, one run, after the second review's fixes |
+| iPad UI (iPad Pro 11-inch (M5), `KJ_SITE`) | 19 of 19, one run, after the same fixes |
+| `KJ_APP_STORE` builds | iPhone and tvOS both build |
+| Apple TV Rooms remote test (live register) | passed |
+| Apple TV rights-held title (`-kjrrheldfirst`) | passed in all three skins; failed without the flag on the same shelf |
 | Mac Catalyst | builds; launched and the Madrassa room captured; not driven by input |
 | Builds | iOS simulator, tvOS simulator, Mac Catalyst: all succeed |
+
+The two CI failures on PR 8 at 350a025 were real and are fixed: the app aborted on the runner's
+simulator when the Receiver built its tuning hiss (an audio device opened in `init`, crash report
+in the run's artifact), and the TV rights-held test could not reach a held title once the comic
+reprints left the hold on 2026-10-21 (held titles rank at the end of long rows). The second also failed on
+three other branches' runs (`cursor/*`, 2026-10-26).
 
 ## Not covered
 
 - Mac Catalyst not driven by a UI test; keyboard and pointer not exercised by hand.
 - Full-film playback with an entitled account (no test account held).
-- `KJ_APP_STORE` tvOS build not compiled in this branch.
 - Physical devices: none.

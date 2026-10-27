@@ -113,7 +113,19 @@ final class ReadingStore {
         titles = built
         // Ranked before the first paint, so a shelf never reorders under the viewer.
         provenance = await ranks
-        tabs = RRRank.ranked(RRShelves.tabs(titles: built, index: await index, rights: rights), provenance: provenance)
+        var shelf = RRRank.ranked(RRShelves.tabs(titles: built, index: await index, rights: rights), provenance: provenance)
+        #if DEBUG
+        // UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
+        // row, past where a remote walking down the shelf can see it, so the test brings it forward.
+        if UserDefaults.standard.bool(forKey: "kjrrheldfirst") {
+            shelf = shelf.map { tab in
+                RRTab(id: tab.id, name: tab.name, native: tab.native, depth: tab.depth, rows: tab.rows.map { row in
+                    RRRow(id: row.id, name: row.name, titles: row.titles.filter { isRights($0) } + row.titles.filter { !isRights($0) })
+                })
+            }
+        }
+        #endif
+        tabs = shelf
         phase = .ready
     }
 

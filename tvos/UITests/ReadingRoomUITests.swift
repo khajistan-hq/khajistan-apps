@@ -16,9 +16,9 @@ final class ReadingRoomUITests: XCTestCase {
 
     private let skins = ["day", "grove", "smut"]
 
-    private func launch(skin: String) -> XCUIApplication {
+    private func launch(skin: String, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        var arguments = ["-kjtab", "reading", "-kjskin", skin]
+        var arguments = ["-kjtab", "reading", "-kjskin", skin] + extra
         if let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty {
             arguments += ["-kjfilms", origin]
         }
@@ -206,7 +206,8 @@ final class ReadingRoomUITests: XCTestCase {
 
     func testRightsHeldTitleShowsCoversAndNoPages() throws {
         for skin in skins {
-            let app = launch(skin: skin)
+            // Held titles rank last in their rows; the flag brings them to the front (DEBUG only).
+            let app = launch(skin: skin, extra: ["-kjrrheldfirst", "YES"])
             waitForShelf(app)
             _ = try XCTUnwrap(focusCard(app, tagged: "Rights pending"), "a rights-held title must be on the shelf")
             XCUIRemote.shared.press(.select)

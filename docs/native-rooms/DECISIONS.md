@@ -37,3 +37,12 @@ Each entry: what was chosen, and why, in one or two lines.
     2026-10-06 for membership, and a product code was not asked for).
 13. **Films use the system player on phone and Mac** (scrubber, manifest subtitles, PiP, AirPlay);
     starting a film turns the Receiver off so one source plays.
+14. **Saves use the website's own `passport_saves` rows**, so the website and the app show one list:
+    films `tv:<handle>`, Pics/Vids `pnv:<key>` with no title or picture kept, Madrassa pieces
+    `page:<path>`. A ref the table's check refuses is disabled in the app, never sent.
+15. **A shared store owns its own loads.** A screen awaits the load; it does not run it. A screen
+    rebuilt mid-load (iPad does this when a room opens on a pushed route) must not cancel what
+    every other screen is waiting on.
+16. **Nothing opens an audio device until it makes a sound.** The Receiver's tuning hiss wires its
+    engine on the first sound; SwiftUI builds a view's state object on every rebuild, and a device
+    with no audio output hung and aborted in `init`.

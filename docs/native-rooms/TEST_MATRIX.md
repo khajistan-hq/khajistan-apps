@@ -24,13 +24,16 @@ tests check the locked note instead.
 | iOS core | 74 passed, 1 skipped |
 | iOS package | 8 passed |
 | iPhone UI (iPhone 17, live site) | 17 of 17 passed across the last two runs (the locked-room path was fixed and re-run alone) |
-| iPhone UI, site-data walk (iPhone 18 Pro, `KJ_SITE`) | passed |
+| iPhone UI, site-data walk (iPhone 18 Pro, `KJ_SITE`) | passed, again after the review fixes |
+| iPad UI (iPad Pro 11-inch) | 17 of 17 (two tests made layout-aware and re-run) |
+| `KJ_APP_STORE` iPhone build and its exclusion test | builds; exclusion test passed, Chat test skipped as designed |
+| Apple TV Rooms remote test (live register) | passed, again after the review fixes |
+| Mac Catalyst | builds; launched and the Madrassa room captured; not driven by input |
 | Builds | iOS simulator, tvOS simulator, Mac Catalyst: all succeed |
 
 ## Not covered
 
-- iPad UI suite not re-run after Stage 1 (the sidebar assertion is written, not yet run on an iPad).
 - Mac Catalyst not driven by a UI test; keyboard and pointer not exercised by hand.
 - Full-film playback with an entitled account (no test account held).
-- `KJ_APP_STORE` builds compiled and run: not yet in this branch.
+- `KJ_APP_STORE` tvOS build not compiled in this branch.
 - Physical devices: none.

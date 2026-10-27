@@ -16,9 +16,9 @@ Nothing pushed, nothing uploaded. Update this file at the end of every stage.
 | 8 Madrassa | complete on phone/Mac; TV browse + full reading | 15 entries from the page itself; 13 essays reach the screen whole (word-count check); dictionary 829 / 151 set apart |
 | 9 Databases | complete on phone/Mac; TV compact browse + record | 11 files decode at the site's stated counts; censor scans open the native reader |
 | 10 Library / Search | complete on phone/Mac | Search answers by room and names rooms it could not search; Library lists places on this device and account saves |
-| 11 Mac | builds; layouts are the iPad ones with keyboard commands | not yet exercised by hand with keyboard and pointer |
-| 12 Apple TV | Rooms door added; remote UI test written | see TEST_MATRIX.md |
-| 13 Release candidate | not started | — |
+| 11 Mac | partial | builds; sidebar + room layout captured from the running app; Cmd-1…5, Cmd-F, Cmd-[ and Esc wired; keyboard/pointer not driven |
+| 12 Apple TV | complete for the new rooms | Rooms door; remote test passes on live register data |
+| 13 Release candidate | partial | refute pass run and its ten findings fixed; HANDOFF.md written; no upload (owner-only) |
 
 ## Resume here
 

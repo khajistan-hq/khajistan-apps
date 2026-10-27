@@ -10,7 +10,7 @@ Release, store and compliance work is a separate set: `docs/handoffs/2026-10-13-
 | | |
 |---|---|
 | Repository | `khajistan-hq/khajistan-apps` (public: no private material in commits) |
-| Branch | `codex/khajistan-native-rooms`, head `f7e9c0f`, pushed |
+| Branch | `codex/khajistan-native-rooms`, pushed; the Apple TV layouts are the commit after `4f2d627` |
 | Pull request | draft PR 8 against `main`; Auto-fix is on for it |
 | Worktree | `/Users/home/CZURImages/khajistan-apps-native-rooms` |
 | Base | `origin/main` 513b617 with PR 1 (the Mac app) merged in |
@@ -31,8 +31,9 @@ The website and the machinery live in the separate private repo `/Users/home/CZU
    app. Done for iPhone, iPad and Mac (f7e9c0f). Approved by the owner: "Looks right."
 4. "Make sure CC shows in the receiver": done (a plain CC key, f7e9c0f).
 5. "Carry the same reference-app layouts to the Apple TV app next, same tests and review", then
-   **"actually stop"**. The TV work had not started: one build and two baseline screenshots, no
-   code changed. **This is the open task.**
+   **"actually stop"**. Resumed on the owner's word the same day and **done** (the commit after
+   4f2d627): the Rooms door, its four rooms, the Receiver guide and radio Now Playing. Not yet
+   seen by the owner.
 
 ## The reference apps (DECISIONS 17)
 
@@ -73,19 +74,35 @@ Shared building blocks: `ios/Khajistan/Views/Shelves.swift` (`LargeTitle`, `Sear
   use `RoomLink(route:in:)`, which opens the room at that place. A bare `NavigationLink` on Home is
   disabled and draws dimmed.
 
-## The open task: the Apple TV app
+## The Apple TV layouts (done 2026-10-27)
 
-**State.** The TV app already follows the Apple TV app's shelves and focus rules (owner,
-2026-10-06, written in `tvos/DESIGN.md`, "Cards and shelves": shelves with a 38pt title and count,
-cards that lift to 1.08 with a band-coloured shadow, posters 420pt high uncropped). So the TV gap
-is smaller than the phone's was. What is visibly behind:
+**What was built** (written up in `tvos/DESIGN.md`, "Rooms" and "The Receiver"):
 
-- The **Rooms** door (`tvos/KhajistanTV/Views/RoomsTV.swift`, 500 lines) is four text cards
-  with no artwork; its rooms (Screening, Bazaar, Madrassa, Databases) are compact browse views.
-- Two baseline screenshots were taken on 2026-10-27 (Rooms, and a launch with `-kjtab reading`).
-  **The `-kjtab reading` launch landed on the tvOS home screen, not in the app.** It was not
-  investigated: it may be a crash at launch, a wrong launch-argument value, or the previous launch
-  still terminating. Check first, with the simulator log.
+- **Rooms door**: four tiles (mark, count only if the list is already loaded, name, line) and Up
+  Next from this device. It starts no download of its own.
+- **Screening Room**: Up Next (`kj.filmPlaces`, seconds by handle, kept by `FilmPlayerView` when a
+  full film stops part-way, forgotten at its end), Your watchlist, a poster shelf per country. A
+  poster opens `TVFilmPage`: poster, one solid Play or *Resume from 20:00*, Preview, Watchlist,
+  Information. Play opens the player asking for the full film at once (`startsFull`). The
+  Receiver's own film shelves still open a film on its preview.
+- **Bazaar**: price first under each object on its soft plate; the object's page has the shop's
+  live price, option chips that change it, the description, and the khajistan.com address.
+- **Madrassa**: serif titles and text, entry pictures, writing cards with their lead picture; a
+  piece ends *Continue on your phone, or on the website*.
+- **Databases**: a grid of systems; a table with hairlines and two property columns; a record as a
+  property page.
+- **Receiver**: channel cards lead with the medium's mark; the player's strip gains **Guide**
+  after CC and Like (armed with Right, never focused, like them): every channel of the shelf,
+  numbered, LIVE on the playing one; Select tunes behind the pigeon; Left or Menu closes.
+  Radio shows Now Playing (mark, NOW PLAYING · LIVE RADIO, name, place and broadcaster).
+- **Shared fix**: the focus shadow now falls under the card as one shape (`compositingGroup`);
+  before, each piece on a plate cast its own, a halo under lettering and marks in Smut.
+- **`-kjtab reading`** opens the Reading Room; the home-screen landing of the baseline did not
+  recur (most likely the previous launch still terminating).
+
+**Not done on TV, from the research column below**: the Reading Room's title page and Continue
+shelf, Pics/Vids source identity, and direct channel entry by number (the Siri Remote has no
+digits; the guide numbers its rows instead).
 
 **What to build** (the research guide's TV column, adapted):
 
@@ -147,9 +164,8 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
    simulators), each finding checked against the code before it is fixed or dismissed. Write what
    was dismissed and why in the commit message.
 
-Last measured, 2026-10-27 at f7e9c0f: iPhone UI 19/19, iPad UI 19/19, iOS core 74 passed 1
-skipped, TV core 149 passed 2 skipped, package 8, TV Rooms 1/1; Mac, iOS and tvOS `KJ_APP_STORE`
-builds succeed.
+Last measured, 2026-10-27, the Apple TV layouts: see TEST_MATRIX's first table (TV walks 3/3
+in each new suite, TV regression 9/9, core suites unchanged, iPhone and iPad UI, builds).
 
 ## Working rules on this machine
 
@@ -163,11 +179,12 @@ builds succeed.
 
 ## Next actions, ranked
 
-1. **Apple TV layouts** (the open task): check the `-kjtab reading` launch first, then rebuild
-   the Rooms door and its four rooms in the Apple TV app's shape, then the Receiver guide and Now
-   Playing; same tests and refute review as above. Recommended next.
-2. When CI runs again on PR 8, read its result; Auto-fix reports failures.
-3. Backend: the `phone_media_collections` grants and the saves table's ref check (two board items;
+1. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
+   `-kjtab rooms` in the simulator) and say whether they look right, as was done for the phone.
+2. Apple TV, what the research column still lists: the Reading Room's title page with one
+   Read/Continue and a Continue shelf from this device; source identity on Pics/Vids cards.
+3. When CI runs again on PR 8, read its result; Auto-fix reports failures.
+4. Backend: the `phone_media_collections` grants and the saves table's ref check (two board items;
    not this lane's to apply).
-4. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
-5. Front lane: the two stale website menu lines.
+5. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
+6. Front lane: the two stale website menu lines.

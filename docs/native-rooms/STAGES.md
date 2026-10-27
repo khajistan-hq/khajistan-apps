@@ -21,7 +21,7 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | 13 Release candidate | partial | refute pass run and its ten findings fixed; HANDOFF.md written; no upload (owner-only) |
 | Mobbin pieces | complete on phone/Mac | watchlist, Pics/Vids saves + collections (read only), Madrassa contents + save, database sort, reader rail, now-playing bar; second refute pass, its findings fixed; iPad found the RR catalogue load cancelled by a rebuilt screen — the store now owns its load |
 | Reference-app layouts | built on iPhone/iPad/Mac | every native room restyled to its reference app (DECISIONS 17); CC key; see TEST_MATRIX for the runs |
-| Reference-app layouts on Apple TV | not started (owner said stop, 2026-10-27) | baseline only; the plan and a launch to check first are in HANDOFF.md |
+| Reference-app layouts on Apple TV | complete (2026-10-27, resumed on the owner's word) | Rooms door as tiles + Up Next; Screening Room with Up Next, watchlist and a film page (one Play/Resume); Bazaar showcase (price first, option chips, buy-on-khajistan.com); Madrassa in serif with pictures; databases as a Notion table and property page; Receiver guide (strip's Guide control, LIVE row) and radio Now Playing. `RoomsLayoutUITests` and `ReceiverGuideUITests` pass in Day, Grove and Smut; Fable refute pass run, its findings fixed or dismissed in the commit. `-kjtab reading` launch checked: it opens the Reading Room (the earlier home-screen landing did not recur) |
 
 ## Resume here
 

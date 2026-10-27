@@ -10,13 +10,38 @@ swift test --package-path ios
 xcodebuild test -project ios/Khajistan.xcodeproj -scheme Khajistan -destination 'platform=iOS Simulator,name=iPhone 17'
 TEST_RUNNER_KJ_SITE=http://127.0.0.1:8831 xcodebuild test ... -only-testing:KhajistanUITests/KhajistanUITests/testMadrassaDatabasesAndBazaarReadTheSiteData
 xcodebuild test -project tvos/KhajistanTV.xcodeproj -scheme KhajistanTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' -only-testing:KhajistanTVUITests/RoomsUITests
+TEST_RUNNER_KJ_SITE=http://127.0.0.1:8831 xcodebuild test -project tvos/KhajistanTV.xcodeproj -scheme KhajistanTV -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)' -only-testing:KhajistanTVUITests/RoomsLayoutUITests -only-testing:KhajistanTVUITests/ReceiverGuideUITests
 ```
+
+`RoomsLayoutUITests` walks the TV Rooms door and its four rooms in each skin (it seeds a film place
+with `-kj.filmPlaces`, so Up Next and Resume show without an entitled account) and keeps a
+screenshot of every screen; `ReceiverGuideUITests` opens a live Indus channel, the guide, tunes from
+it, closes it with Left, and opens a radio station's Now Playing, in each skin. DEBUG builds of the
+TV app also take `-kjroom <screening|bazaar|madrassa|databases>`.
 
 `KJ_SITE` is a local server of the site checkout (`python3 scripts/dev_server.py 8831 --directory archive`
 in the machinery repo). Most room data is behind the site password until launch; without `KJ_SITE` the
 tests check the locked note instead.
 
-## Last measured (2026-10-27)
+## Last measured (2026-10-27, Apple TV reference-app layouts)
+
+Measured on the TV layouts diff before it was committed; the rows below this table are the
+earlier phone run.
+
+| Suite | Result |
+|---|---|
+| TV core (real site data, Bazaar fixture) | 149 passed, 2 skipped (unchanged; no Core file changed) |
+| iOS core | 74 passed, 1 skipped |
+| iOS package | 8 passed |
+| Apple TV `RoomsLayoutUITests` (local site) | 3 of 3 (Day, Grove, Smut) after the refute fixes |
+| Apple TV `ReceiverGuideUITests` (live channels) | 3 of 3 after the refute fixes |
+| Apple TV Rooms remote test | passed |
+| Apple TV regression set | 9 of 9: rights-held title, both film tests, two caption tests, region shelves, radio dancer, a press mid-flight, Rooms |
+| iPhone UI (iPhone 17, `KJ_SITE`) | 19 of 19 on a run alone; a first run beside the TV suite lost `testMapTapChoosesARegion` to a 10 s timeout and it passed on its own |
+| iPad UI (iPad Pro 11-inch (M5), `KJ_SITE`) | 19 of 19 |
+| Builds | Mac Catalyst, iPhone `KJ_APP_STORE` and tvOS `KJ_APP_STORE` all build |
+
+## Earlier (2026-10-27, phone reference-app layouts)
 
 | Suite | Result |
 |---|---|

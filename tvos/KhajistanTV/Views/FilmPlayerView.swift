@@ -12,6 +12,8 @@ import SwiftUI
 /// switched with a Subtitles control in the panel, beside Watch the full film.
 struct FilmPlayerView: View {
     let film: Film
+    /// Opened by the film page's Play: ask for the full film at once, with no preview first.
+    var startsFull = false
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -205,6 +207,11 @@ struct FilmPlayerView: View {
 
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
+        if startsFull {
+            await watchFull()
+            if full == nil { watchFocused = true }
+            return
+        }
         guard Films.previewURL(film) != nil else {
             watchFocused = true
             return
@@ -239,8 +246,14 @@ struct FilmPlayerView: View {
             }
             full = (kind, expiresAt)
             model.clips.cover(caption: Films.displayTitle(film))
-            controller.onEnded = { controller.stop() }
-            controller.attach(url: url, seekTo: nil, title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
+            // Watched to the end: it leaves Up Next.
+            controller.onEnded = { [handle = film.handle] in
+                FilmPlaces.forget(handle)
+                controller.stop()
+            }
+            let resume = FilmPlaces.position(film.handle)
+            controller.attach(url: url, seekTo: resume,
+                              title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
             await controller.settled()
             model.clips.uncover()
         case .refused(let status):
@@ -280,6 +293,12 @@ struct FilmPlayerView: View {
     }
 
     private func stopEverything() {
+        // Only the full film's place is kept, as on the phone; a preview has none.
+        // The player's own clock, not the half-second poll, which can still hold the preview's.
+        if full != nil, controller.state == .playing || controller.state == .paused {
+            let now = controller.player.currentTime().seconds
+            FilmPlaces.record(film.handle, at: now.isFinite ? now : position, of: duration)
+        }
         hideTask?.cancel()
         subtitles.clear()
         controller.stop()

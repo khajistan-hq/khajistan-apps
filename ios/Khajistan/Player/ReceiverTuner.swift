@@ -15,6 +15,12 @@ final class ReceiverTuner {
         case transmission(Int)
     }
 
+    /// The viewer's choice, kept on the device (owner, 2026-10-28): leaving the Receiver keeps the
+    /// channel on in the small player (the default), or turns it off.
+    static let keepsPlayingKey = "kj.receiverKeepsPlaying"
+    /// And whether it plays on with the app closed or the phone locked (the default), or pauses.
+    static let playsInBackgroundKey = "kj.receiverPlaysInBackground"
+
     /// Nil when the receiver is off.
     private(set) var source: Source?
     /// The list a live channel was chosen from: up and down move through it.
@@ -194,6 +200,13 @@ final class ReceiverTuner {
         case nil:
             return
         }
+    }
+
+    /// The app left the screen with Play in the background off: what is on pauses, to be played
+    /// again on return.
+    func appLeftTheScreen() {
+        guard !(UserDefaults.standard.object(forKey: Self.playsInBackgroundKey) as? Bool ?? true) else { return }
+        if player.state == .playing || player.state == .tuning { playPause() }
     }
 
     /// True while Surf is looking for a channel.

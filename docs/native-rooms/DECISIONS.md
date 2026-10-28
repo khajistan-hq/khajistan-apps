@@ -103,3 +103,13 @@ Each entry: what was chosen, and why, in one or two lines.
     not used. Access stays the page server's answer on every page. Measured on the owner's TV:
     1.36–1.44 s to the shelf, 1.65–1.73 s to the first cover; the first open after an install 2.9 s.
 
+24. **The Receiver's two choices on the phone (owner, 2026-10-28: "both options should be there so
+    user can choose to play a tv channel as they read"; "play reciever in background even when
+    their phone is on home screen").** Two switches on the Receiver page, kept on the device, both on
+    by default. *Keep playing on other pages*: on, the small player follows the viewer, now also
+    inside the Reading Room reader, which covers the house bar (its name closes the reader and
+    opens the Receiver); off, leaving the Receiver turns the channel off. *Play with the app
+    closed*: on, the Receiver's picture lets go of its player while the app is in the background,
+    so a television channel's sound carries on (radio already did, `UIBackgroundModes audio`); off,
+    what is on pauses when the app leaves the screen. Pics/Vids videos and films are not covered:
+    the system still pauses them. Chat and the Pics/Vids viewer do not carry the small player yet.

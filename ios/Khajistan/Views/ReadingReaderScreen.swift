@@ -94,6 +94,8 @@ struct ReadingReaderScreen: View {
             .contentShape(Rectangle())
             .gesture(turnGesture, including: zoomed ? .subviews : .all)
             bottomBar
+            // A channel left on in the Receiver plays on while reading; its controls stay to hand.
+            if model.tuner.source != nil { NowPlayingBar() }
         }
     }
 

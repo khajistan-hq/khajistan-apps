@@ -25,6 +25,8 @@ struct ReceiverView: View {
     /// Which full-screen view is up, fixed when it opens: read live from the tuner, turning the
     /// receiver off mid-dismissal swapped in an empty live view for a frame.
     @State private var fullScreenTransmission = false
+    @AppStorage(ReceiverTuner.keepsPlayingKey) private var keepsPlaying = true
+    @AppStorage(ReceiverTuner.playsInBackgroundKey) private var playsInBackground = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,8 +44,10 @@ struct ReceiverView: View {
             guard model.tab == .receiver else { return }
             await model.tuner.receiverOpened(isActive: { model.tab == .receiver })
         }
-        .onChange(of: model.tab) { _, tab in
-            if tab != .receiver { model.tuner.receiverClosed() }
+        .onChange(of: model.tab) { old, tab in
+            guard old == .receiver, tab != .receiver else { return }
+            model.tuner.receiverClosed()
+            if !keepsPlaying { model.tuner.stop() }
         }
         .fullScreenCover(isPresented: $fullScreen) {
             Group {
@@ -67,6 +71,16 @@ struct ReceiverView: View {
             VStack(alignment: .leading, spacing: 20) {
                 LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
                 figures
+                HouseSwitch(title: "Keep playing on other pages",
+                            detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
+                                                 : "The channel turns off when you leave the Receiver",
+                            isOn: $keepsPlaying)
+                    .accessibilityIdentifier("receiverKeepsPlaying")
+                HouseSwitch(title: "Play with the app closed",
+                            detail: playsInBackground ? "Keeps playing on the home screen and with the phone locked"
+                                                      : "Pauses when you leave the app",
+                            isOn: $playsInBackground)
+                    .accessibilityIdentifier("receiverPlaysInBackground")
                 if model.tuner.source == nil { device }
                 switch part {
                 case .live: LiveSection()

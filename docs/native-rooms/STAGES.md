@@ -27,6 +27,8 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | TV index search (2026-10-28) | complete | every TV database table has a search bar (owner: "the indexes should have a search bar for people to search metadata and name of song"); the phone already had one. `testIndexSearchFindsASongByTitleAndArtist` passes in three skins |
 | Sign in on the TV from a phone | live 2026-10-27 (table, function, /activate); first real approval is the owner's | TV QR + code + polling, iPhone Sign in on a TV (scan or type), `/activate` page, `tv-sign-in` function and migration on `apps/tv-sign-in` branches; Fable security pass, six fixes made; QR decoded from the screenshots in all three skins |
 
+| Receiver choices on the phone (2026-10-28) | built; background sound not yet heard on a device | Keep playing on other pages (small player also in the reader) and Play with the app closed (DECISIONS 24). `testNowPlayingBarStaysOverTheReader`, `testLeavingTheReceiverStopsItWhenKeepPlayingIsOff` and `testNowPlayingBarFollowsTheReceiverAcrossDoors` pass on the iPhone 17 simulator; tvOS builds |
+
 | Apple TV load speed (2026-10-27) | complete; proxy live | Cause measured on the owner's TV: the home network drops connections to the project host. Site `/sb/` proxy live (archive b96a2b2f3, deployed by the sign-in session); apps route through it and fail fast (DECISIONS 22); the Reading Room opens from the shelf kept on the device (DECISIONS 23). Owner's TV, Release: before, 45.7 s then failure; now 1.36–1.44 s to the shelf and 1.65–1.73 s to the first cover, 2.9 s on the first open after an install; Pics/Vids opens |
 
 ## Resume here

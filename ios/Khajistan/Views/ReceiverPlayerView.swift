@@ -20,7 +20,7 @@ struct ReceiverPlayerView: View {
         let palette = Palette(model.skin)
         ZStack {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: controller.player).ignoresSafeArea()
+            PlayerLayerView(player: controller.player, soundCarriesInBackground: true).ignoresSafeArea()
             if let current, current.mediaType == "radio" && controller.state == .playing {
                 Text(current.name)
                     .kjDisplay()
@@ -244,7 +244,7 @@ struct ReceiverDevice: View {
         ZStack {
             (showsPicture ? Color.black : palette.ground)
             if hasPicture {
-                PlayerLayerView(player: player.player).accessibilityHidden(true)
+                PlayerLayerView(player: player.player, soundCarriesInBackground: true).accessibilityHidden(true)
             } else if tuner.source == nil {
                 idleMark.accessibilityHidden(true)
             } else {

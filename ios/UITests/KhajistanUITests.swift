@@ -695,6 +695,58 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    /// A channel left on plays while reading, and its small player is in the reader too, which
+    /// covers the house bar (owner, 2026-10-28: "play a tv channel as they read"). Its name closes
+    /// the reader and opens the Receiver.
+    func testNowPlayingBarStaysOverTheReader() {
+        let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        app.buttons["tab-receiver"].tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        app.buttons["tab-rooms"].tap()
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the shelf loads")
+        let free = titles.matching(NSPredicate(format: "label CONTAINS[c] 'read in full'")).firstMatch
+        waitFor(free, 30, "a free title is on the shelf")
+        free.tap()
+        let issue = app.buttons["rr-issue-0"]
+        waitFor(issue, 20, "the title lists its issues")
+        issue.tap()
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
+        let bar = app.descendants(matching: .any)["nowPlaying"]
+        waitFor(bar, 5, "the small player is in the reader")
+        shot("now-playing-reader", app)
+        // The house bar's own small player is still in the tree under the reader: take the one on top.
+        let names = app.buttons.matching(identifier: "nowPlayingName").allElementsBoundByIndex
+        guard let name = names.first(where: { $0.isHittable }) else { return XCTFail("the reader's small player can be tapped") }
+        name.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["rrReaderPage"].waitForNonExistence(timeout: 5), "the reader closes")
+        waitFor(state, 5, "the Receiver is open")
+        XCTAssertFalse(bar.exists, "no small player on the Receiver itself")
+    }
+
+    /// With Keep playing off, leaving the Receiver turns the channel off: no bar, nothing on
+    /// returning. The choice comes as a launch argument so no test leaves it behind.
+    func testLeavingTheReceiverStopsItWhenKeepPlayingIsOff() {
+        let app = launch(skin: "smut", tab: "receiver",
+                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        // A house switch carries the toggle trait, so it is not listed among the buttons.
+        let choice = app.descendants(matching: .any)["receiverKeepsPlaying"]
+        waitFor(choice, 10, "the Receiver offers the choice")
+        XCTAssertTrue(["Off", "0"].contains(String(describing: choice.value ?? "")), "the choice reads off (\(String(describing: choice.value)))")
+        app.buttons["tab-rooms"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
+        app.buttons["tab-receiver"].tap()
+        expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+    }
+
     /// Signed out, the film watchlist and the Pics/Vids save ask to sign in and keep nothing on
     /// the device: a save is on the account or nowhere.
     func testSavesAskASignedOutReaderToSignIn() {

@@ -139,7 +139,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   plate, 1.03), Select tunes it behind the pigeon, Left or Menu closes it. Like CC and Like it is
   lit by the remote and never takes focus, so presses keep reaching the player.
 - **Small player** (2026-10-28, after Sonos): Menu on a radio station that is playing leaves it
-  playing. Under every screen, below the page, a band plate: the radio mark on an onBand tint, the
+  playing. Under every section of the top bar (the gap was "while browsing other tabs"), below the
+  page, a band plate (a full-screen page opened over a section covers it until Menu comes back): the radio mark on an onBand tint, the
   station's name and *Radio · On air* (Paused, Tuning…), then Play/Pause and Off. Its controls are
   onBand on the band and swap colours under focus (the onBand plate, band text, 1.03); it is its own
   focus section, so Down from a page reaches it. Select on the name opens the station full screen

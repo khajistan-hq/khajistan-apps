@@ -120,5 +120,6 @@ Each entry: what was chosen, and why, in one or two lines.
     phone's `BagStore`, one file for both apps. Pics/Vids keeps its region shelves (2026-10-06
     ruling) and gains Save, Collection, and Saved and collection shelves from the account. A film's
     Website is a QR of its page, the TV having no browser. A radio station closed with Menu plays on
-    in a small player under every screen; unlike the phone's (DECISIONS 24) it is not a switch, and
+    in a small player under every top-bar section (a full-screen page over one covers it until Menu
+    comes back); unlike the phone's (DECISIONS 24) it is not a switch, and
     any other signal stops it.

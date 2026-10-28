@@ -28,7 +28,8 @@ struct RootView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
-            // The radio left playing, under every screen, until it is turned off.
+            // The radio left playing, under every section (owner gap: "while browsing other tabs"),
+            // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
             if let away = model.radioAway {
                 RadioBar(away: away) {
                     model.silenceRadio()

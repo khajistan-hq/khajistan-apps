@@ -577,7 +577,7 @@ enum PlayerFocus: Hashable {
     case surface, captions
 }
 
-/// A radio channel left playing when its player closed: the small player under every screen
+/// A radio channel left playing when its player closed: the small player under every section
 /// reads it, and opens the channel full screen again from it.
 struct RadioAway: Identifiable {
     let channel: Channel

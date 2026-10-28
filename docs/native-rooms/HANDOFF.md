@@ -129,7 +129,7 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
 
 ## Known gaps and blockers
 
-- **The owner's home network blocks the database host** (2026-10-27; DECISIONS 21). The apps fall
+- **The owner's home network blocks the database host** (2026-10-27; DECISIONS 22). The apps fall
   back to the site's `/sb/` proxy, which is committed in the archive repo but **not deployed**: it
   goes live only with `scripts/deploy.sh --yes` (owner's approval; the archive checkout's `main` is
   101 ahead / 99 behind its remote, so reconcile first). Until then the TV says the archive cannot be

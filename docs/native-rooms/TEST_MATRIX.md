@@ -51,7 +51,7 @@ uncommitted in the shared folder).
 Not covered: anything against the live project (nothing is deployed, no test account); the SQL was
 not run (no local Postgres); a real phone scanning a real TV.
 
-## Last measured (2026-10-27, the database route; DECISIONS 21)
+## Last measured (2026-10-27, the database route; DECISIONS 22)
 
 | Check | Result |
 |---|---|

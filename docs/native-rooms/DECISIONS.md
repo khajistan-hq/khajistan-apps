@@ -81,7 +81,7 @@ Each entry: what was chosen, and why, in one or two lines.
     drafts on the owner's "You build all; I approve deploys", then deployed on "deploy them safely"
     (2026-10-27). Should the function be unreachable, the TV falls back to email and password and
     says phone sign-in is not available.
-21. **The database by the site's own address where its host is blocked (owner, 2026-10-27: "Route
+22. **The database by the site's own address where its host is blocked (owner, 2026-10-27: "Route
     the apps' database calls through a proxy on the website's own address … as a fallback, and make
     the app fail fast with a clear message").** Measured on the owner's Apple TV HD at home: DNS for
     the project host is right, but every TCP connection to its two Cloudflare addresses is dropped

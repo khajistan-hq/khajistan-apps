@@ -129,6 +129,14 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
 
 ## Known gaps and blockers
 
+- **The owner's home network blocks the database host** (2026-10-27; DECISIONS 21). The apps fall
+  back to the site's `/sb/` proxy, which is committed in the archive repo but **not deployed**: it
+  goes live only with `scripts/deploy.sh --yes` (owner's approval; the archive checkout's `main` is
+  101 ahead / 99 behind its remote, so reconcile first). Until then the TV says the archive cannot be
+  reached, in under 3 s. The website itself calls the host directly and is equally stuck on that
+  network; pointing its pages at `/sb/` is a site change for the Front lane. Live captions and other
+  realtime features are not proxied.
+
 - **Closed 2026-10-27, no migration — Pics/Vids collections**: the table's per-column grants
   (INSERT user_id, name, media_keys; UPDATE name, media_keys) already let an account create and fill
   one; the Backend board note (machinery `04391297`, `COORDINATION.md`) read only table-level grants
@@ -180,26 +188,24 @@ in each new suite, TV regression 9/9, core suites unchanged, iPhone and iPad UI,
   rollback, and the instruction it serves. Prefer fresh output paths to deleting old ones.
 - Report to the owner answer first, in short chunks, with the next action and a recommendation.
 
-## Sign in on the TV from a phone (2026-10-27, DECISIONS 21)
+## Sign in on the TV from a phone (2026-10-27, DECISIONS 21) — live
 
-Built and tested; **not live**. Three deploys wait for the owner, each separately:
+Deployed on the owner's "deploy them safely", each step verified:
 
-| Piece | Where | State |
+| Piece | Live as | Checked |
 |---|---|---|
-| Migration `draft_tv_sign_in.proposed.sql` | machinery worktree `/Users/home/CZURImages/filmart-tv-sign-in`, branch `apps/tv-sign-in` (local, not pushed) | not applied |
-| Edge function `tv-sign-in` (deploy with `verify_jwt = false`) | same branch, `supabase/functions/tv-sign-in/` | not deployed; `deno test` 4 passed, `deno check` clean |
-| Page `/activate` + its two entries on the worker's public list | archive worktree `/Users/home/CZURImages/archive-tv-sign-in`, branch `apps/tv-sign-in` (local; **not pushed**: a pushed branch can build a Cloudflare preview) | not deployed; `tv_sign_in_page_test` 5 passed, Receiver/gate tests 152 passed |
-| TV (QR, code, polling, `signIn(tokenHash:)`) and iPhone (Library → Sign in on a TV) | this branch | committed; falls back to email and password until the function is live |
+| Table `tv_sign_in_requests` | migrations `20261028031501_tv_sign_in_requests` and `20261028031723_tv_sign_in_requests_service_role_grant` (the project writes no default grants since 2026-10-20; the first live call failed without the second) | RLS on, no policies, no anon/authenticated grant; the checks refuse a bad code, a duplicate live code, approval without an account and a hash on a pending row (rolled-back test) |
+| Function `tv-sign-in` | v1, `verify_jwt = false` | start → code + secret; poll pending, slow_down when too fast, expired for an unknown secret; anon peek/approve 401; a caller's label ignored |
+| Page `/activate` | archive `main` `dbeb659ec`, deployed by CI (Deploy to Cloudflare Pages, run 40626477415) | 200 signed out, `/activate.html` forwards; `/tv` still the Receiver redirect; dashboard, Reading Room, vod.json still 401; site suite 782 OK; smoke 52/0 against the deployed commit |
 
-Order to deploy: migration, then the function, then the page. Until all three are live nothing works
-end to end, and nothing has been exercised against the live project (no test account). The SQL has
-not been run anywhere (no local Postgres); a Fable security pass reviewed all of it. Accepted risks are
-written at the top of the function: the token hash is a bearer credential for the magic-link lifetime
-(service-role only meanwhile), and a magic link shares GoTrue's recovery slot with password resets.
+Recorded in the machinery repo on `trunk` (`7f91cd89`: migrations as applied, the function as deployed).
+**Not yet done end to end:** approving a code needs a signed-in account; the owner's first real sign-in
+is the last check. The Apple TV installed earlier carries an older build without this screen.
 
 ## Next actions, ranked
 
-1. **Owner: approve (or not) the three sign-in deploys above**, one at a time.
+1. **Owner: try it once**: on the TV, Account → Sign in; scan the QR with a phone; approve. (Reinstall the
+   TV build first: `KJ_DEVICE=<udid> sh tvos/scripts/install-on-apple-tv.sh`.)
 2. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
    `-kjtab rooms` in the simulator) and say whether they look right, as was done for the phone.
 3. When CI runs again on PR 8, read its result; Auto-fix reports failures.

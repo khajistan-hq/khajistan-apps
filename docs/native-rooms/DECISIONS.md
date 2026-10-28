@@ -77,7 +77,20 @@ Each entry: what was chosen, and why, in one or two lines.
     the archive's `/activate` page (`/tv` is the Receiver's TV redirect; khajistan.com is the shop);
     a signed-in phone, on that page or in the iPhone app (Library → Sign in on a TV: scan or type),
     approves after being told what asked, when, and whether the TV is on another network; the TV is
-    handed a one-time magic-link token hash and makes its own session. No password crosses. The
-    backend (migration + `tv-sign-in` function) and the page are drafts on `apps/tv-sign-in`
-    branches; the owner approves each deploy ("You build all; I approve deploys"). Until they are
-    live the TV falls back to email and password and says phone sign-in is not available.
+    handed a one-time magic-link token hash and makes its own session. No password crosses. Built as
+    drafts on the owner's "You build all; I approve deploys", then deployed on "deploy them safely"
+    (2026-10-27). Should the function be unreachable, the TV falls back to email and password and
+    says phone sign-in is not available.
+21. **The database by the site's own address where its host is blocked (owner, 2026-10-27: "Route
+    the apps' database calls through a proxy on the website's own address … as a fallback, and make
+    the app fail fast with a clear message").** Measured on the owner's Apple TV HD at home: DNS for
+    the project host is right, but every TCP connection to its two Cloudflare addresses is dropped
+    (−1004 after 6–8 s), while the site, supabase.com and 1.1.1.1 answer in under a second; the
+    Reading Room spun 45.7 s and Pics/Vids never opened. The site's worker gains `/sb/<path>`
+    (REST, functions, storage objects, auth only; Bearer and the listed headers cross, the site's
+    Basic password and cookies never do). `SupabaseRoute` (shared core) asks both ways at launch
+    (HEAD, 2.5 s), keeps direct whenever it answers, remembers the choice for the next launch, moves
+    every project address (built or handed back, signed pages, stored files, players) onto the
+    route, and with neither answering says so at once (`unreachableText`), asking again at most
+    every 10 s. Realtime (live captions, chat presence) is not proxied.
+

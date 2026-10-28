@@ -38,7 +38,7 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.entertainment</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Attach a photo or recording when you choose to contribute to Khajistan.</string>
+	<string>Attach a photo or recording when you choose to contribute to Khajistan, or scan the sign-in code on your Apple TV.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record audio when you choose to contribute through the Human Desk.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

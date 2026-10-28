@@ -25,6 +25,7 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 
 | Gaps closed (2026-10-27, owner: "resolve the gaps") | complete | TV Reading Room: title page with the cover large and one Read/Continue, a Continue shelf from this device's places (`kj.readingPlaces`); Persian-handle films saved as hex refs; Pics/Vids collections created and filled from the iPhone viewer. Fable advised on both save gaps; no migration |
 | TV index search (2026-10-28) | complete | every TV database table has a search bar (owner: "the indexes should have a search bar for people to search metadata and name of song"); the phone already had one. `testIndexSearchFindsASongByTitleAndArtist` passes in three skins |
+| Sign in on the TV from a phone | built; backend and page are drafts awaiting the owner's deploy | TV QR + code + polling, iPhone Sign in on a TV (scan or type), `/activate` page, `tv-sign-in` function and migration on `apps/tv-sign-in` branches; Fable security pass, six fixes made; QR decoded from the screenshots in all three skins |
 
 ## Resume here
 

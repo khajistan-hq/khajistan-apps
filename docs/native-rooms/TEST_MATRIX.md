@@ -32,6 +32,25 @@ tests check the locked note instead.
 | TV core | 150 passed, 2 skipped |
 | tvOS `KJ_APP_STORE` build | builds |
 
+## Last measured (2026-10-27, sign in on the TV from a phone)
+
+Run in a clean worktree holding the branch head plus only this change (another session's work was
+uncommitted in the shared folder).
+
+| Suite | Result |
+|---|---|
+| TV core | 150 passed, 3 skipped (new: "TV sign-in from a phone"; the third skip is the Bazaar fixture, not passed in this run) |
+| iOS core | 74 passed, 1 skipped (TVSignIn is a shared link) |
+| Apple TV `PhoneSignInUITests` | 3 of 3 (Day, Grove, Smut): opens on the QR and code, focus on the way to email and password, there and back |
+| iPhone `testSignInOnATVFromThePhone` | passed: a bad code refused in place, a loosely typed one read, what asked said before approving, done |
+| QR read back | Apple's own QR reader decodes the address from the Day, Grove and Smut screenshots |
+| Builds | tvOS, tvOS `KJ_APP_STORE`, iOS, iOS `KJ_APP_STORE`, Mac Catalyst (no scanner there): all build |
+| `tv-sign-in` (Deno) | 4 passed; `deno check` clean |
+| Archive `/activate` | `tv_sign_in_page_test` 5 passed; Receiver and gate tests 152 passed |
+
+Not covered: anything against the live project (nothing is deployed, no test account); the SQL was
+not run (no local Postgres); a real phone scanning a real TV.
+
 ## Last measured (2026-10-28, the gaps closed)
 
 TV Reading Room title page and Continue; Persian-handle film saves; Pics/Vids collections.

@@ -474,6 +474,34 @@ final class KhajistanUITests: XCTestCase {
         shot("saved-page", again)
     }
 
+    /// Sign in on a TV from the phone: Library → Sign in on a TV, a code typed as people type it,
+    /// what asked for it said before anything is approved, then done. `-kjtvapprovefixture`
+    /// answers in place of the tv-sign-in function (not deployed) and needs no account.
+    func testSignInOnATVFromThePhone() {
+        let app = launch(skin: "grove", tab: "library", extra: ["-kjtvapprovefixture", "YES"])
+        let open = app.buttons["accountSignInTV"]
+        for _ in 0..<6 where !open.isHittable { app.swipeUp() }
+        waitFor(open, 10, "Library offers Sign in on a TV")
+        open.tap()
+        let field = app.textFields["tvApproveCode"]
+        waitFor(field, 10, "the screen asks for the code")
+        field.tap()
+        field.typeText("1234")
+        app.buttons["tvApproveContinue"].tap()
+        waitFor(app.staticTexts["tvApproveNote"], 5, "a code that cannot be one is refused in place")
+        XCTAssertTrue(app.staticTexts["tvApproveNote"].label.hasPrefix("A code is eight"))
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4) + "qrt4 mxz7")
+        app.buttons["tvApproveContinue"].tap()
+        let what = app.staticTexts["tvApproveWhat"]
+        waitFor(what, 5, "what asked for the code is said before approving")
+        XCTAssertTrue(what.label.hasPrefix("Apple TV asked for code QRT4-MXZ7"), what.label)
+        shot("tv-approve-confirm", app)
+        app.buttons["tvApproveConfirm"].tap()
+        waitFor(app.staticTexts["tvApproveDone"], 5, "the TV is signing in")
+        shot("tv-approve-done", app)
+    }
+
     /// The Reading Room on the phone: a free title opens, its first issue reads page by page,
     /// and the place is kept; a members' title stops at the website's preview, two pages, and
     /// never shows the third. Reads the live shelf and page server.

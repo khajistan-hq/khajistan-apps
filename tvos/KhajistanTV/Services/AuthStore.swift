@@ -55,6 +55,19 @@ final class AuthStore {
         persist(fresh)
     }
 
+    /// Signs in with the one-time token hash a phone approved for this TV (TVSignIn): the server
+    /// answers as it does a password sign-in, and the session is kept the same way.
+    func signIn(tokenHash: String) async throws {
+        let (data, response) = try await urlSession.data(for: TVSignIn.verifyRequest(tokenHash: tokenHash))
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if code >= 400 {
+            throw AuthError.server(AuthAPI.errorMessage(from: data) ?? "Sign-in failed (HTTP \(code)).")
+        }
+        let fresh = try AuthAPI.session(from: data, now: Date())
+        session = fresh
+        persist(fresh)
+    }
+
     /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
     func signOut() async {
         let token = session?.accessToken

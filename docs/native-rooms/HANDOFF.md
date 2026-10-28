@@ -180,12 +180,28 @@ in each new suite, TV regression 9/9, core suites unchanged, iPhone and iPad UI,
   rollback, and the instruction it serves. Prefer fresh output paths to deleting old ones.
 - Report to the owner answer first, in short chunks, with the next action and a recommendation.
 
+## Sign in on the TV from a phone (2026-10-27, DECISIONS 21)
+
+Built and tested; **not live**. Three deploys wait for the owner, each separately:
+
+| Piece | Where | State |
+|---|---|---|
+| Migration `draft_tv_sign_in.proposed.sql` | machinery worktree `/Users/home/CZURImages/filmart-tv-sign-in`, branch `apps/tv-sign-in` (local, not pushed) | not applied |
+| Edge function `tv-sign-in` (deploy with `verify_jwt = false`) | same branch, `supabase/functions/tv-sign-in/` | not deployed; `deno test` 4 passed, `deno check` clean |
+| Page `/activate` + its two entries on the worker's public list | archive worktree `/Users/home/CZURImages/archive-tv-sign-in`, branch `apps/tv-sign-in` (local; **not pushed**: a pushed branch can build a Cloudflare preview) | not deployed; `tv_sign_in_page_test` 5 passed, Receiver/gate tests 152 passed |
+| TV (QR, code, polling, `signIn(tokenHash:)`) and iPhone (Library → Sign in on a TV) | this branch | committed; falls back to email and password until the function is live |
+
+Order to deploy: migration, then the function, then the page. Until all three are live nothing works
+end to end, and nothing has been exercised against the live project (no test account). The SQL has
+not been run anywhere (no local Postgres); a Fable security pass reviewed all of it. Accepted risks are
+written at the top of the function: the token hash is a bearer credential for the magic-link lifetime
+(service-role only meanwhile), and a magic link shares GoTrue's recovery slot with password resets.
+
 ## Next actions, ranked
 
-1. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
+1. **Owner: approve (or not) the three sign-in deploys above**, one at a time.
+2. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
    `-kjtab rooms` in the simulator) and say whether they look right, as was done for the phone.
-2. Correct the Backend board note on `phone_media_collections` (machinery `COORDINATION.md`, entry
-   of 2026-10-27): the grants exist per column; no migration is needed (DECISIONS 20).
 3. When CI runs again on PR 8, read its result; Auto-fix reports failures.
 4. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
 5. Front lane: the two stale website menu lines.

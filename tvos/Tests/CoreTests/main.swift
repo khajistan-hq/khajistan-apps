@@ -4191,6 +4191,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Saves: films in any script, and named collections", passportFilmRefsAndCollections),
+    ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
@@ -4238,6 +4239,53 @@ func passportFilmRefsAndCollections() throws {
     let patch = try JSONSerialization.jsonObject(with: moved.httpBody!) as! [String: Any]
     try expectEqual(Set(patch.keys), ["media_keys"], "only a granted column")
     try expectEqual(PassportSaves.collectionUpdateRequest(userId: user, id: "1 or 1=1", keys: [], accessToken: "t"), nil)
+}
+
+// MARK: - TV sign-in from a phone
+
+func tvSignInFromAPhone() throws {
+    // Codes as typed, read and shown.
+    try expectEqual(TVSignIn.normalise("qrt4-mxz7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.normalise(" QRT4 MXZ7 "), "QRT4MXZ7")
+    try expectEqual(TVSignIn.normalise("QRT4-MXZ0"), nil, "zero is not in the alphabet")
+    try expectEqual(TVSignIn.normalise("QRT4-MXZA"), nil, "no vowels")
+    try expectEqual(TVSignIn.normalise("QRT4-MX"), nil)
+    try expectEqual(TVSignIn.display("qrt4mxz7"), "QRT4-MXZ7")
+    // A camera's read: the TV's own QR address on the archive host, or a bare code; any other host is refused.
+    try expectEqual(TVSignIn.code(fromScanned: "https://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.code(fromScanned: "QRT4-MXZ7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.code(fromScanned: "https://evil.example/activate?code=QRT4-MXZ7"), nil)
+    try expectEqual(TVSignIn.code(fromScanned: "http://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7"), nil)
+    try expectEqual(TVSignIn.code(fromScanned: "https://khajistan-archive.pages.dev/tv?code=QRT4-MXZ7"), nil)
+
+    // Requests: the TV speaks with the public key; a phone with its own session.
+    func body(_ request: URLRequest) throws -> [String: String] {
+        try expectNotNil(try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String])
+    }
+    let start = TVSignIn.startRequest()
+    try expectEqual(start.httpMethod, "POST")
+    try expect(start.url!.absoluteString.hasSuffix("/functions/v1/tv-sign-in"))
+    try expectEqual(try body(start), ["action": "start"], "the TV sends no label of its own")
+    try expectEqual(start.value(forHTTPHeaderField: "Authorization"), "Bearer \(KJConfig.anonKey)")
+    try expectEqual(try body(TVSignIn.pollRequest(deviceCode: "d")), ["action": "poll", "device_code": "d"])
+    let approve = try expectNotNil(TVSignIn.approveRequest(code: "qrt4-mxz7", accessToken: "USER"))
+    try expectEqual(try body(approve), ["action": "approve", "user_code": "QRT4MXZ7"])
+    try expectEqual(approve.value(forHTTPHeaderField: "Authorization"), "Bearer USER")
+    try expectEqual(TVSignIn.peekRequest(code: "nope", accessToken: "USER"), nil)
+    let verify = TVSignIn.verifyRequest(tokenHash: "abc")
+    try expect(verify.url!.absoluteString.hasSuffix("/auth/v1/verify"))
+    try expectEqual(try body(verify), ["type": "email", "token_hash": "abc"])
+
+    // Answers.
+    let started = #"{"device_code":"\#(String(repeating: "x", count: 43))","user_code":"QRT4-MXZ7","verification_uri":"https://khajistan-archive.pages.dev/activate","verification_uri_complete":"https://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7","interval":5,"expires_in":600}"#
+    try expectEqual(TVSignIn.start(from: Data(started.utf8))?.interval, 5)
+    try expectEqual(TVSignIn.start(from: Data(#"{"device_code":"short","user_code":"QRT4-MXZ7","verification_uri":"https://a","verification_uri_complete":"https://a","interval":5,"expires_in":600}"#.utf8)), nil)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"pending"}"#.utf8)), .pending)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"slow_down"}"#.utf8)), .slowDown)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"expired"}"#.utf8)), .expired)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"approved","token_hash":"h","type":"email"}"#.utf8)), .approved(tokenHash: "h"))
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"approved"}"#.utf8)), nil, "approved with no hash is no answer")
+    try expectEqual(TVSignIn.poll(from: Data(#"{"error":"server_error"}"#.utf8)), nil)
 }
 
 // MARK: - Shuffle

@@ -70,3 +70,14 @@ Each entry: what was chosen, and why, in one or two lines.
     grant list does not show; the Backend board note of 04391297 read only that list. The app sends
     exactly the website's saveCollection payloads (those columns, never an upsert) under the same
     rules (name 1–120 once trimmed, at most 500 keys of 1–160 characters); a trigger moves updated_at.
+21. **Sign in on the TV from a phone, with a QR (owner, 2026-10-27: "allow people to sign in with
+    their phone or with a qr code on the app or on the web so they dont have to write in apple tv
+    everytime").** This narrows DECISIONS 12's QR ruling, which was about membership: the sign-in
+    QR is asked for. The shape is the device-authorization grant: the TV shows a QR and a code for
+    the archive's `/activate` page (`/tv` is the Receiver's TV redirect; khajistan.com is the shop);
+    a signed-in phone, on that page or in the iPhone app (Library → Sign in on a TV: scan or type),
+    approves after being told what asked, when, and whether the TV is on another network; the TV is
+    handed a one-time magic-link token hash and makes its own session. No password crosses. The
+    backend (migration + `tv-sign-in` function) and the page are drafts on `apps/tv-sign-in`
+    branches; the owner approves each deploy ("You build all; I approve deploys"). Until they are
+    live the TV falls back to email and password and says phone sign-in is not available.

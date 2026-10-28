@@ -180,6 +180,18 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
   seconds in the full film.
 
+## Sign in
+
+Owner, 2026-10-27: "sign in with their phone or with a qr code". Sign-in opens on **Sign in with
+your phone**: at left the QR for `khajistan-archive.pages.dev/activate?code=…` on a 520pt plate,
+dark modules on a light plate in every skin (ink on the ground by day; the ground's colour on an ink
+plate in Grove and Smut, because a camera reads an inverted QR badly; checked by decoding the
+screenshots); at right the address, the code in 96pt monospaced black, how long it lasts, and
+**Use email and password instead**, where focus starts. The TV asks every five seconds; once a
+phone approves, it says *Signed in as …* for a moment and closes. A code that runs out offers
+**Get a new code**. When the function cannot be reached the password form opens and says so. The
+password form keeps **Sign in with your phone instead**. DEBUG: `-kjsigninfixture`.
+
 ## Rooms
 
 The Screening Room, the Bazaar, the Madrassa and the databases under one door (DECISIONS 12),

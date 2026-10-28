@@ -13,6 +13,7 @@ struct YoursView: View {
     @State private var preview: URL?
     @State private var confirmClear = false
     @State private var showSignIn = false
+    @State private var approvingTV = false
     @State private var editingPassword = false
     @State private var draft = ""
 
@@ -173,16 +174,29 @@ struct YoursView: View {
                 Text(email.isEmpty ? "Signed in" : email).kjName(KJType.title)
                 Button(kicker: "Sign out") { Task { await model.auth.signOut() } }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                tvSignInButton
             } else {
                 Text("Khajistan Transmission plays under your website account.").kjBody()
                 Button { showSignIn = true } label: { Label("Sign in", systemImage: "person.crop.circle") }
                     .buttonStyle(SolidActionStyle())
                     .accessibilityIdentifier("accountSignIn")
+                #if DEBUG
+                // The UI test of the approval runs with no account (`-kjtvapprovefixture`).
+                if UserDefaults.standard.bool(forKey: "kjtvapprovefixture") { tvSignInButton }
+                #endif
             }
             webRow("Your Khajistan on the website", path: "dashboard.html", id: "web-dashboard")
             webRow("Your downloads", path: "downloads.html", id: "web-downloads")
             previewBlock
         }
+    }
+
+    /// Approve the code the Apple TV shows, so it signs in to this account without the remote's keyboard.
+    private var tvSignInButton: some View {
+        Button { approvingTV = true } label: { Label("Sign in on a TV", systemImage: "appletv") }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+            .accessibilityIdentifier("accountSignInTV")
+            .sheet(isPresented: $approvingTV) { TVApproveScreen() }
     }
 
     private func webRow(_ title: String, path: String, id: String) -> some View {

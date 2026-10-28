@@ -211,10 +211,10 @@ is the last check. The Apple TV installed earlier carries an older build without
 
 ## Next actions, ranked
 
-1. **Owner: try it once**: on the TV, Account → Sign in; scan the QR with a phone; approve. (Reinstall the
-   TV build first: `KJ_DEVICE=<udid> sh tvos/scripts/install-on-apple-tv.sh`.)
-2. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
-   `-kjtab rooms` in the simulator) and say whether they look right, as was done for the phone.
+1. **Owner: try TestFlight build 1.0 (3)** on the iPhone, the Mac and the Apple TV (from `6151b85`;
+   the app code is the same as the head's and as what is installed on the owner's Apple TV). Done on
+   the TV at home already: Reading Room, Pics/Vids and the QR sign-in work (2026-10-28).
+2. **Owner: look at the Apple TV rooms** and say whether they look right, as was done for the phone.
 3. When CI runs again on PR 8, read its result; Auto-fix reports failures.
-4. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
+4. Owner: review draft PR 8 and decide when it merges to `main` (owner-only).
 5. Front lane: the two stale website menu lines.

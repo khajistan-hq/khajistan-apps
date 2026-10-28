@@ -29,6 +29,15 @@ func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ note: @autoclosure 
     }
 }
 
+@discardableResult
+func expectNotNil<T>(_ value: T?, _ note: @autoclosure () -> String = "", line: Int = #line) throws -> T {
+    guard let value else {
+        let text = note()
+        throw Failure(description: "line \(line): got nil" + (text.isEmpty ? "" : " (\(text))"))
+    }
+    return value
+}
+
 func expectClose(_ actual: Double, _ expected: Double, tolerance: Double = 1e-6, line: Int = #line) throws {
     guard abs(actual - expected) <= tolerance else {
         throw Failure(description: "line \(line): got \(actual), expected \(expected) within \(tolerance)")
@@ -4181,9 +4190,55 @@ let tests: [(String, () throws -> Void)] = [
     ("Chat: requests, refusals, what is shown", chatRequestsAndRefusals),
     ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
+    ("Saves: films in any script, and named collections", passportFilmRefsAndCollections),
     ("Reading Room: provenance", readingProvenance),
     ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
+
+// MARK: - Saves: films in any script, collections
+
+func passportFilmRefsAndCollections() throws {
+    // A Latin handle keeps its ref as written; a Persian one is carried as hex the check allows.
+    try expectEqual(PassportSaves.filmRef("showgirls-of-pakistan-2021-khajistan"), "tv:showgirls-of-pakistan-2021-khajistan")
+    for handle in ["nirt-خسرو-میرزای-دوم", "nirt-جنگ-نوروزی-1357", "nirt-دنیای-خوب-ما", "nirt-شبکه-صفر"] {
+        let ref = try expectNotNil(PassportSaves.filmRef(handle), handle)
+        try expect(ref.hasPrefix("tv:u."), ref)
+        try expect(PassportSaves.isRefSafe(String(ref.dropFirst(3))), "the table's check takes \(ref)")
+        try expectEqual(PassportSaves.filmHandle(ref: ref), handle)
+    }
+    // Hex is only read back where it names a handle that needed it: a Latin handle that looks like
+    // hex stays as written, and so does hex that is not UTF-8.
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.6162"), "u.6162")
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.ff"), "u.ff")
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.6"), "u.6")
+    try expectEqual(PassportSaves.filmHandle(ref: "pnv:x"), nil)
+    try expectEqual(PassportSaves.filmRef(String(repeating: "ک", count: 60)), nil, "over the table's 200")
+    let user = "8f14e45f-ceea-467a-9575-5d1f5b2d0a11"
+    let ref = PassportSaves.filmRef("nirt-شبکه-صفر")!
+    try expectNotNil(PassportSaves.deleteRequest(userId: user, refs: [ref], accessToken: "t"), "a hex ref can be unsaved")
+
+    // Collections: the columns the account is granted, as the website's saveCollection sends them.
+    let made = try expectNotNil(PassportSaves.collectionInsertRequest(userId: user, name: "  Lollywood  ", keys: ["a", "b"], accessToken: "t"))
+    try expectEqual(made.httpMethod, "POST")
+    try expect(made.url!.absoluteString.hasSuffix("/rest/v1/phone_media_collections?select=id,name,media_keys"), made.url!.absoluteString)
+    try expectEqual(made.value(forHTTPHeaderField: "Prefer"), "return=representation")
+    let body = try JSONSerialization.jsonObject(with: made.httpBody!) as! [String: Any]
+    try expectEqual(Set(body.keys), ["user_id", "name", "media_keys"])
+    try expectEqual(body["name"] as? String, "Lollywood")
+    try expectEqual(body["media_keys"] as? [String], ["a", "b"])
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "   ", keys: [], accessToken: "t"), nil, "a name is needed")
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: String(repeating: "n", count: 121), keys: [], accessToken: "t"), nil)
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "x", keys: Array(repeating: "k", count: 501), accessToken: "t"), nil)
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "x", keys: ["bad\nkey"], accessToken: "t"), nil)
+    let id = "0b7c0c8e-2d3a-4f61-9a43-0a5d2f1c9e77"
+    let moved = try expectNotNil(PassportSaves.collectionUpdateRequest(userId: user, id: id, keys: ["a"], accessToken: "t"))
+    try expectEqual(moved.httpMethod, "PATCH")
+    try expect(moved.url!.absoluteString.hasSuffix("phone_media_collections?id=eq.\(id)&user_id=eq.\(user)&select=id,name,media_keys"), moved.url!.absoluteString)
+    try expectEqual(moved.value(forHTTPHeaderField: "Prefer"), "return=representation", "a row back, or no change")
+    let patch = try JSONSerialization.jsonObject(with: moved.httpBody!) as! [String: Any]
+    try expectEqual(Set(patch.keys), ["media_keys"], "only a granted column")
+    try expectEqual(PassportSaves.collectionUpdateRequest(userId: user, id: "1 or 1=1", keys: [], accessToken: "t"), nil)
+}
 
 // MARK: - Shuffle
 

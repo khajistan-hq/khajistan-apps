@@ -10,6 +10,11 @@ struct ReadingTitleView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var reading: RRIssue?
+    /// The reader opened by the one action, at the place this device stopped, or page 1.
+    @State private var continuing: ReadingPlaces.Opening?
+    @FocusState private var actionFocused: Bool
+    /// The places as last drawn: a page read in either reader redraws the one action.
+    @State private var places = ReadingPlaces.all
     @State private var showProvenance = false
     @State private var saveNote: String?
 
@@ -31,6 +36,9 @@ struct ReadingTitleView: View {
                     }
                     // The cards' plate padding is pulled back so the covers sit on the page margin.
                     .padding(.leading, -10)
+                    // A section, so Down from the action row (right of the large cover) lands here:
+                    // the first issue sits below and to the left of it, out of the press's line.
+                    .focusSection()
                 }
                 .kjBody()
                 .padding(KJLayout.inset)
@@ -42,11 +50,38 @@ struct ReadingTitleView: View {
         .fullScreenCover(item: $reading) { issue in
             ReadingReaderView(title: title, issue: issue)
         }
+        .fullScreenCover(item: $continuing) { place in
+            ReadingReaderView(title: title, issue: place.issue, startPage: place.page)
+        }
+        .defaultFocus($actionFocused, true)
+        .onAppear { store.want(title) }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            let now = ReadingPlaces.all
+            if now != places { places = now }
+        }
+    }
+
+    /// Apple Books' one action: Continue where this device stopped, else Read from the start.
+    /// A rights-held title has none; its covers say why.
+    private var opening: ReadingPlaces.Opening? {
+        guard !held, let first = title.issues.first else { return nil }
+        if let place = places[title.slug],
+           let found = ReadingPlaces.openings([title.slug: place], in: [title]).first { return found }
+        return ReadingPlaces.Opening(title: title, issue: first, page: 1)
     }
 
     // MARK: - Header
 
+    /// The cover large at left and the title beside it, as Apple Books opens a book's page.
     private var header: some View {
+        HStack(alignment: .top, spacing: 60) {
+            RRCover(state: store.card(for: title))
+                .frame(width: 360, height: 490)
+            titleBlock
+        }
+    }
+
+    private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
             Kicker(RRWords.heading)
             Text(title.name)
@@ -60,6 +95,15 @@ struct ReadingTitleView: View {
                 .accessibilityIdentifier("rrTitleSummary")
             let lines = store.provenanceLines(for: title)
             HStack(spacing: 12) {
+                if let opening {
+                    Button { continuing = opening } label: {
+                        Label(opening.page > 1 || opening.issue.index > 0 ? "Continue \u{00B7} " + opening.line : "Read",
+                              systemImage: "book").kjKicker()
+                    }
+                    .buttonStyle(HouseButtonStyle(solid: true))
+                    .focused($actionFocused)
+                    .accessibilityIdentifier("rrRead")
+                }
                 saveButton
                 if !lines.isEmpty {
                     Button {
@@ -72,6 +116,7 @@ struct ReadingTitleView: View {
                 }
             }
             .padding(.leading, -26)
+            .focusSection()
             if let saveNote {
                 Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("rrSaveNote")
             }

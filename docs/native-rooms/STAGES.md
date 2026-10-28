@@ -23,6 +23,8 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | Reference-app layouts | built on iPhone/iPad/Mac | every native room restyled to its reference app (DECISIONS 17); CC key; see TEST_MATRIX for the runs |
 | Reference-app layouts on Apple TV | complete (2026-10-27, resumed on the owner's word) | Rooms door as tiles + Up Next; Screening Room with Up Next, watchlist and a film page (one Play/Resume); Bazaar showcase (price first, option chips, buy-on-khajistan.com); Madrassa in serif with pictures; databases as a Notion table and property page; Receiver guide (strip's Guide control, LIVE row) and radio Now Playing. `RoomsLayoutUITests` and `ReceiverGuideUITests` pass in Day, Grove and Smut; Fable refute pass run, its findings fixed or dismissed in the commit. `-kjtab reading` launch checked: it opens the Reading Room (the earlier home-screen landing did not recur) |
 
+| Gaps closed (2026-10-27, owner: "resolve the gaps") | complete | TV Reading Room: title page with the cover large and one Read/Continue, a Continue shelf from this device's places (`kj.readingPlaces`); Persian-handle films saved as hex refs; Pics/Vids collections created and filled from the iPhone viewer. Fable advised on both save gaps; no migration |
+
 ## Resume here
 
 Read `HANDOFF.md` first, then this file, `DECISIONS.md` and `git log --oneline -20`; rebuild with

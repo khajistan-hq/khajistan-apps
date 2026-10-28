@@ -58,3 +58,15 @@ Each entry: what was chosen, and why, in one or two lines.
 18. **CC is a text key.** The Receiver's caption control reads "CC" on every live channel, filled
     while captions are on; the shared caption and chat messages name each app's own sign-in door
     (`KJConfig.signInDoor`: Library on the phone, Account on the television).
+19. **A film in another script is saved as hex; no migration (2026-10-27).** The saves table's check
+    takes Latin ids only, and four Screening Room handles are Persian. The app is the only writer of
+    `tv:` rows and the website and dashboard read only their title and href, so such a film is saved
+    as `tv:u.<UTF-8 bytes in lowercase hex>` with its real `/film/<handle>` href;
+    `PassportSaves.filmHandle(ref:)` reads it back, and only where the decoded handle needed it, so a
+    Latin handle that looks like hex is never misread. If Backend later widens the check, these rows
+    stay valid. Advised by a Fable pass, which found no reader of the ref past its prefix.
+20. **Pics/Vids collections are writable by the account (measured 2026-10-27).** The table grants
+    INSERT(user_id, name, media_keys) and UPDATE(name, media_keys) per column, which a table-level
+    grant list does not show; the Backend board note of 04391297 read only that list. The app sends
+    exactly the website's saveCollection payloads (those columns, never an upsert) under the same
+    rules (name 1–120 once trimmed, at most 500 keys of 1–160 characters); a trigger moves updated_at.

@@ -23,6 +23,24 @@ TV app also take `-kjroom <screening|bazaar|madrassa|databases>`.
 in the machinery repo). Most room data is behind the site password until launch; without `KJ_SITE` the
 tests check the locked note instead.
 
+## Last measured (2026-10-28, the gaps closed)
+
+TV Reading Room title page and Continue; Persian-handle film saves; Pics/Vids collections.
+
+| Suite | Result |
+|---|---|
+| TV core | 150 passed, 2 skipped (new: films in any script, collection requests) |
+| iOS core | 74 passed, 1 skipped |
+| Apple TV `ReadingRoomUITests` + Rooms | 4 passed, 1 skipped (no account-open title on the shelf today); Rooms 1 of 1. The free-title walk reads to p. 2, sees Continue · p. 2, walks up to the Continue card and reopens at p. 2, in all three skins |
+| iPhone UI | 19 of 19 |
+| iPad UI | 19 of 19 |
+| iOS package | 8 passed |
+| Builds | Mac Catalyst, iPhone `KJ_APP_STORE` and tvOS `KJ_APP_STORE` all build |
+
+Not covered: creating or filling a collection, and saving a Persian-handle film, against the live
+table with a real account (none is held); the request shapes are core-tested and the grants were
+read from the live database.
+
 ## Last measured (2026-10-27, Apple TV reference-app layouts)
 
 Measured on the TV layouts diff before it was committed; the rows below this table are the

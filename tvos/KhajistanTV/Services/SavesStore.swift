@@ -10,13 +10,15 @@ final class SavesStore {
     private(set) var refs: Set<String> = []
     /// The account's saves as the server listed them, newest first.
     private(set) var rows: [PassportSave] = []
-    /// The account's named Pics/Vids collections, read only: the table takes no new ones from a
-    /// signed-in account at present, so none is created here.
+    /// The account's named Pics/Vids collections, newest first. A signed-in account may create one
+    /// and change what it holds (the table's column grants; measured 2026-10-27).
     private(set) var collections: [PnvCollection] = []
     @ObservationIgnored private var loadedFor: String?
     @ObservationIgnored private var loading: Task<Void, Never>?
     /// Refs with a change on its way.
     @ObservationIgnored private var busy: Set<String> = []
+    /// Collections with a change on its way: a second tap waits for none and changes nothing.
+    @ObservationIgnored private var busyCollections: Set<String> = []
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -71,7 +73,7 @@ final class SavesStore {
     /// Film handles on the account's watchlist, newest first.
     var watchlist: [String] {
         guard known else { return [] }
-        return rows.filter { $0.object_ref.hasPrefix("tv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(3)) }
+        return rows.filter { refs.contains($0.object_ref) }.compactMap { PassportSaves.filmHandle(ref: $0.object_ref) }
     }
 
     func isSaved(pnvKey key: String) -> Bool {
@@ -116,6 +118,41 @@ final class SavesStore {
             saved ? await self.remove([ref])
                   : await self.add(ref, wing: PassportSaves.otherWing, title: title, href: PassportSaves.filmHref(handle))
         }
+    }
+
+    /// Makes a named collection, holding `keys`, and puts it first. Nil when the server did not take it.
+    func createCollection(name: String, keys: [String] = []) async -> PnvCollection? {
+        await load()
+        guard known, let userId = auth.session?.userId, let token = try? await auth.validAccessToken(),
+              let request = PassportSaves.collectionInsertRequest(userId: userId, name: name, keys: keys, accessToken: token),
+              let (data, response) = try? await urlSession.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 201,
+              let made = (try? JSONDecoder().decode([PnvCollection].self, from: data))?.first,
+              auth.session?.userId == userId else { return nil }
+        collections.insert(made, at: 0)
+        return made
+    }
+
+    /// Puts an object in a collection, or takes it out. False when the server did not take it, and
+    /// the collection stays as it was.
+    @discardableResult
+    func toggle(pnvKey key: String, in collectionId: String) async -> Bool {
+        guard known, !busyCollections.contains(collectionId),
+              let userId = auth.session?.userId, let token = try? await auth.validAccessToken(),
+              // Found after the wait for the token: the list may have changed during it.
+              let held = collections.first(where: { $0.id == collectionId }) else { return false }
+        busyCollections.insert(collectionId)
+        defer { busyCollections.remove(collectionId) }
+        let keys = held.media_keys.contains(key) ? held.media_keys.filter { $0 != key } : [key] + held.media_keys
+        guard let request = PassportSaves.collectionUpdateRequest(userId: userId, id: held.id, keys: keys, accessToken: token),
+              let (data, response) = try? await urlSession.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              // No row back is no change: the collection was deleted elsewhere, or is not this account's.
+              let changed = (try? JSONDecoder().decode([PnvCollection].self, from: data))?.first,
+              auth.session?.userId == userId,
+              let now = collections.firstIndex(where: { $0.id == held.id }) else { return false }
+        collections[now] = changed
+        return true
     }
 
     /// The saves are known for the account signed in now.

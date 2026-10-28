@@ -115,6 +115,10 @@ final class AppModel {
         // The shelf's module index sits behind the site password like vod.json, so it is read from the same origin.
         self.reading = ReadingStore(auth: auth, origin: films.origin)
         self.captions = LiveCaptionSession(auth: auth)
+        #if DEBUG
+        // `-kjforgetplaces YES`: a UI test starts with no Continue, whatever an earlier run read.
+        if UserDefaults.standard.bool(forKey: "kjforgetplaces") { UserDefaults.standard.removeObject(forKey: "kj.readingPlaces") }
+        #endif
         if let launched = UserDefaults.standard.string(forKey: DefaultsKey.launchSkin) {
             UserDefaults.standard.set(SkinChoice(stored: launched).rawValue, forKey: DefaultsKey.skinChoice)
         }

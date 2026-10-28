@@ -18,7 +18,9 @@ final class ReadingRoomUITests: XCTestCase {
 
     private func launch(skin: String, extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        var arguments = ["-kjtab", "reading", "-kjskin", skin] + extra
+        // Each run starts with no Continue: what an earlier run read would head the room and push
+        // the shelves this test walks below the first screen.
+        var arguments = ["-kjtab", "reading", "-kjskin", skin, "-kjforgetplaces", "YES"] + extra
         if let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty {
             arguments += ["-kjfilms", origin]
         }
@@ -78,8 +80,12 @@ final class ReadingRoomUITests: XCTestCase {
         Int(state.split(separator: "/").dropFirst().first?.split(separator: "|").first ?? "") ?? 0
     }
 
+    /// The shelf has answered: a title card, or Continue, which heads it once this device has read
+    /// something and can push the language shelves below the first screen (they are lazy, and
+    /// focusCard walks down to them).
     private func waitForShelf(_ app: XCUIApplication) {
-        XCTAssertTrue(cards(app).firstMatch.waitForExistence(timeout: 90), "The shelf must lay out titles once the feed has answered")
+        let any = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-' OR identifier BEGINSWITH 'rr-continue-'")).firstMatch
+        XCTAssertTrue(any.waitForExistence(timeout: 90), "The shelf must lay out titles once the feed has answered")
         kjPause(6)   // the covers arrive
     }
 
@@ -95,7 +101,6 @@ final class ReadingRoomUITests: XCTestCase {
             let card = try XCTUnwrap(focusCard(app, tagged: "read in full"), "a free title must be on the shelf")
             kjScreenshot("rr-\(skin)-02-shelf-focused", app: app)
             XCTAssertNotNil(openFirstIssue(app, shot: "rr-\(skin)-03-title"), "the title must open to its issues and the first issue to a reader")
-            _ = card
             let first = waitForPage(app, position: 1)
             XCTAssertTrue(first.hasPrefix("1/") && first.contains("|page"), "page 1 must show; state: \(first)")
             XCTAssertGreaterThanOrEqual(pages(in: first), 3, "the issue must run to three pages for the turn; state: \(first)")
@@ -136,8 +141,25 @@ final class ReadingRoomUITests: XCTestCase {
             // Menu leaves the reader, then the title.
             XCUIRemote.shared.press(.menu)
             XCTAssertTrue(app.staticTexts["rrTitleSummary"].waitForExistence(timeout: 20), "Menu must come back to the title")
+            // Apple Books' one action: the page left on is this device's place in the title.
+            let read = app.buttons["rrRead"]
+            XCTAssertTrue(read.waitForExistence(timeout: 5) && read.label.hasPrefix("Continue") && read.label.hasSuffix("p. 2"),
+                          "the title offers Continue at page 2: \(read.label)")
+            kjPause(2)
+            kjScreenshot("rr-\(skin)-08-title-continue", app: app)
             XCUIRemote.shared.press(.menu)
             XCTAssertTrue(cards(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelf")
+            let slug = card.identifier.replacingOccurrences(of: "rr-title-", with: "")
+            let onward = app.buttons["rr-continue-\(slug)"]
+            // Continue heads the room, above the row the title was opened from; the page is lazy,
+            // so the card exists once focus has walked up to it.
+            for _ in 0..<12 where !onward.exists { XCUIRemote.shared.press(.up); kjPause(0.5) }
+            XCTAssertTrue(onward.waitForExistence(timeout: 10), "the shelf gains a Continue card for the title")
+            XCTAssertTrue(kjFocus(onward, app: app), "the remote reaches Continue")
+            kjScreenshot("rr-\(skin)-09-continue-row", app: app)
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(waitForPage(app, position: 2).hasPrefix("2/"), "Continue opens the reader at page 2")
+            XCUIRemote.shared.press(.menu)
             app.terminate()
         }
     }

@@ -100,9 +100,10 @@ Shared building blocks: `ios/Khajistan/Views/Shelves.swift` (`LargeTitle`, `Sear
 - **`-kjtab reading`** opens the Reading Room; the home-screen landing of the baseline did not
   recur (most likely the previous launch still terminating).
 
-**Not done on TV, from the research column below**: the Reading Room's title page and Continue
-shelf, Pics/Vids source identity, and direct channel entry by number (the Siri Remote has no
-digits; the guide numbers its rows instead).
+**Then, same day ("resolve the gaps")**: the TV Reading Room's title page (cover large, one
+Read/Continue) and Continue shelf. Pics/Vids source identity was already there (`@account` on every
+card). Direct channel entry by number is not built: the Siri Remote has no digits; the guide
+numbers its rows instead.
 
 **What to build** (the research guide's TV column, adapted):
 
@@ -128,12 +129,14 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
 
 ## Known gaps and blockers
 
-- **Named Pics/Vids collections can be read, not made.** `phone_media_collections` grants a
-  signed-in account SELECT and DELETE only. Posted to the board for Backend (machinery commit
-  `04391297`). Do not apply a migration from this lane.
-- **Four films cannot go on a watchlist**: Persian-script handles (`nirt-خسرو-میرزای-دوم`,
-  `nirt-جنگ-نوروزی-1357`, `nirt-دنیای-خوب-ما`, `nirt-شبکه-صفر`) fail the saves table's
-  Latin-only ref check. The button is disabled and says why. Needs Backend to widen the check.
+- **Closed 2026-10-27, no migration — Pics/Vids collections**: the table's per-column grants
+  (INSERT user_id, name, media_keys; UPDATE name, media_keys) already let an account create and fill
+  one; the Backend board note (machinery `04391297`, `COORDINATION.md`) read only table-level grants
+  and is wrong. **It still needs correcting on the board** (the file had other sessions' uncommitted
+  edits, so it was not touched from here). The iPhone viewer has a Collection menu (DECISIONS 20).
+- **Closed 2026-10-27, no migration — the four Persian-handle films** save as `tv:u.<hex>`
+  (DECISIONS 19). Not checked against the live table with a real account (none held); the request
+  shape is core-tested.
 - **Pashto channels cannot be captioned**: the live recogniser does not take Pashto; the
   Receiver says so under the channel.
 - **CI on PR 8**: the runs for f7e9c0f were still `pending` at 0 elapsed when this was written,
@@ -181,10 +184,8 @@ in each new suite, TV regression 9/9, core suites unchanged, iPhone and iPad UI,
 
 1. **Owner: look at the Apple TV rooms** (screenshots in the run's result bundle, or
    `-kjtab rooms` in the simulator) and say whether they look right, as was done for the phone.
-2. Apple TV, what the research column still lists: the Reading Room's title page with one
-   Read/Continue and a Continue shelf from this device; source identity on Pics/Vids cards.
+2. Correct the Backend board note on `phone_media_collections` (machinery `COORDINATION.md`, entry
+   of 2026-10-27): the grants exist per column; no migration is needed (DECISIONS 20).
 3. When CI runs again on PR 8, read its result; Auto-fix reports failures.
-4. Backend: the `phone_media_collections` grants and the saves table's ref check (two board items;
-   not this lane's to apply).
-5. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
-6. Front lane: the two stale website menu lines.
+4. Owner: review draft PR 8, and decide on a TestFlight upload (owner-only).
+5. Front lane: the two stale website menu lines.

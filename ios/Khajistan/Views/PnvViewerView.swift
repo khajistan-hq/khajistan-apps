@@ -17,6 +17,8 @@ struct PnvViewerView: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
     @State private var saveNote: String?
+    @State private var naming = false
+    @State private var newName = ""
 
     private enum Phase: Equatable {
         case loading, ready, needsSignIn
@@ -114,6 +116,7 @@ struct PnvViewerView: View {
             // Buttons as well as the swipe, for a viewer who cannot swipe (WCAG 2.5.1).
             HStack(spacing: 4) {
                 saveButton
+                if model.saves.canSave && PassportSaves.pnvRef(current.media_key) != nil { collectionMenu }
                 if steps {
                     Button { step(by: -1) } label: { Text("Previous").kjKicker() }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18)))
@@ -147,6 +150,42 @@ struct PnvViewerView: View {
         .disabled(PassportSaves.pnvRef(current.media_key) == nil)
         .accessibilityIdentifier("pnvSave")
         .accessibilityValue(saved ? "On" : "Off")
+        .task { await model.saves.load() }
+    }
+
+    /// Collections, as Cosmos files a block: every collection on the account, ticked where this
+    /// object is in it (a tap puts it in or takes it out), and a new one made with this object in it.
+    /// The same rows the website's Pics/Vids collections are.
+    private var collectionMenu: some View {
+        let key = current.media_key
+        return Menu {
+            ForEach(model.saves.collections) { collection in
+                Button {
+                    Task { saveNote = await model.saves.toggle(pnvKey: key, in: collection.id) ? nil : "That did not save. Try again." }
+                } label: {
+                    if collection.media_keys.contains(key) { Label(collection.name, systemImage: "checkmark") } else { Text(collection.name) }
+                }
+            }
+            if !model.saves.collections.isEmpty { Divider() }
+            Button { newName = ""; naming = true } label: { Label("New collection\u{2026}", systemImage: "plus") }
+                .accessibilityIdentifier("pnvNewCollection")
+        } label: {
+            Text("Collection").kjKicker().padding(EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 18))
+        }
+        .accessibilityIdentifier("pnvCollection")
+        .alert("New collection", isPresented: $naming) {
+            TextField("Name", text: $newName)
+            Button("Make") {
+                let name = newName
+                Task {
+                    saveNote = await model.saves.createCollection(name: name, keys: [key]) == nil
+                        ? "That did not save. A name of 1 to 120 characters is needed." : nil
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("It holds this object; add more from their viewers.")
+        }
         .task { await model.saves.load() }
     }
 

@@ -225,7 +225,12 @@ same visitor.
   the access line in the shelf's words: *Free — read in full*, *Free — sign in to read*, *Members*,
   *Rights pending*. The access line is the page server's own answer to an anonymous request for a
   page past the free preview; the app keeps no list of free titles.
-- **Title.** Its issues as covers, with *N issues · M pages*. A rights-held title shows the
+- **Continue** (2026-10-27, after Apple Books): above the language tabs, the titles read on this
+  device, newest first (`kj.readingPlaces`: per title the issue and page, kept when the reader
+  closes on a page), each opening the reader at its page. Rights-held titles are left out.
+- **Title.** The cover large at left (360x490), and beside it the title, its figures and one solid
+  action: *Read*, or *Continue · issue · p. N* where this device stopped; a rights-held title has
+  none. Then its issues as covers, with *N issues · M pages*. A rights-held title shows the
   *Preserved · not published* banner, its covers inert, and a code for the page where researchers
   ask for supervised access.
 - **Reader.** One page at a time, full screen on the ground. Right turns to the next page, left to

@@ -57,6 +57,7 @@ not run (no local Postgres); a real phone scanning a real TV.
 |---|---|
 | Owner's Apple TV HD, Release, `-kjclock` | first open after install: shelf 2.88 s, first cover 3.19 s; next opens: 1.36 s / 1.65 s and 1.44 s / 1.73 s (shelf / first cover) |
 | Owner's Apple TV HD, Pics/Vids | opens with region shelves and pictures (screenshot via `devicectl device capture screenshot`) |
+| Owner's check at home (2026-10-28, relayed) | "reading room opens", "born digital works", and on the QR phone sign-in and the 2-second target: "both are good" |
 | TV core / iOS core | 152 passed 2 skipped / 74 passed 1 skipped |
 | Apple TV `ReadingRoomUITests` + Rooms | 5 passed, 1 skipped (no account-open title today), on the code after the refute fixes |
 

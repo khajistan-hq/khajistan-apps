@@ -47,7 +47,7 @@ struct ReceiverView: View {
         .onChange(of: model.tab) { old, tab in
             guard old == .receiver, tab != .receiver else { return }
             model.tuner.receiverClosed()
-            if !keepsPlaying { model.tuner.stop() }
+            if !keepsPlaying { model.tuner.turnOffOnLeaving() }
         }
         .fullScreenCover(isPresented: $fullScreen) {
             Group {

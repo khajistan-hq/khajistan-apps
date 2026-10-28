@@ -33,6 +33,12 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
     }
 
+    /// HOME is on screen. Its first room tile marks it: "Every room" sits below the picture tiles
+    /// (2e213d2), and HOME's LazyVStack does not build what is off screen, so it is not there to find.
+    private func waitForHome(_ app: XCUIApplication, _ timeout: TimeInterval, _ message: String) {
+        waitFor(app.buttons["home-room-reading"], timeout, message)
+    }
+
     /// An active dock occupies the top of the screen. The lazy channel rows only enter the
     /// accessibility tree after the reader scrolls the catalogue past the map.
     private func firstReceiverChannel(_ app: XCUIApplication) -> XCUIElement {
@@ -40,12 +46,19 @@ final class KhajistanUITests: XCTestCase {
         waitFor(catalogue, 10, "Receiver exposes its scrollable catalogue")
         waitFor(app.buttons["region-indus"], 40, "The region strip lists Indus")
         let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
-        for _ in 0..<10 {
+        for _ in 0..<16 {
             if channel.exists && channel.isHittable { return channel }
-            // Flicks, because a press-and-drag on the map scrubs stations instead of scrolling. On
-            // a slow runner a flick's momentum can carry the first row past the top, under the
-            // dock (CI, 2026-10-28): a row above the middle is brought back down.
-            if channel.exists && channel.frame.midY < catalogue.frame.midY { catalogue.swipeDown() } else { catalogue.swipeUp() }
+            // Flicks until the first row is built, because a press-and-drag on the map scrubs
+            // stations instead of scrolling.
+            guard channel.exists else { catalogue.swipeUp(); usleep(400_000); continue }
+            // Then short drags with no momentum, started just above the house bar, where the list
+            // or the controls above it are. Since the Receiver's two switches (c9932fd) a flick
+            // carried the row across the whole gap between the docked player and the bar (about
+            // 370 pt on iPhone 17); 160 pt cannot jump it.
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
+            let move: CGFloat = channel.frame.midY < catalogue.frame.midY ? 160 : -160
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
             usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
@@ -58,7 +71,7 @@ final class KhajistanUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
-            waitFor(app.buttons["homeAllRooms"], 10, "HOME leads to every room")
+            waitForHome(app, 10, "HOME leads to every room")
             shot("\(skin)-01-home", app)
             app.buttons["tab-rooms"].tap()
             waitFor(app.buttons["destination-reading"], 10, "ROOMS lists the website's menu")
@@ -154,7 +167,7 @@ final class KhajistanUITests: XCTestCase {
     func testNoMembershipCardOutsideTheReadingRoom() {
         for code in ["USA", "GBR"] {
             let app = launch(skin: "day", extra: ["-kjstorefront", code])
-            waitFor(app.buttons["homeAllRooms"], 10, "HOME loads (\(code))")
+            waitForHome(app, 10, "HOME loads (\(code))")
             XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership card on HOME (\(code))")
             app.buttons["tab-library"].tap()
             waitFor(app.buttons["skin-day"], 10, "ACCOUNT loads (\(code))")
@@ -283,17 +296,19 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-        waitFor(app.buttons["homeAllRooms"], 5, "One edge tap selects Home")
+        waitForHome(app, 5, "One edge tap selects Home")
         app.buttons["tab-receiver"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         waitFor(state, 5, "One edge tap selects Receiver")
         XCTAssertEqual(state.label, "Standing by", "Navigation does not undo an explicit Stop")
     }
 
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
+        // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
+        // it off, for whom leaving the Receiver still cancels what it was opening.
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
-        waitFor(app.buttons["homeAllRooms"], 3, "Home opens with one tap")
+        waitForHome(app, 3, "Home opens with one tap")
         sleep(6)
         app.buttons["tab-receiver"].tap()
         let state = app.staticTexts["screenState"]
@@ -745,6 +760,21 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["tab-receiver"].tap()
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
+    }
+
+    /// "Keep playing" off, the viewer leaves while the launch Surf is still choosing: the Surf is
+    /// dropped and nothing starts under the other page. (A Surf has no source until it lands, so a
+    /// turn-off that only stopped what was on let it play under ROOMS.)
+    func testLeavingDuringTheLaunchSurfPlaysNothingWhenKeepPlayingIsOff() {
+        let app = launch(skin: "day", tab: "receiver",
+                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+        waitFor(app.buttons["tab-rooms"], 5, "the house bar is up")
+        app.buttons["tab-rooms"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlayingName"].waitForExistence(timeout: 20),
+                       "a Surf that was still choosing does not land under another page")
+        app.buttons["tab-receiver"].tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 10, "the receiver reopens")
     }
 
     /// Signed out, the film watchlist and the Pics/Vids save ask to sign in and keep nothing on

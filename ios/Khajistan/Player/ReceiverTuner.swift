@@ -117,7 +117,8 @@ final class ReceiverTuner {
         }
     }
 
-    /// Cancel only pending automatic selection. Already-playing radio remains background audio.
+    /// Cancel only pending automatic selection. Already-playing radio remains background audio,
+    /// unless the viewer turned "Keep playing on other pages" off (`turnOffOnLeaving`).
     func receiverClosed() {
         guard openingPending else { return }
         openingPending = false
@@ -250,6 +251,16 @@ final class ReceiverTuner {
     }
 
     /// Turns the receiver off.
+    /// Leaving the Receiver with "Keep playing on other pages" off: what is on turns off, and a
+    /// Surf or selection still in flight is dropped (stop() bumps intentRevision, which both check),
+    /// so nothing lands under another page. It is not an explicit Stop: a selection that leaving
+    /// canceled (receiverClosed() cleared initialOpenAttempted) is tried again on return.
+    func turnOffOnLeaving() {
+        let selectsOnReturn = !initialOpenAttempted
+        stop()
+        initialOpenAttempted = !selectsOnReturn
+    }
+
     func stop() {
         initialOpenAttempted = true
         openingPending = false

@@ -32,6 +32,12 @@ final class AppModel {
     var camerasFirst: String?
     /// Where a Top Shelf link asked to go. The screen it names reads it and clears it.
     var link: DeepLink?
+    /// A title the Rooms door asked the Reading Room to open (its page, or the reader at this
+    /// device's place). The Reading Room opens it once its shelf is in hand, and clears it.
+    var readingLink: ReadingLink?
+    /// A radio channel left playing when its player closed: Sonos's small player, under every
+    /// screen, until it is turned off or another signal starts.
+    var radioAway: RadioAway?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -41,6 +47,9 @@ final class AppModel {
     let madrassaEntries: SiteFeed<[MadrassaEntry]>
     let madrassaPosts: SiteFeed<[MadrassaPost]>
     let lughat: SiteFeed<[LughatEntry]>
+    /// The Bazaar's bag on this device, the phone's own store. Checkout is the shop's page, opened
+    /// on the phone from a code: nothing is paid on the remote.
+    let bag = BagStore()
     @ObservationIgnored private var databaseFeeds: [ArchiveDatabase: SiteFeed<[DBRecord]>] = [:]
 
     /// The preview password's header for a picture on the site's own host, nil anywhere else.
@@ -118,6 +127,8 @@ final class AppModel {
         #if DEBUG
         // `-kjforgetplaces YES`: a UI test starts with no Continue, whatever an earlier run read.
         if UserDefaults.standard.bool(forKey: "kjforgetplaces") { UserDefaults.standard.removeObject(forKey: "kj.readingPlaces") }
+        // `-kjemptybag YES`: a UI test starts with an empty bag, whatever an earlier run put in it.
+        if UserDefaults.standard.bool(forKey: "kjemptybag") { bag.empty() }
         #endif
         if let launched = UserDefaults.standard.string(forKey: DefaultsKey.launchSkin) {
             UserDefaults.standard.set(SkinChoice(stored: launched).rawValue, forKey: DefaultsKey.skinChoice)
@@ -137,6 +148,13 @@ final class AppModel {
         watchTheSky()
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
+    }
+
+    /// Stops the radio left playing under the screens: one signal at a time, so every player
+    /// calls this as it starts its own.
+    func silenceRadio() {
+        radioAway?.controller.stop()
+        radioAway = nil
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

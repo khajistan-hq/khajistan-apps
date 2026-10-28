@@ -95,6 +95,7 @@ struct TVFilmPage: View {
     @State private var playing: Mode?
     @State private var showSignIn = false
     @State private var watchNote: String?
+    @State private var showWebsite = false
     @FocusState private var playFocused: Bool
 
     private enum Mode: String, Identifiable {
@@ -135,12 +136,22 @@ struct TVFilmPage: View {
         }
         .foregroundStyle(palette.ink)
         .defaultFocus($playFocused, true)
+        .onAppear { OpenedLately.record(.film, ref: film.handle, title: Films.displayTitle(film)) }
         .task { await model.saves.load() }
         .fullScreenCover(item: $playing) { mode in
             FilmPlayerView(film: film, startsFull: mode == .full)
         }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {}).environment(\.palette, palette)
+        }
+        // In place over the page, not one more cover: a third cover deep kept re-laying itself
+        // out in Day under accessibility and stopped answering the remote.
+        .disabled(showWebsite)
+        .accessibilityHidden(showWebsite)
+        .overlay {
+            if showWebsite {
+                TVOnYourPhone(title: Films.displayTitle(film), url: Films.pageURL(film)) { showWebsite = false }
+            }
         }
     }
 
@@ -165,6 +176,10 @@ struct TVFilmPage: View {
             .disabled(PassportSaves.filmRef(film.handle) == nil)
             .accessibilityIdentifier("filmWatchlist")
             .accessibilityValue(listed ? "On" : "Off")
+            // The TV has no browser: the film's page opens on the phone, from a code.
+            Button { showWebsite = true } label: { Label("Website", systemImage: "safari").kjKicker() }
+                .buttonStyle(HouseButtonStyle())
+                .accessibilityIdentifier("filmOnWebsite")
         }
         .focusSection()
     }
@@ -201,6 +216,60 @@ struct TVFilmPage: View {
 
     static func runtime(_ minutes: Int) -> String {
         minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
+    }
+}
+
+/// A page of the website, opened on the phone: a QR for it and its address, as the sign-in screen
+/// offers its own. The TV has no browser, so this is what Website does here. Drawn in place over
+/// the screen that asked for it; Menu or Select closes it.
+struct TVOnYourPhone: View {
+    let title: String
+    let url: URL
+    var line = "Point your phone's camera at the code to open this page."
+    let close: () -> Void
+    @FocusState private var backFocused: Bool
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        // Dark modules on a light plate in every skin, as on the sign-in screen: phone cameras
+        // read an inverted QR badly.
+        let day = model.skin == .day
+        let dark = day ? palette.ink : palette.ground
+        let light = day ? palette.ground : palette.ink
+        ZStack {
+            palette.ground.ignoresSafeArea()
+            HStack(alignment: .center, spacing: 80) {
+                ZStack {
+                    light
+                    if let grid = QRModules.grid(url.absoluteString) {
+                        QRModulesView(grid: grid, colour: dark).padding(36)
+                            .accessibilityLabel("QR code for the page on the website")
+                            .accessibilityIdentifier("websiteQR")
+                    }
+                }
+                .frame(width: 520, height: 520)
+                VStack(alignment: .leading, spacing: 18) {
+                    Kicker("On the website")
+                    Text(title).kjDisplay(KJType.headline, tracking: -0.055).lineLimit(3)
+                    Text(line).kjBody()
+                    Text((url.host ?? "") + url.path).kjName(30).lineLimit(2).minimumScaleFactor(0.6)
+                        .accessibilityIdentifier("websiteAddress")
+                    Button(action: close) { Text("Back").kjKicker() }
+                        .buttonStyle(HouseButtonStyle())
+                        .focused($backFocused)
+                        .padding(.top, 12)
+                        .accessibilityIdentifier("websiteBack")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(KJLayout.inset)
+        }
+        .foregroundStyle(palette.ink)
+        .defaultFocus($backFocused, true)
+        .onAppear { backFocused = true }
+        .onExitCommand(perform: close)
+        .accessibilityAddTraits(.isModal)
     }
 }
 

@@ -90,5 +90,18 @@ final class ReceiverGuideUITests: XCTestCase {
             kjScreenshot("\(skin)-g4-radio-not-playing", app: app)
             XCTFail("the station played and showed Now Playing")
         }
+
+        // Menu leaves the station playing, in Sonos's small player under the region; Off stops it.
+        XCUIRemote.shared.press(.menu)
+        let bar = app.descendants(matching: .any)["radioBar"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "the radio plays on in the small player")
+        XCTAssertTrue(app.buttons["radioBarName"].label.contains("On air") || app.buttons["radioBarName"].label.contains("Tuning"),
+                      "the bar says the station is on: \(app.buttons["radioBarName"].label)")
+        kjPause(1)
+        kjScreenshot("\(skin)-g5-radio-bar", app: app)
+        let off = app.buttons["radioBarOff"]
+        XCTAssertTrue(kjFocus(off, app: app), "the remote reaches the bar's Off")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
     }
 }

@@ -134,7 +134,7 @@ struct ReadingReaderView: View {
         // Each page actually shown is this device's place in the title, for Continue. Kept as it is
         // read, not on leaving: the screen under the reader redraws before this one disappears.
         .onChange(of: phase == .page ? position : 0) { _, shown in
-            if shown > 0 { ReadingPlaces.record(title: title.slug, issue: issue, page: shown) }
+            if shown > 0 { ReadingPlaces.record(title: title.slug, name: title.name, issue: issue, page: shown) }
         }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { retryAfterSignIn() })

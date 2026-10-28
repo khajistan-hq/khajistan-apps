@@ -113,3 +113,12 @@ Each entry: what was chosen, and why, in one or two lines.
     so a television channel's sound carries on (radio already did, `UIBackgroundModes audio`); off,
     what is on pauses when the app leaves the screen. Pics/Vids videos and films are not covered:
     the system still pauses them. Chat and the Pics/Vids viewer do not carry the small player yet.
+25. **The Apple TV reaches the reference apps too (owner, 2026-10-28: Bazaar "Bag + QR checkout";
+    Pics/Vids "Saves, keep shelves").** The TV Bazaar has a bag, steppers and one Checkout; the
+    checkout is the shop's own page shown as a QR for the phone, so nothing is paid on the remote.
+    This narrows DECISIONS 12: an address and now a code, never a payment form. The bag is the
+    phone's `BagStore`, one file for both apps. Pics/Vids keeps its region shelves (2026-10-06
+    ruling) and gains Save, Collection, and Saved and collection shelves from the account. A film's
+    Website is a QR of its page, the TV having no browser. A radio station closed with Menu plays on
+    in a small player under every screen; unlike the phone's (DECISIONS 24) it is not a switch, and
+    any other signal stops it.

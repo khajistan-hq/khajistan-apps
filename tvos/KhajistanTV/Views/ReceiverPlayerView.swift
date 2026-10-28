@@ -155,6 +155,11 @@ struct ReceiverPlayerView: View {
                 wake()
                 return
             }
+            // Radio plays on under the screens, in the small player, as Sonos keeps playing
+            // while you browse; a picture stops with its screen.
+            if current.mediaType == "radio", destination == nil, controller.state == .playing {
+                model.radioAway = RadioAway(channel: current, list: list, controller: controller)
+            }
             stopEverything()
             dismiss()
         }
@@ -442,6 +447,7 @@ struct ReceiverPlayerView: View {
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
     /// arrives.
     private func open() async {
+        model.silenceRadio()
         model.clips.cover(caption: current.name, animated: false)
         tune(current)
         await controller.settled()
@@ -542,8 +548,9 @@ struct ReceiverPlayerView: View {
         changeTask?.cancel()
         hideTask?.cancel()
         model.captions.detach()
-        playerA.stop()
-        playerB.stop()
+        // The radio handed to the small player keeps playing.
+        if model.radioAway?.controller !== playerA { playerA.stop() }
+        if model.radioAway?.controller !== playerB { playerB.stop() }
         model.clips.clear()
         model.pigeon.clear()
     }
@@ -568,4 +575,108 @@ struct ReceiverPlayerView: View {
 /// What holds focus on a player: the picture, or the caption control in its strip.
 enum PlayerFocus: Hashable {
     case surface, captions
+}
+
+/// A radio channel left playing when its player closed: the small player under every screen
+/// reads it, and opens the channel full screen again from it.
+struct RadioAway: Identifiable {
+    let channel: Channel
+    let list: [Channel]
+    let controller: PlayerController
+    var id: String { channel.id }
+}
+
+/// Sonos's small player while you browse, on the remote: a band plate along the foot of the
+/// screen with the channel's mark, its name and state, and Play/Pause and Off. Select on the name
+/// opens the channel full screen again. Its own focus section, so Down from a page reaches it.
+struct RadioBar: View {
+    let away: RadioAway
+    let open: () -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let state = away.controller.state
+        let playing = state == .playing || state == .tuning
+        HStack(spacing: 20) {
+            Image(systemName: "radio")
+                .font(.system(size: 34, weight: .semibold))
+                .frame(width: 72, height: 72)
+                .background(palette.onBand.opacity(0.16))
+                .accessibilityHidden(true)
+            Button(action: open) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(away.channel.name).kjName(30).lineLimit(1)
+                    Text("Radio \u{00B7} " + Self.word(state)).kjSmall().lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(OnBandStyle())
+            .accessibilityHint("Opens the channel full screen")
+            .accessibilityIdentifier("radioBarName")
+            // Play tunes the station afresh, full screen, as the player's own Play does: a live
+            // signal paused or stopped is not the live signal any more.
+            Button {
+                if playing { away.controller.pause() } else { open() }
+            } label: {
+                Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: 30, weight: .bold)).frame(width: 60)
+            }
+            .buttonStyle(OnBandStyle())
+            .accessibilityLabel(playing ? "Pause" : "Play")
+            .accessibilityIdentifier("radioBarToggle")
+            Button { model.silenceRadio() } label: {
+                // Not a kicker: a kicker is the accent, which in Day is the band itself.
+                Label("Off", systemImage: "xmark")
+                    .font(.system(size: KJType.kicker, weight: .black))
+                    .textCase(.uppercase)
+            }
+            .buttonStyle(OnBandStyle())
+            .accessibilityLabel("Turn the radio off")
+            .accessibilityIdentifier("radioBarOff")
+        }
+        .foregroundStyle(palette.onBand)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(palette.band)
+        .padding(.horizontal, KJLayout.inset)
+        .padding(.bottom, 24)
+        .focusSection()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("radioBar")
+    }
+
+    private static func word(_ state: PlayerController.State) -> String {
+        switch state {
+        case .playing: return "On air"
+        case .tuning: return "Tuning\u{2026}"
+        case .paused: return "Paused"
+        case .failed: return "The signal stopped"
+        case .idle: return "Standing by"
+        }
+    }
+}
+
+/// A control on the band: onBand at rest; under focus the colours swap, the onBand plate with the
+/// band's colour as its text, at 1.03. No outline.
+private struct OnBandStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        OnBandFace(label: configuration.label, isPressed: configuration.isPressed)
+    }
+}
+
+private struct OnBandFace<Face: View>: View {
+    let label: Face
+    let isPressed: Bool
+    @Environment(\.isFocused) private var isFocused
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        label
+            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .foregroundStyle(isFocused ? palette.band : palette.onBand)
+            .background(isFocused ? palette.onBand : Color.clear)
+            .scaleEffect(isFocused && !isPressed ? 1.03 : 1)
+            .animation(.easeOut(duration: 0.15), value: isFocused)
+    }
 }

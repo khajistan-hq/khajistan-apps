@@ -4,6 +4,8 @@ import SwiftUI
 /// as a white pill, and the house allows no white.
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    /// The radio from the small player, opened full screen again.
+    @State private var reopened: RadioAway?
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -26,6 +28,16 @@ struct RootView: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
+            // The radio left playing, under every screen, until it is turned off.
+            if let away = model.radioAway {
+                RadioBar(away: away) {
+                    model.silenceRadio()
+                    reopened = away
+                }
+            }
+        }
+        .fullScreenCover(item: $reopened) { away in
+            ReceiverPlayerView(channel: away.channel, list: away.list)
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG

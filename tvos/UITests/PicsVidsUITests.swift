@@ -118,6 +118,40 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertFalse(surface.exists)
     }
 
+    /// Save and Collection in the viewer, lit by the remote: Down lights Save, Right Collection, Up
+    /// lets go. Signed out, Select on Save says where to sign in, in place.
+    func testViewerSaveControls() {
+        for skin in ["day", "grove", "smut"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjtab", "picsvids", "-kjskin", skin]
+            kjLaunch(app)
+            dismissNotice(app)
+            let tile = tiles(app).firstMatch
+            XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
+            XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")
+            XCUIRemote.shared.press(.select)
+            let save = app.descendants(matching: .any)["pnvSave"]
+            XCTAssertTrue(save.waitForExistence(timeout: 20), "the viewer offers Save")
+            XCTAssertFalse(save.isSelected, "nothing is lit until the remote moves to it")
+            XCUIRemote.shared.press(.down)
+            kjPause(0.6)
+            XCTAssertTrue(save.isSelected, "Down lights Save")
+            XCUIRemote.shared.press(.right)
+            kjPause(0.6)
+            XCTAssertTrue(app.descendants(matching: .any)["pnvCollection"].isSelected, "Right lights Collection")
+            XCUIRemote.shared.press(.left)
+            kjPause(0.6)
+            XCTAssertTrue(save.isSelected, "Left comes back to Save")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.staticTexts["pnvSaveNote"].waitForExistence(timeout: 5), "signed out, Save says where to sign in")
+            kjScreenshot("\(skin)-pv-save", app: app)
+            XCUIRemote.shared.press(.up)
+            kjPause(0.6)
+            XCTAssertFalse(save.isSelected, "Up lets go")
+            app.terminate()
+        }
+    }
+
     /// Walking right along a shelf to its end reaches the next page of that shelf.
     func testScrollingLoadsTheNextPage() {
         let app = launch()

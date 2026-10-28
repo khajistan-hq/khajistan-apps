@@ -59,13 +59,14 @@ final class RoomsLayoutUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = [
-            "-kjtab", "rooms", "-kjskin", skin, "-kjsite", site, "-kjfilms", site,
+            "-kjtab", "rooms", "-kjskin", skin, "-kjsite", site, "-kjfilms", site, "-kjemptybag", "YES",
             "-kj.filmPlaces", "<dict><key>\(Self.stoppedFilm)</key><real>1200</real></dict>",
         ]
         kjLaunch(app)
 
         let screening = app.buttons["tvroom-screening"]
         XCTAssertTrue(screening.waitForExistence(timeout: 15), "Rooms shows its tiles")
+        XCTAssertTrue(app.buttons["tvroom-chat"].exists, "Chat is a tile beside the rooms")
         XCTAssertTrue(kjFocus(screening, app: app), "the remote reaches the Screening Room")
         kjScreenshot("\(skin)-01-rooms", app: app)
 
@@ -87,10 +88,20 @@ final class RoomsLayoutUITests: XCTestCase {
         kjPause(2)
         XCTAssertTrue(play.hasFocus, "focus starts on the one action")
         kjScreenshot("\(skin)-03-film", app: app)
+        // Website: the TV has no browser, so the film's page is a code for the phone.
+        let website = app.buttons["filmOnWebsite"]
+        XCTAssertTrue(kjFocus(website, app: app), "the remote reaches Website")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["websiteQR"].waitForExistence(timeout: 5), "Website shows a code for the film's page")
+        XCTAssertTrue(app.staticTexts["websiteAddress"].label.contains("/film/\(Self.stoppedFilm)"), "and its address")
+        kjScreenshot("\(skin)-03b-website", app: app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(play.waitForExistence(timeout: 5), "Menu returns to the film")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(play.waitForNonExistence(timeout: 5), "Menu returns to the room")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(screening.waitForExistence(timeout: 5), "Menu returns to Rooms")
+        XCTAssertTrue(app.buttons["opened-film|\(Self.stoppedFilm)"].waitForExistence(timeout: 5), "the film is under Opened lately")
 
         // The Bazaar: objects on soft plates with the price first; an object's page.
         let bazaar = app.buttons["tvroom-bazaar"]
@@ -106,6 +117,37 @@ final class RoomsLayoutUITests: XCTestCase {
         XCTAssertTrue(address.waitForExistence(timeout: 10), "an object's page names where it is bought")
         kjPause(5)
         kjScreenshot("\(skin)-05-object", app: app)
+        // The bag, as On's: Add to bag, the bag with a stepper, one Checkout as a code for the
+        // phone. Only where the shop answers with the object for sale today.
+        let add = app.buttons["tvaddToBag"]
+        if add.waitForExistence(timeout: 15) {
+            XCTAssertTrue(kjFocus(add, app: app), "the remote reaches Add to bag")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.staticTexts["tvadded"].waitForExistence(timeout: 5), "the object goes in the bag")
+            let objectBag = app.buttons["tvobjectBag"]
+            XCTAssertTrue(kjFocus(objectBag, app: app), "the remote reaches the bag")
+            XCUIRemote.shared.press(.select)
+            let more = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tvbagMore-'")).firstMatch
+            XCTAssertTrue(more.waitForExistence(timeout: 5), "the bag lists the object with a stepper")
+            let counted = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH 'tvbagCount-'")).firstMatch
+            let before = Int(counted.label.components(separatedBy: " ").first ?? "") ?? 0
+            XCTAssertTrue(kjFocus(more, app: app), "the remote reaches +")
+            XCUIRemote.shared.press(.select)
+            let stepped = NSPredicate { _, _ in counted.label.hasPrefix("\(before + 1) ") }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: stepped, object: nil)], timeout: 5), .completed,
+                           "+ adds one: \(counted.label)")
+            kjScreenshot("\(skin)-05b-bag", app: app)
+            let checkout = app.buttons["tvbagCheckout"]
+            XCTAssertTrue(kjFocus(checkout, app: app), "the remote reaches Checkout")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.descendants(matching: .any)["websiteQR"].waitForExistence(timeout: 20), "Checkout is the shop's page, as a code for the phone")
+            kjPause(1)
+            kjScreenshot("\(skin)-05c-checkout", app: app)
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(checkout.waitForExistence(timeout: 5), "Menu returns to the bag")
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(add.waitForExistence(timeout: 5), "Menu returns to the object")
+        }
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(product.waitForExistence(timeout: 5), "Menu returns to the Bazaar")
         XCUIRemote.shared.press(.menu)
@@ -125,6 +167,7 @@ final class RoomsLayoutUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(onCard.waitForNonExistence(timeout: 10), "a writing opens over the room")
         kjPause(3)
+        XCTAssertTrue(app.buttons["tvpostSave"].exists, "a writing has Save beside its date")
         kjScreenshot("\(skin)-07-writing", app: app)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(onCard.waitForExistence(timeout: 5), "Menu returns to the Madrassa")
@@ -142,8 +185,40 @@ final class RoomsLayoutUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tvrecord-'")).firstMatch
         XCTAssertTrue(first.waitForExistence(timeout: 40), "the register's records load")
-        XCTAssertTrue(kjFocus(first, app: app), "the remote reaches the first record")
         kjScreenshot("\(skin)-09-table", app: app)
+
+        // Notion's Filter: a property, a value, and the pill that takes itself off.
+        let count = app.staticTexts["tvdbCount"]
+        let total = count.label
+        let filter = app.buttons["tvdbFilter"]
+        XCTAssertTrue(kjFocus(filter, app: app), "the remote reaches Filter")
+        XCUIRemote.shared.press(.select)
+        let value = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tvdbValue-'")).firstMatch
+        XCTAssertTrue(value.waitForExistence(timeout: 5), "Filter lists a property's values")
+        XCTAssertTrue(kjFocus(value, app: app), "the remote reaches a value")
+        kjScreenshot("\(skin)-09b-filter", app: app)
+        XCUIRemote.shared.press(.select)
+        let pill = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tvdbPill-'")).firstMatch
+        XCTAssertTrue(pill.waitForExistence(timeout: 5), "the filter in force is a pill")
+        let narrowed = NSPredicate { _, _ in count.label != total }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: narrowed, object: nil)], timeout: 10), .completed, "the table narrows")
+        kjScreenshot("\(skin)-09c-pill", app: app)
+        XCTAssertTrue(kjFocus(pill, app: app), "the remote reaches the pill")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(pill.waitForNonExistence(timeout: 5), "Select on the pill takes the filter off")
+
+        // Notion's Sort.
+        let sort = app.buttons["tvdbSort"]
+        XCTAssertTrue(kjFocus(sort, app: app), "the remote reaches Sort")
+        XCUIRemote.shared.press(.select)
+        let byTitle = app.buttons["tvdbOrder-title"]
+        XCTAssertTrue(byTitle.waitForExistence(timeout: 5), "Sort lists its orders")
+        XCTAssertTrue(kjFocus(byTitle, app: app))
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(sort.waitForExistence(timeout: 5))
+        XCTAssertTrue(sort.label.contains("A\u{2013}Z"), "the order in force is named: \(sort.label)")
+
+        XCTAssertTrue(kjFocus(first, app: app), "the remote reaches the first record")
         XCUIRemote.shared.press(.select)
         let field = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Broadcaster: '")).firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10), "a record opens with its properties named")

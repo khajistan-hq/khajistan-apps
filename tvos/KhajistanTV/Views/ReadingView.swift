@@ -11,6 +11,10 @@ struct ReadingView: View {
     @State private var tabID: String?
     @State private var opened: RRTitle?
     @State private var continuing: ReadingPlaces.Opening?
+    /// A shelf opened whole, as Apple Books opens "Name ›" into a grid.
+    @State private var wholeRow: RRRow?
+    /// What is typed in the search bar: titles in any script, from the shelf already held.
+    @State private var query = ""
     /// The places as last drawn: a page read in the reader redraws Continue.
     @State private var places = ReadingPlaces.all
     @FocusState private var focusedTab: String?
@@ -36,10 +40,15 @@ struct ReadingView: View {
                 case .failed(let message):
                     problem(message)
                 case .ready:
-                    continueRow
-                    if store.tabs.count > 1 { tabRow }
-                    if let tab {
-                        LazyVStack(alignment: .leading, spacing: 32) { shelf(tab) }
+                    searchBar
+                    if !trimmed.isEmpty {
+                        results
+                    } else {
+                        continueRow
+                        if store.tabs.count > 1 { tabRow }
+                        if let tab {
+                            LazyVStack(alignment: .leading, spacing: 32) { shelf(tab) }
+                        }
                     }
                 }
             }
@@ -50,11 +59,18 @@ struct ReadingView: View {
         // Down from the top bar lands on the tab on show, not on the one under the bar item.
         .defaultFocus($focusedTab, tab?.id, priority: .userInitiated)
         .task { await store.start() }
+        // A title the Rooms door asked for, opened once the shelf is in hand.
+        .task(id: store.phase == .ready && model.readingLink != nil) { follow() }
+        // A shelf that did not load drops the request, so it never opens a title later unasked.
+        .onChange(of: store.phase) { if case .failed = store.phase { model.readingLink = nil } }
         .fullScreenCover(item: $opened) { title in
             ReadingTitleView(title: title)
         }
         .fullScreenCover(item: $continuing) { place in
             ReadingReaderView(title: place.title, issue: place.issue, startPage: place.page)
+        }
+        .fullScreenCover(item: $wholeRow) { row in
+            ReadingRowGrid(row: row)
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all
@@ -98,6 +114,51 @@ struct ReadingView: View {
             }
             .focusSection()
         }
+    }
+
+    private func follow() {
+        guard store.phase == .ready, let link = model.readingLink else { return }
+        model.readingLink = nil
+        guard let title = store.titles.first(where: { $0.slug == link.slug }) else { return }
+        if link.resume, let place = ReadingPlaces.openings(places, in: [title]).first, !store.isRights(title) {
+            continuing = place
+        } else {
+            opened = title
+        }
+    }
+
+    // MARK: - Search
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// The search bar Apple Books puts over its shelf, in the house field.
+    private var searchBar: some View {
+        HouseInputField("Search", text: query, hint: "Titles, in any script") {
+            TextField("", text: $query)
+                .autocorrectionDisabled()
+        }
+        .frame(maxWidth: 900, alignment: .leading)
+        .accessibilityIdentifier("rrSearch")
+    }
+
+    /// Titles whose name, native name or byline holds what is typed, in shelf order. Reads the
+    /// shelf already held; nothing is fetched.
+    @ViewBuilder
+    private var results: some View {
+        let needle = trimmed.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        let found = store.titles.filter { title in
+            [title.name, title.native, title.byline].contains {
+                $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).contains(needle)
+            }
+        }
+        Text(found.isEmpty ? "No title on the shelf matches \u{201C}\(trimmed)\u{201D}." : "\(found.count.formatted()) title\(found.count == 1 ? "" : "s")")
+            .kjSmall(faint: true)
+            .accessibilityIdentifier("rrSearchCount")
+        LazyVGrid(columns: ReadingMetrics.gridColumns, alignment: .leading, spacing: 28) {
+            ForEach(found) { title in RRTitleCard(title: title) { opened = title } }
+        }
+        .padding(.leading, -10)
+        .focusSection()
     }
 
     // MARK: - Header and tabs
@@ -158,14 +219,22 @@ struct ReadingView: View {
 
     private func rowView(_ row: RRRow) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 16) {
-                Kicker(row.name)
-                Text(row.titles.count.formatted()).kjSmall(faint: true)
+            // "Name ›", as Apple Books heads a shelf: it opens the whole shelf as a grid.
+            Button { wholeRow = row } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text(row.name + " \u{203A}").kjKicker()
+                    Text(row.titles.count.formatted()).kjSmall(faint: true)
+                }
             }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)))
+            .padding(.leading, -14)
+            .accessibilityLabel("\(row.name), \(row.titles.count) titles")
+            .accessibilityHint("Opens the whole shelf")
+            .accessibilityIdentifier("rr-shelf-\(row.id)")
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 24) {
                     ForEach(row.titles) { title in
-                        card(title)
+                        RRTitleCard(title: title) { opened = title }
                     }
                 }
                 .padding(.vertical, 6)
@@ -177,36 +246,6 @@ struct ReadingView: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("rr-row-\(row.id)")
-    }
-
-    private func card(_ title: RRTitle) -> some View {
-        let state = store.card(for: title)
-        let meta = [title.byline, "\(title.issues.count) issue\(title.issues.count == 1 ? "" : "s")"]
-            .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-        return Button {
-            opened = title
-        } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                RRCover(state: state)
-                    .frame(width: ReadingMetrics.coverWidth, height: ReadingMetrics.coverHeight)
-                Text(title.name)
-                    .kjName(26)
-                    .lineLimit(2)
-                    .frame(height: 70, alignment: .topLeading)
-                Text(meta)
-                    .kjSmall(faint: true)
-                    .lineLimit(1)
-                Text(store.access(for: title)?.tag ?? " ")
-                    .kjKicker()
-                    .lineLimit(2)
-                    .frame(height: 56, alignment: .topLeading)
-            }
-            .frame(width: ReadingMetrics.coverWidth, alignment: .leading)
-        }
-        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)))
-        .onAppear { store.want(title) }
-        .accessibilityIdentifier("rr-title-\(title.slug)")
-        .accessibilityLabel([title.name, meta, store.access(for: title)?.tag].compactMap { $0 }.joined(separator: ", "))
     }
 
     private func problem(_ message: String) -> some View {
@@ -223,6 +262,12 @@ struct ReadingView: View {
     }
 }
 
+/// A title the Rooms door sends the Reading Room to: its page, or the reader at this device's place.
+struct ReadingLink: Equatable {
+    let slug: String
+    let resume: Bool
+}
+
 /// Where reading stopped, on this device: per title, the issue (its position in the title) and the
 /// page. Never a page address, which carries access; the page server is asked again on Continue.
 enum ReadingPlaces {
@@ -236,6 +281,9 @@ enum ReadingPlaces {
         /// The issue's own slug and id, so a catalogue that inserts an issue ahead of it does not
         /// send Continue to its neighbour. Absent in a place kept before it was added.
         var ref: String? = nil
+        /// The title's name, so the Rooms door can say what to continue without the shelf.
+        /// Absent in a place kept before it was added.
+        var name: String? = nil
     }
 
     /// A place made openable: the title and issue as the shelf has them now.
@@ -265,12 +313,20 @@ enum ReadingPlaces {
     }
 
     /// Page 1 of the first issue is no place to continue from; the newest forty are kept.
-    static func record(title slug: String, issue: RRIssue, page: Int, at date: Date = .now) {
+    static func record(title slug: String, name: String? = nil, issue: RRIssue, page: Int, at date: Date = .now) {
         var places = all
-        places[slug] = page > 1 || issue.index > 0 ? Place(issue: issue.index, page: page, date: date, ref: ref(issue)) : nil
+        places[slug] = page > 1 || issue.index > 0 ? Place(issue: issue.index, page: page, date: date, ref: ref(issue), name: name) : nil
         let kept = places.sorted { $0.value.date > $1.value.date }.prefix(40)
         if let data = try? JSONEncoder().encode(Dictionary(uniqueKeysWithValues: kept.map { ($0.key, $0.value) })) {
             UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// The places that know their title's name, newest first: what the Rooms door can offer
+    /// without the shelf.
+    static func named(_ places: [String: Place]) -> [(slug: String, name: String, page: Int)] {
+        places.sorted { $0.value.date > $1.value.date }.compactMap { slug, place in
+            place.name.map { (slug, $0, place.page) }
         }
     }
 
@@ -287,6 +343,73 @@ enum ReadingPlaces {
 enum ReadingMetrics {
     static let coverWidth: CGFloat = 250
     static let coverHeight: CGFloat = 340
+    static let gridColumns = [GridItem(.adaptive(minimum: coverWidth + 20), spacing: 24, alignment: .top)]
+}
+
+/// A title on a shelf: the real cover at its own shape, the name, its run, and the access line in
+/// the shelf's words.
+struct RRTitleCard: View {
+    let title: RRTitle
+    let open: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let store = model.reading
+        let meta = [title.byline, "\(title.issues.count) issue\(title.issues.count == 1 ? "" : "s")"]
+            .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 10) {
+                RRCover(state: store.card(for: title))
+                    .frame(width: ReadingMetrics.coverWidth, height: ReadingMetrics.coverHeight)
+                Text(title.name)
+                    .kjName(26)
+                    .lineLimit(2)
+                    .frame(height: 70, alignment: .topLeading)
+                Text(meta)
+                    .kjSmall(faint: true)
+                    .lineLimit(1)
+                Text(store.access(for: title)?.tag ?? " ")
+                    .kjKicker()
+                    .lineLimit(2)
+                    .frame(height: 56, alignment: .topLeading)
+            }
+            .frame(width: ReadingMetrics.coverWidth, alignment: .leading)
+        }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)))
+        .onAppear { store.want(title) }
+        .accessibilityIdentifier("rr-title-\(title.slug)")
+        .accessibilityLabel([title.name, meta, store.access(for: title)?.tag].compactMap { $0 }.joined(separator: ", "))
+    }
+}
+
+/// A shelf opened whole, as Apple Books opens one: its name large, the count, every title as a
+/// grid of covers. A title opens its page; Menu comes back to the shelf.
+struct ReadingRowGrid: View {
+    let row: RRRow
+    @Environment(\.palette) private var palette
+    @State private var opened: RRTitle?
+
+    var body: some View {
+        ZStack {
+            palette.ground.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(row.name).kjDisplay(KJType.headline, tracking: -0.055).accessibilityAddTraits(.isHeader)
+                        Text("\(row.titles.count.formatted()) title\(row.titles.count == 1 ? "" : "s")").kjBody()
+                    }
+                    LazyVGrid(columns: ReadingMetrics.gridColumns, alignment: .leading, spacing: 28) {
+                        ForEach(row.titles) { title in RRTitleCard(title: title) { opened = title } }
+                    }
+                    .padding(.leading, -10)
+                }
+                .padding(KJLayout.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .foregroundStyle(palette.ink)
+        .fullScreenCover(item: $opened) { title in ReadingTitleView(title: title) }
+    }
 }
 
 /// A cover at its own shape on the house lift colour, fitted whole and never cropped. The plate holds

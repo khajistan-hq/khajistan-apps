@@ -428,6 +428,7 @@ struct TransmissionPlayerView: View {
     /// The sign-on once per launch, then the channel. Every step checks that the viewer is still
     /// here: a clip must not start after the screen has gone.
     private func start() async {
+        model.silenceRadio()
         // The sign-on, once per launch: the skin's colour with the channel's name, a pigeon
         // flying over it while the programme tunes behind, and the cut to the picture.
         if !model.clips.signOnPlayed {

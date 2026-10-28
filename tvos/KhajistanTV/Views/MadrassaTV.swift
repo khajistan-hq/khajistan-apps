@@ -60,20 +60,29 @@ struct TVMadrassa: View {
                       blocks: [item.sub, item.desc].compactMap { $0 }.map { .paragraph(AttributedString($0)) },
                       website: item.href.map { "khajistan-archive.pages.dev/\($0)" })
         }
-        .fullScreenCover(item: $post) { item in
-            TVReading(kicker: MadrassaWritings.label(item), title: item.title, picture: picture(item.image),
-                      blocks: ArticleHTML.blocks(item.body ?? ""),
-                      website: "khajistan-archive.pages.dev/\(MadrassaWritings.pagePath(item))")
-        }
+        .fullScreenCover(item: $post) { item in Self.reading(item, model: model) }
         .fullScreenCover(isPresented: $dictionary) { TVDictionary() }
     }
 
+    private func picture(_ raw: String?) -> URL? { Self.picture(raw, model: model) }
+
     /// A picture named by the page or the feed: an https address as it is, a site path on the
     /// site's own origin.
-    private func picture(_ raw: String?) -> URL? {
+    static func picture(_ raw: String?, model: AppModel) -> URL? {
         guard let raw, !raw.isEmpty, let url = URL(string: raw, relativeTo: model.madrassaEntries.origin)?.absoluteURL,
               url.scheme == "https" || url.host == model.madrassaEntries.origin.host else { return nil }
         return url
+    }
+
+    /// A writing read whole, with its date and Save beside it, as The Atlantic heads an essay.
+    static func reading(_ post: MadrassaPost, model: AppModel) -> TVReading {
+        TVReading(kicker: MadrassaWritings.label(post), title: post.title, picture: picture(post.image, model: model),
+                  blocks: ArticleHTML.blocks(post.body ?? ""),
+                  website: "khajistan-archive.pages.dev/\(MadrassaWritings.pagePath(post))",
+                  date: post.publishedAt.map { String($0.prefix(10)) },
+                  saving: TVReading.Saving(pageID: (post.blog ?? "announcements") + "/" + post.handle,
+                                           href: "/" + MadrassaWritings.pagePath(post)),
+                  opened: post.handle)
     }
 }
 
@@ -135,28 +144,64 @@ private struct PostCard: View {
 }
 
 /// A piece read whole on the TV, set as The Atlantic sets an essay: the section, the headline in a
-/// serif, the lead picture, then the text. Each block is a focus stop, so the remote moves down the
-/// text a block at a time and the screen follows. It ends by sending the reader to the phone.
+/// serif, the date with Save beside it, the contents where the piece has three headings or more,
+/// the lead picture, then the text. Each block is a focus stop, so the remote moves down the text
+/// a block at a time and the screen follows; a line of the contents jumps to its heading. It ends
+/// by sending the reader to the phone.
 struct TVReading: View {
+    /// Where a writing is kept on the account, with the other saves the website's profile lists.
+    struct Saving {
+        let pageID: String
+        let href: String
+    }
+
     let kicker: String
     let title: String
     var picture: URL? = nil
     let blocks: [ArticleBlock]
     let website: String?
+    var date: String? = nil
+    var saving: Saving? = nil
+    /// The writing's handle, for Opened lately on the Rooms door.
+    var opened: String? = nil
+    @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    @State private var saveNote: String?
+    @State private var showSignIn = false
+    /// The block the remote is on; a line of the contents moves it to its heading, and the
+    /// screen follows focus there.
+    @FocusState private var focusedBlock: Int?
+
+    private var headings: [(index: Int, text: String)] {
+        blocks.enumerated().compactMap { index, block in
+            if case .heading(let text) = block { return (index, text) } else { return nil }
+        }
+    }
 
     var body: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
+            ScrollViewReader { reader in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     Kicker(kicker)
                     Text(title).font(MadrassaType.title(60)).frame(maxWidth: 1400, alignment: .leading)
                         .accessibilityAddTraits(.isHeader)
+                    if date != nil || saving != nil {
+                        HStack(alignment: .center, spacing: 32) {
+                            if let date { Text(date).kjSmall(faint: true) }
+                            if let saving { saveButton(saving) }
+                            if let saveNote { Text(saveNote).kjSmall(faint: true) }
+                        }
+                        .focusSection()
+                    }
+                    if headings.count >= 3 { contents(reader) }
                     if let picture { TVPicture(url: picture, maxPixel: 1600).frame(maxWidth: 1300, minHeight: 560, maxHeight: 560) }
-                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                         Button { } label: { blockView(block).frame(maxWidth: 1300, alignment: .leading) }
                             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                            .focused($focusedBlock, equals: index)
+                            .id(index)
                     }
                     if let website {
                         Text("Continue on your phone, or on the website: \(website)").kjSmall(faint: true).padding(.top, 12)
@@ -164,8 +209,59 @@ struct TVReading: View {
                 }
                 .padding(KJLayout.inset)
             }
+            }
         }
         .foregroundStyle(palette.ink)
+        .onAppear { if let opened { OpenedLately.record(.writing, ref: opened, title: title) } }
+        .task { if saving != nil { await model.saves.load() } }
+        .fullScreenCover(isPresented: $showSignIn) {
+            SignInView(onSignedIn: {}).environment(\.palette, palette)
+        }
+    }
+
+    /// The piece's own headings, each a jump to its place, as Wikipedia's contents box.
+    private func contents(_ reader: ScrollViewProxy) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Kicker("Contents")
+            ForEach(headings, id: \.index) { heading in
+                Button { jump(to: heading.index, reader) } label: {
+                    Text(heading.text).font(MadrassaType.body(28)).lineLimit(1).frame(maxWidth: 1100, alignment: .leading)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
+                .accessibilityIdentifier("tvcontents-\(heading.index)")
+            }
+        }
+        .padding(.vertical, 8)
+        .focusSection()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("tvpostContents")
+    }
+
+    /// The heading is built first (the text is a lazy stack), then the remote is put on it, and
+    /// the screen follows focus there.
+    private func jump(to index: Int, _ reader: ScrollViewProxy) {
+        reader.scrollTo(index, anchor: .top)
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            focusedBlock = index
+        }
+    }
+
+    private func saveButton(_ saving: Saving) -> some View {
+        let saved = model.saves.isSaved(page: saving.pageID)
+        return Button {
+            guard model.saves.canSave else { showSignIn = true; return }
+            Task {
+                await model.saves.load()
+                saveNote = await model.saves.toggle(page: saving.pageID, title: title, href: saving.href) ? nil : "That did not save. Try again."
+            }
+        } label: {
+            Label(saved ? "Saved" : "Save", systemImage: saved ? "bookmark.fill" : "bookmark").kjKicker()
+        }
+        .buttonStyle(HouseButtonStyle())
+        .disabled(PassportSaves.pageRef(saving.pageID) == nil)
+        .accessibilityIdentifier("tvpostSave")
+        .accessibilityValue(saved ? "On" : "Off")
     }
 
     @ViewBuilder

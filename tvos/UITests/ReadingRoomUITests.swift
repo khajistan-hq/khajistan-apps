@@ -253,6 +253,46 @@ final class ReadingRoomUITests: XCTestCase {
 
     // MARK: - The shelf's shape
 
+    // MARK: - Search and a whole shelf
+
+    /// Apple Books' two ways in, on the remote: a shelf's "Name ›" opens the whole shelf as a grid,
+    /// and the search bar over the shelf finds a title by part of its name.
+    func testWholeShelfAndSearch() throws {
+        for skin in skins {
+            let app = launch(skin: skin)
+            waitForShelf(app)
+            let heading = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-shelf-'")).firstMatch
+            XCTAssertTrue(heading.exists, "each shelf is headed \"Name ›\"")
+            XCTAssertTrue(kjFocus(heading, app: app), "the remote reaches a shelf's heading")
+            let name = heading.label.components(separatedBy: ",").first ?? ""
+            XCUIRemote.shared.press(.select)
+            let title = app.staticTexts[name]
+            XCTAssertTrue(title.waitForExistence(timeout: 10), "the shelf opens whole, under its name: \(name)")
+            kjPause(4)
+            kjScreenshot("\(skin)-rr-shelf-grid", app: app)
+            let card = cards(app).firstMatch
+            XCTAssertTrue(kjFocus(card, app: app), "the grid's covers take the remote")
+            let wanted = card.label.components(separatedBy: ",").first ?? ""
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(title.waitForNonExistence(timeout: 5), "Menu returns to the shelf")
+
+            let field = app.textFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "the Reading Room has a search bar")
+            XCTAssertTrue(kjFocus(field, app: app), "the remote reaches the search bar")
+            XCUIRemote.shared.press(.select)
+            kjPause(1.5)
+            app.typeText(String(wanted.prefix(6)))
+            kjPause(1)
+            XCUIRemote.shared.press(.menu)
+            let count = app.staticTexts["rrSearchCount"]
+            XCTAssertTrue(count.waitForExistence(timeout: 10), "the search says what it found")
+            XCTAssertFalse(count.label.hasPrefix("No title"), "part of a title's name finds it: \(wanted)")
+            kjPause(3)
+            kjScreenshot("\(skin)-rr-search", app: app)
+            app.terminate()
+        }
+    }
+
     func testTabsWhenTheModuleIndexIsThere() throws {
         guard ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"] != nil else {
             throw XCTSkip("the module index is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN")

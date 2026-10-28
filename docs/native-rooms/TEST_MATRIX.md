@@ -23,6 +23,20 @@ TV app also take `-kjroom <screening|bazaar|madrassa|databases>`.
 in the machinery repo). Most room data is behind the site password until launch; without `KJ_SITE` the
 tests check the locked note instead.
 
+## Full run on the combined branch (2026-10-28, at 422aded; later commits to d04263b are docs only)
+
+Run on a clean checkout of the pushed head, so no session's uncommitted work was in it.
+
+| Suite | Result |
+|---|---|
+| iOS core | 74 passed, 1 skipped |
+| TV core (real site data, Bazaar fixture) | 152 passed, 2 skipped |
+| iOS package | 8 passed |
+| Apple TV UI (local site): Rooms, RoomsLayout (3 skins + index search), ReceiverGuide (3 skins), ReadingRoom (incl. rights-held), Films, PicsVids | 18 passed, 1 skipped (no account-open title on the shelf today), 0 failed |
+| iPhone UI (iPhone 17, `KJ_SITE`) | 19 of 19 (a first attempt never started: the simulator refused to launch the test runner, "Host is down"; the re-run on the same build passed) |
+| iPad UI (iPad Pro 11-inch (M5), `KJ_SITE`) | 20 of 20 |
+| Builds | Mac Catalyst, iPhone `KJ_APP_STORE` and tvOS `KJ_APP_STORE` all build |
+
 ## Last measured (2026-10-28, TV index search)
 
 | Suite | Result |

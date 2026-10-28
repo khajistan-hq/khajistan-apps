@@ -40,9 +40,13 @@ final class KhajistanUITests: XCTestCase {
         waitFor(catalogue, 10, "Receiver exposes its scrollable catalogue")
         waitFor(app.buttons["region-indus"], 40, "The region strip lists Indus")
         let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
-        for _ in 0..<8 {
+        for _ in 0..<10 {
             if channel.exists && channel.isHittable { return channel }
-            catalogue.swipeUp()
+            // Flicks, because a press-and-drag on the map scrubs stations instead of scrolling. On
+            // a slow runner a flick's momentum can carry the first row past the top, under the
+            // dock (CI, 2026-10-28): a row above the middle is brought back down.
+            if channel.exists && channel.frame.midY < catalogue.frame.midY { catalogue.swipeDown() } else { catalogue.swipeUp() }
+            usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")

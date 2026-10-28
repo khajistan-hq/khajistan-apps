@@ -103,7 +103,8 @@ final class ReadingStore {
     @ObservationIgnored private var firstCoverTimed = false
     private func clock(_ step: String) {
         guard UserDefaults.standard.bool(forKey: "kjclock") else { return }
-        print("RRCLOCK \(step) \(ContinuousClock.now - clockStart)")
+        // stderr: unbuffered, so each line reaches `devicectl --console` as it happens.
+        FileHandle.standardError.write(Data("RRCLOCK \(step) \(ContinuousClock.now - clockStart)\n".utf8))
     }
 
     private func load() async {
@@ -196,9 +197,23 @@ final class ReadingStore {
     }
 
     private func fetch<T>(_ request: URLRequest, decode: (Data) -> T?) async -> T? {
-        guard let (data, response) = try? await urlSession.data(for: request),
-              let code = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else { return nil }
-        return decode(data)
+        let asked = ContinuousClock.now
+        let name = request.url?.path.split(separator: "/").last.map(String.init) ?? "?"
+        let data: Data, response: URLResponse
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            clock("fetch \(name) failed after \(ContinuousClock.now - asked): \(error.localizedDescription)")
+            return nil
+        }
+        guard let code = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(code) else {
+            clock("fetch \(name) status \((response as? HTTPURLResponse)?.statusCode ?? 0) after \(ContinuousClock.now - asked)")
+            return nil
+        }
+        clock("fetch \(name) \(data.count) bytes in \(ContinuousClock.now - asked)")
+        let decoded = decode(data)
+        clock("decoded \(name) \(decoded == nil ? "FAILED" : "ok")")
+        return decoded
     }
 
     // MARK: - A title's custodian

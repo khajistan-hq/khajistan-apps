@@ -109,6 +109,15 @@ final class ReadingStore {
 
     private func load() async {
         clock("start")
+        // The shelf as this device last read it, at once; a fresh copy is read behind it for the
+        // next open when the kept one is old (RRShelfDisk). Access stays the page server's answer.
+        if await build(fromDevice: true) {
+            clock("ready from the device")
+            if RRShelfDisk.isStale {
+                Task { await keepAFreshCopy() }
+            }
+            return
+        }
         // Which way the database answers: direct, the site's proxy, or neither (said at once).
         guard await SupabaseRoute.ready() != .unreachable else {
             clock("route unreachable")
@@ -116,18 +125,25 @@ final class ReadingStore {
             return
         }
         clock("route \(SupabaseRoute.path.rawValue)")
-        async let feed = loadFeed()
-        async let rightsHeld = loadRights()
-        async let index = loadModules()
-        async let ranks = loadProvenance()
-        let fetched = await feed
-        clock("feed")
-        guard let collections = fetched, !collections.isEmpty else {
+        if !(await build(fromDevice: false)) {
             phase = .failed(SupabaseRoute.path == .unreachable ? SupabaseRoute.unreachableText : "The Reading Room did not answer.")
-            return
         }
+    }
+
+    /// Builds the shelf from the network, or from the copy kept on the device. False when the
+    /// feed (or, kept, any of the shelf's inputs) is not there.
+    private func build(fromDevice: Bool) async -> Bool {
+        async let feed = loadFeed(fromDevice: fromDevice)
+        async let rightsHeld = loadRights(fromDevice: fromDevice)
+        async let index = loadModules(fromDevice: fromDevice)
+        async let ranks = loadProvenance(fromDevice: fromDevice)
+        let fetched = await feed
+        clock(fromDevice ? "feed from the device" : "feed")
+        // Kept rights are required: a shelf must never show a held title as readable.
+        let held = await rightsHeld
+        guard let collections = fetched, !collections.isEmpty, let held = held ?? (fromDevice ? nil : []) else { return false }
         // Rights first and awaited, as the site does: the room's figures must not count what the reader cannot open.
-        rights = await rightsHeld
+        rights = held
         clock("rights")
         let built = RRCatalogue.titles(from: collections)
         clock("titles built")
@@ -153,6 +169,18 @@ final class ReadingStore {
         tabs = shelf
         phase = .ready
         clock("ready")
+        return true
+    }
+
+    /// Reads the shelf's inputs again and keeps them for the next open. Nothing on screen changes:
+    /// a shelf never reorders under the viewer.
+    private func keepAFreshCopy() async {
+        async let feed = loadFeed(fromDevice: false)
+        async let rightsHeld = loadRights(fromDevice: false)
+        async let index = loadModules(fromDevice: false)
+        async let ranks = loadProvenance(fromDevice: false)
+        _ = await (feed, rightsHeld, index, ranks)
+        clock("fresh copy kept")
     }
 
     func retry() async {
@@ -160,15 +188,25 @@ final class ReadingStore {
     }
 
     /// The feed, a thousand rows a page and retried: a bare call returned 1,000 of 1,036 rows once and called it success.
-    private func loadFeed() async -> [RRCollection]? {
-        for attempt in 0..<3 {
+    /// Read from the device, the pages kept last time, all or none. From the network, the pages are
+    /// kept only once every one has arrived, so a kept feed is never half of two readings.
+    private func loadFeed(fromDevice: Bool) async -> [RRCollection]? {
+        // Kept pages count only when the last keeping finished (its marker is written last).
+        if fromDevice, !RRShelfDisk.feedIsWhole { return nil }
+        for attempt in 0..<(fromDevice ? 1 : 3) {
             // No way to the database: another attempt would only wait out the same refusal.
-            if SupabaseRoute.path == .unreachable { return nil }
+            if !fromDevice, SupabaseRoute.path == .unreachable { return nil }
             if attempt > 0 { try? await Task.sleep(for: .milliseconds(600 * Int(pow(3.0, Double(attempt - 1))))) }
             var all: [RRCollection] = []
+            var pages: [(key: String, data: Data)] = []
             var failed = false
             for pageNo in 0..<64 {
-                guard let rows = await fetch(RRAPI.catalogueRequest(offset: pageNo * RRAPI.feedPage), decode: RRAPI.titles(fromFeed:)) else {
+                let request = RRAPI.catalogueRequest(offset: pageNo * RRAPI.feedPage)
+                let key = RRShelfDisk.key(request)
+                guard let rows = await fetch(request, fromDevice: fromDevice, decode: { data -> [RRCollection]? in
+                    pages.append((key, data))
+                    return RRAPI.titles(fromFeed: data)
+                }) else {
                     failed = true
                     break
                 }
@@ -176,36 +214,49 @@ final class ReadingStore {
                 // A short page is the only honest end of the data.
                 if rows.count < RRAPI.feedPage { break }
             }
-            if !failed { return all }
+            if !failed {
+                if !fromDevice { RRShelfDisk.keepFeed(pages) }
+                return all
+            }
         }
         return nil
     }
 
-    private func loadRights() async -> Set<String> {
-        await fetch(RRAPI.rightsRequest(), decode: RRAPI.slugs(fromRights:)) ?? []
+    private func loadRights(fromDevice: Bool) async -> Set<String>? {
+        await fetch(RRAPI.rightsRequest(), fromDevice: fromDevice, keep: true, decode: RRAPI.slugs(fromRights:))
     }
 
     /// data/rr-modules.json. Without the preview password the site answers 401 and the room is one tab of every title.
-    private func loadModules() async -> RRModuleIndex? {
+    private func loadModules(fromDevice: Bool) async -> RRModuleIndex? {
         var request = URLRequest(url: RRSite.modulesURL(origin: origin))
+        // Kept per site and per gate state: the index is behind the site password, and a copy read
+        // with the password must not stand in once it is gone (nor a test server's for the site's).
+        let key = RRShelfDisk.key(request) + " @" + (origin.host ?? "") + (authorization == nil ? " open" : " gated")
+        if fromDevice { return RRShelfDisk.read(key).flatMap(RRModuleIndex.parse) }
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await urlSession.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return RRModuleIndex.parse(data)
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let index = RRModuleIndex.parse(data) else { return nil }
+        RRShelfDisk.write(data, key)
+        return index
     }
 
-    private func loadProvenance() async -> [String: RRProvenanceRow] {
+    private func loadProvenance(fromDevice: Bool) async -> [String: RRProvenanceRow] {
         var all: [String: RRProvenanceRow] = [:]
         for pageNo in 0..<16 {
-            guard let rows = await fetch(RRAPI.provenanceRequest(offset: pageNo * RRAPI.feedPage), decode: RRProvenance.rows(from:)) else { break }
+            guard let rows = await fetch(RRAPI.provenanceRequest(offset: pageNo * RRAPI.feedPage), fromDevice: fromDevice, keep: true,
+                                         decode: RRProvenance.rows(from:)) else { break }
             for row in rows { all[row.collection_slug] = row }
             if rows.count < RRAPI.feedPage { break }
         }
         return all
     }
 
-    private func fetch<T>(_ request: URLRequest, decode: (Data) -> T?) async -> T? {
+    /// `fromDevice` reads the copy kept for this request (nil when there is none); `keep` keeps a
+    /// network answer that decoded, for the shelf's next open.
+    private func fetch<T>(_ request: URLRequest, fromDevice: Bool = false, keep: Bool = false, decode: (Data) -> T?) async -> T? {
+        if fromDevice { return RRShelfDisk.read(RRShelfDisk.key(request)).flatMap(decode) }
         let asked = ContinuousClock.now
         let name = request.url?.path.split(separator: "/").last.map(String.init) ?? "?"
         let data: Data, response: URLResponse
@@ -222,6 +273,7 @@ final class ReadingStore {
         clock("fetch \(name) \(data.count) bytes in \(ContinuousClock.now - asked)")
         let decoded = decode(data)
         clock("decoded \(name) \(decoded == nil ? "FAILED" : "ok")")
+        if keep, decoded != nil { RRShelfDisk.write(data, RRShelfDisk.key(request)) }
         return decoded
     }
 
@@ -259,6 +311,7 @@ final class ReadingStore {
         let state = card(for: title)
         guard !state.requested, let cover = RRPath.coverEndpoint(title, extra: pad4) else { return }
         state.requested = true
+        showKeptCover(cover, on: state)
         queue.append(Job(key: title.slug, cover: cover, probe: RRPath.probeEndpoint(title, extra: pad4), state: state, title: title))
         scheduleFlush()
     }
@@ -268,6 +321,7 @@ final class ReadingStore {
         let state = issueCard(title, issue)
         guard !state.requested else { return }
         state.requested = true
+        showKeptCover(RRPath.issueCoverEndpoint(title, issue, extra: pad4), on: state)
         queue.append(Job(key: issue.key, cover: RRPath.issueCoverEndpoint(title, issue, extra: pad4), probe: nil, state: state, title: nil))
         scheduleFlush()
     }
@@ -321,9 +375,19 @@ final class ReadingStore {
                 continue
             }
             let state = job.state
+            let kept = Self.coverKey(job.cover)
+            // A kept cover already on the card is not downloaded again.
+            if state.image != nil { continue }
+            let session = urlSession
             Task {
-                state.image = await PnvImages.shared.image([url], maxPixel: 720)
-                if state.image == nil { state.failed = true }
+                let image = await Task.detached(priority: .utility) { () -> UIImage? in
+                    guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
+                          (response as? HTTPURLResponse)?.statusCode == 200,
+                          let image = PnvImages.downsample(data, maxPixel: 720) else { return nil }
+                    RRPageDisk.write(data, kept)
+                    return image
+                }.value
+                if let image { state.image = image } else if state.image == nil { state.failed = true }
                 if !firstCoverTimed, state.image != nil { firstCoverTimed = true; clock("first cover") }
             }
         }
@@ -346,6 +410,29 @@ final class ReadingStore {
                 }
             }
             if pending.isEmpty { return }
+        }
+    }
+
+    /// A cover as this device kept it, by the page it shows (not the signed address, which expires).
+    private static func coverKey(_ endpoint: String) -> String { "cover|" + endpoint }
+
+    /// Puts the kept cover on the card at once, read and decoded off the main thread.
+    private func showKeptCover(_ endpoint: String, on state: RRCardState) {
+        let key = Self.coverKey(endpoint)
+        Task {
+            let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
+                guard let data = RRPageDisk.read(key) else { return nil }
+                guard let image = PnvImages.downsample(data, maxPixel: 720) else {
+                    // A kept copy that will not decode is dropped; the signed download replaces it.
+                    RRPageDisk.remove(key)
+                    return nil
+                }
+                return image
+            }.value
+            if let image, state.image == nil {
+                state.image = image
+                if !firstCoverTimed { firstCoverTimed = true; clock("first cover (kept)") }
+            }
         }
     }
 
@@ -540,6 +627,57 @@ final class ReadingStore {
 /// Page images on the device, keyed by the page's storage path. Only bytes: whether a viewer may
 /// see a page is the server's answer every time, never the presence of a file here. Kept three
 /// days, so a re-cut page is fetched again, and trimmed to 400 MB, oldest first.
+/// The shelf's own inputs as this device last read them (the catalogue pages, the rights held, the
+/// custodians, the module index), so the room opens at once without waiting on the network. A fresh
+/// copy is read behind the shelf when the kept one is older than `freshFor`: the catalogue is a
+/// billed download of about 3 MB. Access is the page server's answer on every page, so a shelf
+/// hours old cannot open a page that has since been held back. Owner, 2026-10-27: the Reading Room
+/// to load "in no more than 2 secs"; on the Apple TV HD the network path alone took 3.4 s.
+enum RRShelfDisk {
+    static let folder: URL = {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        let folder = base.appendingPathComponent("ReadingRoomShelf", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+    static let freshFor: TimeInterval = 6 * 3600
+
+    /// The request as the project names it (whichever way it was sent) and its body.
+    static func key(_ request: URLRequest) -> String {
+        let url = request.url.map(SupabaseRoute.unrouted)
+        return (request.httpMethod ?? "GET") + " " + (url?.path ?? "") + "?" + (url?.query ?? "") + " "
+            + String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+    }
+
+    static func file(_ key: String) -> URL {
+        let digest = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
+        return folder.appendingPathComponent(digest + ".json")
+    }
+
+    static func read(_ key: String) -> Data? { try? Data(contentsOf: file(key)) }
+
+    static func write(_ data: Data, _ key: String) { try? data.write(to: file(key), options: .atomic) }
+
+    private static let feedMarker = "feed kept whole"
+
+    /// Keeps the feed's pages: the marker goes first and comes back last, so a keeping cut short
+    /// leaves no marker and the kept feed is not used.
+    static func keepFeed(_ pages: [(key: String, data: Data)]) {
+        try? FileManager.default.removeItem(at: file(feedMarker))
+        for page in pages { write(page.data, page.key) }
+        write(Data("\(pages.count)".utf8), feedMarker)
+    }
+
+    static var feedIsWhole: Bool { FileManager.default.fileExists(atPath: file(feedMarker).path) }
+
+    /// The kept feed is missing or older than `freshFor`.
+    static var isStale: Bool {
+        let first = file(key(RRAPI.catalogueRequest(offset: 0)))
+        guard let date = (try? first.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate else { return true }
+        return Date().timeIntervalSince(date) > freshFor
+    }
+}
+
 enum RRPageDisk {
     static let folder: URL = {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -554,6 +692,8 @@ enum RRPageDisk {
         let digest = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
         return folder.appendingPathComponent(digest + ".jpg")
     }
+
+    static func remove(_ path: String) { try? FileManager.default.removeItem(at: file(path)) }
 
     static func read(_ path: String) -> Data? {
         let url = file(path)

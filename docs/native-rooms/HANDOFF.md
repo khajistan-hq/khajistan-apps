@@ -130,13 +130,14 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
 ## Known gaps and blockers
 
 - **The owner's home network blocks the database host** (2026-10-27; DECISIONS 22). The apps fall
-  back to the site's `/sb/` proxy, which is committed in the archive repo but **not deployed**: it
-  goes live only with `scripts/deploy.sh --yes` (owner's approval; the archive checkout's `main` is
-  101 ahead / 99 behind its remote, so reconcile first). Until then the TV says the archive cannot be
-  reached, in under 3 s. The website itself calls the host directly and is equally stuck on that
-  network; pointing its pages at `/sb/` is a site change for the Front lane. Live captions and other
-  realtime features are not proxied.
-
+  back to the site's `/sb/` proxy, live since archive b96a2b2f3 (a88eee3f7 cherry-picked onto the
+  live main and deployed by the sign-in session). The website's own pages still call the host
+  directly and are stuck on that network; `/activate` falls back to `/sb/` (d98cb687c). Realtime
+  (live captions, chat presence) is not proxied, and behind `/sb/` the database sees Cloudflare's
+  addresses, not the viewer's (per-IP rate limits, sign-in's same-network flag) — fine for one
+  household, needs a signed client-address header before scale.
+- **The Reading Room opens from the shelf kept on the device** (DECISIONS 23): on the owner's TV
+  1.36–1.44 s to the shelf; the first open after an install still reads the network (2.9 s).
 - **Closed 2026-10-27, no migration — Pics/Vids collections**: the table's per-column grants
   (INSERT user_id, name, media_keys; UPDATE name, media_keys) already let an account create and fill
   one; the Backend board note (machinery `04391297`, `COORDINATION.md`) read only table-level grants

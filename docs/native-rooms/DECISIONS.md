@@ -93,4 +93,13 @@ Each entry: what was chosen, and why, in one or two lines.
     every project address (built or handed back, signed pages, stored files, players) onto the
     route, and with neither answering says so at once (`unreachableText`), asking again at most
     every 10 s. Realtime (live captions, chat presence) is not proxied.
+23. **The Reading Room opens from the shelf this device last read (owner, 2026-10-27: "load in no
+    more than 2 secs").** On the Apple TV HD the network path alone is about 3 s (1.8 s of it opening
+    the connection through the proxy). The shelf's inputs (catalogue pages, kept whole under a marker
+    written last; rights; custodians; the module index, kept per site and per gate state) and the
+    covers (3 days) are kept on the device; the room is built from them at once, and a fresh copy is
+    read behind it when the kept one is over 6 hours old (the catalogue is a billed 3 MB), applied on
+    the next open so a shelf never reorders under the viewer. Without kept rights the kept shelf is
+    not used. Access stays the page server's answer on every page. Measured on the owner's TV:
+    1.36–1.44 s to the shelf, 1.65–1.73 s to the first cover; the first open after an install 2.9 s.
 

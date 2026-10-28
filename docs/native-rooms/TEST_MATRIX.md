@@ -51,6 +51,15 @@ uncommitted in the shared folder).
 Not covered: anything against the live project (nothing is deployed, no test account); the SQL was
 not run (no local Postgres); a real phone scanning a real TV.
 
+## Last measured (2026-10-28, the shelf kept on the device; DECISIONS 23)
+
+| Check | Result |
+|---|---|
+| Owner's Apple TV HD, Release, `-kjclock` | first open after install: shelf 2.88 s, first cover 3.19 s; next opens: 1.36 s / 1.65 s and 1.44 s / 1.73 s (shelf / first cover) |
+| Owner's Apple TV HD, Pics/Vids | opens with region shelves and pictures (screenshot via `devicectl device capture screenshot`) |
+| TV core / iOS core | 152 passed 2 skipped / 74 passed 1 skipped |
+| Apple TV `ReadingRoomUITests` + Rooms | 5 passed, 1 skipped (no account-open title today), on the code after the refute fixes |
+
 ## Last measured (2026-10-27, the database route; DECISIONS 22)
 
 | Check | Result |

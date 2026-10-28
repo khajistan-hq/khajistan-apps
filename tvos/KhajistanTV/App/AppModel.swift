@@ -34,6 +34,26 @@ final class AppModel {
     var link: DeepLink?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
+    /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
+    /// the site's own files (SiteFeed) as the phone reads them.
+    let bazaar: SiteFeed<[BazaarItem]>
+    let bazaarSwap: SiteFeed<[String: String]>
+    let madrassaEntries: SiteFeed<[MadrassaEntry]>
+    let madrassaPosts: SiteFeed<[MadrassaPost]>
+    let lughat: SiteFeed<[LughatEntry]>
+    @ObservationIgnored private var databaseFeeds: [ArchiveDatabase: SiteFeed<[DBRecord]>] = [:]
+
+    /// The preview password's header for a picture on the site's own host, nil anywhere else.
+    func siteAuthorization(for url: URL) -> String? { bazaar.authorization(for: url) }
+
+    /// A research database's records, read the first time it is opened.
+    func database(_ db: ArchiveDatabase) -> SiteFeed<[DBRecord]> {
+        if let feed = databaseFeeds[db] { return feed }
+        let origin = SiteOrigin.current
+        let feed = SiteFeed<[DBRecord]>(auth: auth, paths: db.paths, origin: origin) { files in try db.records(files, origin: origin) }
+        databaseFeeds[db] = feed
+        return feed
+    }
     /// The wing wipes and the sign-on ident. One player for the life of the app.
     let clips = StationClips()
     /// The pigeon over the live picture at a Receiver channel change.
@@ -77,12 +97,28 @@ final class AppModel {
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
         self.saves = SavesStore(auth: auth)
+        bazaar = SiteFeed(auth: auth, path: Bazaar.cataloguePath) { data in
+            Bazaar.offered(try JSONDecoder().decode(BazaarCatalogue.self, from: data).products)
+        }
+        bazaarSwap = SiteFeed(auth: auth, path: Bazaar.swapPath) { data in try Bazaar.swapMap(data) }
+        madrassaEntries = SiteFeed(auth: auth, path: MadrassaEntries.pagePath) { data in
+            guard let entries = MadrassaEntries.entries(fromPage: String(decoding: data, as: UTF8.self)) else { throw DBError.unreadable }
+            return entries
+        }
+        madrassaPosts = SiteFeed(auth: auth, path: MadrassaWritings.feedPath) { data in
+            MadrassaWritings.knowledge(try JSONDecoder().decode([MadrassaPost].self, from: data))
+        }
+        lughat = SiteFeed(auth: auth, path: Lughat.path) { data in try JSONDecoder().decode(LughatFile.self, from: data).entries }
         self.chat = ChatStore(auth: auth)
         let films = FilmStore(auth: auth)
         self.films = films
         // The shelf's module index sits behind the site password like vod.json, so it is read from the same origin.
         self.reading = ReadingStore(auth: auth, origin: films.origin)
         self.captions = LiveCaptionSession(auth: auth)
+        #if DEBUG
+        // `-kjforgetplaces YES`: a UI test starts with no Continue, whatever an earlier run read.
+        if UserDefaults.standard.bool(forKey: "kjforgetplaces") { UserDefaults.standard.removeObject(forKey: "kj.readingPlaces") }
+        #endif
         if let launched = UserDefaults.standard.string(forKey: DefaultsKey.launchSkin) {
             UserDefaults.standard.set(SkinChoice(stored: launched).rawValue, forKey: DefaultsKey.skinChoice)
         }
@@ -94,10 +130,13 @@ final class AppModel {
         case "reading": self.section = .reading
         case "picsvids" where StoreBuild.includes(.picsvids): self.section = .picsvids
         case "chat" where StoreBuild.includes(.chat): self.section = .chat
+        case "rooms": self.section = .rooms
         case "account": self.section = .account
         default: self.section = .receiver
         }
         watchTheSky()
+        // Which way the database answers, decided while the first screen draws.
+        Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

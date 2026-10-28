@@ -98,7 +98,7 @@ enum AuthAPI {
     }
 
     private static func post(_ pathAndQuery: String, bearer: String, body: Data?) -> URLRequest {
-        let url = URL(string: pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL
+        let url = SupabaseRoute.url(pathAndQuery)!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.httpBody = body

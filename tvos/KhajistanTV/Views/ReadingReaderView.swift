@@ -11,6 +11,8 @@ import SwiftUI
 struct ReadingReaderView: View {
     let title: RRTitle
     let issue: RRIssue
+    /// Where to open: page 1, or the place this device stopped at (Continue).
+    let startPage: Int
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -33,6 +35,7 @@ struct ReadingReaderView: View {
     @State private var overlayVisible = true
     @State private var showSignIn = false
     @State private var loadTask: Task<Void, Never>?
+    @State private var fellBackToStart = false
     @State private var hideTask: Task<Void, Never>?
 
     private enum Phase: Equatable {
@@ -45,9 +48,10 @@ struct ReadingReaderView: View {
     private static let zoomLevels: [CGFloat] = [1, 2, 3, 4, 6]
     private var zoomed: Bool { zoom > 1 }
 
-    init(title: RRTitle, issue: RRIssue) {
+    init(title: RRTitle, issue: RRIssue, startPage: Int = 1) {
         self.title = title
         self.issue = issue
+        self.startPage = startPage
         _pages = State(initialValue: max(issue.pages, 1))
     }
 
@@ -126,6 +130,11 @@ struct ReadingReaderView: View {
         .onDisappear {
             loadTask?.cancel()
             hideTask?.cancel()
+        }
+        // Each page actually shown is this device's place in the title, for Continue. Kept as it is
+        // read, not on leaving: the screen under the reader redraws before this one disappears.
+        .onChange(of: phase == .page ? position : 0) { _, shown in
+            if shown > 0 { ReadingPlaces.record(title: title.slug, issue: issue, page: shown) }
         }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { retryAfterSignIn() })
@@ -317,7 +326,7 @@ struct ReadingReaderView: View {
         pages = max(resolved.pages, 1)
         map = resolved.map
         flags = await own.merging(await card) { first, _ in first }
-        show(1)
+        show(startPage)
     }
 
     private func show(_ target: Int) {
@@ -356,6 +365,15 @@ struct ReadingReaderView: View {
                 if let blocked = blockedFrom, at >= blocked { blockedFrom = nil }
                 prefetchAround(at)
             case .outcome(let outcome):
+                // A place this account can no longer read past (signed out, membership lapsed)
+                // starts again at page 1, so the gate is met where the preview really ends rather
+                // than walked back to it a page at a time.
+                if at == startPage, startPage > 1, !fellBackToStart,
+                   outcome == .members || outcome == .signIn || outcome == .closed {
+                    fellBackToStart = true
+                    show(1)
+                    return
+                }
                 shown = nil
                 phase = .gate(outcome)
                 if outcome == .members || outcome == .signIn || outcome == .closed {

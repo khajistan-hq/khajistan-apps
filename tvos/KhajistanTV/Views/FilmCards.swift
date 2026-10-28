@@ -1,27 +1,33 @@
 import SwiftUI
 
-/// The films on a shelf. Select opens a film on its preview.
+/// The films on a shelf. Select opens a film on its preview, as the Receiver's shelves do, or,
+/// in the Screening Room, on its page (`opensPage`), as the Apple TV app does.
 struct FilmShelf: View {
     let title: String
     let count: String
     let films: [Film]
+    var onChoose: () -> Void = {}
+    var opensPage = false
+    /// Up Next: each card says where this device stopped the full film.
+    var showsPlaces = false
     @State private var playing: Film?
 
     var body: some View {
         Shelf(title, count: count) {
             ForEach(films) { film in
                 Button {
+                    onChoose()
                     playing = film
                 } label: {
-                    FilmCard(film: film)
+                    FilmCard(film: film, place: showsPlaces ? FilmPlaces.position(film.handle) : nil)
                 }
                 .buttonStyle(HouseCardStyle())
-                .accessibilityIdentifier("film-\(film.handle)")
+                .accessibilityIdentifier(showsPlaces ? "upnext-\(film.handle)" : "film-\(film.handle)")
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }
         }
         .fullScreenCover(item: $playing) { film in
-            FilmPlayerView(film: film)
+            if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
     }
 }
@@ -35,10 +41,19 @@ struct FilmCard: View {
     static let textHeight: CGFloat = 210
 
     let film: Film
+    /// Seconds in, where this device stopped the full film: a progress line and the time take the
+    /// offer line's place.
+    var place: Double? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             FilmPoster(film: film, height: Self.posterHeight, maxPixel: 900)
+                // How far in, on the artwork, as the Apple TV app draws Up Next.
+                .overlay(alignment: .bottom) {
+                    if let place, let minutes = film.runtime_minutes, minutes > 0 {
+                        TVProgressLine(value: place / Double(minutes * 60)).padding(16)
+                    }
+                }
                 .kjCardArt()
             // The text takes the poster's width, so a long title wraps under its own poster.
             Color.clear
@@ -48,7 +63,9 @@ struct FilmCard: View {
                         Text(Films.displayTitle(film))
                             .kjName(28)
                             .lineLimit(2)
-                        if let offer = Films.offer(film) {
+                        if let place {
+                            Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
+                        } else if let offer = Films.offer(film) {
                             Kicker(offer)
                                 .lineLimit(3)
                         }

@@ -29,6 +29,10 @@ final class AuthStore {
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
 
+        #if DEBUG
+        // UI tests leave real keychain credentials untouched and cannot obtain a billing token.
+        if UserDefaults.standard.bool(forKey: "kjtestsignedout") { return }
+        #endif
         if let data = Keychain.read(Account.session),
            let stored = try? JSONDecoder().decode(Session.self, from: data) {
             session = stored
@@ -40,6 +44,9 @@ final class AuthStore {
     }
 
     func signIn(email: String, password: String) async throws {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "kjtestsignedout") { throw AuthStoreError.unavailable }
+        #endif
         let (data, response) = try await urlSession.data(for: AuthAPI.passwordRequest(email: email, password: password))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 {
@@ -61,6 +68,9 @@ final class AuthStore {
     /// A token that is good now: the stored one, or a refreshed one. When the refresh fails
     /// the session is dropped, because a refresh token is not worth keeping once refused.
     func validAccessToken() async throws -> String {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "kjtestsignedout") { throw AuthStoreError.unavailable }
+        #endif
         guard let current = session else {
             throw AuthError.server("Sign in to watch Khajistan TV.")
         }

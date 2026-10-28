@@ -12,9 +12,19 @@ final class PlayerController {
     }
 
     let player = AVPlayer()
-    var state: State = .idle
+    var state: State = .idle {
+        didSet {
+            // System remote controls and other players can pause us without visiting a view/tuner.
+            switch state {
+            case .idle, .paused, .failed: onPlaybackUnavailable?()
+            case .playing, .tuning: break
+            }
+        }
+    }
+    @ObservationIgnored var onPlaybackUnavailable: (() -> Void)?
     @ObservationIgnored var onEnded: (() -> Void)?
 
+    @ObservationIgnored private var wantsPlayback = false
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var statusObservation: NSKeyValueObservation?
@@ -59,8 +69,11 @@ final class PlayerController {
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
     /// card says; a recording (a mix, a clip) passes false.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true) {
+        // A stored programme or clip on the database's storage plays by the route that answers.
+        let url = SupabaseRoute.routed(url)
         generation += 1
         let gen = generation
+        wantsPlayback = true
         state = .tuning
         timeoutTask?.cancel()
         removeItemObservers()
@@ -136,12 +149,17 @@ final class PlayerController {
     }
 
     func pause() {
+        wantsPlayback = false
+        fadeTask?.cancel()
         player.pause()
         state = .paused
         updateNowPlayingRate(0)
     }
 
     func resume() {
+        guard player.currentItem != nil else { return }
+        wantsPlayback = true
+        state = .tuning
         player.volume = 0
         fadeInPending = true
         player.play()
@@ -187,10 +205,11 @@ final class PlayerController {
     }
 
     func toggle() {
-        if state == .playing { pause() } else { resume() }
+        if wantsPlayback { pause() } else { resume() }
     }
 
     func stop() {
+        wantsPlayback = false
         fadeTask?.cancel()
         fadeInPending = false
         generation += 1
@@ -209,7 +228,7 @@ final class PlayerController {
         guard let start else { return }
         player.seek(to: CMTime(seconds: start, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
             Task { @MainActor in
-                guard let self, gen == self.generation else { return }
+                guard let self, gen == self.generation, self.wantsPlayback else { return }
                 self.player.play()
             }
         }
@@ -220,6 +239,7 @@ final class PlayerController {
     private func syncWithPlayer() {
         switch player.timeControlStatus {
         case .playing:
+            guard wantsPlayback else { player.pause(); return }
             timeoutTask?.cancel()
             state = .playing
             updateNowPlayingRate(1)
@@ -259,6 +279,41 @@ final class PlayerController {
             self.state = .failed("The signal stopped.")
         }
     }
+
+    struct CaptionClock {
+        let now: Double
+        let behindLive: Double
+        let programDate: Date?
+        let window: ClosedRange<Double>?
+    }
+
+    var captionClock: CaptionClock? {
+        guard let item = player.currentItem else { return nil }
+        let now = player.currentTime().seconds
+        guard now.isFinite else { return nil }
+        var window: ClosedRange<Double>?
+        if let range = item.seekableTimeRanges.last?.timeRangeValue, range.duration.seconds > 0,
+           range.start.seconds.isFinite, range.end.seconds.isFinite {
+            window = range.start.seconds...range.end.seconds
+        }
+        // How far behind the live edge the picture is. The seekable window's end says so on most
+        // streams, but on some it sits at or even ahead of the picture (measured on the owner's
+        // Apple TV, 2026-10-06: 2 s, 0.2 s, -11.8 s), while AVPlayer is in fact holding 18-45 s
+        // back from live (configuredTimeOffsetFromLive) — captions then landed 15-20 s before
+        // the speech. The larger of the two is the one that can be trusted.
+        let windowLag = window.map { max(0, $0.upperBound - now) } ?? 0
+        let offset = item.configuredTimeOffsetFromLive.seconds
+        let behind = max(windowLag, offset.isFinite ? offset : 0)
+        return CaptionClock(now: now, behindLive: behind, programDate: item.currentDate(), window: window)
+    }
+
+    func seekBack(by seconds: Double) {
+        let target = player.currentTime().seconds - seconds
+        guard target.isFinite, seconds > 0 else { return }
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
+                    toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600))
+    }
+
 
     private func updateNowPlayingRate(_ rate: Double) {
         guard Self.active === self, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }

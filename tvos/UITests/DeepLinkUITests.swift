@@ -12,7 +12,7 @@ final class DeepLinkUITests: XCTestCase {
 
     func testTopShelfLinksOpenTheirScreens() throws {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the receiver must load")
 

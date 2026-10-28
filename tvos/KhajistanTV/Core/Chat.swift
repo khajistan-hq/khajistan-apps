@@ -62,7 +62,7 @@ enum ChatMedia: Hashable, Sendable {
             guard ref.hasPrefix("gif:") else { return nil }
             let name = String(ref.dropFirst(4))
             guard name.range(of: "^[A-Za-z0-9_-][A-Za-z0-9._-]*\\.gif$", options: [.regularExpression, .caseInsensitive]) != nil,
-                  let url = URL(string: "/storage/v1/object/public/video-gifs/" + name, relativeTo: KJConfig.supabase)?.absoluteURL
+                  let url = SupabaseRoute.url("/storage/v1/object/public/video-gifs/" + name)
             else { return nil }
             return .gif(url)
         case "pnv":
@@ -158,7 +158,7 @@ enum ChatRules {
     static func explain(status: Int, body: Data) -> String {
         let text = String(decoding: body, as: UTF8.self)
         if status == 401, text.contains("JWT") || text.contains("token") {
-            return "Your sign-in has run out. Sign in again under Account."
+            return "Your sign-in has run out. Sign in again under \(KJConfig.signInDoor)."
         }
         if text.contains("row-level security") || status == 401 || status == 403 {
             return "The room refused that. Booted, banned, slow mode, or the room is not open to you."
@@ -285,7 +285,7 @@ enum ChatAPI {
     }
 
     private static func request(_ pathAndQuery: String, token: String?) -> URLRequest {
-        var call = URLRequest(url: URL(string: pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL)
+        var call = URLRequest(url: SupabaseRoute.url(pathAndQuery)!)
         call.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         call.timeoutInterval = 15
         call.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
@@ -414,7 +414,7 @@ final class ChatFeed {
 
     /// Sends a line. Nil when it was taken; otherwise the reason, in the site's words.
     func send(_ body: String, handle: String) async -> String? {
-        guard let me = await account() else { return "Sign in under Account to write in a room." }
+        guard let me = await account() else { return "Sign in under \(KJConfig.signInDoor) to write in a room." }
         guard let request = ChatAPI.postRequest(room: room.slug, body: body, userId: me.userId, handle: handle, token: me.token) else {
             return "A line is 1 to 2,000 characters."
         }
@@ -430,7 +430,7 @@ final class ChatFeed {
     /// Reports a line to the desk; the server hides it at once.
     func report(_ line: ChatMessage) async -> String {
         guard let me = await account(), let request = ChatAPI.reportRequest(messageId: line.id, userId: me.userId, token: me.token) else {
-            return "Sign in under Account to report a line."
+            return "Sign in under \(KJConfig.signInDoor) to report a line."
         }
         guard let (data, response) = try? await session.data(for: request) else { return "That did not reach the desk." }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0

@@ -79,7 +79,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   lettering. System card styles are not used: tvOS draws them as white platters.
 - **Text cards** (channels, the two Transmission channels) sit on a `CardPlate`: the lift
   plate at rest, the band plate with onBand text under focus. Square, no border. Channel
-  cards are 420x190, so a shelf is the same height from its first card to its last.
+  cards are 420x190, so a shelf is the same height from its first card to its last. A channel
+  card leads with its medium's mark (an ink square, the glyph in the ground's colour), as a live
+  guide's row does.
 - **Picture cards** (films, Pics/Vids): the picture lifts and casts the shadow; the title and
   lines under it keep the ground's ink. A film poster is 420pt high at its own width, never
   cropped; its text box has a fixed height and takes the poster's width, so a long title wraps
@@ -127,8 +129,15 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
   (state kicker, the name as headline, the place, the attribution line in small type). The
   screen opens on the ground with TUNING and the channel's name, which fades off as the picture
-  arrives. Radio shows its name as display type on the ground. A channel change is
+  arrives. Radio shows its Now Playing on the ground: the radio mark large, ● NOW PLAYING · LIVE
+  RADIO, the station's name in display type, and its place and broadcaster. A channel change is
   described under Motion.
+- **Guide** (2026-10-27, after YouTube TV's live guide): Guide is the strip's third control, after
+  CC and Like, reached with Right. Select opens it over the left of the picture, which plays on:
+  every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
+  and the place, hairlines between, ● LIVE on the one playing. Up and down light a row (the focus
+  plate, 1.03), Select tunes it behind the pigeon, Left or Menu closes it. Like CC and Like it is
+  lit by the remote and never takes focus, so presses keep reaching the player.
 
 - **Letterbox**: a picture that does not fill the screen sits on **black**, in every skin
   (owner, 2026-10-05: "background should always remain black and not house skin colors").
@@ -171,6 +180,51 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
   seconds in the full film.
 
+## Sign in
+
+Owner, 2026-10-27: "sign in with their phone or with a qr code". Sign-in opens on **Sign in with
+your phone**: at left the QR for `khajistan-archive.pages.dev/activate?code=…` on a 520pt plate,
+dark modules on a light plate in every skin (ink on the ground by day; the ground's colour on an ink
+plate in Grove and Smut, because a camera reads an inverted QR badly; checked by decoding the
+screenshots); at right the address, the code in 96pt monospaced black, how long it lasts, and
+**Use email and password instead**, where focus starts. The TV asks every five seconds; once a
+phone approves, it says *Signed in as …* for a moment and closes. A code that runs out offers
+**Get a new code**. When the function cannot be reached the password form opens and says so. The
+password form keeps **Sign in with your phone instead**. DEBUG: `-kjsigninfixture`.
+
+## Rooms
+
+The Screening Room, the Bazaar, the Madrassa and the databases under one door (DECISIONS 12),
+each laid out after the app chosen for it on the phone (DECISIONS 17), adapted to the remote.
+
+- **Door**: ROOMS (headline) and its line, then four tiles in one row, each a text card on its
+  plate (365x330): the room's mark large, a count where the room's list is already on the device
+  (nothing is fetched for it), the name, the line. Under them, Up Next from this device when the
+  Screening Room's catalogue is already loaded. DEBUG builds take `-kjroom <name>`.
+- **Screening Room** (the Apple TV app): Up Next (films whose full film stopped part-way on this
+  device, `kj.filmPlaces`, with a progress line on the poster and *Stopped at 20:00*), Your
+  watchlist when signed in, then a poster shelf per country. A poster opens the **film's page**:
+  the poster whole at left (720pt high); the title, its line, one solid **Play** (or *Resume from
+  20:00*) with Preview and Watchlist beside it, then Information, label beside value. Play asks
+  vod-token in the player; a refusal is the site's words there. A solid action is the lift plate
+  at rest and the focus plate under focus. The Receiver's own film shelves still open a film on
+  its preview, as under The Screening Room below.
+- **Bazaar** (Etsy): a shelf per category; a card is the object fitted whole on a lift plate
+  (340pt square), the price first under it, then the name. The object's page: the picture on its
+  plate, the shop's live price (stat type), the options as chips that change the price shown,
+  the description, and *Buy it on your phone or computer at khajistan.com/products/…*. No bag,
+  no checkout.
+- **Madrassa** (Wikipedia and The Atlantic): titles and text in the system serif. Reference cards
+  carry the entry's short description and its picture beside it; writing cards are the lead
+  picture on a plate, the date, the title and the summary. A piece reads whole, block by block,
+  and ends *Continue on your phone, or on the website: …*.
+- **Databases** (Notion): the systems as a grid of text cards; a system is a table under a
+  search bar (owner, 2026-10-28: the indexes should search song names and metadata; the house text
+  field, hint *Song, artist, album, label, year* on the music indexes; every word must be in the
+  title or a property, as on the phone; applied once typing pauses for 0.3 s) and its
+  facet tabs, hairlines between rows, the title and the first two properties in columns; a record
+  is a property page, label column beside value, each row a focus stop.
+
 ## The Reading Room
 
 The website's READING ROOM door, `/reading-room.html`, read on 2026-10-06 off
@@ -186,7 +240,12 @@ same visitor.
   the access line in the shelf's words: *Free — read in full*, *Free — sign in to read*, *Members*,
   *Rights pending*. The access line is the page server's own answer to an anonymous request for a
   page past the free preview; the app keeps no list of free titles.
-- **Title.** Its issues as covers, with *N issues · M pages*. A rights-held title shows the
+- **Continue** (2026-10-27, after Apple Books): above the language tabs, the titles read on this
+  device, newest first (`kj.readingPlaces`: per title the issue and page, kept when the reader
+  closes on a page), each opening the reader at its page. Rights-held titles are left out.
+- **Title.** The cover large at left (360x490), and beside it the title, its figures and one solid
+  action: *Read*, or *Continue · issue · p. N* where this device stopped; a rights-held title has
+  none. Then its issues as covers, with *N issues · M pages*. A rights-held title shows the
   *Preserved · not published* banner, its covers inert, and a code for the page where researchers
   ask for supervised access.
 - **Reader.** One page at a time, full screen on the ground. Right turns to the next page, left to

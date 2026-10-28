@@ -12,7 +12,7 @@ struct PlayerTopBar: View {
     var body: some View {
         HStack(spacing: 0) {
             Button(action: close) {
-                Image(systemName: "xmark").font(.system(.body, weight: .bold)).frame(width: 44, height: 40)
+                Image(systemName: "xmark").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
             .environment(\.palette, palette.onBandPlate)

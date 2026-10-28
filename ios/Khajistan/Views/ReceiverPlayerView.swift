@@ -10,6 +10,7 @@ struct ReceiverPlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var overlay = OverlayClock()
+    @State private var panelHeight: CGFloat = 0
 
     private var tuner: ReceiverTuner { model.tuner }
     private var controller: PlayerController { tuner.controller }
@@ -26,6 +27,12 @@ struct ReceiverPlayerView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, KJLayout.inset)
             }
+            VStack {
+                Spacer()
+                ReceiverCaptionPlate(text: model.captions.text, skin: model.skin)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, overlay.visible ? panelHeight + 12 : 24)
+            }.allowsHitTesting(false)
             Color.clear.channelGestures(step: step, tap: { overlay.toggle(settled: controller.state == .playing) })
             chrome(palette)
                 .opacity(overlay.visible ? 1 : 0)
@@ -40,6 +47,7 @@ struct ReceiverPlayerView: View {
         .onChange(of: controller.state) { _, new in overlay.wake(settled: new == .playing) }
         // The receiver was turned off, or switched to Transmission, while this was up.
         .onChange(of: tuner.channel == nil) { _, off in if off { dismiss() } }
+        .onPreferenceChange(ReceiverPanelHeight.self) { panelHeight = $0 }
         .onAppear { overlay.wake(settled: controller.state == .playing) }
         .onDisappear { overlay.stop() }
         .accessibilityAction(named: "Next channel") { step(1) }
@@ -56,8 +64,11 @@ struct ReceiverPlayerView: View {
     private func chrome(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             PlayerTopBar(leading: bandLeading, trailing: ["\u{25CF} \(liveLabel)"]) { dismiss() }
-            Spacer(minLength: 0)
+            Spacer(minLength: 0).allowsHitTesting(false)
             panel.background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
+                .background {
+                    GeometryReader { proxy in Color.clear.preference(key: ReceiverPanelHeight.self, value: proxy.size.height) }
+                }
         }
     }
 
@@ -76,7 +87,16 @@ struct ReceiverPlayerView: View {
                     Text(attribution).kjSmall(faint: true).lineLimit(3)
                 }
             }
-            TransportRow(isPlaying: controller.state == .playing || controller.state == .tuning, toggle: tuner.playPause,
+            HStack {
+                Button { overlay.wake(settled: false); model.captions.toggle() } label: {
+                    Text(model.captions.isOn ? "CC On" : "CC").kjKicker().frame(minWidth: 44, minHeight: 44)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+                .accessibilityIdentifier("receiverCC")
+                .accessibilityLabel(model.captions.isOn ? "Turn captions off" : "Turn captions on")
+            }
+            ReceiverCaptionStatus(session: model.captions)
+            TransportRow(isPlaying: controller.state == .playing || controller.state == .tuning, toggle: { overlay.wake(settled: false); tuner.playPause() },
                          previousChannel: tuner.canStep ? { step(-1) } : nil,
                          nextChannel: tuner.canStep ? { step(1) } : nil)
         }
@@ -142,15 +162,18 @@ struct ReceiverDevice: View {
                 // small enough to leave the page room under it.
                 HStack(alignment: .top, spacing: 28) {
                     set.frame(width: verticalClass == .compact ? 300 : 560)
-                    copy.padding(.top, 52)
+                    if !fullScreen { copy.padding(.top, 52) }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     set
-                    copy
+                    if !fullScreen { copy }
                 }
             }
         }
+        // The fullscreen cover uses the same tuner; its covered dock must not expose duplicate
+        // controls to VoiceOver or UI automation while the player is presented.
+        .accessibilityHidden(fullScreen)
         .onChange(of: player.state) { old, new in
             tuner.playerStateChanged(from: old, to: new)
             // The screen is hidden from VoiceOver; say what came on.
@@ -169,9 +192,11 @@ struct ReceiverDevice: View {
         // The set's body runs round the screen, as a bezel does, so off it still reads as one
         // object and not a strip of the page between two bars.
         VStack(spacing: 0) {
-            bar
+            // Keep the dock's player surface, but remove its covered controls/readouts entirely.
+            // UIKit can flatten Group accessibility and otherwise expose these under the cover.
+            if !fullScreen { bar }
             screen.padding(.horizontal, 6)
-            remote
+            if !fullScreen { remote }
         }
         .background(palette.band)
         .accessibilityElement(children: .contain)
@@ -233,6 +258,9 @@ struct ReceiverDevice: View {
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .overlay { StationClipLayer(clips: model.clips) }
+        .overlay(alignment: .bottom) {
+            ReceiverCaptionPlate(text: model.captions.text, skin: model.skin).padding(8)
+        }
         .clipped()
         // Only a radio station's name is read here: it is said nowhere else on the page.
     }
@@ -265,15 +293,36 @@ struct ReceiverDevice: View {
                 key(isPlaying ? "pause.fill" : "play.fill", isPlaying ? "Pause" : "Play", "screenPlayPause", enabled: true) {
                     tuner.playPause()
                 }
+                if tuner.channel != nil { ccKey }
                 key("arrow.up.left.and.arrow.down.right", "Full screen", "fullScreen", enabled: true) { fullScreen = true }
                 key("power", "Turn the receiver off", "receiverOff", enabled: true) { tuner.stop() }
             } else {
                 Spacer(minLength: 0)
+                if tuner.surfing {
+                    key("power", "Stop finding a channel", "receiverOff", enabled: true) { tuner.stop() }
+                }
             }
         }
         .padding(.horizontal, 4)
         .background(palette.band)
         .environment(\.palette, palette.onBandPlate)
+    }
+
+    /// Captions, said as every player says them: CC, filled in while they are on.
+    private var ccKey: some View {
+        let on = model.captions.isOn
+        return Button { model.captions.toggle() } label: {
+            Text("CC")
+                .font(.system(size: 14, weight: .heavy))
+                .foregroundStyle(on ? palette.band : palette.onBand)
+                .frame(width: 32, height: 22)
+                .background(on ? palette.onBand : Color.clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .overlay { if !on { RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(palette.onBand, lineWidth: 2) } }
+                .frame(width: 46, height: 44)
+        }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+        .accessibilityLabel(on ? "Turn captions off" : "Turn captions on")
+        .accessibilityIdentifier("receiverCC")
     }
 
     private func key(_ symbol: String, _ label: String, _ id: String, enabled: Bool, action: @escaping () -> Void) -> some View {
@@ -299,6 +348,7 @@ struct ReceiverDevice: View {
                 Text(title).kjName().lineLimit(2)
             }
             if let place, !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }
+            ReceiverCaptionStatus(session: model.captions)
             if let note = tuner.surfNote { Text(note).kjSmall(faint: true) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,6 +400,7 @@ struct ReceiverDevice: View {
         switch tuner.source {
         case nil: return tuner.surfing ? "Surfing\u{2026}" : "Standing by"
         case .transmission:
+            if player.state == .paused { return "Paused" }
             switch store.phase {
             case .idle, .tuning: return "Channel \(store.channelNumber) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in to watch"
@@ -371,4 +422,9 @@ struct ReceiverDevice: View {
         case .failed(let message): return message
         }
     }
+}
+
+private struct ReceiverPanelHeight: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }

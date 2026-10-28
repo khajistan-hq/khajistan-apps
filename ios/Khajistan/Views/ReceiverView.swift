@@ -38,8 +38,18 @@ struct ReceiverView: View {
             }
             page
         }
+        .task(id: model.tab) {
+            guard model.tab == .receiver else { return }
+            await model.tuner.receiverOpened(isActive: { model.tab == .receiver })
+        }
+        .onChange(of: model.tab) { _, tab in
+            if tab != .receiver { model.tuner.receiverClosed() }
+        }
         .fullScreenCover(isPresented: $fullScreen) {
-            if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
+            Group {
+                if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
+            }
+            .environment(model)
         }
     }
 
@@ -55,7 +65,7 @@ struct ReceiverView: View {
     private var page: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                PageHead("Receiver", line: "Live television, live radio and public cameras from the Middle World.")
+                LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
                 figures
                 if model.tuner.source == nil { device }
                 switch part {
@@ -68,6 +78,7 @@ struct ReceiverView: View {
             .kjColumn(KJLayout.wideWidth)
             .padding(.vertical, 16)
         }
+        .accessibilityIdentifier("receiverCatalogue")
         .scrollDismissesKeyboard(.interactively)
         .task {
             await model.receiver.loadIndex()
@@ -188,18 +199,19 @@ private struct LiveSection: View {
                             choose(region.id)
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(region.label).kjKicker()
-                                if let live = region.live { Text(live.formatted()).kjSmall(faint: true).monospacedDigit() }
+                                Text(region.label)
+                                if let live = region.live { Text(live.formatted()).monospacedDigit().opacity(0.7) }
                             }
                         }
-                        .buttonStyle(HouseTabStyle(isCurrent: region.id == selected))
+                        .buttonStyle(ChipStyle(on: region.id == selected))
+                        .padding(.trailing, 8)
                         .id(region.id)
                         .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
                     }
                 }
             }
-            .padding(.horizontal, -12)
+            .scrollClipDisabled()
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Regions")
             .onChange(of: selected) { _, id in withAnimation(.kj) { reader.scrollTo(id, anchor: .center) } }
@@ -274,12 +286,7 @@ private struct LiveSection: View {
             .accessibilityIdentifier("regionTitle")
             if loadedRegion == selected && media.count > 1 { mediumSwitch }
             if channels.count + cameraChannels.count > 10 {
-                HouseInputField("Find a channel") {
-                    TextField("", text: $filter, prompt: Text("Name, place or language").foregroundStyle(palette.faint))
-                        .autocorrectionDisabled()
-                        .submitLabel(.search)
-                        .accessibilityIdentifier("channelFilter")
-                }
+                SearchField(prompt: "Name, place or language", text: $filter, id: "channelFilter")
             }
             list
         }
@@ -293,14 +300,15 @@ private struct LiveSection: View {
                         medium = kind
                         if kind == "camera" && !camerasLoaded { Task { await loadCameras() } }
                     } label: {
-                        Text(switchTitle(kind)).kjKicker()
+                        Text(switchTitle(kind))
                     }
-                    .buttonStyle(HouseTabStyle(isCurrent: medium == kind))
+                    .buttonStyle(ChipStyle(on: medium == kind))
+                    .padding(.trailing, 8)
                     .accessibilityIdentifier("medium-\(kind)")
                 }
             }
         }
-        .padding(.horizontal, -12)
+        .scrollClipDisabled()
     }
 
     private func switchTitle(_ kind: String) -> String {
@@ -428,21 +436,44 @@ struct ChannelRow: View {
         return false
     }
 
+    /// A live guide's row, as YouTube TV sets one: the medium's mark on a plate, the name, where
+    /// it is from, and LIVE in the accent on the channel playing now.
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if isOn {
-                    Image(systemName: "speaker.wave.2.fill").foregroundStyle(palette.accent).accessibilityHidden(true)
+        HStack(alignment: .center, spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isOn ? palette.band : palette.lift)
+                .frame(width: 52, height: 40)
+                .overlay {
+                    Image(systemName: isOn ? "speaker.wave.2.fill" : Self.symbol(channel.mediaType))
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(isOn ? palette.onBand : palette.ink)
                 }
-                Text(channel.name).kjName().lineLimit(2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(channel.name).font(.system(.body, weight: .semibold)).lineLimit(2)
+                let line = [channel.place, channel.broadcaster.flatMap { $0.isEmpty || $0 == channel.name ? nil : $0 }]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+                if !line.isEmpty { Text(line).kjSmall(faint: true).lineLimit(1) }
             }
-            if !channel.place.isEmpty { Kicker(channel.place).lineLimit(1) }
-            if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
-                Text(broadcaster).kjSmall(faint: true).lineLimit(1)
+            Spacer(minLength: 0)
+            if isOn {
+                Text("LIVE").font(.system(size: 11, weight: .heavy)).tracking(0.8)
+                    .foregroundStyle(palette.onBand)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(palette.band, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .accessibilityHidden(true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+
+    static func symbol(_ mediaType: String) -> String {
+        switch mediaType.lowercased() {
+        case "radio": return "radio"
+        case "camera": return "video"
+        default: return "tv"
+        }
     }
 }
 
@@ -460,7 +491,7 @@ private struct SurfSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Kicker("Surf")
+                Text("Surf").font(.system(.subheadline, weight: .bold))
                 Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
             }
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
@@ -472,13 +503,14 @@ private struct SurfSettings: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 0) {
                 ForEach(items, id: \.0) { item in
-                    Button { set(item.0) } label: { Text(item.1).kjKicker() }
-                        .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    Button { set(item.0) } label: { Text(item.1) }
+                        .buttonStyle(ChipStyle(on: item.0 == current))
+                        .padding(.trailing, 8)
                         .accessibilityIdentifier("\(id)-\(item.0)")
                 }
             }
         }
-        .padding(.horizontal, -12)
+        .scrollClipDisabled()
     }
 }
 

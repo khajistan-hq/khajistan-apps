@@ -13,15 +13,7 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
     var url: URL { URL(string: path, relativeTo: ArchiveURL.base)!.absoluteURL }
 
     /// The rooms the app draws itself; every other room is the live website.
-    var nativeRoom: NativeRoom? {
-        switch id {
-        case "receiver": return .receiver
-        case "picsnvids": return .picsVids
-        case "chat": return .chat
-        case "passport": return .yours
-        default: return nil
-        }
-    }
+    var nativeRoom: NativeRoom? { NativeRoom.allCases.first { $0.destinationID == id } }
 
     static let all: [Self] = [
         .init(id: "home", door: "HOME", title: "Home", subtitle: "Explore by region", path: "/"),
@@ -53,9 +45,47 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
     }
 }
 
-/// A room of the website the app draws natively, and the bottom-bar door that holds it.
+/// A room of the website the app draws natively. A room is listed here only once its native
+/// screen exists; until then its door opens the live website, so no door leads to a stand-in.
 enum NativeRoom: String, CaseIterable, Sendable {
-    case receiver, picsVids, yours, chat
+    case receiver, picsVids, yours, chat, reading, screening, bazaar, madrassa
+
+    /// The website menu entry (ArchiveDestination.id) the room stands in for.
+    var destinationID: String {
+        switch self {
+        case .receiver: return "receiver"
+        case .picsVids: return "picsnvids"
+        case .yours: return "passport"
+        case .chat: return "chat"
+        case .reading: return "reading"
+        case .screening: return "cinema"
+        case .bazaar: return "bazaar"
+        case .madrassa: return "madrassa"
+        }
+    }
+
+    /// The room's icon on Home (SF Symbols: monochrome, in the text's colour).
+    var symbol: String {
+        switch self {
+        case .receiver: return "dot.radiowaves.left.and.right"
+        case .picsVids: return "photo.on.rectangle"
+        case .yours: return "books.vertical"
+        case .chat: return "bubble.left.and.bubble.right"
+        case .reading: return "book"
+        case .screening: return "film"
+        case .bazaar: return "bag"
+        case .madrassa: return "graduationcap"
+        }
+    }
+
+    /// Whether the room opens inside ROOMS (pushed on its stack) rather than on a bar door of its
+    /// own (Receiver, Library) or over the whole app (Chat).
+    var opensInRooms: Bool {
+        switch self {
+        case .receiver, .yours, .chat: return false
+        case .picsVids, .reading, .screening, .bazaar, .madrassa: return true
+        }
+    }
 }
 
 /// Where the membership links are offered: the United States storefront only (StoreKit's

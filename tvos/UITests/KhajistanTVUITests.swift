@@ -27,7 +27,7 @@ final class KhajistanTVUITests: XCTestCase {
 
     func testReceiverRegionsChannelsAndPlayer() {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
 
         // The map is a Canvas; what the remote can reach is a button over each region's label.
         let regions = regionButtons(app)
@@ -68,7 +68,7 @@ final class KhajistanTVUITests: XCTestCase {
     /// beyond the map having drawn.
     func testBeyondTheAtlas() {
         let app = XCUIApplication()
-        app.launch()
+        kjLaunch(app)
 
         XCTAssertTrue(regionButtons(app).firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
 
@@ -94,7 +94,7 @@ final class KhajistanTVUITests: XCTestCase {
     func testKhajistanTVTab() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "transmission"]
-        app.launch()
+        kjLaunch(app)
 
         // The phase is the sentence's accessibility value, so the screen carries no marker word.
         let state = app.staticTexts["transmissionState"]
@@ -107,7 +107,7 @@ final class KhajistanTVUITests: XCTestCase {
     func testAccountTab() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "account"]
-        app.launch()
+        kjLaunch(app)
 
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 30), "A signed-out account offers Sign in")
         screenshot("05-account", app: app)

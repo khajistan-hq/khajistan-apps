@@ -11,7 +11,7 @@ final class PicsVidsUITests: XCTestCase {
     private func launch() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids"]
-        app.launch()
+        kjLaunch(app)
         return app
     }
 
@@ -80,13 +80,15 @@ final class PicsVidsUITests: XCTestCase {
         var onShelves = Set<String>()
         var log: [String] = []
         let walk: [XCUIRemote.Button] = [.right, .right, .right, .down, .right, .down, .left, .left, .down, .right]
-        seen.insert(focusedTile(app).identifier)
+        var lastTileID = focusedTile(app).identifier
+        seen.insert(lastTileID)
         if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
         for press in walk {
             XCUIRemote.shared.press(press)
             kjPause(0.8)
             let id = focusedTile(app).exists ? focusedTile(app).identifier : "(off the shelves)"
             seen.insert(id)
+            if id != "(off the shelves)" { lastTileID = id }
             if let shelf = focusedShelf(app) { onShelves.insert(shelf) }
             log.append("\(press == .left ? "L" : press == .right ? "R" : press == .up ? "U" : "D")->\(id)")
         }
@@ -96,7 +98,11 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(onShelves.count, 2, "down must move from one region's shelf to the next; shelves: \(onShelves)")
         kjScreenshot("pv-03-walked", app: app)
 
-        // Open the focused one, move on with right, back out.
+        // Live shelves can end on a loading/retry control. Choose the last visited tile
+        // explicitly; one Select on a focused tile must open its viewer.
+        let chosenTile = app.buttons[lastTileID]
+        XCTAssertTrue(kjFocus(chosenTile, app: app), "The chosen tile must take focus before Select: \(lastTileID)")
+        XCTAssertTrue(chosenTile.hasFocus)
         XCUIRemote.shared.press(.select)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 20), "Select must open the viewer")
@@ -204,8 +210,13 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(state.label, "Sign in to watch Khajistan Transmission.")
         kjScreenshot("pv-09-ktv-signed-out", app: app)
         XCUIRemote.shared.press(.select)
-        let signIn = app.buttons["Sign in"]
-        XCTAssertTrue(signIn.waitForExistence(timeout: 10), "Select must open the sign-in sheet")
+        // Sign-in opens on the phone panel (QR and code; 2026-10-27), or on email and password
+        // when the tv-sign-in function cannot be reached. Either is the sign-in sheet.
+        let phone = app.buttons["tvSignInUsePassword"]
+        let password = app.buttons["Sign in"]
+        let opened = NSPredicate { _, _ in phone.exists || password.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: opened, object: nil)], timeout: 15), .completed,
+                       "Select must open the sign-in sheet")
         kjScreenshot("pv-10-ktv-sign-in-sheet", app: app)
         XCUIRemote.shared.press(.menu)
         kjPause(1)

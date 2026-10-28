@@ -192,7 +192,11 @@ func offPageOffersCarryTheAppFlag() throws {
 
 func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     let native = Dictionary(uniqueKeysWithValues: ArchiveDestination.all.compactMap { d in d.nativeRoom.map { (d.id, $0) } })
-    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat])
+    try expect(native == ["receiver": .receiver, "picsnvids": .picsVids, "passport": .yours, "chat": .chat,
+                          "reading": .reading, "cinema": .screening, "bazaar": .bazaar, "madrassa": .madrassa])
+    // Every native room stands in for a door that exists, and no two rooms claim one door.
+    try expect(Set(NativeRoom.allCases.map(\.destinationID)).count == NativeRoom.allCases.count)
+    try expect(NativeRoom.allCases.allSatisfy { room in ArchiveDestination.all.contains { $0.id == room.destinationID } })
     for destination in ArchiveDestination.all {
         try expect(ArchiveURL.isArchive(destination.url))
     }
@@ -228,9 +232,30 @@ private func require<T>(_ value: T?) throws -> T {
     guard let value else { throw AssertionFailure(description: "Required value was nil") }
     return value
 }
+func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
+    let request = CaptionContinuation(generation: 7, channelID: "live-a", sessionID: "lease-a")
+    func allowed(_ generation: Int = 7, _ channel: String? = "live-a", _ session: String? = "lease-a",
+                 on: Bool = true, cancelled: Bool = false) -> Bool {
+        request.admits(generation: generation, channelID: channel, sessionID: session, on: on, cancelled: cancelled)
+    }
+    try expect(allowed())
+    // Each can happen while token refresh or translation HTTP is suspended. None may dispatch or paint.
+    try expect(!allowed(8))
+    try expect(!allowed(7, "live-b"))
+    try expect(!allowed(7, "live-a", "lease-b"))
+    try expect(!allowed(7, nil))
+    try expect(!allowed(on: false))
+    try expect(!allowed(cancelled: true))
+    var dispatched = 0
+    let switchedDuringAuth = allowed(8, "live-b", "lease-b")
+    if switchedDuringAuth { dispatched += 1 }
+    try expect(dispatched == 0)
+}
+
 @main struct CoreTestRunner {
     static func main() throws {
         let tests: [(String, () throws -> Void)] = [
+            ("Caption requests reject stale auth and reply identities", captionRequestRejectsIdentityChangesAcrossAuthAndReply),
             ("Exact origins and deep links", exactOriginsAndDeepLinks),
             ("Urdu and delimiter search encoding", searchPreservesUrduAndDelimiters),
             ("Private pages excluded from persistence", privatePagesNeverEnterLibrary),

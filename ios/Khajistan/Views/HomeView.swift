@@ -1,42 +1,115 @@
 import SwiftUI
 
-/// HOME: the website's own menu, door by door (ArchiveDestination, read off kj-chrome.js), with the
-/// site's search at the top. Membership is offered in the Reading Room itself, on the website's
-/// own page, and nowhere else in the app (owner, 2026-10-07: the Home card was too aggressive). A room the app draws itself opens
-/// in its door; every other room is the live website in the house browser.
+/// HOME: the masthead, what was opened last on this device, and the rooms the app draws itself.
+/// Nothing on it is picked by hand or ranked; the website's whole menu is ROOMS. Membership is
+/// offered in the Reading Room itself, on the website's own page, and nowhere else in the app
+/// (owner, 2026-10-07: the Home card was too aggressive).
 struct HomeView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.palette) private var palette
-    @State private var query = ""
-    @FocusState private var searching: Bool
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 24) {
                 masthead
-                    .padding(.bottom, 24)
-                search
-                    .padding(.bottom, 32)
-                ForEach(Self.doors, id: \.door) { group in
-                    door(group.door, rooms: group.rooms)
+                if hasReading {
+                    // Covers when the shelf is already in hand; otherwise the places as text, so
+                    // Home never starts the catalogue download (every Supabase byte is billed).
+                    if model.reading.phase == .ready { ContinueShelf(fromHome: true) } else { continueText }
                 }
+                upNext
+                rooms
+                if !recent.isEmpty { recentBlock }
+                Button(kicker: "Every room \u{2192}") { model.tab = .rooms }
+                    .accessibilityIdentifier("homeAllRooms")
             }
             .padding(.horizontal, KJLayout.inset)
-            .kjColumn()
+            .kjColumn(KJLayout.wideWidth)
             .padding(.top, 12)
             .padding(.bottom, 28)
         }
-        .scrollDismissesKeyboard(.interactively)
+        .task(id: model.auth.previewPassword) { if hasFilm { await model.films.load() } }
     }
 
-    /// The website's menu without the rooms the tab bar already holds (owner, 2026-10-07: one
-    /// control once). Receiver, Pics/Vids and Your Khajistan are tabs; the website's own home is
-    /// this page. A door left with no rooms is not drawn.
-    static var doors: [(door: String, rooms: [ArchiveDestination])] {
-        ArchiveDestination.doorsInThisBuild
-            .map { ($0.door, $0.rooms.filter { room in room.id != "home" && room.nativeRoom.flatMap(AppTab.init) == nil }) }
-            .filter { !$0.1.isEmpty }
+    /// The menu's rooms the app draws inside ROOMS, in the menu's order.
+    static var nativeRooms: [ArchiveDestination] {
+        ArchiveDestination.doorsInThisBuild.flatMap(\.rooms).filter { $0.nativeRoom?.opensInRooms == true }
     }
+
+    /// Every room the app draws itself, Chat included, in the menu's order.
+    private var appRooms: [ArchiveDestination] {
+        ArchiveDestination.doorsInThisBuild.flatMap(\.rooms).filter {
+            guard let room = $0.nativeRoom else { return false }
+            return room.opensInRooms || room == .chat
+        }
+    }
+
+    private var hasReading: Bool {
+        StoreBuild.includes(.reading) && model.library.resume.contains { $0.kind == .reading }
+    }
+
+    private var hasFilm: Bool {
+        StoreBuild.includes(.screening) && model.library.resume.contains { $0.kind == .film && $0.position > 30 }
+    }
+
+    /// Where reading stopped, from this device's own record: no catalogue needed.
+    private var continueText: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ShelfHeader(title: "Continue")
+            ForEach(model.library.resume.filter { $0.kind == .reading }.prefix(3)) { place in
+                Button { model.open(.reading, at: [.readingTitle(place.ref, resume: true)]) } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(place.title).font(.system(.body, weight: .semibold)).lineLimit(2)
+                            Text([place.detail, "p. \(Int(place.position))"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                                .kjSmall(faint: true)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                .accessibilityIdentifier("continue-\(place.ref)")
+            }
+        }
+    }
+
+    /// Full films stopped on this device, as the Apple TV app's Up Next.
+    @ViewBuilder
+    private var upNext: some View {
+        let stopped: [(Film, Resume)] = hasFilm ? model.library.resume.filter { $0.kind == .film && $0.position > 30 }.compactMap { place in
+            model.films.films.first { $0.handle == place.ref }.map { ($0, place) }
+        } : []
+        if !stopped.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                ShelfHeader(title: "Up Next")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 14) {
+                        ForEach(stopped, id: \.0.id) { film, place in
+                            FilmCard(film: film, width: sizeClass == .regular ? 170 : 140,
+                                     progress: film.runtime_minutes.flatMap { $0 > 0 ? place.position / Double($0 * 60) : nil },
+                                     line: "Stopped at \(FilmPlayback.clock(place.position))", fromHome: true)
+                        }
+                    }
+                }
+                .scrollClipDisabled()
+            }
+        }
+    }
+
+    /// The rooms, as the reference apps' browse tiles: an icon, the name and its line.
+    private var rooms: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ShelfHeader(title: "In the app")
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 220 : 160), spacing: 12)], spacing: 12) {
+                ForEach(appRooms) { room in RoomTile(room: room) }
+            }
+        }
+    }
+
+    /// The last pages opened here, newest first: the device's own history, never a pick.
+    private var recent: [SavedPage] { Array(model.library.history.prefix(3)) }
 
     private var masthead: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -51,60 +124,51 @@ struct HomeView: View {
         .accessibilityLabel("Khajistan, Media of the Middle World")
     }
 
-    private var search: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            HouseInputField("Search the archive") {
-                TextField("", text: $query, prompt: Text("Titles, places, people").foregroundStyle(palette.faint))
-                    .submitLabel(.search)
-                    .autocorrectionDisabled()
-                    .focused($searching)
-                    .onSubmit(runSearch)
-                    .accessibilityIdentifier("archiveSearch")
-            }
-            Button(action: runSearch) { Text("Search").kjKicker() }
-                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 8, bottom: 10, trailing: 0)))
-                .disabled(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier("archiveSearchGo")
-        }
-    }
-
-    private func door(_ name: String, rooms: [ArchiveDestination]) -> some View {
+    private var recentBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HouseRule()
-            // A door with one room of its own name is named once, by the room.
-            if !(rooms.count == 1 && rooms[0].title.caseInsensitiveCompare(name) == .orderedSame) {
-                Kicker(name)
-                    .padding(.top, 14)
-                    .padding(.bottom, 4)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            ForEach(rooms) { room in
-                Button {
-                    searching = false
-                    model.open(room)
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(room.title).kjName(KJType.title)
-                            Text(room.subtitle).kjSmall(faint: true)
-                        }
+            ShelfHeader(title: "Opened lately")
+            ForEach(recent) { page in
+                Button { model.open(page.url) } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(page.title.isEmpty ? page.url.path : page.title).font(.system(.body, weight: .semibold)).lineLimit(2)
                         Spacer(minLength: 0)
-                        // In the app, or the live website.
-                        Text(room.nativeRoom == nil ? "\u{2197}" : "\u{2192}").kjName().accessibilityHidden(true)
+                        Image(systemName: "arrow.up.right").accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
-                .accessibilityIdentifier("destination-\(room.id)")
             }
         }
-        .padding(.bottom, 18)
     }
+}
 
-    private func runSearch() {
-        guard let url = ArchiveURL.search(query) else { return }
-        searching = false
-        model.open(url)
+/// A room on Home: its icon, name and line on the lift colour.
+private struct RoomTile: View {
+    let room: ArchiveDestination
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button { model.open(room) } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: room.nativeRoom?.symbol ?? "square").font(.system(.title2, weight: .semibold))
+                    .foregroundStyle(palette.accent)
+                    .frame(height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(room.title).font(.system(.headline, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(room.subtitle).kjSmall(faint: true).lineLimit(2).multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(palette.ink)
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+            .background(palette.lift, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("home-room-\(room.id)")
     }
 }
 

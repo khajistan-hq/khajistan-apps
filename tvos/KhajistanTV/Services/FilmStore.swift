@@ -33,7 +33,7 @@ final class FilmStore {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
-        origin = Self.debugOrigin() ?? KJConfig.site
+        origin = Self.debugOrigin() ?? SiteOrigin.current
     }
 
     private static func debugOrigin() -> URL? {

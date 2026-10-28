@@ -35,6 +35,8 @@ final class LiveCaptionSession {
     @ObservationIgnored private var billingSession: String?
     /// Bumped by every start and stop; work that carries an older number is dropped.
     @ObservationIgnored private var generation = 0
+    /// Channel metadata remains valid across caption toggles, but never across a new attachment.
+    @ObservationIgnored private var attachment = 0
     @ObservationIgnored private var tasks: [Task<Void, Never>] = []
     @ObservationIgnored private var leaseTask: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
@@ -77,24 +79,24 @@ final class LiveCaptionSession {
     /// the control; anything else says why in one line, or nothing.
     func attach(_ target: Channel, player: PlayerController) {
         stop("")
+        attachment += 1
         channel = target
         self.player = player
         detected = nil
         decide()
         label = CaptionRules.label(on: false, balance: balance)
-        let gen = generation
+        let gen = attachment
         Task { await self.pullDetectedLanguage(target, generation: gen) }
         Task { await self.loadAccuracy(target, generation: gen) }
         guard offered else { return }
         askBalance()
-        // A viewer who had captions on keeps them on from channel to channel (loadMode()); one who
-        // never chose follows the Apple TV's Closed Captions setting (owner, 2026-10-09).
-        let saved = UserDefaults.standard.string(forKey: CaptionRules.modeKey)
-        if saved.map({ $0 != "off" }) ?? UIAccessibility.isClosedCaptioningEnabled { turnOn() }
+        // Opening Receiver or changing channel never spends a caption allowance.
+        // Starting live captions requires a deliberate press on CC for this channel.
     }
 
     func detach() {
         stop("")
+        attachment += 1
         channel = nil
         offered = false
         note = ""
@@ -107,6 +109,10 @@ final class LiveCaptionSession {
     }
 
     func toggle() {
+        guard offered else {
+            note = channel.map { CaptionRules.parkedReason($0, detected: detected, accuracy: Self.accuracy) } ?? "Captions are unavailable for this channel."
+            return
+        }
         if isOn {
             UserDefaults.standard.set("off", forKey: CaptionRules.modeKey)
             stop("Captions off.")
@@ -124,6 +130,13 @@ final class LiveCaptionSession {
             return
         }
         // The server refuses the anon key with sign_in_required anyway; asking here saves the trip.
+        #if DEBUG
+        // Caption UI fixtures never start paid demand, even on a simulator with a saved account.
+        if UserDefaults.standard.bool(forKey: "kjcaptiontestsignedout") {
+            note = CaptionRules.billingReason("sign_in_required") ?? ""
+            return
+        }
+        #endif
         guard auth.isSignedIn else {
             note = CaptionRules.billingReason("sign_in_required") ?? ""
             return
@@ -211,9 +224,13 @@ final class LiveCaptionSession {
     }
 
     private func ask(_ action: String) async -> CaptionReply? {
-        guard let channel, let token = try? await auth.validAccessToken() else { return nil }
+        guard let channel else { return nil }
+        let gen = generation
+        let session = billingSession
+        guard let token = try? await auth.validAccessToken(), !Task.isCancelled,
+              gen == generation, self.channel?.id == channel.id else { return nil }
         let request = CaptionRules.demandRequest(action: action, channelId: channel.id, viewerId: viewerId,
-                                                 sessionId: billingSession, accessToken: token)
+                                                 sessionId: session, accessToken: token)
         guard let (data, _) = try? await urlSession.data(for: request) else { return nil }
         return try? JSONDecoder().decode(CaptionReply.self, from: data)
     }
@@ -322,17 +339,23 @@ final class LiveCaptionSession {
     }
 
     private func translate(_ row: CaptionWireRow, seq: Int, generation gen: Int) async {
+        guard let channel, isOn, gen == generation, !Task.isCancelled else { return }
+        let continuation = CaptionContinuation(generation: gen, channelID: channel.id, sessionID: billingSession)
+        let code = CaptionRules.effectiveLangCode(channel, detected: detected)
         var english: String?
-        if let token = try? await auth.validAccessToken(), let channel {
-            let code = CaptionRules.effectiveLangCode(channel, detected: detected)
-            let request = CaptionRules.translateRequest(row: row, channelLang: code, sessionId: billingSession, accessToken: token)
+        if let token = try? await auth.validAccessToken() {
+            guard continuation.admits(generation: generation, channelID: self.channel?.id,
+                                      sessionID: billingSession, on: isOn, cancelled: Task.isCancelled) else { return }
+            let request = CaptionRules.translateRequest(row: row, channelLang: code, sessionId: continuation.sessionID, accessToken: token)
             if let (data, response) = try? await urlSession.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
                let reply = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 let checked = CaptionRules.checkedEnglish(reply["english"] as? String, row: row)
                 english = checked.isEmpty ? nil : checked
             }
         }
-        guard gen == generation, let index = waiting.firstIndex(where: { $0.seq == seq }) else { return }
+        guard continuation.admits(generation: generation, channelID: self.channel?.id,
+                                  sessionID: billingSession, on: isOn, cancelled: Task.isCancelled),
+              let index = waiting.firstIndex(where: { $0.seq == seq }) else { return }
         waiting[index].english = english
         waiting[index].ready = true
         flush()
@@ -476,10 +499,11 @@ final class LiveCaptionSession {
     private func pullDetectedLanguage(_ target: Channel, generation gen: Int) async {
         guard let (data, _) = try? await urlSession.data(for: CaptionRules.detectedRequest(channelId: target.id)),
               let row = (try? JSONDecoder().decode([DetectedLanguage].self, from: data))?.first, row.lang_code != nil,
-              channel?.id == target.id else { return }
+              gen == attachment, channel?.id == target.id else { return }
         detected = row
         let code = CaptionRules.effectiveLangCode(target, detected: row)
-        if let code, !CaptionRules.supported.contains(code) {
+        if (code.map { !CaptionRules.supported.contains($0) } ?? false) ||
+           !CaptionRules.eligible(target, detected: row, accuracy: Self.accuracy) {
             let reason = CaptionRules.parkedReason(target, detected: row, accuracy: Self.accuracy)
             stop(reason.isEmpty ? "The current source language is not supported by the live recognizer." : reason)
             offered = false
@@ -495,7 +519,7 @@ final class LiveCaptionSession {
                   let file = try? JSONDecoder().decode(CaptionAccuracy.self, from: data) else { return }
             Self.accuracy = file
         }
-        guard channel?.id == target.id else { return }
+        guard gen == attachment, channel?.id == target.id else { return }
         if CaptionRules.isExtension(target, accuracy: Self.accuracy),
            !CaptionRules.measured(target, code: CaptionRules.effectiveLangCode(target, detected: detected), accuracy: Self.accuracy) {
             if isOn { UserDefaults.standard.set("off", forKey: CaptionRules.modeKey) }

@@ -14,14 +14,14 @@ enum PlayRoute: Equatable, Sendable {
 }
 
 enum Transmission {
-    private static let supabaseHost =
-        URLComponents(url: KJConfig.supabase, resolvingAgainstBaseURL: false)?.host?.lowercased() ?? ""
     private static let streamSuffix = "manifest/video.m3u8"
 
     /// Classifies a play_url. Nil for anything that must not be fetched: not https, credentials in
     /// the URL, unparseable, or a stream-host URL that is not exactly /<32 hex>/manifest/video.m3u8.
     static func route(for playURL: String) -> PlayRoute? {
-        guard let url = URL(string: playURL),
+        // Classified as the project names it, whichever way it was built (direct or the site's
+        // proxy); the token request is moved onto the route when it is sent.
+        guard let url = URL(string: playURL).map(SupabaseRoute.unrouted),
               let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
               parts.scheme?.lowercased() == "https",
               parts.user == nil, parts.password == nil,
@@ -31,7 +31,7 @@ enum Transmission {
             guard let uid = streamUID(inPath: path) else { return nil }
             return .stream(uid: uid, suffix: streamSuffix)
         }
-        if host == supabaseHost, parts.port == nil || parts.port == 443, path == "/functions/v1/tv-play" {
+        if host == SupabaseRoute.host, parts.port == nil || parts.port == 443, path == "/functions/v1/tv-play" {
             return .tvPlay(url)
         }
         return .direct(url)

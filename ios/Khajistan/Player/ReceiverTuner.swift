@@ -22,6 +22,12 @@ final class ReceiverTuner {
     /// The live channels' player. Transmission plays on its store's own.
     let controller = PlayerController()
 
+    let captions: LiveCaptionSession
+    @ObservationIgnored private var initialOpenAttempted = false
+    @ObservationIgnored private var openingPending = false
+    @ObservationIgnored private var openingRevision = 0
+    @ObservationIgnored private var surfRevision = 0
+    @ObservationIgnored private var intentRevision = 0
     @ObservationIgnored private let clips: StationClips
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private let transmission: TransmissionStore
@@ -38,10 +44,12 @@ final class ReceiverTuner {
     /// a flow left behind still finishes; only the newest may clear `changing`.
     @ObservationIgnored private var run = 0
 
-    init(clips: StationClips, receiver: ReceiverStore, transmission: TransmissionStore) {
+    init(clips: StationClips, receiver: ReceiverStore, transmission: TransmissionStore, captions: LiveCaptionSession) {
+        self.captions = captions
         self.clips = clips
         self.receiver = receiver
         self.transmission = transmission
+        controller.onPlaybackUnavailable = { [weak captions] in captions?.suspendForPlaybackInterruption() }
     }
 
     var channel: Channel? {
@@ -63,23 +71,79 @@ final class ReceiverTuner {
         }
     }
 
+    /// A canceled pre-selection opening may retry; explicit Stop remains off on tab return.
+    func receiverOpened(isActive: @escaping @MainActor () -> Bool) async {
+        guard isActive(), !initialOpenAttempted else { return }
+        initialOpenAttempted = true
+        guard source == nil else { return }
+        openingRevision += 1
+        let opening = openingRevision
+        let startingIntent = intentRevision
+        openingPending = true
+        defer {
+            if opening == openingRevision {
+                openingPending = false
+                if source == nil, startingIntent == intentRevision, Task.isCancelled || !isActive() {
+                    initialOpenAttempted = false
+                }
+            }
+        }
+        #if DEBUG
+        // Reproduce a tab change while automatic selection is suspended without depending on network speed.
+        let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
+        if delay > 0 {
+            try? await Task.sleep(for: .milliseconds(min(delay, 10_000)))
+            guard !Task.isCancelled, isActive(), opening == openingRevision else { return }
+        }
+        #endif
+        await surf(allowSelection: { isActive() && self.openingRevision == opening })
+        guard !Task.isCancelled, isActive(), opening == openingRevision, let first = channel else { return }
+        var attempted = Set([first.id])
+        // Only a definite failure advances. Slow buffering does not switch a working station.
+        for _ in 0..<2 {
+            let revision = intentRevision
+            await controller.settled(within: .seconds(32))
+            guard !Task.isCancelled, isActive(), opening == openingRevision, revision == intentRevision else { return }
+            guard case .failed = controller.state,
+                  let next = list.first(where: { !attempted.contains($0.id) }) else { return }
+            attempted.insert(next.id)
+            play(next, in: list)
+        }
+    }
+
+    /// Cancel only pending automatic selection. Already-playing radio remains background audio.
+    func receiverClosed() {
+        guard openingPending else { return }
+        openingPending = false
+        openingRevision += 1
+        if source == nil {
+            initialOpenAttempted = false
+            intentRevision += 1
+            surfRevision += 1
+            surfing = false
+        }
+    }
+
     // MARK: - Choosing
 
     func play(_ channel: Channel, in list: [Channel]) {
         stop()
         self.list = list
         source = .live(channel)
+        tune(channel)
         changeTask = Task { await open(channel) }
     }
 
     func playTransmission(_ number: Int) {
         stop()
         source = .transmission(number)
+        transmission.player.state = .tuning
         changeTask = Task { await openTransmission(number) }
     }
 
     /// The next channel (1) or the one before (-1). Transmission has two, so either way switches.
     func step(_ delta: Int) {
+        intentRevision += 1
         switch source {
         case .live(let current):
             let from = destination ?? current
@@ -98,23 +162,32 @@ final class ReceiverTuner {
 
     /// A live signal paused is not the live signal any more: play tunes it afresh.
     func playPause() {
+        intentRevision += 1
         switch source {
         case .live(let channel):
             if controller.state == .tuning {
                 // Pause while connecting stops the connecting, or the signal would start anyway.
+                run += 1
+                changing = false
+                captions.suspendForPlaybackInterruption()
                 tuneTask?.cancel()
                 changeTask?.cancel()
                 controller.stop()
                 controller.state = .paused
                 clips.uncover()
             } else if controller.state == .playing {
+                captions.suspendForPlaybackInterruption()
                 controller.pause()
             } else {
                 tune(channel)
             }
         case .transmission:
-            if transmission.player.state == .playing {
-                transmission.player.pause()
+            if transmission.player.state == .playing || transmission.player.state == .tuning {
+                changeTask?.cancel()
+                run += 1
+                changing = false
+                clips.uncover()
+                transmission.pause()
             } else {
                 Task { await transmission.rejoinLive() }
             }
@@ -131,12 +204,16 @@ final class ReceiverTuner {
     /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
     /// settings (owner, 2026-10-07). The region is drawn by how many channels of that medium it
     /// carries; next and previous then move through that region's list.
-    func surf() async {
+    func surf(allowSelection: @escaping @MainActor () -> Bool = { true }) async {
         guard !surfing else { return }
+        let revision = intentRevision
+        surfRevision += 1
+        let search = surfRevision
         surfing = true
         surfNote = nil
-        defer { surfing = false }
+        defer { if search == surfRevision { surfing = false } }
         await receiver.loadIndex()
+        guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
         guard let index = receiver.index else {
             surfNote = "The receiver has not loaded."
             return
@@ -149,6 +226,7 @@ final class ReceiverTuner {
         for _ in 0..<3 {
             guard let region = ShufflePick.region(weights) else { break }
             guard let list = try? await receiver.channels(regionId: region, cameras: false) else { continue }
+            guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
             let pool = list.filter { $0.mediaType == medium.rawValue }
             if let channel = pool.randomElement() {
                 play(channel, in: pool)
@@ -160,6 +238,11 @@ final class ReceiverTuner {
 
     /// Turns the receiver off.
     func stop() {
+        initialOpenAttempted = true
+        openingPending = false
+        intentRevision += 1
+        run += 1
+        captions.detach()
         tuneTask?.cancel()
         changeTask?.cancel()
         controller.stop()
@@ -216,10 +299,12 @@ final class ReceiverTuner {
     // MARK: - Live channels
 
     private func tune(_ target: Channel) {
+        captions.detach()
         tuneTask?.cancel()
         controller.stop()
         controller.state = .tuning
         source = .live(target)
+        captions.attach(target, player: controller)
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -239,10 +324,10 @@ final class ReceiverTuner {
     }
 
     private func open(_ channel: Channel) async {
+        guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
         clips.cover(caption: channel.name, animated: false)
-        tune(channel)
         await controller.settled()
         guard !Task.isCancelled else { return }
         clips.uncover()
@@ -250,6 +335,7 @@ final class ReceiverTuner {
     }
 
     private func change(to target: Channel) async {
+        guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine, destination == nil || destination?.id == target.id { changing = false } }
         async let quiet: Void = controller.fadeOut()
@@ -269,6 +355,7 @@ final class ReceiverTuner {
     // MARK: - Khajistan Transmission
 
     private func openTransmission(_ number: Int) async {
+        guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
         clips.signOnPlayed = true
@@ -282,6 +369,7 @@ final class ReceiverTuner {
     }
 
     private func switchTransmission() async {
+        guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
         let next = transmission.channelNumber == 1 ? 2 : 1

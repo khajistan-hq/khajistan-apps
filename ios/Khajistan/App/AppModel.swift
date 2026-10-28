@@ -2,30 +2,52 @@ import SwiftUI
 import Observation
 import StoreKit
 
-/// The bottom bar's doors. HOME carries the website's whole menu; the other three are the rooms
-/// the app draws itself.
+/// The bottom bar's doors (owner brief, 2026-10-27): HOME, ROOMS (every room of the website's
+/// menu, the native ones drawn here), the RECEIVER, the LIBRARY (account, saved work, what is on
+/// this device) and SEARCH.
 enum AppTab: String, CaseIterable, Identifiable {
-    case home, receiver, picsVids, yours
+    case home, rooms, receiver, library, search
 
     var id: String { rawValue }
 
-    /// The website's own door names (kj-chrome.js), and ACCOUNT as the Apple TV app names it.
-    var title: String {
+    /// The tab bar's icon (SF Symbols: monochrome, in the text's colour).
+    var symbol: String {
         switch self {
-        case .home: return "Home"
-        case .receiver: return "Receiver"
-        case .picsVids: return "Pics/Vids"
-        case .yours: return "Account"
+        case .home: return "house"
+        case .rooms: return "square.grid.2x2"
+        case .receiver: return "dot.radiowaves.left.and.right"
+        case .library: return "books.vertical"
+        case .search: return "magnifyingglass"
         }
     }
 
-    /// The tab a native room lives on; nil for a room that opens over the tabs (chat).
+    var title: String {
+        switch self {
+        case .home: return "Home"
+        case .rooms: return "Rooms"
+        case .receiver: return "Receiver"
+        case .library: return "Library"
+        case .search: return "Search"
+        }
+    }
+
+    /// The bar door a native room lives on; nil for a room that opens inside ROOMS or over the
+    /// tabs (chat).
     init?(_ room: NativeRoom) {
         switch room {
         case .receiver: self = .receiver
-        case .picsVids: self = .picsVids
-        case .yours: self = .yours
-        case .chat: return nil
+        case .yours: self = .library
+        case .picsVids, .chat, .reading, .screening, .bazaar, .madrassa: return nil
+        }
+    }
+
+    /// `-kjtab <name>`, with the names the bar had before 2026-10-27 still read, so old UI test
+    /// launches and saved launch arguments land where they meant to.
+    init?(launchName: String) {
+        switch launchName {
+        case "yours", "account": self = .library
+        case "picsVids": self = .rooms
+        default: self.init(rawValue: launchName)
         }
     }
 }
@@ -42,6 +64,11 @@ final class AppModel {
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions
     var tab: AppTab
+    /// The room open in ROOMS, nil for the list of rooms. Kept while another bar door is on show,
+    /// so coming back finds the room where it was left.
+    var room: NativeRoom?
+    /// Each room's own stack of pushed screens, kept per room for the same reason.
+    var roomPaths: [NativeRoom: [RoomRoute]] = [:]
     /// The skin on screen: the sky's, or the reader's pick while the sky is in the band it was
     /// made under (Sky.resolve, the website's rule).
     private(set) var skin: Skin = .day
@@ -62,8 +89,25 @@ final class AppModel {
     /// The channel-change pigeon. One player for the life of the app.
     let clips = StationClips()
     /// What the Receiver tab is playing, docked or full screen.
+    let captions: LiveCaptionSession
     let tuner: ReceiverTuner
     let chat: ChatStore
+    /// The Screening Room's films, read from vod.json; full films through vod-token.
+    let films: FilmStore
+    /// The Reading Room: the shelf feed, the page server and the reader's pages.
+    let reading: ReadingStore
+    /// Saves on the account (`passport_saves`), shared with the website and the Apple TV.
+    let saves: SavesStore
+    /// The Bazaar's shelf (data/catalog.json) and this device's bag for the shop's checkout.
+    let bazaar: SiteFeed<[BazaarItem]>
+    let bag = BagStore()
+    let bazaarSwap: SiteFeed<[String: String]>
+    /// The Madrassa: the page's reference entries, the writings feed and the Street Dictionary.
+    let madrassaEntries: SiteFeed<[MadrassaEntry]>
+    let madrassaPosts: SiteFeed<[MadrassaPost]>
+    let lughat: SiteFeed<[LughatEntry]>
+    /// The research databases, each read the first time it is opened.
+    @ObservationIgnored private var databaseFeeds: [ArchiveDatabase: SiteFeed<[DBRecord]>] = [:]
 
     private let libraryFile: LibraryFile
     private var libraryReadable = false
@@ -77,13 +121,38 @@ final class AppModel {
         let auth = AuthStore()
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
-        tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission)
+        captions = LiveCaptionSession(auth: auth)
+        tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission, captions: captions)
         pnv = PicsVidsStore(auth: auth)
         chat = ChatStore(auth: auth)
+        let films = FilmStore(auth: auth)
+        self.films = films
+        reading = ReadingStore(auth: auth, origin: films.origin)
+        saves = SavesStore(auth: auth)
+        bazaar = SiteFeed(auth: auth, path: Bazaar.cataloguePath) { data in
+            Bazaar.offered(try JSONDecoder().decode(BazaarCatalogue.self, from: data).products)
+        }
+        bazaarSwap = SiteFeed(auth: auth, path: Bazaar.swapPath) { data in try Bazaar.swapMap(data) }
+        madrassaEntries = SiteFeed(auth: auth, path: MadrassaEntries.pagePath) { data in
+            guard let entries = MadrassaEntries.entries(fromPage: String(decoding: data, as: UTF8.self)) else { throw DBError.unreadable }
+            return entries
+        }
+        madrassaPosts = SiteFeed(auth: auth, path: MadrassaWritings.feedPath) { data in
+            MadrassaWritings.knowledge(try JSONDecoder().decode([MadrassaPost].self, from: data))
+        }
+        lughat = SiteFeed(auth: auth, path: Lughat.path) { data in try JSONDecoder().decode(LughatFile.self, from: data).entries }
         let defaults = UserDefaults.standard
         forcedSkin = defaults.string(forKey: "kjskin").flatMap(Skin.init(rawValue:))
         playsAtLaunch = defaults.object(forKey: "kjautoplay") == nil || defaults.bool(forKey: "kjautoplay")
-        tab = defaults.string(forKey: "kjtab").flatMap(AppTab.init(rawValue:)).flatMap { AppTab.available.contains($0) ? $0 : nil } ?? .receiver
+        let launchTab = defaults.string(forKey: "kjtab")
+        tab = launchTab.flatMap(AppTab.init(launchName:)) ?? .receiver
+        if launchTab == "picsVids", StoreBuild.includes(.picsVids) { room = .picsVids }
+        // `-kjroom reading`: open ROOMS on a room, for UI tests and screenshots.
+        if let launchRoom = defaults.string(forKey: "kjroom").flatMap(NativeRoom.init(rawValue:)),
+           launchRoom.opensInRooms, StoreBuild.includes(launchRoom) {
+            room = launchRoom
+            tab = .rooms
+        }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
@@ -93,6 +162,8 @@ final class AppModel {
         browser.warm()
         watchTheSky()
         watchTheStorefront(forced: defaults.string(forKey: "kjstorefront"))
+        // Which way the database answers, decided while the first screen draws.
+        Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }
 
     // MARK: - Storefront
@@ -169,6 +240,18 @@ final class AppModel {
     /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
+        // A Reading Room address (?m=title&issue=&p=) opens the native reader, as the site's does.
+        if let route = ReadingLinks.route(url), StoreBuild.includes(.reading) {
+            open(.reading, at: [route])
+            return
+        }
+        openWebsite(url)
+    }
+
+    /// A website page in the house browser, even where the app has a native room for it: for the
+    /// "on the website" controls, whose point is the page itself.
+    func openWebsite(_ url: URL) {
+        guard ArchiveURL.isArchive(url) else { return }
         browser.load(showsJoin ? url : JoinOffer.tagged(url))
         isShowingBrowser = true
     }
@@ -180,16 +263,48 @@ final class AppModel {
             message = "\(destination.title) is not in this edition of the app."
             return
         }
-        if destination.nativeRoom == .chat {
-            isShowingChat = true
-        } else if let room = destination.nativeRoom, let tab = AppTab(room) {
-            var instant = Transaction()
-            instant.disablesAnimations = true
-            withTransaction(instant) { self.tab = tab }
+        if let room = destination.nativeRoom {
+            open(room)
         } else {
             open(destination.url)
         }
     }
+
+    /// A room the app draws itself: on its own bar door, pushed in ROOMS, or over the tabs.
+    func open(_ room: NativeRoom, at route: [RoomRoute]? = nil) {
+        guard StoreBuild.includes(room) else {
+            message = "This room is not in this edition of the app."
+            return
+        }
+        var instant = Transaction()
+        instant.disablesAnimations = true
+        withTransaction(instant) {
+            if room == .chat {
+                isShowingChat = true
+            } else if let tab = AppTab(room) {
+                self.tab = tab
+            } else {
+                self.room = room
+                if let route { roomPaths[room] = route }
+                self.tab = .rooms
+            }
+        }
+    }
+
+    /// The preview password's header for a picture on the site's own host, nil anywhere else.
+    func siteAuthorization(for url: URL) -> String? { bazaar.authorization(for: url) }
+
+    /// A research database's records, read once per preview password.
+    func database(_ db: ArchiveDatabase) -> SiteFeed<[DBRecord]> {
+        if let feed = databaseFeeds[db] { return feed }
+        let origin = SiteOrigin.current
+        let feed = SiteFeed<[DBRecord]>(auth: auth, paths: db.paths, origin: origin) { files in try db.records(files, origin: origin) }
+        databaseFeeds[db] = feed
+        return feed
+    }
+
+    /// Where reading or watching stopped, kept on this device.
+    func record(_ place: Resume) { updateLibrary { $0.record(place) } }
 
     func toggleSaved(_ url: URL, title: String) { updateLibrary { $0.toggleBookmark(url, title: title) } }
     func removeSaved(_ id: UUID) { updateLibrary { $0.bookmarks.removeAll { $0.id == id } } }

@@ -87,8 +87,9 @@ struct Palette: Equatable {
     // kicker (accent) or a faint line that is right on the page cannot fall into the plate's own
     // colour: on the day skin the accent and the band are the same green.
 
-    /// A focused control: the focus plate is the ground, `onFocus` the ink and the accent.
-    fileprivate var onFocusPlate: Palette {
+    /// A focused control: the focus plate is the ground, `onFocus` the ink and the accent. Also
+    /// what a row lit by the remote without focus reads (the Receiver's guide).
+    var onFocusPlate: Palette {
         replacing(ground: focusPlate, ink: onFocus, accent: onFocus, faint: onFocus.opacity(0.85))
     }
 
@@ -210,13 +211,17 @@ private struct SmallStyle: ViewModifier {
 /// A pressed control sits on the lift plate. No outline, no shadow: colour and a 1.03 scale.
 struct HouseButtonStyle: ButtonStyle {
     let padding: EdgeInsets
+    /// The one action of a screen (Play, Resume), as the Apple TV app sets it: a filled plate at
+    /// rest, the lift, so it reads as the thing to press before focus reaches it.
+    let solid: Bool
 
-    init(padding: EdgeInsets = EdgeInsets(top: 18, leading: 26, bottom: 18, trailing: 26)) {
+    init(padding: EdgeInsets = EdgeInsets(top: 18, leading: 26, bottom: 18, trailing: 26), solid: Bool = false) {
         self.padding = padding
+        self.solid = solid
     }
 
     func makeBody(configuration: Configuration) -> some View {
-        HouseControl(label: configuration.label, isPressed: configuration.isPressed, padding: padding, kind: .button)
+        HouseControl(label: configuration.label, isPressed: configuration.isPressed, padding: padding, kind: solid ? .solid : .button)
     }
 }
 
@@ -257,6 +262,9 @@ private struct CardShadow: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            // One shape casts it: without the group SwiftUI shadows each piece drawn on the plate,
+            // a halo under the lettering and the marks (seen in smut, 2026-10-27).
+            .compositingGroup()
             .shadow(color: palette.band.opacity(isFocused ? 0.55 : 0), radius: isFocused ? 30 : 0, x: 0, y: isFocused ? 20 : 0)
             .animation(CardMotion.spring, value: isFocused)
     }
@@ -355,6 +363,7 @@ struct HouseTabStyle: ButtonStyle {
 
 private enum ControlKind {
     case button
+    case solid
     case tab(isCurrent: Bool)
 }
 
@@ -391,7 +400,9 @@ private struct HousePlate<Face: View>: View {
 
     private var plate: Color {
         if isPressed { return palette.lift }
-        return isFocused ? palette.focusPlate : .clear
+        if isFocused { return palette.focusPlate }
+        if case .solid = kind { return palette.lift }
+        return .clear
     }
 
     /// The rule under the current tab, which a plate under it would make redundant.
@@ -715,6 +726,7 @@ enum Section: String, CaseIterable, Identifiable {
     case transmission
     case reading
     case picsvids
+    case rooms
     case chat
     case account
 
@@ -728,6 +740,8 @@ enum Section: String, CaseIterable, Identifiable {
         case .reading: return "Reading Room"
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
+        // The Screening Room, the Bazaar, the Madrassa and the databases, under one door.
+        case .rooms: return "Rooms"
         case .chat: return "Chat"
         case .account: return "Account"
         }

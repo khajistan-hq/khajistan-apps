@@ -29,6 +29,15 @@ func expectEqual<T: Equatable>(_ actual: T, _ expected: T, _ note: @autoclosure 
     }
 }
 
+@discardableResult
+func expectNotNil<T>(_ value: T?, _ note: @autoclosure () -> String = "", line: Int = #line) throws -> T {
+    guard let value else {
+        let text = note()
+        throw Failure(description: "line \(line): got nil" + (text.isEmpty ? "" : " (\(text))"))
+    }
+    return value
+}
+
 func expectClose(_ actual: Double, _ expected: Double, tolerance: Double = 1e-6, line: Int = #line) throws {
     guard abs(actual - expected) <= tolerance else {
         throw Failure(description: "line \(line): got \(actual), expected \(expected) within \(tolerance)")
@@ -85,7 +94,10 @@ guard CommandLine.arguments.count > 1 else {
 }
 let fixtureURL = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
 /// <root>/tvos/Tests/Fixtures/<file> -> <root>
-let repoRoot = fixtureURL.deletingLastPathComponent().deletingLastPathComponent()
+/// The site checkout the parity tests read. The app repo no longer sits inside it, so the old
+/// <root>/tvos/... walk found nothing and every parity test skipped; KJ_ARCHIVE names it.
+let repoRoot = ProcessInfo.processInfo.environment["KJ_ARCHIVE"].map { URL(fileURLWithPath: $0) }
+    ?? fixtureURL.deletingLastPathComponent().deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
 
 func realFile(_ relative: String) throws -> Data {
@@ -3761,7 +3773,278 @@ func readingProvenance() throws {
 }
 
 
+func receiverOpeningDoesNotRestartOrOverrideIntent() throws {
+    var opening = ReceiverOpeningPlayback()
+    try expect(opening.begin(active: true, ready: false, explicitDestination: false) == nil)
+    let ticket = opening.begin(active: true, ready: true, explicitDestination: false)!
+    try expect(opening.admits(ticket))
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) == nil, "render/player dismissal must not restart")
+    opening.manualInteraction()
+    try expect(!opening.admits(ticket), "pending automatic surf cannot override manual navigation")
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) == nil)
+    _ = opening.begin(active: false, ready: true, explicitDestination: false)
+    try expect(opening.begin(active: true, ready: true, explicitDestination: false) != nil, "new Receiver visit starts once")
+    var linked = ReceiverOpeningPlayback()
+    try expect(linked.begin(active: true, ready: true, explicitDestination: true) == nil)
+    try expect(linked.begin(active: true, ready: true, explicitDestination: false) == nil, "clearing a deep link does not trigger shuffle")
+}
+
+func receiverCaptionsRespectDeniedRights() throws {
+    var channel = try eligibilityChannel("caption-rights")
+    channel.captionsDenied = true
+    try expect(!CaptionRules.eligible(channel, detected: nil, accuracy: nil))
+    try expectEqual(CaptionRules.parkedReason(channel, detected: nil, accuracy: nil), "Captions are unavailable for this channel.")
+    let data = Data(#"{"id":"rights","name":"Rights","mediaType":"tv","streams":[],"captionsDenied":true}"#.utf8)
+    let decoded = try JSONDecoder().decode(Channel.self, from: data)
+    try expectEqual(decoded.captionsDenied, true, "payload rights refusal must be decoded")
+}
+
+func captionContinuationRejectsStalePaidWork() throws {
+    let captured = CaptionContinuation(generation: 4, channelID: "channel-a", sessionID: "session-a")
+    try expect(captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: false))
+    try expect(!captured.admits(generation: 5, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: false), "off/on while refreshing token invalidates old work")
+    try expect(!captured.admits(generation: 4, channelID: "channel-b", sessionID: "session-a", on: true, cancelled: false), "channel change blocks dispatch")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-b", on: true, cancelled: false), "new billing session blocks dispatch")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: false, cancelled: false), "off blocks dispatch and response consumption")
+    try expect(!captured.admits(generation: 4, channelID: "channel-a", sessionID: "session-a", on: true, cancelled: true), "cancelled translation cannot dispatch")
+}
+
+func receiverPauseInvalidatesPendingResolver() throws {
+    var intent = ReceiverTuneIntent()
+    let initial = intent.begin()
+    try expect(intent.admits(initial))
+    intent.cancel()
+    try expect(!intent.admits(initial), "first Pause during connection prevents a late resolve from attaching")
+    let resumed = intent.begin()
+    try expect(intent.admits(resumed), "explicit Play permits a new resolve")
+    try expect(!intent.admits(initial), "old readiness cannot join the new play intent")
+    let changed = intent.begin()
+    try expect(!intent.admits(resumed), "channel change invalidates old resolver")
+    intent.cancel()
+    try expect(!intent.admits(changed), "pause during channel change blocks incoming playback")
+}
+
+/// The app's direction rule is the site's: the same region set, read out of reading-room-app.js,
+/// and the per-issue override both ways.
+func readingDirectionMatchesTheSite() throws {
+    let js = String(decoding: try realFile("scripts/reading-room-app.js"), as: UTF8.self)
+    let start = try require(js.range(of: "const RR_RTL_REGIONS = new Set(["), "RR_RTL_REGIONS in reading-room-app.js")
+    let block = String(js[start.upperBound...].prefix { $0 != "]" })
+    let site = Set(block.components(separatedBy: ",").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \n'\"")) }.filter { !$0.isEmpty })
+    try expectEqual(site, RRDirection.rightToLeftRegions)
+    try expect(site != RRDirection.rightToLeftRegions.subtracting(["persia"]), "the comparator can fail")
+    for slug in RRDirection.byIssue["molla-nasraddin"]!.except {
+        try expect(js.contains("'\(slug)'"), "the override lists \(slug)")
+    }
+}
+
+func readingDirectionRules() throws {
+    func title(_ slug: String, _ region: String) -> RRTitle {
+        RRTitle(slug: slug, name: slug, native: "", region: region, memberSlugs: [slug], issues: [])
+    }
+    func issue(_ slug: String) -> RRIssue { RRIssue(slug: slug, id: "1", label: "", pages: 4, index: 0) }
+    try expect(RRDirection.isRightToLeft(title("kayhan", "persia"), nil), "Persia reads right to left")
+    try expect(!RRDirection.isRightToLeft(title("ses", "anatolia"), nil), "Anatolia reads left to right")
+    let molla = title("molla-nasraddin", "persia")
+    try expect(!RRDirection.isRightToLeft(molla, issue("molla-nasraddin-3-molla-nasredin-1911-1-2")), "the reprint runs left to right")
+    try expect(RRDirection.isRightToLeft(molla, issue("molla-nasraddin-3-molla-nasredin-1906-1-39")), "the 1906 volume runs right to left")
+}
+
+/// Every product of the real catalogue stands on the shelf the website's own code puts it on
+/// (scripts/bazaar-shelf-fixture.mjs runs kj-typetag.js and writes KJ_BAZAAR_EXPECTED).
+func bazaarShelvesMatchTheSite() throws {
+    guard let expectedPath = ProcessInfo.processInfo.environment["KJ_BAZAAR_EXPECTED"] else {
+        throw Skip(reason: "set KJ_BAZAAR_EXPECTED (scripts/bazaar-shelf-fixture.mjs writes it)")
+    }
+    let catalogue = try JSONDecoder().decode(BazaarCatalogue.self, from: try realFile(Bazaar.cataloguePath))
+    let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: expectedPath))) as? [String: Any] ?? [:]
+    let expected = raw.mapValues { $0 as? String }
+    try expectEqual(expected.count, catalogue.products.count, "the fixture covers the same catalogue")
+    var mismatched: [String] = []
+    for product in catalogue.products {
+        let mine = Bazaar.shelf(product)?.rawValue
+        if mine != (expected[product.h] ?? nil) { mismatched.append(product.h) }
+    }
+    try expect(mismatched.isEmpty, "\(mismatched.count) shelves differ, e.g. \(mismatched.prefix(5))")
+    try expect(catalogue.products.contains { Bazaar.shelf($0) != nil }, "the shelf is not empty")
+}
+
+func bazaarRules() throws {
+    func product(_ type: String?, _ title: String, tags: [String] = [], pp: Double? = 18, pd: Double? = nil, o: Int? = nil, so: Int? = nil, image: String? = "https://cdn.shopify.com/s/files/1/x.jpg") -> BazaarProduct {
+        BazaarProduct(h: "h", t: title, i: image, p: pp, c: "USD", pt: type, r: nil, l: nil, tags: tags, pp: pp, pd: pd, so: so, o: o)
+    }
+    try expectEqual(Bazaar.shelf(product("T-Shirt", "Lollywood Tee")), .apparel)
+    try expectEqual(Bazaar.shelf(product("Poster", "Film poster", o: 1)), nil, "an original holding is not sold on the Bazaar")
+    try expectEqual(Bazaar.shelf(product("Book", "A Press title")), nil, "printed matter is not on the Bazaar")
+    try expectEqual(Bazaar.shelf(product("Apparel & Accessories", "Mujra Masti Iron-on Embroidered Patch")), nil, "a patch typed apparel is retired")
+    try expectEqual(Bazaar.shelf(product("Accessories", "I Am Pure Canvas Tote Bag")), .objects, "a canvas tote bag is still for sale")
+    try expectEqual(Bazaar.shelf(product("Paper products", "Allah Hoo", tags: ["type:sticker"])), .stickers)
+    try expectEqual(Bazaar.shelf(product("Home Decor", "Maula Jatt Movie Poster \u{2014} Metal Panel")), .objects, "metal stays an object")
+    try expectEqual(Bazaar.shelf(product("Home Decor", "Maula Jatt Matte Print")), .prints)
+    try expectEqual(Bazaar.shelf(product("Stickers", "Sticker", pp: nil, pd: 3)), nil, "digital-only leaves the shelf")
+    try expectEqual(Bazaar.shelf(product("Stickers", "Sticker", image: nil)), nil, "no image, no card")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 18)), "$18")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 4.5)), "$4.50")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 2800)), "$2,800")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", pp: 2800.01)), "Price on request")
+    try expectEqual(Bazaar.priceLine(product("Poster", "x", so: 1)), "Sold out")
+    try expect(Bazaar.imageURL("assets/products/350cabf9dbe894ad.webp") != nil)
+    try expectEqual(Bazaar.imageURL("https://evil.example/s/files/x.jpg"), nil)
+    try expectEqual(Bazaar.imageURL("assets/products/../../x.webp\u{0000}"), nil)
+    try expectEqual(Bazaar.imageURL("https://cdn.shopify.com/s/files/1/a.jpg?v=2", width: 320)?.absoluteString,
+                    "https://cdn.shopify.com/s/files/1/a.jpg?v=2&width=320")
+    try expectEqual(ShopStorefront.safeCheckout("https://khajistan.myshopify.com/cart/c/abc?key=1")?.absoluteString,
+                    "https://khajistan.myshopify.com/cart/c/abc?key=1&skip_shop_pay=true")
+    try expectEqual(ShopStorefront.safeCheckout("https://khajistan.myshopify.com.evil.example/cart"), nil)
+    try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
+    try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"data":{"product":null}}"#.utf8)), .notForSale, "an unpublished product is not a fault")
+    try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"errors":[{"message":"x"}]}"#.utf8)), .unreadable, "an error is not 'not for sale'")
+    let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
+    try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
+    let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)
+    try expectEqual(ShopStorefront.checkout(from: ok), .success(URL(string: "https://khajistan.com/cart/c/1?skip_shop_pay=true")!))
+}
+
+/// Every database decodes from its real file, and the counts are the ones the website states for
+/// it (databases.html, cinema/ and television/ hubs, logos.html's review rule).
+func databasesDecodeTheRealFiles() throws {
+    func records(_ db: ArchiveDatabase) throws -> [DBRecord] {
+        try db.records(try db.paths.map { try realFile($0) })
+    }
+    let expected: [ArchiveDatabase: Int] = [
+        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 6_686, .persianMusic: 45_568,
+        .censorCertificates: 52, .iranianCinema: 1_437, .pakistaniCinema: 6_179, .turkishCinema: 65,
+        .screenMarks: 1_726, .pakistaniDramas: 1_599,
+    ]
+    for (db, count) in expected {
+        let all = try records(db)
+        try expectEqual(all.count, count, "\(db.title) record count")
+        try expectEqual(Set(all.map(\.id)).count, all.count, "\(db.title) ids are unique")
+    }
+    // logos.html shows review == false with an image file, and nothing else.
+    let raw = try JSONSerialization.jsonObject(with: try realFile("data/logos.json")) as? [String: Any]
+    let shown = ((raw?["records"] as? [[String: Any]]) ?? []).filter { ($0["review"] as? Bool) == false && ($0["image_file"] as? String)?.isEmpty == false }
+    let logos = try records(.logos)
+    try expectEqual(logos.count, shown.count, "Logos: the page's review rule")
+    try expect(logos.contains { $0.image?.path.contains("/thumb/") == true }, "level-2 logos use their WebP thumb")
+    try expect(!logos.contains { $0.image?.pathExtension.lowercased() == "svg" }, "no SVG is offered as a picture")
+    // The Persian index decodes its dictionaries: no record shows a bare index as a performer.
+    let persian = try records(.persianMusic)
+    try expect(persian.contains { $0.fields.contains { $0.label == "Performer" && Int($0.value) == nil } })
+    // Censor certificates link to their scan in the Reading Room.
+    let censor = try records(.censorCertificates)
+    try expect(censor.allSatisfy { $0.link?.absoluteString.contains("reading-room?m=censor-records") == true }, "every certificate has its scan")
+    try expect(censor.contains { $0.native != nil }, "Urdu titles are read")
+}
+
+func databaseQuery() throws {
+    func record(_ title: String, _ language: String) -> DBRecord {
+        DBRead.make(id: title, title: title, subtitle: [], facets: ["Language": language], fields: [("Performer", "Noor Jehan")], link: nil)!
+    }
+    let all = [record("Aa Intezar Hai Tera", "Urdu"), record("Sohni Mahiwal", "Punjabi"), record("Chan Kithan", "Punjabi")]
+    try expectEqual(DBQuery.filter(all, text: "noor intezar", facets: [:]).map(\.title), ["Aa Intezar Hai Tera"], "every word must match")
+    try expectEqual(DBQuery.filter(all, text: "", facets: ["Language": "Punjabi"]).count, 2)
+    try expectEqual(DBQuery.filter(all, text: "intezar", facets: ["Language": "Punjabi"]).count, 0, "facet and words together")
+    try expectEqual(DBQuery.values("Language", in: all).map(\.value), ["Punjabi", "Urdu"])
+    func dated(_ title: String, _ year: String?) -> DBRecord {
+        DBRead.make(id: title, title: title, subtitle: [], facets: [:], fields: [("Year", year)], link: nil)!
+    }
+    let years = [dated("b", "1975"), dated("a", nil), dated("c", "1960")]
+    try expectEqual(DBQuery.sort(years, by: .newest).map(\.title), ["b", "c", "a"], "newest first, undated last")
+    try expectEqual(DBQuery.sort(years, by: .oldest).map(\.title), ["c", "b", "a"], "oldest first, undated last")
+    try expectEqual(DBQuery.sort(years, by: .title).map(\.title), ["a", "b", "c"])
+    try expectEqual(DBQuery.sort(years, by: .listed).map(\.title), ["b", "a", "c"], "as listed is the file's order")
+    try expectEqual(DBRead.text("None"), nil)
+    try expectEqual(DBRead.text(NSNumber(value: true)), nil, "a boolean is not a value to show")
+    try expectEqual(DBRead.text(["Drama", "None", "Romance"]), "Drama, Romance")
+    try expectEqual(DBRead.text(1945.0), "1945")
+    try expectEqual(DBRead.year("1979-04-01"), 1979)
+    try expectEqual(DBRead.year("0"), nil)
+    let coded = DBRead.make(id: "x", title: "T", subtitle: [], facets: [:], fields: [("Status", "strong_source_verified"), ("Path", "a_b/c")], link: nil)!
+    try expectEqual(coded.fields.map(\.value), ["strong source verified", "a_b/c"], "only a whole code-style value is spaced")
+}
+
+/// The Madrassa reads its sources as the pages do, at the counts site-counts.json states, and an
+/// essay's body loses none of its words on the way to blocks.
+func madrassaReadsTheRealSources() throws {
+    let page = String(decoding: try realFile(MadrassaEntries.pagePath), as: UTF8.self)
+    let entries = try require(MadrassaEntries.entries(fromPage: page), "ENTRIES evaluates")
+    try expectEqual(entries.count, 15, "the page's reference entries")
+    try expect(entries.contains { $0.id == "omar-ali-khan" && ($0.press ?? []).count > 0 })
+    try expectEqual(MadrassaEntries.entries(fromPage: "<html>no list here</html>"), nil, "a page without the list is not read as empty")
+
+    let posts = try JSONDecoder().decode([MadrassaPost].self, from: try realFile(MadrassaWritings.feedPath))
+    let knowledge = MadrassaWritings.knowledge(posts)
+    let counts = try JSONSerialization.jsonObject(with: try realFile("data/site-counts.json")) as? [String: Any]
+    let figures = counts?["counts"] as? [String: Int] ?? [:]
+    try expectEqual(knowledge.filter(MadrassaWritings.isForensics).count, figures["madrassa_forensics"] ?? -1, "forensics")
+    try expectEqual(knowledge.filter { !MadrassaWritings.isForensics($0) }.count, figures["madrassa_writings"] ?? -1, "writings")
+    try expect(knowledge.filter(MadrassaWritings.isForensics).allSatisfy { !MadrassaWritings.listTitle($0).lowercased().hasPrefix("archive forensics") })
+
+    func words(_ text: String) -> Int { text.split(whereSeparator: { $0.isWhitespace }).count }
+    for post in knowledge {
+        let body = post.body ?? ""
+        let blocks = ArticleHTML.blocks(body)
+        try expect(!blocks.isEmpty, "\(post.handle) has blocks")
+        let kept = blocks.reduce(0) { total, block in
+            switch block {
+            case .heading(let t): return total + words(t)
+            case .paragraph(let a), .quote(let a), .item(let a): return total + words(String(a.characters))
+            case .row(let cells): return total + cells.reduce(0) { $0 + words($1) }
+            case .image, .embed, .rule: return total
+            }
+        }
+        let whole = words(ArticleHTML.text(body))
+        try expect(Double(kept) >= Double(whole) * 0.97, "\(post.handle): \(kept) of \(whole) words reach the screen")
+    }
+
+    let lughat = try JSONDecoder().decode(LughatFile.self, from: try realFile(Lughat.path))
+    try expectEqual(lughat.entries.count, figures["lughat_entries"] ?? -1, "dictionary entries")
+    try expectEqual(lughat.entries.filter(Lughat.isSetApart).count, 151, "High and Restricted are set apart, none removed")
+}
+
+func articleHTMLRules() throws {
+    let blocks = ArticleHTML.blocks(#"<h2>Head</h2><p>One <a href="https://example.org/a">link</a> &amp; more&nbsp;text.</p><script>alert(1)</script><p><img src="https://cdn.shopify.com/x.jpg" alt="A &quot;scan&quot;"></p><blockquote>Said.</blockquote><ul><li>Item</li></ul><p><img src="javascript:x"></p>"#)
+    try expectEqual(blocks.count, 5, "script and an unsafe image are dropped, the rest kept")
+    let table = ArticleHTML.blocks(#"<div>Loose text</div><table><tr><td><strong>t</strong></td><td>اردو</td></tr></table><iframe src="x"></iframe><audio></audio>"#)
+    try expectEqual(table, [.paragraph(AttributedString("Loose text")), .row(["t", "اردو"]), .embed], "div text, a row, one embed note")
+    if case .paragraph(let text) = blocks[1] {
+        try expectEqual(String(text.characters), "One link & more\u{00A0}text.")
+        try expect(text.runs.contains { $0.link == URL(string: "https://example.org/a") }, "the link survives")
+    } else { try expect(false, "second block is a paragraph") }
+    if case .image(_, let alt) = blocks[2] { try expectEqual(alt, "A \"scan\"") } else { try expect(false, "third block is the image") }
+    try expectEqual(ArticleHTML.decodeEntities("&amp;lt; &#1606; &#x645;"), "&lt; \u{0646} \u{0645}", "an escaped entity stays escaped")
+    // A link around a picture leaves no tag text behind (refute pass, 2026-10-27).
+    let linked = ArticleHTML.blocks(#"<p><a href="https://cdn.shopify.com/x"><img src="https://cdn.shopify.com/y.jpg"></a></p><p>After.</p>"#)
+    try expectEqual(linked, [.image(URL(string: "https://cdn.shopify.com/y.jpg")!, alt: nil), .paragraph(AttributedString("After."))])
+    // Text before the first cell does not run into it; a quote or list item keeps its shape around a <p>.
+    try expectEqual(ArticleHTML.blocks(#"<table><tr>stray<td>A</td><td>B</td></tr></table>"#), [.paragraph(AttributedString("stray")), .row(["A", "B"])])
+    try expectEqual(ArticleHTML.blocks(#"<blockquote><p>Said.</p></blockquote><ul><li><p>Item</p></li></ul>"#),
+                    [.quote(AttributedString("Said.")), .item(AttributedString("Item"))])
+    try expectEqual(DBRead.text(NSNumber(value: 1e20)), "1e+20", "a number too big for Int is shown, not a crash")
+}
+
+func savesFilmAndPnvRefs() throws {
+    try expectEqual(PassportSaves.filmRef("zinda-laash"), "tv:zinda-laash")
+    try expectEqual(PassportSaves.filmHref("zinda laash"), "/film/zinda%20laash")
+    try expectEqual(PassportSaves.pnvRef("abc_123"), "pnv:abc_123")
+    try expectEqual(PassportSaves.pnvRef("bad key"), nil, "a key the table's check refuses is not sent")
+    let user = "6f0c2d2e-6b57-4e0f-9a64-1d2b3c4d5e6f"
+    let pnv = try require(PassportSaves.insertRequest(userId: user, ref: "pnv:abc", wing: PassportSaves.bornDigitalWing, title: nil, href: "/canvas?item=abc", accessToken: "t"))
+    let body = try JSONSerialization.jsonObject(with: try require(pnv.httpBody)) as? [String: Any] ?? [:]
+    try expect(body["title"] == nil, "a Pics/Vids save carries no title, as the website's")
+    try expectEqual(body["wing"] as? String, "born-digital")
+    try expect(PassportSaves.deleteRequest(userId: user, refs: ["tv:zinda-laash", "pnv:abc"], accessToken: "t") != nil, "film and Pics/Vids saves can be removed")
+    try expectEqual(PassportSaves.deleteRequest(userId: user, refs: ["poster:x"], accessToken: "t"), nil, "a ref this app never writes is not deleted from here")
+    let list = try require(PassportSaves.listRequest(userId: user, accessToken: "t")).url?.absoluteString ?? ""
+    try expect(list.contains("wing=in.(receiver,reading-room,born-digital,other)"))
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
+    ("Caption continuation rejects stale paid work after token refresh", captionContinuationRejectsStalePaidWork),
+    ("Receiver opening starts once and respects manual/deep-link intent", receiverOpeningDoesNotRestartOrOverrideIntent),
+    ("Receiver captions preserve explicit rights refusals", receiverCaptionsRespectDeniedRights),
     ("Skin follows the sun: noon, midnight, 0 degrees, either side of +6", skinFollowsTheSun),
     ("Skin hex triples", skinColours),
     ("Skin choice: Automatic follows the sun, a fixed choice holds", skinChoiceResolvesAutomaticAndFixed),
@@ -3878,6 +4161,15 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
+    ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
+    ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
+    ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
+    ("Saves: films and Pics/Vids, as the table allows", savesFilmAndPnvRefs),
+    ("Databases: every file decodes, at the site's own counts", databasesDecodeTheRealFiles),
+    ("Databases: search and facets", databaseQuery),
+    ("Madrassa: entries, writings, dictionary from the real sources", madrassaReadsTheRealSources),
+    ("Madrassa: article bodies to blocks", articleHTMLRules),
+    ("Reading Room: direction by region and by issue", readingDirectionRules),
     ("Reading Room: titles group as the site groups them (sample, from the site's own code)", readingGroupingMatchesTheSite),
     ("Reading Room: titles group as the site groups them (full feed)", readingGroupingMatchesTheSiteOnTheFullFeed),
     ("Reading Room: title splitting and keys", readingTitleSplitting),
@@ -3898,9 +4190,148 @@ let tests: [(String, () throws -> Void)] = [
     ("Chat: requests, refusals, what is shown", chatRequestsAndRefusals),
     ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
+    ("Saves: films in any script, and named collections", passportFilmRefsAndCollections),
+    ("Database route: direct, or the site's /sb/ proxy", supabaseRouteRewrites),
+    ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
+
+// MARK: - Database route
+
+func supabaseRouteRewrites() throws {
+    let signed = URL(string: "https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/sign/rr/a%20b.jpg?token=t.k")!
+    // Direct: every address as it is.
+    try expectEqual(SupabaseRoute.routed(signed, via: .direct), signed)
+    try expectEqual(SupabaseRoute.base(for: .direct).absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co")
+    // Proxy: the project's addresses move under the site's /sb/, path and query kept byte for byte.
+    try expectEqual(SupabaseRoute.routed(signed, via: .proxy).absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/storage/v1/object/sign/rr/a%20b.jpg?token=t.k")
+    try expectEqual(SupabaseRoute.base(for: .proxy).appendingPathComponent("rest/v1/rpc/x").absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/rest/v1/rpc/x")
+    // A path and query joined onto the route keep the proxy's "/sb" (resolving "/rest/…" against it
+    // would start from the site's root), and the query as written.
+    try expectEqual(SupabaseRoute.url("/rest/v1/rpc/reading_room_catalogue?order=collection_slug.asc&limit=1000", via: .proxy)?.absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/rest/v1/rpc/reading_room_catalogue?order=collection_slug.asc&limit=1000")
+    try expectEqual(SupabaseRoute.url("/rest/v1/x?a=eq.1", via: .direct)?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/x?a=eq.1")
+    // A proxy address goes back to the project's own when the route turns direct, and a play_url built
+    // on the proxy is still the project's tv-play, so its token is asked for.
+    let onProxy = URL(string: "https://khajistan-archive.pages.dev/sb/functions/v1/tv-play?id=abc")!
+    try expectEqual(SupabaseRoute.routed(onProxy, via: .direct).absoluteString,
+                    "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=abc")
+    try expectEqual(SupabaseRoute.routed(onProxy, via: .proxy), onProxy)
+    try expectEqual(SupabaseRoute.unrouted(URL(string: "https://khajistan-archive.pages.dev/reading-room.html")!).absoluteString,
+                    "https://khajistan-archive.pages.dev/reading-room.html", "the site's own pages are not the project")
+    if case .tvPlay = Transmission.route(for: onProxy.absoluteString) {} else { throw Failure(description: "a proxied tv-play is still tv-play") }
+    if case .tvPlay = Transmission.route(for: "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=abc") {} else {
+        throw Failure(description: "a direct tv-play is tv-play")
+    }
+    // Anything not on the project's host is left alone, whatever the route.
+    let elsewhere = URL(string: "https://customer-0svgnorro16tedsf.cloudflarestream.com/x/manifest/video.m3u8")!
+    try expectEqual(SupabaseRoute.routed(elsewhere, via: .proxy), elsewhere)
+    // The probe's verdicts: any answer from the project is the project; the proxy counts only when
+    // it is the proxy answering (before the site is deployed, /sb/ is the site's own 404).
+    try expect(SupabaseRoute.answers(status: 401, routeHeader: nil, viaProxy: false))
+    try expect(!SupabaseRoute.answers(status: 404, routeHeader: nil, viaProxy: true), "the site's 404 is not the proxy")
+    try expect(SupabaseRoute.answers(status: 401, routeHeader: "sb-proxy", viaProxy: true))
+    try expect(!SupabaseRoute.answers(status: 502, routeHeader: "sb-proxy", viaProxy: true), "the proxy could not reach the project either")
+    // Errors that mean "this address cannot be reached", as against an answer that came back.
+    try expect(SupabaseRoute.isUnreachable(URLError(.cannotConnectToHost)))
+    try expect(SupabaseRoute.isUnreachable(URLError(.timedOut)))
+    try expect(!SupabaseRoute.isUnreachable(URLError(.cancelled)))
+}
+
+// MARK: - Saves: films in any script, collections
+
+func passportFilmRefsAndCollections() throws {
+    // A Latin handle keeps its ref as written; a Persian one is carried as hex the check allows.
+    try expectEqual(PassportSaves.filmRef("showgirls-of-pakistan-2021-khajistan"), "tv:showgirls-of-pakistan-2021-khajistan")
+    for handle in ["nirt-خسرو-میرزای-دوم", "nirt-جنگ-نوروزی-1357", "nirt-دنیای-خوب-ما", "nirt-شبکه-صفر"] {
+        let ref = try expectNotNil(PassportSaves.filmRef(handle), handle)
+        try expect(ref.hasPrefix("tv:u."), ref)
+        try expect(PassportSaves.isRefSafe(String(ref.dropFirst(3))), "the table's check takes \(ref)")
+        try expectEqual(PassportSaves.filmHandle(ref: ref), handle)
+    }
+    // Hex is only read back where it names a handle that needed it: a Latin handle that looks like
+    // hex stays as written, and so does hex that is not UTF-8.
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.6162"), "u.6162")
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.ff"), "u.ff")
+    try expectEqual(PassportSaves.filmHandle(ref: "tv:u.6"), "u.6")
+    try expectEqual(PassportSaves.filmHandle(ref: "pnv:x"), nil)
+    try expectEqual(PassportSaves.filmRef(String(repeating: "ک", count: 60)), nil, "over the table's 200")
+    let user = "8f14e45f-ceea-467a-9575-5d1f5b2d0a11"
+    let ref = PassportSaves.filmRef("nirt-شبکه-صفر")!
+    try expectNotNil(PassportSaves.deleteRequest(userId: user, refs: [ref], accessToken: "t"), "a hex ref can be unsaved")
+
+    // Collections: the columns the account is granted, as the website's saveCollection sends them.
+    let made = try expectNotNil(PassportSaves.collectionInsertRequest(userId: user, name: "  Lollywood  ", keys: ["a", "b"], accessToken: "t"))
+    try expectEqual(made.httpMethod, "POST")
+    try expect(made.url!.absoluteString.hasSuffix("/rest/v1/phone_media_collections?select=id,name,media_keys"), made.url!.absoluteString)
+    try expectEqual(made.value(forHTTPHeaderField: "Prefer"), "return=representation")
+    let body = try JSONSerialization.jsonObject(with: made.httpBody!) as! [String: Any]
+    try expectEqual(Set(body.keys), ["user_id", "name", "media_keys"])
+    try expectEqual(body["name"] as? String, "Lollywood")
+    try expectEqual(body["media_keys"] as? [String], ["a", "b"])
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "   ", keys: [], accessToken: "t"), nil, "a name is needed")
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: String(repeating: "n", count: 121), keys: [], accessToken: "t"), nil)
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "x", keys: Array(repeating: "k", count: 501), accessToken: "t"), nil)
+    try expectEqual(PassportSaves.collectionInsertRequest(userId: user, name: "x", keys: ["bad\nkey"], accessToken: "t"), nil)
+    let id = "0b7c0c8e-2d3a-4f61-9a43-0a5d2f1c9e77"
+    let moved = try expectNotNil(PassportSaves.collectionUpdateRequest(userId: user, id: id, keys: ["a"], accessToken: "t"))
+    try expectEqual(moved.httpMethod, "PATCH")
+    try expect(moved.url!.absoluteString.hasSuffix("phone_media_collections?id=eq.\(id)&user_id=eq.\(user)&select=id,name,media_keys"), moved.url!.absoluteString)
+    try expectEqual(moved.value(forHTTPHeaderField: "Prefer"), "return=representation", "a row back, or no change")
+    let patch = try JSONSerialization.jsonObject(with: moved.httpBody!) as! [String: Any]
+    try expectEqual(Set(patch.keys), ["media_keys"], "only a granted column")
+    try expectEqual(PassportSaves.collectionUpdateRequest(userId: user, id: "1 or 1=1", keys: [], accessToken: "t"), nil)
+}
+
+// MARK: - TV sign-in from a phone
+
+func tvSignInFromAPhone() throws {
+    // Codes as typed, read and shown.
+    try expectEqual(TVSignIn.normalise("qrt4-mxz7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.normalise(" QRT4 MXZ7 "), "QRT4MXZ7")
+    try expectEqual(TVSignIn.normalise("QRT4-MXZ0"), nil, "zero is not in the alphabet")
+    try expectEqual(TVSignIn.normalise("QRT4-MXZA"), nil, "no vowels")
+    try expectEqual(TVSignIn.normalise("QRT4-MX"), nil)
+    try expectEqual(TVSignIn.display("qrt4mxz7"), "QRT4-MXZ7")
+    // A camera's read: the TV's own QR address on the archive host, or a bare code; any other host is refused.
+    try expectEqual(TVSignIn.code(fromScanned: "https://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.code(fromScanned: "QRT4-MXZ7"), "QRT4MXZ7")
+    try expectEqual(TVSignIn.code(fromScanned: "https://evil.example/activate?code=QRT4-MXZ7"), nil)
+    try expectEqual(TVSignIn.code(fromScanned: "http://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7"), nil)
+    try expectEqual(TVSignIn.code(fromScanned: "https://khajistan-archive.pages.dev/tv?code=QRT4-MXZ7"), nil)
+
+    // Requests: the TV speaks with the public key; a phone with its own session.
+    func body(_ request: URLRequest) throws -> [String: String] {
+        try expectNotNil(try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: String])
+    }
+    let start = TVSignIn.startRequest()
+    try expectEqual(start.httpMethod, "POST")
+    try expect(start.url!.absoluteString.hasSuffix("/functions/v1/tv-sign-in"))
+    try expectEqual(try body(start), ["action": "start"], "the TV sends no label of its own")
+    try expectEqual(start.value(forHTTPHeaderField: "Authorization"), "Bearer \(KJConfig.anonKey)")
+    try expectEqual(try body(TVSignIn.pollRequest(deviceCode: "d")), ["action": "poll", "device_code": "d"])
+    let approve = try expectNotNil(TVSignIn.approveRequest(code: "qrt4-mxz7", accessToken: "USER"))
+    try expectEqual(try body(approve), ["action": "approve", "user_code": "QRT4MXZ7"])
+    try expectEqual(approve.value(forHTTPHeaderField: "Authorization"), "Bearer USER")
+    try expectEqual(TVSignIn.peekRequest(code: "nope", accessToken: "USER"), nil)
+    let verify = TVSignIn.verifyRequest(tokenHash: "abc")
+    try expect(verify.url!.absoluteString.hasSuffix("/auth/v1/verify"))
+    try expectEqual(try body(verify), ["type": "email", "token_hash": "abc"])
+
+    // Answers.
+    let started = #"{"device_code":"\#(String(repeating: "x", count: 43))","user_code":"QRT4-MXZ7","verification_uri":"https://khajistan-archive.pages.dev/activate","verification_uri_complete":"https://khajistan-archive.pages.dev/activate?code=QRT4-MXZ7","interval":5,"expires_in":600}"#
+    try expectEqual(TVSignIn.start(from: Data(started.utf8))?.interval, 5)
+    try expectEqual(TVSignIn.start(from: Data(#"{"device_code":"short","user_code":"QRT4-MXZ7","verification_uri":"https://a","verification_uri_complete":"https://a","interval":5,"expires_in":600}"#.utf8)), nil)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"pending"}"#.utf8)), .pending)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"slow_down"}"#.utf8)), .slowDown)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"expired"}"#.utf8)), .expired)
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"approved","token_hash":"h","type":"email"}"#.utf8)), .approved(tokenHash: "h"))
+    try expectEqual(TVSignIn.poll(from: Data(#"{"status":"approved"}"#.utf8)), nil, "approved with no hash is no answer")
+    try expectEqual(TVSignIn.poll(from: Data(#"{"error":"server_error"}"#.utf8)), nil)
+}
 
 // MARK: - Shuffle
 

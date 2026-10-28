@@ -13,13 +13,16 @@ struct YoursView: View {
     @State private var preview: URL?
     @State private var confirmClear = false
     @State private var showSignIn = false
+    @State private var approvingTV = false
     @State private var editingPassword = false
     @State private var draft = ""
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                PageHead(kicker: "Account", "Your Khajistan", line: "Account, downloads and saved work")
+                LargeTitle(title: "Library", line: "Account, downloads and saved work")
+                if !places.isEmpty { placesBlock }
+                savedTitlesBlock
                 accountBlock
                 skinBlock
                 libraryBlock
@@ -43,19 +46,105 @@ struct YoursView: View {
         .onChange(of: model.isShowingBrowser) { if !model.isShowingBrowser { readFiles() } }
     }
 
+    // MARK: - Places and saved titles
+
+    /// Where reading and watching stopped, on this device only (never synced), newest first.
+    private var places: [Resume] {
+        model.library.resume.filter { $0.position > 0 || $0.kind == .reading }
+    }
+
+    private var placesBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ShelfHeader(title: "On this device")
+            ForEach(places.prefix(12)) { place in
+                Button { open(place) } label: {
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(place.title).font(.system(.body, weight: .semibold)).lineLimit(2)
+                            Text(detail(place)).kjSmall(faint: true)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                .accessibilityIdentifier("place-\(place.id)")
+            }
+        }
+    }
+
+    private func detail(_ place: Resume) -> String {
+        switch place.kind {
+        case .reading: return ["Reading Room", place.detail, "p. \(Int(place.position))"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        case .film: return "Screening Room \u{00B7} stopped at \(FilmPlayback.clock(place.position))"
+        }
+    }
+
+    private func open(_ place: Resume) {
+        switch place.kind {
+        case .reading: model.open(.reading, at: [.readingTitle(place.ref, resume: true)])
+        case .film: model.open(.screening, at: [.film(place.ref)])
+        }
+    }
+
+    /// Reading Room titles saved to the account, the same saves the website's dashboard lists.
+    @ViewBuilder
+    private var savedTitlesBlock: some View {
+        let saved = model.reading.titles.filter { model.saves.isSaved($0) }
+        let films = model.saves.watchlist.compactMap { handle in model.films.films.first { $0.handle == handle } }
+        Group {
+            if model.auth.isSignedIn && !films.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ShelfHeader(title: "Your watchlist")
+                    ForEach(films) { film in
+                        Button { model.open(.screening, at: [.film(film.handle)]) } label: {
+                            HStack {
+                                Text(Films.displayTitle(film)).font(.system(.body, weight: .semibold)).lineLimit(2)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
+                            }
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                    }
+                }
+            }
+            if model.auth.isSignedIn && !saved.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    ShelfHeader(title: "Saved to your account")
+                    ForEach(saved) { title in
+                        Button { model.open(.reading, at: [.readingTitle(title.slug)]) } label: {
+                            HStack {
+                                Text(title.name).font(.system(.body, weight: .semibold)).lineLimit(2)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
+                            }
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
+                    }
+                }
+            }
+        }
+        .task(id: model.auth.email) {
+            guard model.auth.isSignedIn else { return }
+            await model.saves.load()
+            await model.reading.start()
+            await model.films.load()
+        }
+    }
+
     // MARK: - Skin
 
     private var skinBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HouseRule()
-            Kicker("Skin").padding(.top, 10)
+            ShelfHeader(title: "Skin")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     skinTab("Automatic", pick: nil)
                     ForEach(Skin.allCases, id: \.self) { skin in skinTab(skin.label, pick: skin) }
                 }
             }
-            .padding(.horizontal, -12)
+            .scrollClipDisabled()
             Text(model.skinPick == nil
                  ? "Following the sun where you are: \(model.skin.label) now. Day in daylight, Smut at dawn and dusk, Grove at night."
                  : "\(model.skin.label), until the sky moves to its next band. Then Automatic again, as on the website.")
@@ -68,9 +157,10 @@ struct YoursView: View {
         Button {
             model.chooseSkin(pick)
         } label: {
-            Text(title).kjKicker()
+            Text(title)
         }
-        .buttonStyle(HouseTabStyle(isCurrent: model.skinPick == pick))
+        .buttonStyle(ChipStyle(on: model.skinPick == pick))
+        .padding(.trailing, 8)
         .accessibilityIdentifier("skin-\(pick?.rawValue ?? "auto")")
     }
 
@@ -78,18 +168,22 @@ struct YoursView: View {
 
     private var accountBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HouseRule()
-            Kicker("Your account").padding(.top, 10)
+            ShelfHeader(title: "Your account")
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName(KJType.title)
                 Button(kicker: "Sign out") { Task { await model.auth.signOut() } }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                tvSignInButton
             } else {
                 Text("Khajistan Transmission plays under your website account.").kjBody()
-                Button(kicker: "Sign in") { showSignIn = true }
-                    .buttonStyle(HouseButtonStyle(solid: true))
+                Button { showSignIn = true } label: { Label("Sign in", systemImage: "person.crop.circle") }
+                    .buttonStyle(SolidActionStyle())
                     .accessibilityIdentifier("accountSignIn")
+                #if DEBUG
+                // The UI test of the approval runs with no account (`-kjtvapprovefixture`).
+                if UserDefaults.standard.bool(forKey: "kjtvapprovefixture") { tvSignInButton }
+                #endif
             }
             webRow("Your Khajistan on the website", path: "dashboard.html", id: "web-dashboard")
             webRow("Your downloads", path: "downloads.html", id: "web-downloads")
@@ -97,14 +191,22 @@ struct YoursView: View {
         }
     }
 
+    /// Approve the code the Apple TV shows, so it signs in to this account without the remote's keyboard.
+    private var tvSignInButton: some View {
+        Button { approvingTV = true } label: { Label("Sign in on a TV", systemImage: "appletv") }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+            .accessibilityIdentifier("accountSignInTV")
+            .sheet(isPresented: $approvingTV) { TVApproveScreen() }
+    }
+
     private func webRow(_ title: String, path: String, id: String) -> some View {
         Button {
             model.open(ArchiveURL.base.appendingPathComponent(path))
         } label: {
             HStack {
-                Text(title).kjName()
+                Text(title).font(.system(.body, weight: .semibold))
                 Spacer()
-                Text("\u{2197}").kjName().accessibilityHidden(true)
+                Image(systemName: "arrow.up.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
             }
         }
         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
@@ -115,8 +217,8 @@ struct YoursView: View {
     private var previewBlock: some View {
         let isSet = model.auth.previewPassword != nil
         VStack(alignment: .leading, spacing: 8) {
-            Kicker("Preview password")
-            Text(isSet ? "Set on this device, for the Transmission schedule until launch." : "Not set. Khajistan Transmission asks for it until launch.")
+            ShelfHeader(title: "Preview password")
+            Text(isSet ? "Set on this device, for Transmission, the Screening Room and the Reading Room shelves until launch." : "Not set. Transmission, the Screening Room and the Reading Room shelves ask for it until launch.")
                 .kjSmall(faint: true)
             if editingPassword {
                 HouseInputField("Password") { SecureField("", text: $draft) }
@@ -145,8 +247,7 @@ struct YoursView: View {
 
     private var libraryBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HouseRule()
-            Kicker("On this device").padding(.top, 10)
+            ShelfHeader(title: "On this device")
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
@@ -171,8 +272,9 @@ struct YoursView: View {
     }
 
     private func shelfTab(_ title: String, _ value: Int) -> some View {
-        Button { shelf = value; if value == 2 { readFiles() } } label: { Text(title).kjKicker() }
-            .buttonStyle(HouseTabStyle(isCurrent: shelf == value))
+        Button { shelf = value; if value == 2 { readFiles() } } label: { Text(title) }
+            .buttonStyle(ChipStyle(on: shelf == value))
+            .padding(.trailing, 8)
             .accessibilityIdentifier("shelf-\(title.lowercased())")
     }
 
@@ -233,7 +335,11 @@ struct YoursView: View {
             HouseRule()
             webRow("About Khajistan", path: "about.html", id: "web-about")
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            #if targetEnvironment(macCatalyst)
+            Text("Khajistan for Mac \(version)").kjSmall(faint: true)
+            #else
             Text("Khajistan for \(UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone") \(version)").kjSmall(faint: true)
+            #endif
             Text("Khajistan carries each broadcaster's own signal and keeps no copy of it.").kjSmall(faint: true)
         }
     }

@@ -26,18 +26,6 @@ enum StoreBuild {
     }
 }
 
-extension AppTab {
-    /// The tabs this build shows, in the bar's order.
-    static var available: [AppTab] {
-        allCases.filter { tab in
-            switch tab {
-            case .picsVids: return StoreBuild.includes(.picsVids)
-            default: return true
-            }
-        }
-    }
-}
-
 extension ArchiveDestination {
     /// The website's menu as this build shows it: a room left out of the build is not offered,
     /// and a door left with no rooms is not drawn.

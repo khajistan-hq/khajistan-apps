@@ -460,7 +460,7 @@ final class TransmissionStore {
     }
 
     private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> Reply {
-        let (data, response) = try await urlSession.data(for: request, delegate: refusingRedirects ? RefuseRedirects() : nil)
+        let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession, delegate: refusingRedirects ? RefuseRedirects() : nil)
         return Reply(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
     }
 

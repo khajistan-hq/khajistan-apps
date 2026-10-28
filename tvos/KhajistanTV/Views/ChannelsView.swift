@@ -229,8 +229,9 @@ struct ChannelsView: View {
     }
 }
 
-/// A channel's card: the place as a kicker, the name, the broadcaster where it differs. It sits
-/// on a plate, so it names no colour: the plate sets the palette its text reads.
+/// A channel's card, in a live guide's row style: the medium's mark on its plate, the place as a
+/// kicker, the name, the broadcaster where it differs. It sits on a plate, so it names no colour:
+/// the plate sets the palette its text reads.
 struct ChannelCard: View {
     static let width: CGFloat = 420
     static let height: CGFloat = 190
@@ -241,7 +242,8 @@ struct ChannelCard: View {
     var body: some View {
         CardPlate(width: Self.width, height: Self.height) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
+                HStack(spacing: 14) {
+                    MediumMark(medium: channel.mediaType, size: 40)
                     if liked {
                         Image(systemName: "heart.fill")
                             .font(.system(size: 24, weight: .semibold))

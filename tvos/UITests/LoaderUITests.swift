@@ -7,7 +7,7 @@ final class LoaderUITests: XCTestCase {
         for skin in ["day", "grove"] {
             let app = XCUIApplication()
             app.launchArguments += ["-kjloaderpreview", "YES", "-kjskin", skin]
-            app.launch()
+            kjLaunch(app)
             let words = app.staticTexts.matching(NSPredicate(format: "label ==[c] %@", "Loading the receiver\u{2026}"))
             XCTAssertTrue(words.firstMatch.waitForExistence(timeout: 30), "The loader's words must show")
             sleep(2)

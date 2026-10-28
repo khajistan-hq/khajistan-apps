@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// Email and password, for Khajistan Transmission. `onSignedIn` runs after the session is stored
-/// and before the screen closes. Menu goes back without signing in.
+/// Signing in: first with a phone (PhoneSignInPanel: a QR and a code, approved on the phone), and
+/// email and password one press away. `onSignedIn` runs after the session is stored and before the
+/// screen closes. Menu goes back without signing in.
 struct SignInView: View {
     let onSignedIn: () async -> Void
 
@@ -13,10 +14,37 @@ struct SignInView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var errorLine: String?
+    @State private var withPassword = false
+    /// Said over the password form when phone sign-in could not start.
+    @State private var phoneNote: String?
 
     var body: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
+            if withPassword {
+                passwordForm
+            } else {
+                PhoneSignInPanel(signedIn: {
+                    await onSignedIn()
+                    dismiss()
+                }, usePassword: { unavailable in
+                    phoneNote = unavailable ? "Signing in with a phone is not available right now." : nil
+                    withPassword = true
+                })
+                .padding(KJLayout.inset)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        }
+        .foregroundStyle(palette.ink)
+        .onChange(of: errorLine) { _, line in
+            if let line { UIAccessibility.post(notification: .announcement, argument: line) }
+        }
+        .onExitCommand { dismiss() }
+        // The colour scheme steers what tvOS draws itself: the keyboard this screen brings up.
+        .preferredColorScheme(model.skin == .day ? .light : .dark)
+    }
+
+    private var passwordForm: some View {
             VStack(alignment: .leading, spacing: 32) {
                 Text("Khajistan account")
                     .kjDisplay(KJType.headline, tracking: -0.055)
@@ -50,18 +78,18 @@ struct SignInView: View {
                 if let line = errorLine {
                     Text(line).kjBody()
                 }
+                if let phoneNote {
+                    Text(phoneNote).kjSmall(faint: true).accessibilityIdentifier("tvSignInPhoneNote")
+                } else {
+                    Button(kicker: "Sign in with your phone instead") { withPassword = false }
+                        .buttonStyle(HouseButtonStyle())
+                        .padding(.leading, -26)
+                        .accessibilityIdentifier("tvSignInUsePhone")
+                }
             }
             .kjBody()
             .padding(KJLayout.inset)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .foregroundStyle(palette.ink)
-        .onChange(of: errorLine) { _, line in
-            if let line { UIAccessibility.post(notification: .announcement, argument: line) }
-        }
-        .onExitCommand { dismiss() }
-        // The colour scheme steers what tvOS draws itself: the keyboard this screen brings up.
-        .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 
     private func submit() async {
@@ -96,6 +124,8 @@ struct SignInView: View {
 struct HouseInputField<Entry: View>: View {
     let label: String
     private let shown: String
+    /// Said in faint type while the field is empty: what to type.
+    private let hint: String?
     private let entry: Entry
     @Environment(\.palette) private var palette
     @FocusState private var isFocused: Bool
@@ -103,8 +133,9 @@ struct HouseInputField<Entry: View>: View {
     /// `entry` is the TextField or SecureField itself, with its own title left empty: the kicker is
     /// the label, and a title would print as a second one inside the field. `text` is what it
     /// holds, drawn by this view; `secure` draws it as bullets.
-    init(_ label: String, text: String, secure: Bool = false, @ViewBuilder entry: () -> Entry) {
+    init(_ label: String, text: String, secure: Bool = false, hint: String? = nil, @ViewBuilder entry: () -> Entry) {
         self.label = label
+        self.hint = text.isEmpty ? hint : nil
         self.shown = secure ? String(repeating: "\u{2022}", count: text.count) : text
         self.entry = entry()
     }
@@ -127,9 +158,10 @@ struct HouseInputField<Entry: View>: View {
                 .accessibilityLabel(label)
                 .overlay(alignment: .leading) {
                     // Opaque, in the colour under it, so what is left of the pill does not show.
-                    Text(shown)
+                    Text(hint ?? shown)
                         .kjBody()
-                        .foregroundStyle(ink)
+                        // The hint is the skin's faint tone, or the focus plate's.
+                        .foregroundStyle(hint == nil ? ink : (isFocused ? palette.onFocus.opacity(0.85) : palette.faint))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .background(isFocused ? palette.focusPlate : palette.ground)

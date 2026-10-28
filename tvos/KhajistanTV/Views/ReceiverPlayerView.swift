@@ -27,6 +27,7 @@ struct ReceiverPlayerView: View {
     @State private var overlayVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
+    @State private var tuneIntent = ReceiverTuneIntent()
     @State private var changeTask: Task<Void, Never>?
     /// The Captions control takes focus only when the viewer moves right to it, so the focus engine
     /// never lands on it from an up or down press, which change channel.
@@ -34,7 +35,11 @@ struct ReceiverPlayerView: View {
     /// lets go, Select works it. Focus never leaves the surface (see below).
     @State private var armed: Chip?
     @State private var likeNote: String?
-    private enum Chip { case captions, like }
+    /// The guide, open over the left of the picture: the row the remote has lit, as an index in
+    /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
+    /// controls, it is lit by the remote and never takes focus.
+    @State private var guideRow: Int?
+    private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -67,10 +72,7 @@ struct ReceiverPlayerView: View {
             // front of the channel's name. The band says live radio; the centre carries the name.
             DancerLayer(controller: controller) {
                 if current.mediaType == "radio" && controller.state == .playing {
-                    Text(current.name)
-                        .kjDisplay()
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, KJLayout.inset)
+                    RadioNowPlaying(channel: current)
                 }
             }
             // The focus target. It draws nothing; its job is to hold focus so the remote's
@@ -79,9 +81,14 @@ struct ReceiverPlayerView: View {
             // focus onto a control as it appears did not take on a real Apple TV, so Select fell
             // through to here and captions could not be turned on (owner, 2026-10-06).
             Button {
+                if let guideRow {
+                    pick(list[guideRow])
+                    return
+                }
                 switch armed {
                 case .captions: model.captions.toggle()
                 case .like: like()
+                case .guide: openGuide()
                 case nil: wake()
                 }
             } label: {
@@ -89,6 +96,7 @@ struct ReceiverPlayerView: View {
             }
             .buttonStyle(SurfaceButtonStyle())
             .focused($focus, equals: .surface)
+            .defaultFocus($focus, .surface)
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
@@ -97,7 +105,12 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: "Previous channel") { step(by: -1) }
             .accessibilityAction(named: model.captions.isOn ? "Captions off" : "Captions on") { model.captions.toggle() }
             .accessibilityAction(named: "Like") { like() }
+            .accessibilityAction(named: "Guide") { openGuide() }
             overlay(palette)
+            if let guideRow {
+                ReceiverGuide(list: list, current: current, lit: guideRow)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
         }
@@ -105,6 +118,15 @@ struct ReceiverPlayerView: View {
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
+            if let row = guideRow {
+                switch direction {
+                case .up: guideRow = (row - 1 + list.count) % list.count
+                case .down: guideRow = (row + 1) % list.count
+                case .left: closeGuide()
+                default: break
+                }
+                return
+            }
             switch direction {
             case .up: armed = nil; step(by: -1)
             case .down: armed = nil; step(by: 1)
@@ -114,18 +136,20 @@ struct ReceiverPlayerView: View {
             }
         }
         .onPlayPauseCommand {
-            wake()
-            // During a change the channel coming in is the one that matters; retuning the one
-            // going out would cancel it and leave the new channel on "Connecting" for good.
-            guard destination == nil else { return }
-            if controller.state == .playing {
-                controller.pause()
-            } else {
-                tune(current)
+            switch controller.state {
+            case .playing, .tuning:
+                pauseReceiver()
+            case .idle, .paused, .failed:
+                if destination != nil { pauseReceiver() } else { tune(current) }
             }
+            wake()
         }
         .onExitCommand {
-            // Back lets go of an armed Captions or Like control first, as it leaves any control.
+            // Back closes the guide, then lets go of an armed control, as it leaves any control.
+            if guideRow != nil {
+                closeGuide()
+                return
+            }
             if armed != nil {
                 armed = nil
                 wake()
@@ -167,7 +191,7 @@ struct ReceiverPlayerView: View {
                 detail: stripDetail,
                 attribution: shown.sourceLine,
                 trailing: stripTrailing,
-                accessory: controller.state.isFailed ? nil : AnyView(stripControls)
+                accessory: AnyView(stripControls)
             )
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
@@ -217,10 +241,11 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
+            .accessibilityAction { model.captions.toggle() }
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
             .accessibilityValue(model.captions.isOn ? "On" : "Off")
@@ -228,18 +253,57 @@ struct ReceiverPlayerView: View {
 
     private var stripControls: some View {
         HStack(spacing: 14) {
-            if model.captions.offered { captionsControl }
+            captionsControl
             likeControl
+            if list.count > 1 { guideControl }
         }
+    }
+
+    /// The guide, as a live TV app offers one: every channel of the shelf the viewer came from,
+    /// LIVE on the one playing, one press to another.
+    private var guideControl: some View {
+        StripChipStyle.face(Text("Guide"), isOn: guideRow != nil, selected: armed == .guide)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Guide")
+            .accessibilityIdentifier("guideControl")
+            .accessibilityAction { openGuide() }
+            .accessibilityAddTraits(armed == .guide ? .isSelected : [])
+    }
+
+    private func openGuide() {
+        guard list.count > 1 else { return }
+        hideTask?.cancel()
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+            guideRow = list.firstIndex { $0.id == (destination ?? current).id } ?? 0
+        }
+    }
+
+    /// Closing lets go of the Guide control too: the viewer has left it, and an armed control
+    /// keeps the strip up and takes the next Menu.
+    private func closeGuide() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        armed = nil
+        wake()
+    }
+
+    /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
+    private func pick(_ target: Channel) {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        armed = nil
+        guard target.id != (destination ?? current).id else { return wake() }
+        destination = target
+        changeTask?.cancel()
+        changeTask = Task { await change(to: target) }
     }
 
     /// Like: saved on the account, so it is on the dashboard and every device signed in to it.
     private var likeControl: some View {
         let liked = model.saves.isSaved(current)
-        return StripChipStyle.face(Text((model.captions.offered ? "" : rightCue) + (liked ? "Liked" : "Like")), isOn: liked, selected: armed == .like)
+        return StripChipStyle.face(Text(liked ? "Liked" : "Like"), isOn: liked, selected: armed == .like)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(liked ? "Liked" : "Like")
             .accessibilityIdentifier("likeControl")
+            .accessibilityAction { like() }
             .accessibilityAddTraits(armed == .like ? .isSelected : [])
             .accessibilityValue(liked ? "On" : "Off")
     }
@@ -250,18 +314,20 @@ struct ReceiverPlayerView: View {
 
     private func moveRight() {
         // A failed channel's strip carries no controls, so there is nothing to the right.
-        guard stripShown, !controller.state.isFailed else { return }
+        guard stripShown else { return }
         hideTask?.cancel()
         switch armed {
-        case nil: armed = model.captions.offered ? .captions : .like
+        case nil: armed = .captions
         case .captions: armed = .like
-        case .like: break
+        case .like: if list.count > 1 { armed = .guide }
+        case .guide: break
         }
     }
 
     private func moveLeft() {
         switch armed {
-        case .like: armed = model.captions.offered ? .captions : nil
+        case .guide: armed = .like
+        case .like: armed = .captions
         case .captions: armed = nil
         case nil: return
         }
@@ -324,6 +390,7 @@ struct ReceiverPlayerView: View {
     /// on from is cancelled and says nothing.
     private func tune(_ target: Channel, behind: Bool = false) {
         tuneTask?.cancel()
+        let ticket = tuneIntent.begin()
         let player = behind ? incoming : controller
         player.stop()
         player.holdsSound = behind
@@ -334,6 +401,7 @@ struct ReceiverPlayerView: View {
             do {
                 let url = try await model.receiver.resolve(target)
                 try Task.checkCancellation()
+                guard tuneIntent.admits(ticket) else { return }
                 player.attach(
                     url: url,
                     seekTo: nil,
@@ -347,7 +415,7 @@ struct ReceiverPlayerView: View {
                 )
                 if !behind { model.captions.attach(target, player: player) }
             } catch {
-                if Task.isCancelled { return }
+                if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
                 player.state = .failed(PlayerController.unreachable)
             }
@@ -448,8 +516,28 @@ struct ReceiverPlayerView: View {
         UIAccessibility.post(notification: .announcement, argument: target.name)
     }
 
+    /// Pause cancels a pending resolver/change immediately; no late attach can resume it.
+    /// Captions release their lease and resume only after another explicit CC press.
+    private func pauseReceiver() {
+        tuneIntent.cancel()
+        tuneTask?.cancel()
+        changeTask?.cancel()
+        destination = nil
+        incoming.stop()
+        if controller.state == .tuning {
+            controller.cancelPendingPlayback()
+        } else {
+            controller.pause()
+        }
+        model.captions.detach()
+        model.clips.clear()
+        model.pigeon.clear()
+    }
+
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
     private func stopEverything() {
+        guideRow = nil
+        tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()
         hideTask?.cancel()
@@ -469,8 +557,8 @@ struct ReceiverPlayerView: View {
         guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
-            // The strip stays while the viewer is on its Captions control.
-            if !Task.isCancelled, armed == nil {
+            // The strip stays while the viewer is on its Captions control or in the guide.
+            if !Task.isCancelled, armed == nil, guideRow == nil {
                 overlayVisible = false
             }
         }

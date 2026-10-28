@@ -4,11 +4,20 @@ import Foundation
 /// literal the site ships in scripts/kj-chrome.js (payload role "anon"), so it grants a
 /// signed-out visitor nothing a browser does not already have. No other key belongs here.
 enum KJConfig {
+    /// Where sign-in lives, as this app's bar names it. Shared messages name it through this;
+    /// the phone app's own Config says Library.
+    static let signInDoor = "Account"
+
     static let site = URL(string: "https://khajistan-archive.pages.dev")!
-    static let supabase = URL(string: "https://qojysegeddztsxdmhjfb.supabase.co")!
+    /// The database, directly or by the site's /sb/ proxy where its host cannot be reached (SupabaseRoute).
+    static var supabase: URL { SupabaseRoute.base }
     static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvanlzZWdlZGR6dHN4ZG1oamZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE2Nzc1MjM5MjQsImV4cCI6MTk5MzA5OTkyNH0.iz8hhr1TYYLWk9HyI0b_yxqlzGJgyuXKsBO_2_kuQ94"
     static let streamHost = "customer-0svgnorro16tedsf.cloudflarestream.com"
     static let userAgent = "KhajistanTV/1.0 (tvOS)"
+    /// The shop's Storefront API (scripts kj-storefront-config.js): the permanent Shopify host and
+    /// its public, read-and-cart-only Storefront token, which the website ships to every visitor.
+    static let storefrontDomain = "khajistan.myshopify.com"
+    static let storefrontToken = "6067a42799481881942ce2cf6dd32635"
     static let previewUser = "khajistan"
     static let keychainService = "com.khajistan.tv"
 }

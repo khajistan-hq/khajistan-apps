@@ -65,7 +65,7 @@ final class ChannelChangeUITests: XCTestCase {
     private let app = XCUIApplication()
 
     private func openChannel() {
-        app.launch()
+        kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch

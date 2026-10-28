@@ -98,22 +98,39 @@ final class ReadingStore {
         loading = nil
     }
 
+    /// `-kjclock YES` prints how long each step of opening the room took, from the first call.
+    @ObservationIgnored private let clockStart = ContinuousClock.now
+    @ObservationIgnored private var firstCoverTimed = false
+    private func clock(_ step: String) {
+        guard UserDefaults.standard.bool(forKey: "kjclock") else { return }
+        print("RRCLOCK \(step) \(ContinuousClock.now - clockStart)")
+    }
+
     private func load() async {
+        clock("start")
         async let feed = loadFeed()
         async let rightsHeld = loadRights()
         async let index = loadModules()
         async let ranks = loadProvenance()
-        guard let collections = await feed, !collections.isEmpty else {
+        let fetched = await feed
+        clock("feed")
+        guard let collections = fetched, !collections.isEmpty else {
             phase = .failed("The Reading Room did not answer.")
             return
         }
         // Rights first and awaited, as the site does: the room's figures must not count what the reader cannot open.
         rights = await rightsHeld
+        clock("rights")
         let built = RRCatalogue.titles(from: collections)
+        clock("titles built")
         titles = built
         // Ranked before the first paint, so a shelf never reorders under the viewer.
         provenance = await ranks
-        var shelf = RRRank.ranked(RRShelves.tabs(titles: built, index: await index, rights: rights), provenance: provenance)
+        clock("provenance")
+        let modules = await index
+        clock("modules")
+        var shelf = RRRank.ranked(RRShelves.tabs(titles: built, index: modules, rights: rights), provenance: provenance)
+        clock("shelf ranked")
         #if DEBUG
         // UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
         // row, past where a remote walking down the shelf can see it, so the test brings it forward.
@@ -127,6 +144,7 @@ final class ReadingStore {
         #endif
         tabs = shelf
         phase = .ready
+        clock("ready")
     }
 
     func retry() async {
@@ -282,6 +300,7 @@ final class ReadingStore {
             Task {
                 state.image = await PnvImages.shared.image([url], maxPixel: 720)
                 if state.image == nil { state.failed = true }
+                if !firstCoverTimed, state.image != nil { firstCoverTimed = true; clock("first cover") }
             }
         }
         if !unresolved.isEmpty { await probeLater(unresolved) }
@@ -307,6 +326,8 @@ final class ReadingStore {
     }
 
     private func signBatch(_ paths: [String], token: String?) async -> [String: RRPageAnswer]? {
+        clock("sign batch \(paths.count) asked")
+        defer { clock("sign batch \(paths.count) answered") }
         guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: paths, size: "sm", accessToken: token)),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return RRPageAnswer.parseBatch(data)

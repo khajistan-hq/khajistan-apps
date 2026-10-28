@@ -129,14 +129,6 @@ per app through `KJConfig.signInDoor` ("Account" on TV, "Library" on the phone).
 
 ## Known gaps and blockers
 
-- **The owner's home network blocks the database host** (2026-10-27; DECISIONS 21). The apps fall
-  back to the site's `/sb/` proxy, which is committed in the archive repo but **not deployed**: it
-  goes live only with `scripts/deploy.sh --yes` (owner's approval; the archive checkout's `main` is
-  101 ahead / 99 behind its remote, so reconcile first). Until then the TV says the archive cannot be
-  reached, in under 3 s. The website itself calls the host directly and is equally stuck on that
-  network; pointing its pages at `/sb/` is a site change for the Front lane. Live captions and other
-  realtime features are not proxied.
-
 - **Closed 2026-10-27, no migration — Pics/Vids collections**: the table's per-column grants
   (INSERT user_id, name, media_keys; UPDATE name, media_keys) already let an account create and fill
   one; the Backend board note (machinery `04391297`, `COORDINATION.md`) read only table-level grants

@@ -27,8 +27,6 @@ Pushed as draft PR 8; nothing uploaded. Update this file at the end of every sta
 | TV index search (2026-10-28) | complete | every TV database table has a search bar (owner: "the indexes should have a search bar for people to search metadata and name of song"); the phone already had one. `testIndexSearchFindsASongByTitleAndArtist` passes in three skins |
 | Sign in on the TV from a phone | live 2026-10-27 (table, function, /activate); first real approval is the owner's | TV QR + code + polling, iPhone Sign in on a TV (scan or type), `/activate` page, `tv-sign-in` function and migration on `apps/tv-sign-in` branches; Fable security pass, six fixes made; QR decoded from the screenshots in all three skins |
 
-| Apple TV load speed (2026-10-27) | built; proxy NOT YET DEPLOYED | Cause measured on the owner's TV: the home network drops connections to the project host. Website `/sb/` proxy (archive repo, local commit, needs the owner's deploy); apps route through it as a fallback and fail fast. Simulator, direct blocked + local stand-in proxy: Reading Room shelf ready 1.24 s, first cover 2.35 s; Pics/Vids opens; both blocked: message at 2.6 s. Owner's TV before: 45.7 s then failure; now: message at 2.8 s (proxy not live yet) |
-
 ## Resume here
 
 Read `HANDOFF.md` first, then this file, `DECISIONS.md` and `git log --oneline -20`; rebuild with

@@ -14,7 +14,7 @@ Release, store and compliance work is a separate set: `docs/handoffs/2026-10-13-
 | Pull request | draft PR 8 against `main`; Auto-fix is on for it |
 | Worktree | `/Users/home/CZURImages/khajistan-apps-native-rooms` |
 | Base | `origin/main` 513b617 with PR 1 (the Mac app) merged in |
-| Released | **nothing**: no TestFlight, no App Store, no website deploy. Uploads are the owner's alone |
+| Released | **TestFlight build 1.0 (2)** for iOS, Mac and tvOS from `bc8cc38`, internal testing only (owner: "i am ready do whatever you need to get t uplaoding testfllight and deployinge veyrthing", 2026-10-28); no App Store submission. Website: `/activate` and `/sb/` live. Receipts: `filmart/reports/app-distribution-20261028/` |
 
 The website and the machinery live in the separate private repo `/Users/home/CZURImages/filmart`
 (the site checkout is `filmart/archive`). Native-app work never edits the site.

@@ -96,6 +96,8 @@ struct SignInView: View {
 struct HouseInputField<Entry: View>: View {
     let label: String
     private let shown: String
+    /// Said in faint type while the field is empty: what to type.
+    private let hint: String?
     private let entry: Entry
     @Environment(\.palette) private var palette
     @FocusState private var isFocused: Bool
@@ -103,8 +105,9 @@ struct HouseInputField<Entry: View>: View {
     /// `entry` is the TextField or SecureField itself, with its own title left empty: the kicker is
     /// the label, and a title would print as a second one inside the field. `text` is what it
     /// holds, drawn by this view; `secure` draws it as bullets.
-    init(_ label: String, text: String, secure: Bool = false, @ViewBuilder entry: () -> Entry) {
+    init(_ label: String, text: String, secure: Bool = false, hint: String? = nil, @ViewBuilder entry: () -> Entry) {
         self.label = label
+        self.hint = text.isEmpty ? hint : nil
         self.shown = secure ? String(repeating: "\u{2022}", count: text.count) : text
         self.entry = entry()
     }
@@ -127,9 +130,10 @@ struct HouseInputField<Entry: View>: View {
                 .accessibilityLabel(label)
                 .overlay(alignment: .leading) {
                     // Opaque, in the colour under it, so what is left of the pill does not show.
-                    Text(shown)
+                    Text(hint ?? shown)
                         .kjBody()
-                        .foregroundStyle(ink)
+                        // The hint is the skin's faint tone, or the focus plate's.
+                        .foregroundStyle(hint == nil ? ink : (isFocused ? palette.onFocus.opacity(0.85) : palette.faint))
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .background(isFocused ? palette.focusPlate : palette.ground)

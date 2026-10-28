@@ -206,7 +206,10 @@ each laid out after the app chosen for it on the phone (DECISIONS 17), adapted t
   carry the entry's short description and its picture beside it; writing cards are the lead
   picture on a plate, the date, the title and the summary. A piece reads whole, block by block,
   and ends *Continue on your phone, or on the website: …*.
-- **Databases** (Notion): the systems as a grid of text cards; a system is a table under its
+- **Databases** (Notion): the systems as a grid of text cards; a system is a table under a
+  search bar (owner, 2026-10-28: the indexes should search song names and metadata; the house text
+  field, hint *Song, artist, album, label, year* on the music indexes; every word must be in the
+  title or a property, as on the phone; applied once typing pauses for 0.3 s) and its
   facet tabs, hairlines between rows, the title and the first two properties in columns; a record
   is a property page, label column beside value, each row a focus stop.
 

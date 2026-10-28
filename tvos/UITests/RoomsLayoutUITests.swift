@@ -19,6 +19,40 @@ final class RoomsLayoutUITests: XCTestCase {
     func testGrove() throws { try walk("grove") }
     func testSmut() throws { try walk("smut") }
 
+    /// The music indexes are searched as the phone searches them: every word typed must be in the
+    /// song's name or its metadata. Two words of a title and one of the singer's find the song.
+    func testIndexSearchFindsASongByTitleAndArtist() throws {
+        guard let site = ProcessInfo.processInfo.environment["KJ_SITE"], !site.isEmpty else {
+            throw XCTSkip("the indexes are behind the site password; set TEST_RUNNER_KJ_SITE to a local server of the archive tree")
+        }
+        for skin in ["day", "grove", "smut"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjtab", "rooms", "-kjroom", "databases", "-kjskin", skin, "-kjsite", site]
+            kjLaunch(app)
+            let index = app.buttons["tvdb-pakistanMusic"]
+            XCTAssertTrue(index.waitForExistence(timeout: 15), "the systems are listed")
+            XCTAssertTrue(kjFocus(index, app: app), "the remote reaches the Pakistan Music Index")
+            XCUIRemote.shared.press(.select)
+            let count = app.staticTexts["tvdbCount"]
+            XCTAssertTrue(count.waitForExistence(timeout: 60), "the index loads")
+            let total = count.label
+            let field = app.textFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "the index has a search bar")
+            XCTAssertTrue(kjFocus(field, app: app), "the remote reaches the search bar")
+            XCUIRemote.shared.press(.select)
+            kjPause(1.5)
+            app.typeText("dayem pada ghulam")
+            kjPause(1)
+            XCUIRemote.shared.press(.menu)
+            let song = app.buttons["tvrecord-KMI-03410"]
+            XCTAssertTrue(song.waitForExistence(timeout: 10), "Ghulam Ali's Dayem Pada Huwa is found")
+            XCTAssertNotEqual(count.label, total, "the table narrows: \(count.label)")
+            kjPause(2)
+            kjScreenshot("\(skin)-11-index-search", app: app)
+            app.terminate()
+        }
+    }
+
     private func walk(_ skin: String) throws {
         guard let site = ProcessInfo.processInfo.environment["KJ_SITE"], !site.isEmpty else {
             throw XCTSkip("the rooms' files are behind the site password; set TEST_RUNNER_KJ_SITE to a local server of the archive tree")

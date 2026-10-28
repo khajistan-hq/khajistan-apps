@@ -23,6 +23,15 @@ TV app also take `-kjroom <screening|bazaar|madrassa|databases>`.
 in the machinery repo). Most room data is behind the site password until launch; without `KJ_SITE` the
 tests check the locked note instead.
 
+## Last measured (2026-10-28, TV index search)
+
+| Suite | Result |
+|---|---|
+| Apple TV `RoomsLayoutUITests/testIndexSearchFindsASongByTitleAndArtist` (local site) | 3 skins pass: "dayem pada ghulam" narrows 19,363 records to Ghulam Ali's Dayem Pada Huwa |
+| Apple TV Rooms remote test, `RoomsLayoutUITests/testDay` | passed (focus now opens on the search bar) |
+| TV core | 150 passed, 2 skipped |
+| tvOS `KJ_APP_STORE` build | builds |
+
 ## Last measured (2026-10-28, the gaps closed)
 
 TV Reading Room title page and Continue; Persian-handle film saves; Pics/Vids collections.

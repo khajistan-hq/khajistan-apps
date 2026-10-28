@@ -237,14 +237,33 @@ private struct TVDatabases: View {
     }
 }
 
-/// A database on the TV: its first facet as tabs, then the records as a table, hairlines between
-/// rows, the title and two properties in columns. Select opens the record.
+/// A database on the TV: a search bar, its first facet as tabs, then the records as a table,
+/// hairlines between rows, the title and two properties in columns. Select opens the record. The
+/// search reads what the phone's does: every word must be in the title, the title in its own
+/// script, or any property (artist, album, label, year…), accents and case aside.
 private struct TVDatabaseScreen: View {
     let db: ArchiveDatabase
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var facet: String?
     @State private var record: DBRecord?
+    /// What is typed; the table follows once typing pauses, searched off the main actor, so the
+    /// largest index (45,568 records) is neither searched nor counted again on every key.
+    @State private var query = ""
+    @State private var shown: Shown?
+    /// The first facet's values, counted once per load rather than on every draw.
+    @State private var facetValues: [(value: String, count: Int)] = []
+
+    private struct Shown {
+        let query: String
+        let records: [DBRecord]
+    }
+
+    private struct Ask: Equatable {
+        let query: String
+        let facet: String?
+        let loaded: Int
+    }
 
     private static let shown = 300
     private static let titleWidth: CGFloat = 760
@@ -263,13 +282,30 @@ private struct TVDatabaseScreen: View {
         }
         .foregroundStyle(palette.ink)
         .task(id: model.auth.previewPassword) { await model.database(db).load() }
+        .task(id: model.database(db).value?.count ?? 0) {
+            guard let records = model.database(db).value else { return }
+            let name = db.facetNames.first ?? ""
+            facetValues = Array(await Task.detached { DBQuery.values(name, in: records) }.value.prefix(8))
+        }
+        .task(id: Ask(query: query, facet: facet, loaded: model.database(db).value?.count ?? 0)) {
+            guard let records = model.database(db).value else { return }
+            let typed = query, name = db.facetNames.first ?? "", chosen = facet.map { [name: $0] } ?? [:]
+            if shown != nil && !typed.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
+            guard !Task.isCancelled else { return }
+            let found = await Task.detached { DBQuery.filter(records, text: typed, facets: chosen) }.value
+            if !Task.isCancelled { shown = Shown(query: typed, records: found) }
+        }
         .fullScreenCover(item: $record) { item in TVRecordScreen(db: db, record: item) }
     }
 
     @ViewBuilder
     private func table(_ records: [DBRecord]) -> some View {
-        let name = db.facetNames.first ?? ""
-        let values = DBQuery.values(name, in: records).prefix(8)
+        HouseInputField("Search", text: query, hint: db.isMetadataOnly ? "Song, artist, album, label, year" : "Title, name, place, year") {
+            TextField("", text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        let values = facetValues
         if values.count > 1 {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -279,9 +315,16 @@ private struct TVDatabaseScreen: View {
             }
             .focusSection()
         }
-        let found = DBQuery.filter(records, text: "", facets: facet.map { [name: $0] } ?? [:])
-        Text("\(found.count.formatted()) of \(records.count.formatted()) records" + (found.count > Self.shown ? " \u{00B7} the first \(Self.shown) here" : ""))
-            .kjSmall(faint: true)
+        let found = shown?.records ?? []
+        // Said once the first answer is in, so it never reads "0 of" while the table is being found.
+        if shown != nil {
+            Text("\(found.count.formatted()) of \(records.count.formatted()) records" + (found.count > Self.shown ? " \u{00B7} the first \(Self.shown) here" : ""))
+                .kjSmall(faint: true)
+                .accessibilityIdentifier("tvdbCount")
+        }
+        if let applied = shown?.query, found.isEmpty, !applied.isEmpty {
+            Text("No record\(facet.map { " under \($0)" } ?? "") has every word of \u{201C}\(applied)\u{201D}.").kjBody()
+        }
         // The table's columns are the first record's first two properties.
         let columns = Array((records.first?.fields ?? []).prefix(2).map(\.label))
         HStack(spacing: 24) {

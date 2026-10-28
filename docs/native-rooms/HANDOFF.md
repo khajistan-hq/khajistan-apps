@@ -199,6 +199,12 @@ Deployed on the owner's "deploy them safely", each step verified:
 | Page `/activate` | archive `main` `dbeb659ec`, deployed by CI (Deploy to Cloudflare Pages, run 40626477415) | 200 signed out, `/activate.html` forwards; `/tv` still the Receiver redirect; dashboard, Reading Room, vod.json still 401; site suite 782 OK; smoke 52/0 against the deployed commit |
 
 Recorded in the machinery repo on `trunk` (`7f91cd89`: migrations as applied, the function as deployed).
+**Side door, 2026-10-28** (owner: "use the side door, my apple tv is not showing qr code"): the site's
+`/sb/` proxy is live (archive `main` `b96a2b2f3`, the speed session's `a88eee3f7`), and `/activate` asks the
+project host for 2.5 s then uses `/sb/` (`d98cb687c`). The owner's Apple TV was reinstalled from the shared
+folder as it stood (with the speed session's then-uncommitted routing). Limit: behind `/sb/` every client
+reaches the project from Cloudflare's worker IPs, so per-IP rate limits and `same_network` see the worker,
+not the person; fine for one household, needs a signed client-IP header before launch.
 **Not yet done end to end:** approving a code needs a signed-in account; the owner's first real sign-in
 is the last check. The Apple TV installed earlier carries an older build without this screen.
 

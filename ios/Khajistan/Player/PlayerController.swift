@@ -69,6 +69,8 @@ final class PlayerController {
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
     /// card says; a recording (a mix, a clip) passes false.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true) {
+        // A stored programme or clip on the database's storage plays by the route that answers.
+        let url = SupabaseRoute.routed(url)
         generation += 1
         let gen = generation
         wantsPlayback = true

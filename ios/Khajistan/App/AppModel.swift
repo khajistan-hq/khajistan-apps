@@ -162,6 +162,8 @@ final class AppModel {
         browser.warm()
         watchTheSky()
         watchTheStorefront(forced: defaults.string(forKey: "kjstorefront"))
+        // Which way the database answers, decided while the first screen draws.
+        Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }
 
     // MARK: - Storefront

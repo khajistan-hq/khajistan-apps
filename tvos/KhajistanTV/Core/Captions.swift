@@ -217,8 +217,8 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
 }
 
 enum CaptionRules {
-    static let demandURL = KJConfig.supabase.appendingPathComponent("functions/v1/request-captions")
-    static let translateURL = KJConfig.supabase.appendingPathComponent("functions/v1/translate-caption")
+    static var demandURL: URL { KJConfig.supabase.appendingPathComponent("functions/v1/request-captions") }
+    static var translateURL: URL { KJConfig.supabase.appendingPathComponent("functions/v1/translate-caption") }
     static let accuracyPath = "/data/open-frequencies/caption-accuracy.json"
     static let modeKey = "kj-caption-mode"
     static let viewerKey = "kj-viewer-id"

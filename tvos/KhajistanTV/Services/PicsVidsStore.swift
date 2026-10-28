@@ -78,6 +78,11 @@ final class PicsVidsStore {
         case .idle, .failed: break
         }
         phase = .loading
+        // Which way the database answers; neither is said at once, not after two timeouts.
+        guard await SupabaseRoute.ready() != .unreachable else {
+            phase = .failed(SupabaseRoute.unreachableText)
+            return
+        }
         do {
             roster = try await fetch([PnvAccount].self, PnvAPI.accountsRequest())
         } catch {
@@ -90,7 +95,7 @@ final class PicsVidsStore {
                 roster = try await fetch([PnvAccount].self, PnvAPI.accountsRequest())
             } catch {
                 if Task.isCancelled { phase = .idle; return }
-                phase = .failed("The archive did not answer.")
+                phase = .failed(SupabaseRoute.path == .unreachable ? SupabaseRoute.unreachableText : "The archive did not answer.")
                 return
             }
         }
@@ -195,7 +200,7 @@ final class PicsVidsStore {
 
     func caption(for row: PnvRow) async -> String? {
         guard let request = PnvAPI.captionRequest(for: row),
-              let (data, _) = try? await urlSession.data(for: request) else { return nil }
+              let (data, _) = try? await SupabaseRoute.data(for: request, session: urlSession) else { return nil }
         return PnvAPI.caption(from: data)
     }
 
@@ -215,7 +220,7 @@ final class PicsVidsStore {
         guard let route = Transmission.route(for: full.absoluteString),
               let request = Transmission.request(for: route, accessToken: token) else { throw PnvPlaybackError.unavailable }
         // A signer that redirects is refused, as the website's fetch does.
-        let (data, response) = try await urlSession.data(for: request, delegate: RefuseRedirects())
+        let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession, delegate: RefuseRedirects())
         if (response as? HTTPURLResponse)?.statusCode == 401 { throw PnvPlaybackError.needsSignIn }
         guard let url = try? Transmission.carrier(from: data, route: route) else { throw PnvPlaybackError.unavailable }
         // An answer is used only if the same viewer is still signed in when it arrives.
@@ -238,7 +243,7 @@ final class PicsVidsStore {
         guard let token = try? await auth.validAccessToken(), let userId = auth.session?.userId,
               var request = PnvAPI.profileRequest(userId: userId, accessToken: token) else { return false }
         request.timeoutInterval = 6
-        guard let (data, _) = try? await urlSession.data(for: request),
+        guard let (data, _) = try? await SupabaseRoute.data(for: request, session: urlSession),
               let rows = try? JSONDecoder().decode([ProfileRow].self, from: data) else { return false }
         return rows.first?.nsfw_age_confirmed == true
     }
@@ -262,7 +267,7 @@ final class PicsVidsStore {
         while true {
             var status: Int?
             do {
-                let (data, response) = try await urlSession.data(for: request)
+                let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession)
                 let http = response as? HTTPURLResponse
                 if let code = http?.statusCode, (200..<300).contains(code) { return (data, http) }
                 status = http?.statusCode ?? 0
@@ -282,7 +287,7 @@ final class PicsVidsStore {
     }
 
     private func fetch<T: Decodable & Sendable>(_ type: T.Type, _ request: URLRequest) async throws -> T {
-        let (data, response) = try await urlSession.data(for: request)
+        let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else { throw ReceiverStoreError.http(code) }
         return try await Task.detached(priority: .userInitiated) { try JSONDecoder().decode(T.self, from: data) }.value

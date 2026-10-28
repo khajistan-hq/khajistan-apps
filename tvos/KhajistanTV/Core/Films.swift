@@ -56,7 +56,7 @@ enum Films {
     static let cataloguePath = "/data/khajistan-tv/vod.json"
     /// The same Cloudflare Stream customer host the site's STREAM_BASE names.
     static let streamBase = "https://\(KJConfig.streamHost)"
-    static let tokenFunction = KJConfig.supabase.appendingPathComponent("functions/v1/vod-token")
+    static var tokenFunction: URL { KJConfig.supabase.appendingPathComponent("functions/v1/vod-token") }
     static let attribution = "A film Khajistan owns and distributes."
 
     static func catalogueURL(origin: URL) -> URL {

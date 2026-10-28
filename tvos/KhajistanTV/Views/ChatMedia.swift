@@ -147,7 +147,7 @@ actor ChatMediaCache {
     func gif(_ url: URL, maxPixel: Int) async -> Gif? {
         let key = "\(url.absoluteString)#\(maxPixel)" as NSString
         if let box = gifs.object(forKey: key) { return box.gif }
-        guard let (data, response) = try? await session.data(from: url),
+        guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
               (response as? HTTPURLResponse)?.statusCode == 200, data.count <= Self.maxBytes
         else { return nil }
         // Decoded off the actor, so a row lookup never waits behind a GIF.

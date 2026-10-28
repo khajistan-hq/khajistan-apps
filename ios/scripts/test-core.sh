@@ -16,6 +16,7 @@ SHARED="Core/Auth Core/Mixes Core/PicsVids Core/Programming Core/Receiver Core/R
 Core/StationClock Core/Transmission Core/Chat Core/Sky Services/PicsVidsStore Services/ChatStore
 Player/PlayerLayerView Views/PigeonMark"
 SHARED="$SHARED Views/ChatMedia Core/Shuffle"
+SHARED="$SHARED Core/SupabaseRoute"
 SHARED="$SHARED Core/TVSignIn"
 SHARED="$SHARED Core/ReadingRoom Core/Films Core/PassportSaves Services/ReadingStore Services/FilmStore Services/SavesStore Services/PnvImages Core/Bazaar Core/Madrassa Core/Databases Services/SiteFeed"
 for f in $SHARED; do

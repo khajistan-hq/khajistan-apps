@@ -135,6 +135,8 @@ final class AppModel {
         default: self.section = .receiver
         }
         watchTheSky()
+        // Which way the database answers, decided while the first screen draws.
+        Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

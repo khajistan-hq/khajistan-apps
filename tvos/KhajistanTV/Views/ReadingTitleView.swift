@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// One title: its issues as covers, each the real first page, with the figures the website states for
@@ -55,7 +56,7 @@ struct ReadingTitleView: View {
         }
         .defaultFocus($actionFocused, true)
         .onAppear { store.want(title) }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all
             if now != places { places = now }
         }

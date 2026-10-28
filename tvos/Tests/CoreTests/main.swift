@@ -4191,10 +4191,55 @@ let tests: [(String, () throws -> Void)] = [
     ("Chat: GIF and Pics/Vids lines, and what stays text", chatMediaLines),
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Saves: films in any script, and named collections", passportFilmRefsAndCollections),
+    ("Database route: direct, or the site's /sb/ proxy", supabaseRouteRewrites),
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
+
+// MARK: - Database route
+
+func supabaseRouteRewrites() throws {
+    let signed = URL(string: "https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/sign/rr/a%20b.jpg?token=t.k")!
+    // Direct: every address as it is.
+    try expectEqual(SupabaseRoute.routed(signed, via: .direct), signed)
+    try expectEqual(SupabaseRoute.base(for: .direct).absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co")
+    // Proxy: the project's addresses move under the site's /sb/, path and query kept byte for byte.
+    try expectEqual(SupabaseRoute.routed(signed, via: .proxy).absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/storage/v1/object/sign/rr/a%20b.jpg?token=t.k")
+    try expectEqual(SupabaseRoute.base(for: .proxy).appendingPathComponent("rest/v1/rpc/x").absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/rest/v1/rpc/x")
+    // A path and query joined onto the route keep the proxy's "/sb" (resolving "/rest/…" against it
+    // would start from the site's root), and the query as written.
+    try expectEqual(SupabaseRoute.url("/rest/v1/rpc/reading_room_catalogue?order=collection_slug.asc&limit=1000", via: .proxy)?.absoluteString,
+                    "https://khajistan-archive.pages.dev/sb/rest/v1/rpc/reading_room_catalogue?order=collection_slug.asc&limit=1000")
+    try expectEqual(SupabaseRoute.url("/rest/v1/x?a=eq.1", via: .direct)?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/x?a=eq.1")
+    // A proxy address goes back to the project's own when the route turns direct, and a play_url built
+    // on the proxy is still the project's tv-play, so its token is asked for.
+    let onProxy = URL(string: "https://khajistan-archive.pages.dev/sb/functions/v1/tv-play?id=abc")!
+    try expectEqual(SupabaseRoute.routed(onProxy, via: .direct).absoluteString,
+                    "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=abc")
+    try expectEqual(SupabaseRoute.routed(onProxy, via: .proxy), onProxy)
+    try expectEqual(SupabaseRoute.unrouted(URL(string: "https://khajistan-archive.pages.dev/reading-room.html")!).absoluteString,
+                    "https://khajistan-archive.pages.dev/reading-room.html", "the site's own pages are not the project")
+    if case .tvPlay = Transmission.route(for: onProxy.absoluteString) {} else { throw Failure(description: "a proxied tv-play is still tv-play") }
+    if case .tvPlay = Transmission.route(for: "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-play?id=abc") {} else {
+        throw Failure(description: "a direct tv-play is tv-play")
+    }
+    // Anything not on the project's host is left alone, whatever the route.
+    let elsewhere = URL(string: "https://customer-0svgnorro16tedsf.cloudflarestream.com/x/manifest/video.m3u8")!
+    try expectEqual(SupabaseRoute.routed(elsewhere, via: .proxy), elsewhere)
+    // The probe's verdicts: any answer from the project is the project; the proxy counts only when
+    // it is the proxy answering (before the site is deployed, /sb/ is the site's own 404).
+    try expect(SupabaseRoute.answers(status: 401, routeHeader: nil, viaProxy: false))
+    try expect(!SupabaseRoute.answers(status: 404, routeHeader: nil, viaProxy: true), "the site's 404 is not the proxy")
+    try expect(SupabaseRoute.answers(status: 401, routeHeader: "sb-proxy", viaProxy: true))
+    try expect(!SupabaseRoute.answers(status: 502, routeHeader: "sb-proxy", viaProxy: true), "the proxy could not reach the project either")
+    // Errors that mean "this address cannot be reached", as against an answer that came back.
+    try expect(SupabaseRoute.isUnreachable(URLError(.cannotConnectToHost)))
+    try expect(SupabaseRoute.isUnreachable(URLError(.timedOut)))
+    try expect(!SupabaseRoute.isUnreachable(URLError(.cancelled)))
+}
 
 // MARK: - Saves: films in any script, collections
 

@@ -174,7 +174,7 @@ enum PassportSaves {
     }
 
     private static func request(_ pathAndQuery: String, method: String, token: String, body: Data? = nil) -> URLRequest {
-        var call = URLRequest(url: URL(string: pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL)
+        var call = URLRequest(url: SupabaseRoute.url(pathAndQuery)!)
         call.httpMethod = method
         call.httpBody = body
         call.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData

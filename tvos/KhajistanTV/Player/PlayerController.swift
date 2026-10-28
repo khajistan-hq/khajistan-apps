@@ -55,6 +55,8 @@ final class PlayerController {
     /// LiveRadio, the only way its samples can be read; anything it cannot play comes back here
     /// and plays on AVPlayer, with no dancer.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
+        // A stored programme or clip on the database's storage plays by the route that answers.
+        let url = SupabaseRoute.routed(url)
         generation += 1
         let gen = generation
         #if DEBUG

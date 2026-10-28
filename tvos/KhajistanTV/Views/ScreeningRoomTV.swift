@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// Where a full film stopped, on this device: seconds in, by film handle. Never a stream address,
@@ -56,7 +57,7 @@ struct TVScreeningRoom: View {
         }
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .task(id: model.auth.email) { await model.saves.load() }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = FilmPlaces.all
             if now != places { places = now }
         }

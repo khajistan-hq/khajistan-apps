@@ -490,7 +490,9 @@ struct RRPageAnswer: Equatable, Sendable {
 
     /// A signed URL must name Supabase storage on the project's own host; any other address is not an answer.
     static func isProjectURL(_ url: URL) -> Bool {
-        url.scheme == "https" && url.host == KJConfig.supabase.host
+        // The project's own host, whichever way it is reached: a signed address names the project, and
+        // SupabaseRoute moves it onto the proxy when that is the way in.
+        url.scheme == "https" && url.host == SupabaseRoute.host
     }
 
     init(status: Int, object: [String: Any]) {
@@ -588,11 +590,11 @@ enum RRPageOutcome: Equatable, Sendable {
 // MARK: - Requests
 
 enum RRAPI {
-    static let pageFunction = KJConfig.supabase.appendingPathComponent("functions/v1/reading-room-page")
+    static var pageFunction: URL { KJConfig.supabase.appendingPathComponent("functions/v1/reading-room-page") }
     static let feedPage = 1000
 
     private static func request(_ pathAndQuery: String, method: String = "GET", token: String? = nil, body: Data? = nil) -> URLRequest {
-        var request = URLRequest(url: URL(string: pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL)
+        var request = URLRequest(url: SupabaseRoute.url(pathAndQuery)!)
         request.httpMethod = method
         request.httpBody = body
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")

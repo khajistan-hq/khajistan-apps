@@ -62,7 +62,7 @@ enum ChatMedia: Hashable, Sendable {
             guard ref.hasPrefix("gif:") else { return nil }
             let name = String(ref.dropFirst(4))
             guard name.range(of: "^[A-Za-z0-9_-][A-Za-z0-9._-]*\\.gif$", options: [.regularExpression, .caseInsensitive]) != nil,
-                  let url = URL(string: "/storage/v1/object/public/video-gifs/" + name, relativeTo: KJConfig.supabase)?.absoluteURL
+                  let url = SupabaseRoute.url("/storage/v1/object/public/video-gifs/" + name)
             else { return nil }
             return .gif(url)
         case "pnv":
@@ -285,7 +285,7 @@ enum ChatAPI {
     }
 
     private static func request(_ pathAndQuery: String, token: String?) -> URLRequest {
-        var call = URLRequest(url: URL(string: pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL)
+        var call = URLRequest(url: SupabaseRoute.url(pathAndQuery)!)
         call.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         call.timeoutInterval = 15
         call.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")

@@ -51,6 +51,18 @@ uncommitted in the shared folder).
 Not covered: anything against the live project (nothing is deployed, no test account); the SQL was
 not run (no local Postgres); a real phone scanning a real TV.
 
+## Last measured (2026-10-27, the database route; DECISIONS 21)
+
+| Check | Result |
+|---|---|
+| TV core | 152 passed, 2 skipped (new: the route's rewrites, a proxied tv-play is still tv-play) |
+| iOS core | 74 passed, 1 skipped |
+| Site worker | `archive/tests/worker_sb_proxy_test.mjs` ok; launch-mode and path-security tests still pass; a live call through the worker code returned the rights list |
+| Apple TV simulator, direct blocked (`-kjsbdirect https://10.255.255.1`) + local stand-in proxy (`-kjsbproxy`) | Reading Room shelf ready 1.24 s, first cover 2.35 s; Pics/Vids opens; both ways dead: the message at 2.6 s |
+| Apple TV simulator, normal route | ReadingRoom free title, PicsVids 3 of 4, Rooms, Transmission subtitle: pass. `testVideoAndKhajistanTVRow` fails at the sign-in sheet since 2033e0a (the TV sign-in now opens on the phone); passed before it; reported to that session |
+| iPhone UI | 20 of 20 |
+| Owner's Apple TV HD, Release | before: catalogue 45.7 s then "did not answer"; now: "can't reach its archive" at 2.8 s (proxy not deployed yet) |
+
 ## Last measured (2026-10-28, the gaps closed)
 
 TV Reading Room title page and Continue; Persian-handle film saves; Pics/Vids collections.

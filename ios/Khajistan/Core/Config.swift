@@ -8,7 +8,8 @@ enum KJConfig {
     static let signInDoor = "Library"
 
     static let site = URL(string: "https://khajistan-archive.pages.dev")!
-    static let supabase = URL(string: "https://qojysegeddztsxdmhjfb.supabase.co")!
+    /// The database, directly or by the site's /sb/ proxy where its host cannot be reached (SupabaseRoute).
+    static var supabase: URL { SupabaseRoute.base }
     static let anonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvanlzZWdlZGR6dHN4ZG1oamZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE2Nzc1MjM5MjQsImV4cCI6MTk5MzA5OTkyNH0.iz8hhr1TYYLWk9HyI0b_yxqlzGJgyuXKsBO_2_kuQ94"
     static let streamHost = "customer-0svgnorro16tedsf.cloudflarestream.com"
     static let userAgent = "Khajistan-iOS/1.0"

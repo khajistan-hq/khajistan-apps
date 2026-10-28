@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// The Reading Room: the shelf the website draws at /reading-room.html, as rows of covers. A tab per
@@ -55,7 +56,7 @@ struct ReadingView: View {
         .fullScreenCover(item: $continuing) { place in
             ReadingReaderView(title: place.title, issue: place.issue, startPage: place.page)
         }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all
             if now != places { places = now }
         }

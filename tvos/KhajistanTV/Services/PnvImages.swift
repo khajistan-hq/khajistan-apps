@@ -28,7 +28,7 @@ final class PnvImages: @unchecked Sendable {
             if let hit = cache.object(forKey: key) { return hit }
             var request = URLRequest(url: url)
             if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
-            guard let (data, response) = try? await session.data(for: request),
+            guard let (data, response) = try? await SupabaseRoute.data(for: request, session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = Self.downsample(data, maxPixel: maxPixel) else { continue }
             cache.setObject(image, forKey: key)

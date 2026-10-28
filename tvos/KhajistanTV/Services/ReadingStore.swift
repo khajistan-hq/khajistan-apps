@@ -109,6 +109,13 @@ final class ReadingStore {
 
     private func load() async {
         clock("start")
+        // Which way the database answers: direct, the site's proxy, or neither (said at once).
+        guard await SupabaseRoute.ready() != .unreachable else {
+            clock("route unreachable")
+            phase = .failed(SupabaseRoute.unreachableText)
+            return
+        }
+        clock("route \(SupabaseRoute.path.rawValue)")
         async let feed = loadFeed()
         async let rightsHeld = loadRights()
         async let index = loadModules()
@@ -116,7 +123,7 @@ final class ReadingStore {
         let fetched = await feed
         clock("feed")
         guard let collections = fetched, !collections.isEmpty else {
-            phase = .failed("The Reading Room did not answer.")
+            phase = .failed(SupabaseRoute.path == .unreachable ? SupabaseRoute.unreachableText : "The Reading Room did not answer.")
             return
         }
         // Rights first and awaited, as the site does: the room's figures must not count what the reader cannot open.
@@ -155,6 +162,8 @@ final class ReadingStore {
     /// The feed, a thousand rows a page and retried: a bare call returned 1,000 of 1,036 rows once and called it success.
     private func loadFeed() async -> [RRCollection]? {
         for attempt in 0..<3 {
+            // No way to the database: another attempt would only wait out the same refusal.
+            if SupabaseRoute.path == .unreachable { return nil }
             if attempt > 0 { try? await Task.sleep(for: .milliseconds(600 * Int(pow(3.0, Double(attempt - 1))))) }
             var all: [RRCollection] = []
             var failed = false
@@ -201,7 +210,7 @@ final class ReadingStore {
         let name = request.url?.path.split(separator: "/").last.map(String.init) ?? "?"
         let data: Data, response: URLResponse
         do {
-            (data, response) = try await urlSession.data(for: request)
+            (data, response) = try await SupabaseRoute.data(for: request, session: urlSession)
         } catch {
             clock("fetch \(name) failed after \(ContinuousClock.now - asked): \(error.localizedDescription)")
             return nil
@@ -343,7 +352,7 @@ final class ReadingStore {
     private func signBatch(_ paths: [String], token: String?) async -> [String: RRPageAnswer]? {
         clock("sign batch \(paths.count) asked")
         defer { clock("sign batch \(paths.count) answered") }
-        guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: paths, size: "sm", accessToken: token)),
+        guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.batchRequest(paths: paths, size: "sm", accessToken: token), session: urlSession),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return RRPageAnswer.parseBatch(data)
     }
@@ -407,7 +416,7 @@ final class ReadingStore {
         let wanted = stored.map { endpoint(issue, page: $0) }
             .filter { answers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
         guard !wanted.isEmpty else { return }
-        guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: wanted, size: "full", accessToken: token)),
+        guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.batchRequest(paths: wanted, size: "full", accessToken: token), session: urlSession),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return }
         let answered = Date()
         for (path, answer) in RRPageAnswer.parseBatch(data) {
@@ -429,7 +438,7 @@ final class ReadingStore {
         let wanted = stored.map { endpoint(issue, page: $0) }
             .filter { thumbAnswers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
         for chunk in stride(from: 0, to: wanted.count, by: RRAPI.batchLimit).map({ Array(wanted[$0..<min($0 + RRAPI.batchLimit, wanted.count)]) }) {
-            guard let (data, response) = try? await urlSession.data(for: RRAPI.batchRequest(paths: chunk, size: "sm", accessToken: token)),
+            guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.batchRequest(paths: chunk, size: "sm", accessToken: token), session: urlSession),
                   (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let answered = Date()
             for (path, answer) in RRPageAnswer.parseBatch(data) {
@@ -453,7 +462,7 @@ final class ReadingStore {
         let image: UIImage? = await Task.detached(priority: .utility) {
             let path = url.path
             if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 320) { return image }
-            guard let (data, response) = try? await session.data(from: url),
+            guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = PnvImages.downsample(data, maxPixel: 320) else { return nil }
             RRPageDisk.write(data, path)
@@ -504,7 +513,7 @@ final class ReadingStore {
     }
 
     private func sign(_ path: String, token: String?) async -> RRPageAnswer? {
-        guard let (data, response) = try? await urlSession.data(for: RRAPI.pageRequest(path: path, size: "full", accessToken: token)),
+        guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.pageRequest(path: path, size: "full", accessToken: token), session: urlSession),
               let code = (response as? HTTPURLResponse)?.statusCode else { return nil }
         return RRPageAnswer.parse(status: code, body: data)
     }
@@ -519,7 +528,7 @@ final class ReadingStore {
         let path = url.path
         return await Task.detached(priority: priority) {
             if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 4096) { return image }
-            guard let (data, response) = try? await session.data(from: url),
+            guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = PnvImages.downsample(data, maxPixel: 4096) else { return nil }
             RRPageDisk.write(data, path)

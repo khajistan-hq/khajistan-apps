@@ -71,8 +71,8 @@ enum PnvKind: String, CaseIterable, Sendable {
 /// How a row becomes a URL. Three hosts, told apart by `media_host` (kj-media.js header):
 /// Supabase public storage (the default), Cloudflare R2, and `ktv`.
 enum PnvMedia {
-    static let storage = "https://qojysegeddztsxdmhjfb.supabase.co/storage/v1/object/public"
-    static let functions = "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1"
+    static var storage: String { KJConfig.supabase.absoluteString + "/storage/v1/object/public" }
+    static var functions: String { KJConfig.supabase.absoluteString + "/functions/v1" }
     static let r2 = "https://pub-717724c730914707b0f97e6bcc443a21.r2.dev"
 
     /// JavaScript's encodeURIComponent: everything but A-Z a-z 0-9 - _ . ! ~ * ' ( ).
@@ -203,7 +203,7 @@ enum PnvAPI {
     static let pageSize = 60
 
     private static func rest(_ pathAndQuery: String) -> URLRequest {
-        var request = URLRequest(url: URL(string: "/rest/v1/" + pathAndQuery, relativeTo: KJConfig.supabase)!.absoluteURL)
+        var request = URLRequest(url: SupabaseRoute.url("/rest/v1/" + pathAndQuery)!)
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
         request.setValue("Bearer \(KJConfig.anonKey)", forHTTPHeaderField: "Authorization")
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")

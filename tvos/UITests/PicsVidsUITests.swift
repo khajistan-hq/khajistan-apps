@@ -210,8 +210,13 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(state.label, "Sign in to watch Khajistan Transmission.")
         kjScreenshot("pv-09-ktv-signed-out", app: app)
         XCUIRemote.shared.press(.select)
-        let signIn = app.buttons["Sign in"]
-        XCTAssertTrue(signIn.waitForExistence(timeout: 10), "Select must open the sign-in sheet")
+        // Sign-in opens on the phone panel (QR and code; 2026-10-27), or on email and password
+        // when the tv-sign-in function cannot be reached. Either is the sign-in sheet.
+        let phone = app.buttons["tvSignInUsePassword"]
+        let password = app.buttons["Sign in"]
+        let opened = NSPredicate { _, _ in phone.exists || password.exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: opened, object: nil)], timeout: 15), .completed,
+                       "Select must open the sign-in sheet")
         kjScreenshot("pv-10-ktv-sign-in-sheet", app: app)
         XCUIRemote.shared.press(.menu)
         kjPause(1)

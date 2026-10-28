@@ -19,6 +19,46 @@ final class RoomsLayoutUITests: XCTestCase {
     func testGrove() throws { try walk("grove") }
     func testSmut() throws { try walk("smut") }
 
+    /// A film's player is the third full-screen cover (Rooms door, Screening Room, film page,
+    /// player). In Day, a cover that deep closed with Menu once sent SwiftUI into a layout loop
+    /// under accessibility and the remote stopped answering; Menu must walk back out to the door.
+    /// The loop came when tvOS itself closed the cover; the player closes itself, so this walk
+    /// passed before the fix too. It guards the path; the cause is in RootView.
+    func testDayFilmPlayerClosesWithMenu() throws {
+        guard let site = ProcessInfo.processInfo.environment["KJ_SITE"], !site.isEmpty else {
+            throw XCTSkip("the rooms' files are behind the site password; set TEST_RUNNER_KJ_SITE to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-kjtab", "rooms", "-kjskin", "day", "-kjsite", site, "-kjfilms", site,
+            "-kj.filmPlaces", "<dict><key>\(Self.stoppedFilm)</key><real>1200</real></dict>",
+        ]
+        kjLaunch(app)
+        let screening = app.buttons["tvroom-screening"]
+        XCTAssertTrue(screening.waitForExistence(timeout: 15), "Rooms shows its tiles")
+        XCTAssertTrue(kjFocus(screening, app: app), "the remote reaches the Screening Room")
+        XCUIRemote.shared.press(.select)
+        let film = app.buttons.matching(identifier: "upnext-\(Self.stoppedFilm)").firstMatch
+        XCTAssertTrue(film.waitForExistence(timeout: 40), "the Screening Room lists its films")
+        kjPause(3)
+        XCUIRemote.shared.press(.select)
+        let play = app.buttons["filmPlay"]
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "a poster opens the film's page")
+        kjPause(2)
+        XCTAssertTrue(kjFocus(play, app: app), "the remote reaches Play")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["playerState"].waitForExistence(timeout: 10), "Play opens the player")
+        kjPause(2)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "Menu closes the player onto the film's page")
+        kjPause(1)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(play.waitForNonExistence(timeout: 10), "Menu returns to the room")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(screening.waitForExistence(timeout: 10), "Menu returns to Rooms")
+        XCTAssertTrue(kjFocus(app.buttons["tvroom-bazaar"], app: app), "the remote still answers")
+    }
+
     /// The music indexes are searched as the phone searches them: every word typed must be in the
     /// song's name or its metadata. Two words of a title and one of the singer's find the song.
     func testIndexSearchFindsASongByTitleAndArtist() throws {

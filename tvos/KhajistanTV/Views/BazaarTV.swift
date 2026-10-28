@@ -112,8 +112,9 @@ struct TVProductScreen: View {
         }
         .foregroundStyle(palette.ink)
         .defaultFocus($addFocused, true)
-        // In place over the object, not one more cover: a third cover deep, closed with Menu, kept
-        // re-laying itself out in Day under accessibility and stopped answering the remote.
+        // In place over the object, not one more cover, so Menu closes only the top layer. (A third
+        // cover once looped SwiftUI's layout in Day; the cause, `.preferredColorScheme`, is gone:
+        // RootView sets the style on the window.)
         .disabled(showBag)
         .accessibilityHidden(showBag)
         .overlay { if showBag { TVBagScreen { showBag = false }.accessibilityAddTraits(.isModal) } }

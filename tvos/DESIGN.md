@@ -230,9 +230,10 @@ each laid out after the app chosen for it on the phone (DECISIONS 17), adapted t
   20:00*) with Preview, Watchlist and **Website** beside it, then Information, label beside value.
   The TV has no browser, so Website shows the film's page as a QR (dark modules on a light plate,
   as the sign-in screen's) and its address, in place over the page (Menu or Back closes it): the
-  page opens on the phone. Codes and the bag are drawn in place, never as a third full-screen
-  cover: one three deep, closed with Menu, sent SwiftUI into a layout loop in Day under
-  accessibility, and the remote stopped answering. Play asks
+  page opens on the phone. Codes and the bag are drawn in place over the page. (A third
+  full-screen cover that tvOS closed on Menu once sent SwiftUI into a layout loop in Day under
+  accessibility. The cause was `.preferredColorScheme` handed down through nested hosting
+  controllers; the skin's style is now set once on the window, and deep covers are safe.) Play asks
   vod-token in the player; a refusal is the site's words there. A solid action is the lift plate
   at rest and the focus plate under focus. The Receiver's own film shelves still open a film on
   its preview, as under The Screening Room below.

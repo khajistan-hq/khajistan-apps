@@ -144,8 +144,8 @@ struct TVFilmPage: View {
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {}).environment(\.palette, palette)
         }
-        // In place over the page, not one more cover: a third cover deep kept re-laying itself
-        // out in Day under accessibility and stopped answering the remote.
+        // In place over the page, not one more cover. (A third cover once looped SwiftUI's layout
+        // in Day; the cause, `.preferredColorScheme`, is gone: RootView sets it on the window.)
         .disabled(showWebsite)
         .accessibilityHidden(showWebsite)
         .overlay {

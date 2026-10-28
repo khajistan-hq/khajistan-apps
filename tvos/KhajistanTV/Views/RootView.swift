@@ -56,8 +56,17 @@ struct RootView: View {
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
-        // The colour scheme steers what tvOS draws itself, the text fields and the keyboard.
-        .preferredColorScheme(model.skin == .day ? .light : .dark)
+        // The colour scheme steers what tvOS draws itself, the text fields and the keyboard. It
+        // is set once on the window, which every cover inherits. `.preferredColorScheme` here was
+        // handed down through each cover's hosting controller, and in Day (the light one) a cover
+        // three deep that tvOS closed on Menu sent SwiftUI's layout round for ever under
+        // accessibility, and the remote stopped answering.
+        .onChange(of: model.skin, initial: true) { _, skin in
+            let style: UIUserInterfaceStyle = skin == .day ? .light : .dark
+            for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                scene.windows.forEach { $0.overrideUserInterfaceStyle = style }
+            }
+        }
         // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
         // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
         // what tvOS does: a region pops back to the map, and the map leaves the app. The pop is

@@ -342,10 +342,19 @@ final class ReceiverStore {
             await self?.reveal(id, key: key, token: token, raw: raw, epoch: epoch)
         }
         guard !Task.isCancelled, loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
-        if ReceiverRules.mayMarkWalkFinished(unprobed: report.unprobed.count) {
-            walksFinished.insert(key)
-            publishCounts()
+        let dead = ReceiverRules.committedDead(
+            candidates: candidates.map(\.id),
+            live: report.live,
+            unprobed: report.unprobed,
+            skipped: report.skipped
+        )
+        if !dead.isEmpty {
+            verified.subtract(dead)
+            offerings[key] = (offerings[key] ?? []).filter { !dead.contains($0.id) }
         }
+        let finished = ReceiverRules.mayMarkWalkFinished(unprobed: report.unprobed.count)
+        if finished { walksFinished.insert(key) }
+        if finished || !dead.isEmpty { publishCounts() }
         dialGeneration += 1
         return shown(regionId: regionId, cameras: cameras)
     }

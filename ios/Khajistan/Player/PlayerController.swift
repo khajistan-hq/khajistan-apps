@@ -47,7 +47,11 @@ final class PlayerController {
     /// Lock-screen and headphone Play. The live dial retunes. Anything else resumes.
     static func performRemotePlay() {
         guard let active else { return }
-        ReceiverRules.performRemotePlay(liveDial: active.servesLiveDial, resume: { active.resume() }, retune: { active.onLivePlay?() })
+        ReceiverRules.performRemotePlay(
+            liveDial: active.servesLiveDial,
+            resume: { if ReceiverRules.resumeMayCallPlay(liveDial: active.servesLiveDial) { active.resume() } },
+            retune: { active.onLivePlay?() }
+        )
     }
 
     /// Lock-screen play/pause. The live dial goes through the tuner. Film and Pics/Vids toggle the item.
@@ -181,7 +185,7 @@ final class PlayerController {
 
     func resume() {
         // A live dial item is started only by resolve. Lock-screen Play must not reach `play()`.
-        guard !servesLiveDial else { return }
+        guard ReceiverRules.resumeMayCallPlay(liveDial: servesLiveDial) else { return }
         guard player.currentItem != nil else { return }
         wantsPlayback = true
         state = .tuning

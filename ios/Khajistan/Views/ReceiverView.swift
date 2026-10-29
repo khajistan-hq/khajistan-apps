@@ -640,8 +640,9 @@ private struct CamerasSection: View {
                 failed.insert(region)
                 return
             }
-            if model.receiver.walkFinished(regionId: region, cameras: true) {
-                lists[region] = model.receiver.shown(regionId: region, cameras: true)
+            let rows = model.receiver.shown(regionId: region, cameras: true)
+            if ReceiverRules.assignCameraList(shown: rows.map(\.id), walkFinished: model.receiver.walkFinished(regionId: region, cameras: true)) != nil {
+                lists[region] = rows
                 return
             }
             guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { return }

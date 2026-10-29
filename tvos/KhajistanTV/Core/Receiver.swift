@@ -292,6 +292,59 @@ enum ReceiverRules {
 
     static func mayMarkWalkFinished(unprobed: Int) -> Bool { unprobed == 0 }
 
+    /// Candidates the probe committed dead: present in none of the live, unprobed, or skipped sets.
+    /// Skipped and unprobed rows stay. The caller removes these from the dial and does not withdraw.
+    static func committedDead(candidates: [String], live: Set<String>, unprobed: Set<String>, skipped: Set<String>) -> Set<String> {
+        Set(candidates).subtracting(live).subtracting(unprobed).subtracting(skipped)
+    }
+
+    /// One region's dial, the same removal `loadChannels` applies after `verify`.
+    struct DialBook {
+        var offerings: [String: [String]] = [:]
+        var verified: Set<String> = []
+        var walksFinished: Set<String> = []
+
+        mutating func reveal(_ id: String, key: String) {
+            verified.insert(id)
+            var rows = offerings[key] ?? []
+            if !rows.contains(id) { rows.append(id) }
+            offerings[key] = rows
+        }
+
+        func shown(key: String) -> [String] {
+            (offerings[key] ?? []).filter { verified.contains($0) }
+        }
+
+        /// Counts only walks that have finished, the same gate as the published figures.
+        func count() -> Int {
+            walksFinished.reduce(0) { $0 + shown(key: $1).count }
+        }
+
+        mutating func applyProbe(key: String, candidates: [String], live: Set<String>, unprobed: Set<String>, skipped: Set<String>) {
+            let dead = ReceiverRules.committedDead(candidates: candidates, live: live, unprobed: unprobed, skipped: skipped)
+            verified.subtract(dead)
+            offerings[key] = (offerings[key] ?? []).filter { !dead.contains($0) }
+            if ReceiverRules.mayMarkWalkFinished(unprobed: unprobed.count) {
+                walksFinished.insert(key)
+            }
+        }
+    }
+
+    /// `lists[region]` is set only after the camera walk has finished. Until `reveal`, the row is not shown.
+    static func assignCameraList(shown: [String], walkFinished: Bool) -> [String]? {
+        walkFinished ? shown : nil
+    }
+
+    /// `open` and `change` call this before `scheduleSkip`. A skipped reprobe keeps the row.
+    static func openSchedulesSkip(keepOnDial: Bool, failed: Bool, mayAct: Bool) -> Bool {
+        failed && mayAct && scheduleSkipProceeds(keepOnDial: keepOnDial)
+    }
+
+    static func scheduleSkipProceeds(keepOnDial: Bool) -> Bool { !keepOnDial }
+
+    /// `resume` / `play()` may run only when this player is not the live dial.
+    static func resumeMayCallPlay(liveDial: Bool) -> Bool { !liveDial }
+
     /// A timed-out or cancelled read is skipped. Any other failure can be dead.
     static func failedReadIsCancelled(timedOut: Bool, taskCancelled: Bool) -> Bool {
         timedOut || taskCancelled
@@ -383,6 +436,19 @@ enum ReceiverRules {
 
     static func carrierMemory(verified: Bool, snapshot: CarrierSnapshot) -> CarrierMemory {
         CarrierMemory(verified: verified, playback: snapshot.playback, verdictAt: snapshot.verdictAt)
+    }
+
+    /// One locked read of the playback URL and the verdict time. `dropVerdict` is applied by the
+    /// probe before it releases the lock, so the two fields cannot come from different commits.
+    static func rememberedSnapshot(playback: URL?, verdictAt: Date?, live: Bool?, now: Date,
+                                   memory: TimeInterval = verdictMemory) -> (snapshot: CarrierSnapshot, dropVerdict: Bool) {
+        guard live == true, let at = verdictAt else {
+            return (CarrierSnapshot(playback: playback, verdictAt: nil), false)
+        }
+        if now.timeIntervalSince(at) >= memory {
+            return (CarrierSnapshot(playback: playback, verdictAt: nil), true)
+        }
+        return (CarrierSnapshot(playback: playback, verdictAt: at), false)
     }
 
     /// A confirm may insert only in the probe epoch it captured before the probe.

@@ -278,11 +278,13 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
-        if case .failed = new, keepOnDial {
-            keepOnDial = false
-        } else if case .failed = new, let tuned, case .live(let showing) = source,
-           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
-                                         currentRevision: intentRevision, showingID: showing.id) {
+        if case .failed = new, let tuned, case .live(let showing) = source,
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: showing.id)
+           ) {
             scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
         guard !changing, source != nil else { return }
@@ -367,6 +369,7 @@ final class ReceiverTuner {
     /// A failed play moves to the next verified signal in this list, and only if this tune is
     /// still the one showing. The viewer having moved on withdraws nothing and skips nothing.
     private func scheduleSkip(failedID: String, ticket: Int) {
+        guard ReceiverRules.scheduleSkipProceeds(keepOnDial: keepOnDial) else { return }
         guard case .live(let current) = source else { return }
         guard ReceiverRules.mayActOnFailure(failedID: failedID, tuneRevision: ticket,
                                             currentRevision: intentRevision, showingID: current.id) else { return }
@@ -410,8 +413,12 @@ final class ReceiverTuner {
         clips.uncover()
         settledAt = Date()
         if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == channel.id,
-           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
-                                         currentRevision: intentRevision, showingID: on.id) {
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: on.id)
+           ) {
             scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
     }
@@ -433,8 +440,12 @@ final class ReceiverTuner {
         clips.uncover()
         settledAt = Date()
         if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == target.id,
-           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
-                                         currentRevision: intentRevision, showingID: on.id) {
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: on.id)
+           ) {
             scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
     }

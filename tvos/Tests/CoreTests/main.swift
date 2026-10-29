@@ -854,46 +854,91 @@ func aTuneElevenMinutesLaterKeepsTheVerifiedCarrier() throws {
 }
 
 func remotePlayOnTheLiveDialRetunesInsteadOfResuming() throws {
-    var resumed = false
+    // The same call PlayerController.performRemotePlay makes. `play` stands in for AVPlayer.play.
+    var playCalls = 0
     var retuned = false
-    ReceiverRules.performRemotePlay(liveDial: true, resume: { resumed = true }, retune: { retuned = true })
-    try expect(!resumed, "resume must never start a live dial item")
-    try expect(retuned, "lock-screen Play on the dial resolves again")
-    resumed = false
+    let servesLiveDial = true
+    ReceiverRules.performRemotePlay(liveDial: servesLiveDial, resume: {
+        if ReceiverRules.resumeMayCallPlay(liveDial: servesLiveDial) { playCalls += 1 }
+    }, retune: { retuned = true })
+    try expectEqual(playCalls, 0)
+    try expect(retuned)
+    try expect(!ReceiverRules.resumeMayCallPlay(liveDial: true))
+    playCalls = 0
     retuned = false
-    ReceiverRules.performRemotePlay(liveDial: false, resume: { resumed = true }, retune: { retuned = true })
-    try expect(resumed && !retuned, "film and Pics/Vids resume the attached item")
-    try expectEqual(ReceiverRules.remotePlay(liveDial: true), .retune)
-    try expectEqual(ReceiverRules.remotePlay(liveDial: false), .resume)
+    ReceiverRules.performRemotePlay(liveDial: false, resume: {
+        if ReceiverRules.resumeMayCallPlay(liveDial: false) { playCalls += 1 }
+    }, retune: { retuned = true })
+    try expectEqual(playCalls, 1)
+    try expect(!retuned)
 }
 
 func aFreshVerdictIsPairedWithItsOwnCarrier() throws {
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let previous = try require(URL(string: "https://cdn.example/old.m3u8"))
     let current = try require(URL(string: "https://cdn.example/new.m3u8"))
-    let split = ReceiverRules.carrierMemory(
-        verified: true,
-        snapshot: .init(playback: previous, verdictAt: now)
-    )
-    try expectEqual(split.tune(current, now: now), .refuse, "a fresh time must not play a different URL")
-    let paired = ReceiverRules.carrierMemory(
-        verified: true,
-        snapshot: .init(playback: current, verdictAt: now)
-    )
-    try expectEqual(paired.tune(current, now: now), .play)
+    // One read, the same function ReceiverProbe.remembered uses under its lock.
+    let read = ReceiverRules.rememberedSnapshot(playback: current, verdictAt: now, live: true, now: now)
+    try expect(!read.dropVerdict)
+    let memory = ReceiverRules.carrierMemory(verified: true, snapshot: read.snapshot)
+    try expectEqual(memory.playback, current)
+    try expectEqual(memory.verdictAt, now)
+    try expectEqual(memory.tune(current, now: now), .play)
+    let older = ReceiverRules.rememberedSnapshot(playback: previous, verdictAt: now, live: true, now: now)
+    let split = ReceiverRules.carrierMemory(verified: true, snapshot: older.snapshot)
+    try expectEqual(split.tune(current, now: now), .refuse, "the URL in the snapshot is the only one that can play")
 }
 
 func aSkippedReprobeDoesNotWithdraw() throws {
-    try expect(!ReceiverRules.withdrawsAfterReprobe(live: false, skipped: true))
-    try expect(ReceiverRules.withdrawsAfterReprobe(live: false, skipped: false), "a dead probe leaves the dial")
-    try expect(!ReceiverRules.withdrawsAfterReprobe(live: true, skipped: false))
+    // open() and change() call openSchedulesSkip, which calls scheduleSkip only when this is true.
+    func openPath(keepOnDial: Bool) -> Bool {
+        var withdrew = false
+        if ReceiverRules.openSchedulesSkip(keepOnDial: keepOnDial, failed: true, mayAct: true),
+           ReceiverRules.scheduleSkipProceeds(keepOnDial: keepOnDial) {
+            withdrew = true
+        }
+        return withdrew
+    }
+    let skippedKeepsDial = !ReceiverRules.withdrawsAfterReprobe(live: false, skipped: true)
+    try expect(!openPath(keepOnDial: skippedKeepsDial), "a skipped reprobe does not withdraw")
+    let deadLeavesDial = !ReceiverRules.withdrawsAfterReprobe(live: false, skipped: false)
+    try expect(openPath(keepOnDial: deadLeavesDial), "a committed dead probe still withdraws")
+    try expect(openPath(keepOnDial: false), "a stall after a successful attach still withdraws")
 }
 
 func anUnfinishedCameraWalkStaysUnset() throws {
-    try expect(ReceiverRules.shouldRetryUnfinishedWalk(attempt: 1, unprobed: 1))
-    try expect(!ReceiverRules.shouldRetryUnfinishedWalk(attempt: ReceiverRules.unfinishedWalkAttempts, unprobed: 1),
-               "the retries stop, and the row stays unset")
-    try expect(!ReceiverRules.shouldRetryUnfinishedWalk(attempt: 1, unprobed: 0))
+    var shown: [String] = []
+    var lists: [String: [String]] = [:]
+    try expect(!shown.contains("cam"), "absent from shown until reveal")
+    try expectEqual(ReceiverRules.assignCameraList(shown: shown, walkFinished: false), nil)
+    shown = ["cam"]
+    if let assigned = ReceiverRules.assignCameraList(shown: shown, walkFinished: false) {
+        lists["indus"] = assigned
+    }
+    try expect(lists["indus"] == nil, "lists[region] stays unset until the walk finishes")
+    if let assigned = ReceiverRules.assignCameraList(shown: shown, walkFinished: true) {
+        lists["indus"] = assigned
+    }
+    try expectEqual(lists["indus"], ["cam"])
+    try expect(!shown.contains("unprobed"))
+}
+
+func aLaterDeadProbeRemovesTheRowFromTheDial() throws {
+    var dial = ReceiverRules.DialBook()
+    let key = "indus"
+    dial.reveal("live-then-dead", key: key)
+    dial.applyProbe(key: key, candidates: ["live-then-dead"], live: ["live-then-dead"], unprobed: [], skipped: [])
+    try expectEqual(dial.shown(key: key), ["live-then-dead"])
+    try expectEqual(dial.count(), 1)
+    dial.reveal("stays", key: key)
+    dial.applyProbe(key: key, candidates: ["live-then-dead", "stays"],
+                    live: [], unprobed: [], skipped: ["stays"])
+    try expect(!dial.shown(key: key).contains("live-then-dead"), "a later dead probe leaves the dial")
+    try expectEqual(dial.shown(key: key), ["stays"], "a skipped row stays")
+    try expectEqual(dial.count(), 1)
+    dial.reveal("waiting", key: key)
+    dial.applyProbe(key: key, candidates: ["waiting"], live: [], unprobed: ["waiting"], skipped: [])
+    try expectEqual(dial.shown(key: key), ["stays", "waiting"])
 }
 
 func aSlowProbeDoesNotFinishTheUnstartedTail() throws {
@@ -4588,6 +4633,7 @@ let tests: [(String, () throws -> Void)] = [
     ("A fresh verdict stays paired with its own carrier", aFreshVerdictIsPairedWithItsOwnCarrier),
     ("A skipped reprobe does not withdraw", aSkippedReprobeDoesNotWithdraw),
     ("An unfinished camera walk stays unset", anUnfinishedCameraWalkStaysUnset),
+    ("A later dead probe removes the row from the dial", aLaterDeadProbeRemovesTheRowFromTheDial),
     ("A slow probe does not finish the unstarted tail", aSlowProbeDoesNotFinishTheUnstartedTail),
     ("A failed feed keeps the previous copy", aFailedFeedKeepsThePreviousCopy),
     ("Figures publish only after the walk finishes", figuresPublishOnlyAfterTheWalkFinishes),

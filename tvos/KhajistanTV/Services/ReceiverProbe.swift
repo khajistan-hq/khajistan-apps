@@ -190,15 +190,12 @@ final class ReceiverProbe: @unchecked Sendable {
     func remembered(_ id: String, now: Date = Date()) -> ReceiverRules.CarrierSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        let url = playbacks[id]
-        guard let entry = cache[id], entry.live else {
-            return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: nil)
-        }
-        if now.timeIntervalSince(entry.at) >= Self.memory {
-            cache[id] = nil
-            return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: nil)
-        }
-        return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: entry.at)
+        let entry = cache[id]
+        let read = ReceiverRules.rememberedSnapshot(
+            playback: playbacks[id], verdictAt: entry?.at, live: entry.map(\.live), now: now, memory: Self.memory
+        )
+        if read.dropVerdict { cache[id] = nil }
+        return read.snapshot
     }
 
     /// Drops every remembered verdict and moves the epoch. Generation numbers are not reused,

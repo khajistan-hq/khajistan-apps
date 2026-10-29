@@ -313,10 +313,16 @@ same visitor.
   name, native name or byline holds what is typed, from the shelf already held.
 - **Whole shelf.** Each row's heading is *Name ›* with its count, a focus stop above its covers;
   Select opens the shelf whole, as a grid under its name, and a cover opens the title.
-- **Reader.** One page at a time, full screen on the ground. Right turns to the next page, left to
-  the one before, Select zooms a step at a time, 2x, 3x, 4x and 6x (the website's ceiling, as the
-  phone), and the remote moves the page; Menu zooms out a step, and leaves from the whole page. The next page is fetched while this one is read. The band (title, issue, `p. 3 / 76`) hides
-  after 2.6 seconds.
+- **Reader.** One page at a time, full screen on the ground, nothing over it once the band (title,
+  issue, `Page 3 of 76`) has shown where you are on opening; it hides after 2.6 seconds and a turn
+  does not bring it back. Left and right turn in the issue's own direction (RRDirection: in a
+  right-to-left issue left is the next page), and the page slides in from that side; Reduce Motion
+  cuts. Down brings the controls: the band, *Page 3 of 76*, a line for how far in, and the issue's
+  pages as a strip of small pictures that runs the way the pages do, the remote landing on the page
+  being read; Select goes to the page chosen, and Up or Menu puts the controls away. Select or
+  Play/Pause zooms a step at a time, 2x, 3x, 4x and 6x (the website's ceiling, as the phone), and
+  the remote moves the page; Menu zooms out a step, then puts the controls away, then leaves. The
+  pages around this one are fetched while it is read.
 - **Refusals**, in the site's words, with a code for the title's page on the website and no purchase
   in the app: *Membership required* (paid, from page 3), *Free to read — sign in to continue*
   (account-open, with the sign-in page), *Preserved · not published* (451), a content warning

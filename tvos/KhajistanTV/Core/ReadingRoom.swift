@@ -589,6 +589,21 @@ enum RRPageOutcome: Equatable, Sendable {
 
 // MARK: - Requests
 
+/// Which held covers to let go so the decoded pictures fit `budget`, oldest first. A cover on
+/// screen is never let go, so a long scroll cannot blank the row the viewer is looking at.
+enum RRCoverBudget {
+    /// `held` is oldest first; the answer is indexes into it.
+    static func letGo(_ held: [(bytes: Int, onScreen: Bool)], budget: Int) -> [Int] {
+        var total = held.reduce(0) { $0 + $1.bytes }
+        var drop: [Int] = []
+        for (index, item) in held.enumerated() where total > budget && !item.onScreen {
+            total -= item.bytes
+            drop.append(index)
+        }
+        return drop
+    }
+}
+
 enum RRAPI {
     static var pageFunction: URL { KJConfig.supabase.appendingPathComponent("functions/v1/reading-room-page") }
     static let feedPage = 1000

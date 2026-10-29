@@ -436,5 +436,8 @@ struct RRCover: View {
                 }
             }
             .accessibilityHidden(true)
+            // The store keeps the pictures of covers on screen and lets go of the rest past its budget.
+            .onAppear { state.shown(true) }
+            .onDisappear { state.shown(false) }
     }
 }

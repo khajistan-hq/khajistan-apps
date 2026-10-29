@@ -261,6 +261,9 @@ struct RRCover: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .accessibilityHidden(true)
+        // The store keeps the pictures of covers on screen and lets go of the rest past its budget.
+        .onAppear { state.shown(true) }
+        .onDisappear { state.shown(false) }
     }
 }
 

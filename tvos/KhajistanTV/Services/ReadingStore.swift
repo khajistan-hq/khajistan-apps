@@ -12,6 +12,14 @@ final class RRCardState {
     /// The cover could not be had. A card says nothing about it; the plate stays.
     fileprivate(set) var failed = false
     @ObservationIgnored fileprivate var requested = false
+    /// How many covers drawing this card are on screen. A card on screen keeps its picture.
+    @ObservationIgnored fileprivate var onScreen = 0
+    /// The cover the picture was kept under, and whether the picture was let go to bound memory:
+    /// a card let go reads it back from the device when it is shown again.
+    @ObservationIgnored fileprivate var cover: String?
+    @ObservationIgnored fileprivate var letGo = false
+
+    func shown(_ visible: Bool) { onScreen += visible ? 1 : -1 }
 }
 
 /// What one page of the reader turned out to be.
@@ -37,6 +45,10 @@ final class ReadingStore {
     private(set) var provenance: [String: RRProvenanceRow] = [:]
 
     @ObservationIgnored private var cards: [String: RRCardState] = [:]
+    /// Cards holding a picture, oldest first. A cover is about 1.5 MB decoded and the shelf holds
+    /// over a thousand titles, so past the budget the oldest picture off screen is let go.
+    @ObservationIgnored private var holding: [RRCardState] = []
+    private static let coverBudget = 60 * 1024 * 1024
     @ObservationIgnored private var queue: [Job] = []
     @ObservationIgnored private var flushing = false
     /// Slugs a four-digit retry has proved (signedUrl() :130).
@@ -309,7 +321,8 @@ final class ReadingStore {
     /// A title's cover and its access line, asked for once.
     func want(_ title: RRTitle) {
         let state = card(for: title)
-        guard !state.requested, let cover = RRPath.coverEndpoint(title, extra: pad4) else { return }
+        if state.requested { return readBack(state) }
+        guard let cover = RRPath.coverEndpoint(title, extra: pad4) else { return }
         state.requested = true
         showKeptCover(cover, on: state)
         queue.append(Job(key: title.slug, cover: cover, probe: RRPath.probeEndpoint(title, extra: pad4), state: state, title: title))
@@ -319,7 +332,7 @@ final class ReadingStore {
     /// An issue's cover in the title view.
     func want(_ title: RRTitle, issue: RRIssue) {
         let state = issueCard(title, issue)
-        guard !state.requested else { return }
+        if state.requested { return readBack(state) }
         state.requested = true
         showKeptCover(RRPath.issueCoverEndpoint(title, issue, extra: pad4), on: state)
         queue.append(Job(key: issue.key, cover: RRPath.issueCoverEndpoint(title, issue, extra: pad4), probe: nil, state: state, title: nil))
@@ -387,7 +400,7 @@ final class ReadingStore {
                     RRPageDisk.write(data, kept)
                     return image
                 }.value
-                if let image { state.image = image } else if state.image == nil { state.failed = true }
+                if let image { show(image, on: state, cover: job.cover) } else if state.image == nil { state.failed = true }
                 if !firstCoverTimed, state.image != nil { firstCoverTimed = true; clock("first cover") }
             }
         }
@@ -416,8 +429,9 @@ final class ReadingStore {
     /// A cover as this device kept it, by the page it shows (not the signed address, which expires).
     private static func coverKey(_ endpoint: String) -> String { "cover|" + endpoint }
 
-    /// Puts the kept cover on the card at once, read and decoded off the main thread.
-    private func showKeptCover(_ endpoint: String, on state: RRCardState) {
+    /// Puts the kept cover on the card at once, read and decoded off the main thread. `missing`
+    /// runs when the device holds no copy.
+    private func showKeptCover(_ endpoint: String, on state: RRCardState, missing: (() -> Void)? = nil) {
         let key = Self.coverKey(endpoint)
         Task {
             let image = await Task.detached(priority: .userInitiated) { () -> UIImage? in
@@ -430,9 +444,39 @@ final class ReadingStore {
                 return image
             }.value
             if let image, state.image == nil {
-                state.image = image
+                show(image, on: state, cover: endpoint)
                 if !firstCoverTimed { firstCoverTimed = true; clock("first cover (kept)") }
+            } else if image == nil {
+                missing?()
             }
+        }
+    }
+
+    /// Puts a picture on a card and lets go of the oldest pictures off screen past the budget.
+    private func show(_ image: UIImage, on state: RRCardState, cover: String) {
+        state.image = image
+        state.cover = cover
+        state.letGo = false
+        holding.removeAll { $0 === state }
+        holding.append(state)
+        let held = holding.map { (bytes: $0.image?.cgImage.map { $0.bytesPerRow * $0.height } ?? 0, onScreen: $0.onScreen > 0 || $0 === state) }
+        let drop = Set(RRCoverBudget.letGo(held, budget: Self.coverBudget))
+        guard !drop.isEmpty else { return }
+        for index in drop {
+            holding[index].image = nil
+            holding[index].letGo = true
+        }
+        holding = holding.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
+    }
+
+    /// A card whose picture was let go reads it back from the device; a copy the device no longer
+    /// holds is downloaded again.
+    private func readBack(_ state: RRCardState) {
+        guard state.letGo, let cover = state.cover else { return }
+        state.letGo = false
+        showKeptCover(cover, on: state) { [self] in
+            queue.append(Job(key: cover, cover: cover, probe: nil, state: state, title: nil))
+            scheduleFlush()
         }
     }
 

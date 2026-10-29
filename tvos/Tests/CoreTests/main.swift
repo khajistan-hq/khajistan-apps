@@ -4225,6 +4225,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
+    ("Reading Room: covers past the budget are let go oldest first, never on screen", readingCoverBudget),
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
     ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
@@ -4476,6 +4477,19 @@ func readingRoomRanksRareThenKhajistanThenRestThenStamped() throws {
     // Rare, then Khajistan's own scans, then the rest in the order they had (a received copy is
     // not Khajistan's), and a stamped cover last even when Khajistan scanned it.
     try expectEqual(ranked, ["rare-a", "kj-a", "rest-1", "rest-2", "kj-received", "kandahar-majalla"])
+}
+
+// MARK: - Reading Room cover memory
+
+func readingCoverBudget() throws {
+    let mb = 1024 * 1024
+    // Under the budget nothing goes.
+    try expectEqual(RRCoverBudget.letGo([(10 * mb, false), (10 * mb, false)], budget: 60 * mb), [])
+    // Over it, the oldest off screen go first, and only until the rest fit.
+    let held = (0..<8).map { (bytes: 10 * mb, onScreen: $0 == 0 || $0 == 7) }
+    try expectEqual(RRCoverBudget.letGo(held, budget: 60 * mb), [1, 2])
+    // Covers on screen are kept even when they alone are over the budget.
+    try expectEqual(RRCoverBudget.letGo([(40 * mb, true), (40 * mb, true)], budget: 60 * mb), [])
 }
 
 var passed = 0, failed = 0, skipped = 0

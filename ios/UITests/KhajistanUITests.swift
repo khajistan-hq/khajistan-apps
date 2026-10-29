@@ -281,6 +281,42 @@ final class KhajistanUITests: XCTestCase {
         shot("player-off", app)
     }
 
+    /// With a channel on, the docked set and the switches fill the screen above the section, so
+    /// Cameras and Transmission changed only what was under the house bar and looked dead
+    /// (owner, 2026-10-28: "every button needs to be immediately responsive"). Each part now
+    /// comes up on screen, under the set, on its first tap.
+    func testReceiverPartsComeUpUnderTheDockedSet() {
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        let houseBar = app.buttons["tab-receiver"].frame.minY
+        func onScreen(_ element: XCUIElement) -> Bool {
+            element.exists && element.frame.minY > 0 && element.frame.maxY < houseBar
+        }
+
+        app.buttons["part-cameras"].tap()
+        let cameras = app.staticTexts["camerasTotal"]
+        waitFor(cameras, 20, "Cameras lists its cameras")
+        expectation(for: NSPredicate { _, _ in onScreen(cameras) }, evaluatedWith: cameras)
+        waitForExpectations(timeout: 3)
+        shot("receiver-part-cameras", app)
+
+        app.buttons["part-transmission"].tap()
+        let transmission = NSPredicate { _, _ in
+            onScreen(app.buttons["transmission-channel-1"]) || onScreen(app.staticTexts["transmissionPreview"])
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: transmission, object: nil)], timeout: 40), .completed,
+                       "Transmission comes up on screen under the set")
+        shot("receiver-part-transmission", app)
+
+        app.buttons["part-live"].tap()
+        let surf = app.buttons["shuffle-medium-tv"]
+        expectation(for: NSPredicate { _, _ in onScreen(surf) }, evaluatedWith: surf)
+        waitForExpectations(timeout: 5)
+    }
+
     /// Real controls receive one tap each: connecting Pause cancels tuning; Stop survives tab navigation.
     func testReceiverAutoplaysAndOneTapStopStaysOff() {
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])

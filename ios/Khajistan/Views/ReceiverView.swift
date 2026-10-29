@@ -27,6 +27,7 @@ struct ReceiverView: View {
     @State private var fullScreenTransmission = false
     @AppStorage(ReceiverTuner.keepsPlayingKey) private var keepsPlaying = true
     @AppStorage(ReceiverTuner.playsInBackgroundKey) private var playsInBackground = true
+    private static let sectionAnchor = "receiverSection"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,36 +68,49 @@ struct ReceiverView: View {
     }
 
     private var page: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
-                figures
-                HouseSwitch(title: "Keep playing on other pages",
-                            detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
-                                                 : "The channel turns off when you leave the Receiver",
-                            isOn: $keepsPlaying)
-                    .accessibilityIdentifier("receiverKeepsPlaying")
-                HouseSwitch(title: "Play with the app closed",
-                            detail: playsInBackground ? "Keeps playing on the home screen and with the phone locked"
-                                                      : "Pauses when you leave the app",
-                            isOn: $playsInBackground)
-                    .accessibilityIdentifier("receiverPlaysInBackground")
-                if model.tuner.source == nil { device }
-                switch part {
-                case .live: LiveSection()
-                case .cameras: CamerasSection()
-                case .transmission: TransmissionSection()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
+                    figures
+                    HouseSwitch(title: "Keep playing on other pages",
+                                detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
+                                                     : "The channel turns off when you leave the Receiver",
+                                isOn: $keepsPlaying)
+                        .accessibilityIdentifier("receiverKeepsPlaying")
+                    HouseSwitch(title: "Play with the app closed",
+                                detail: playsInBackground ? "Keeps playing on the home screen and with the phone locked"
+                                                          : "Pauses when you leave the app",
+                                isOn: $playsInBackground)
+                        .accessibilityIdentifier("receiverPlaysInBackground")
+                    if model.tuner.source == nil { device }
+                    // A fixed mark above the section: an id on the section itself moved with the
+                    // swap, and the scroll overshot the new section's first line.
+                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
+                    switch part {
+                    case .live: LiveSection()
+                    case .cameras: CamerasSection()
+                    case .transmission: TransmissionSection()
+                    }
                 }
+                .padding(.horizontal, KJLayout.inset)
+                .kjColumn(KJLayout.wideWidth)
+                .padding(.vertical, 16)
             }
-            .padding(.horizontal, KJLayout.inset)
-            .kjColumn(KJLayout.wideWidth)
-            .padding(.vertical, 16)
-        }
-        .accessibilityIdentifier("receiverCatalogue")
-        .scrollDismissesKeyboard(.interactively)
-        .task {
-            await model.receiver.loadIndex()
-            await model.playIfOpening()
+            .accessibilityIdentifier("receiverCatalogue")
+            .scrollDismissesKeyboard(.interactively)
+            .task {
+                await model.receiver.loadIndex()
+                await model.playIfOpening()
+            }
+            // With a channel on, the docked set and the switches fill the screen above the
+            // section, so a tab that changed only what is below them looked dead (owner,
+            // 2026-10-28: "every button needs to be immediately responsive"). The section comes
+            // up under the set. Off, the set's bar sits right above the section already.
+            .onChange(of: part) {
+                guard model.tuner.source != nil else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.sectionAnchor, anchor: .top) }
+            }
         }
     }
 

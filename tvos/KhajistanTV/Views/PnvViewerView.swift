@@ -9,6 +9,7 @@ import SwiftUI
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
     @State private var current: PnvRow
     @State private var controller = PlayerController()
     @State private var picture: UIImage?
@@ -239,6 +240,10 @@ struct PnvViewerView: View {
 
     // MARK: - Showing a row
 
+    /// The screen's own width in pixels (tvOS lays out 1,920 points wide), up to 2,400: an Apple
+    /// TV HD draws 1,920 pixels, and a larger decode is memory it can never show.
+    private var viewerPixels: Int { min(2400, Int(1920 * max(displayScale, 1))) }
+
     private func show(_ row: PnvRow) {
         loadTask?.cancel()
         controller.stop()
@@ -257,7 +262,7 @@ struct PnvViewerView: View {
                 model.silenceRadio()
                 await playVideo(row)
             } else {
-                let image = await PnvImages.shared.image(PnvMedia.pictureCandidates(row), maxPixel: 2400)
+                let image = await PnvImages.shared.image(PnvMedia.pictureCandidates(row), maxPixel: viewerPixels)
                 guard !Task.isCancelled, current.id == key else { return }
                 if let image {
                     picture = image
@@ -273,7 +278,7 @@ struct PnvViewerView: View {
     private func playVideo(_ row: PnvRow) async {
         let key = row.id
         Task { @MainActor in
-            let still = await PnvImages.shared.image([PnvMedia.poster(row), PnvMedia.thumb(row)].compactMap { $0 }, maxPixel: 2400)
+            let still = await PnvImages.shared.image([PnvMedia.poster(row), PnvMedia.thumb(row)].compactMap { $0 }, maxPixel: viewerPixels)
             if current.id == key, picture == nil { picture = still }
         }
         do {

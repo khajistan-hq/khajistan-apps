@@ -4226,6 +4226,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
     ("Reading Room: covers past the budget are let go oldest first, never on screen", readingCoverBudget),
+    ("Pics/Vids: a picture is kept by its address and its size", pnvImageKeyCarriesSize),
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
     ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
@@ -4490,6 +4491,14 @@ func readingCoverBudget() throws {
     try expectEqual(RRCoverBudget.letGo(held, budget: 60 * mb), [1, 2])
     // Covers on screen are kept even when they alone are over the budget.
     try expectEqual(RRCoverBudget.letGo([(40 * mb, true), (40 * mb, true)], budget: 60 * mb), [])
+}
+
+func pnvImageKeyCarriesSize() throws {
+    let url = URL(string: "https://example.org/a.jpg")!
+    // A 400 px tile and the 2,400 px viewer must not share a cache entry.
+    try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(url, maxPixel: 2400))
+    try expectEqual(PnvMedia.imageKey(url, maxPixel: 400), PnvMedia.imageKey(URL(string: "https://example.org/a.jpg")!, maxPixel: 400))
+    try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(URL(string: "https://example.org/b.jpg")!, maxPixel: 400))
 }
 
 var passed = 0, failed = 0, skipped = 0

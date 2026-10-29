@@ -81,7 +81,19 @@ final class AppModel {
     private(set) var storefrontCode: String?
     var showsJoin: Bool { JoinOffer.isOffered(storefront: storefrontCode) }
 
-    let browser = ArchiveBrowser()
+    /// The in-app browser, made on first use or once launch has settled (`init`): a WKWebView made
+    /// in `init` held up the first screen.
+    var browser: ArchiveBrowser {
+        if let madeBrowser { return madeBrowser }
+        let made = ArchiveBrowser()
+        made.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
+        if let skinScript { made.applySkin(script: skinScript) }
+        madeBrowser = made
+        return made
+    }
+    @ObservationIgnored private var madeBrowser: ArchiveBrowser?
+    /// The website's skin keys as last read, for a browser made after them.
+    @ObservationIgnored private var skinScript: String?
     let auth: AuthStore
     let receiver = ReceiverStore()
     /// The Receiver list's thumbnails: stills this device takes from the live streams, in memory only.
@@ -160,9 +172,14 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
-        browser.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
         refreshSkin()
-        browser.warm()
+        // WebKit's page process starts once the first screen is up, so the first page opened still
+        // does not wait for it. A browser already opened has its process and a page not to replace.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, self.madeBrowser == nil else { return }
+            self.browser.warm()
+        }
         watchTheSky()
         watchTheStorefront(forced: defaults.string(forKey: "kjstorefront"))
         // Which way the database answers, decided while the first screen draws.
@@ -210,7 +227,9 @@ final class AppModel {
         let resolved = Sky.resolve(chosen: chosen, band: band, at: now, timeZone: zone)
         skinPick = Sky.isHonoured(chosen: chosen, band: band, at: now, timeZone: zone) ? resolved : nil
         if resolved != skin { skin = resolved }
-        browser.applySkin(script: Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone))
+        let script = Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone)
+        skinScript = script
+        madeBrowser?.applySkin(script: script)
     }
 
     /// The website re-reads its sky every minute; so does the app.

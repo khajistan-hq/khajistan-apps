@@ -23,7 +23,7 @@ struct HomeShelves: View {
             if StoreBuild.includes(.picsVids) { picsVids }
             madrassa
             bazaar
-            if StoreBuild.includes(ArchiveDestination.all.first { $0.id == "chat" }!) { chat }
+            if ArchiveDestination.all.first(where: { $0.id == "chat" }).map { StoreBuild.includes($0) } == true { chat }
         }
         // The channel the app opens on comes first: the shelves load a moment after Home.
         .task {
@@ -35,7 +35,7 @@ struct HomeShelves: View {
                 }
             }
             if StoreBuild.includes(.reading) { await model.reading.start() }
-            await model.chat.start()
+            if !StoreBuild.isOn { await model.chat.start() }
         }
         .task(id: model.auth.previewPassword) {
             try? await Task.sleep(for: .seconds(2))

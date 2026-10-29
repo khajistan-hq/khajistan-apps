@@ -20,21 +20,25 @@ struct HomeRows: View {
         VStack(alignment: .leading, spacing: 12) {
             transmissionRow
             readingRow
-            picsVidsRow
+            // A section this build leaves out (StoreBuild: Pics/Vids and Chat in the App Store
+            // build) has no shelf on Home either.
+            if StoreBuild.includes(.picsvids) { picsVidsRow }
             madrassaRow
             bazaarRow
-            chatRow
+            if StoreBuild.includes(.chat) { chatRow }
         }
         // The channel the app opens on comes first: the shelves load a moment after the front.
         .task {
             try? await Task.sleep(for: .seconds(2))
             await model.transmission.loadSchedule()
-            await model.pnv.start()
-            if let region = model.pnv.regions.first, model.pnv.feed(region).isUntouched {
-                await model.pnv.loadMore(region: region)
+            if StoreBuild.includes(.picsvids) {
+                await model.pnv.start()
+                if let region = model.pnv.regions.first, model.pnv.feed(region).isUntouched {
+                    await model.pnv.loadMore(region: region)
+                }
             }
             await model.reading.start()
-            await model.chat.start()
+            if StoreBuild.includes(.chat) { await model.chat.start() }
         }
         .task(id: model.auth.previewPassword) {
             try? await Task.sleep(for: .seconds(2))

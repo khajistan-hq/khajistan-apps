@@ -12,6 +12,8 @@ struct RegionMapView: View {
     let map: ComposedMap
     /// The region the strip under the map has focus on: outlined, with its label on a plate.
     let highlighted: String?
+    /// Verified rows for a region, nil until that region's walk has finished.
+    var liveCount: (String) -> Int? = { _ in nil }
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -26,7 +28,8 @@ struct RegionMapView: View {
                 RegionMapBase(map: map, layout: layout, palette: palette, key: key, skin: palette.ground.description)
                     .equatable()
                 Canvas { context, _ in
-                    RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted, mode: .focus).paint(&context)
+                    RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: highlighted,
+                                     plateLive: highlighted.flatMap { liveCount($0) }, mode: .focus).paint(&context)
                 }
             }
         }
@@ -238,6 +241,8 @@ private struct RegionMapPainter {
     let layout: RegionMapLayout
     let palette: Palette
     let focusedID: String?
+    /// Verified count for the focused region. Nil means its walk has not finished.
+    var plateLive: Int? = nil
     /// The map (shapes and every label), or only what focus adds over it (outline and plate).
     let mode: Mode
 
@@ -385,10 +390,8 @@ private struct RegionMapPainter {
         if let native = region.native {
             rows.append((.plateNative, native, MapFace.plateNative.measure(native)))
         }
-        if let live = region.live {
-            let line = "\(live.formatted()) LIVE"
-            rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
-        }
+        let line = ReceiverRules.regionPlateLine(verified: plateLive)
+        rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
 
         let across: CGFloat = 14
         let down: CGFloat = 10

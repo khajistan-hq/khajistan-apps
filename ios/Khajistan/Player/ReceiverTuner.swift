@@ -35,6 +35,13 @@ final class ReceiverTuner {
     @ObservationIgnored private var destination: Channel?
     @ObservationIgnored private var tuneTask: Task<Void, Never>?
     @ObservationIgnored private var changeTask: Task<Void, Never>?
+    @ObservationIgnored private var skipTask: Task<Void, Never>?
+    /// Channels in the current scope that have already failed. The skip does not return to them.
+    @ObservationIgnored private var failedInScope: Set<String> = []
+    /// The tune now in flight: its channel and the intent revision it started with.
+    @ObservationIgnored private var tuned: (id: String, revision: Int)?
+    /// A skipped probe failed the tune without taking the row off the dial.
+    @ObservationIgnored private var keepOnDial = false
     /// True while a channel opens or changes: those flows cover and uncover the picture themselves.
     @ObservationIgnored private var changing = false
     /// When the last change settled. A stream often stalls once just after it starts; covering
@@ -50,6 +57,9 @@ final class ReceiverTuner {
         self.receiver = receiver
         self.transmission = transmission
         controller.onPlaybackUnavailable = { [weak captions] in captions?.suspendForPlaybackInterruption() }
+        controller.servesLiveDial = true
+        controller.onLivePlay = { [weak self] in self?.replayLive() }
+        controller.onLiveToggle = { [weak self] in self?.playPause() }
     }
 
     var channel: Channel? {
@@ -92,23 +102,11 @@ final class ReceiverTuner {
         // Reproduce a tab change while automatic selection is suspended without depending on network speed.
         let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
         if delay > 0 {
-            try? await Task.sleep(for: .milliseconds(min(delay, 10_000)))
+            try? await Task.sleep(for: .milliseconds(min(delay, 60_000)))
             guard !Task.isCancelled, isActive(), opening == openingRevision else { return }
         }
         #endif
         await surf(allowSelection: { isActive() && self.openingRevision == opening })
-        guard !Task.isCancelled, isActive(), opening == openingRevision, let first = channel else { return }
-        var attempted = Set([first.id])
-        // Only a definite failure advances. Slow buffering does not switch a working station.
-        for _ in 0..<2 {
-            let revision = intentRevision
-            await controller.settled(within: .seconds(32))
-            guard !Task.isCancelled, isActive(), opening == openingRevision, revision == intentRevision else { return }
-            guard case .failed = controller.state,
-                  let next = list.first(where: { !attempted.contains($0.id) }) else { return }
-            attempted.insert(next.id)
-            play(next, in: list)
-        }
     }
 
     /// Cancel only pending automatic selection. Already-playing radio remains background audio.
@@ -127,6 +125,7 @@ final class ReceiverTuner {
     // MARK: - Choosing
 
     func play(_ channel: Channel, in list: [Channel]) {
+        failedInScope = []
         stop()
         self.list = list
         source = .live(channel)
@@ -147,8 +146,9 @@ final class ReceiverTuner {
         switch source {
         case .live(let current):
             let from = destination ?? current
-            guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-            let target = list[(position + delta + list.count) % list.count]
+            let order = list.filter { !failedInScope.contains($0.id) && receiver.lists($0) }
+            guard order.count > 1, let position = order.firstIndex(where: { $0.id == from.id }) else { return }
+            let target = order[(position + delta + order.count) % order.count]
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }
@@ -179,6 +179,16 @@ final class ReceiverTuner {
                 captions.suspendForPlaybackInterruption()
                 controller.pause()
             } else {
+                // Play on a failed signal tries that signal once more, then the skip moves on if it fails again.
+                if case .failed = controller.state {
+                    failedInScope.remove(channel.id)
+                    let asked = intentRevision
+                    Task {
+                        guard await self.receiver.confirm(channel), asked == self.intentRevision else { return }
+                        self.tune(channel)
+                    }
+                    return
+                }
                 tune(channel)
             }
         case .transmission:
@@ -233,6 +243,16 @@ final class ReceiverTuner {
                 return
             }
         }
+        // The three draws were empty. A region in the same scope that already has a verified
+        // signal can still be surfed. This does not probe any further region.
+        guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
+        for region in index.listedRegions where scope.includes(tier: region.tier) {
+            let pool = receiver.verifiedChannels(regionId: region.id, medium: medium.rawValue)
+            if let channel = pool.randomElement() {
+                play(channel, in: pool)
+                return
+            }
+        }
         surfNote = "Nothing to surf there right now."
     }
 
@@ -242,9 +262,11 @@ final class ReceiverTuner {
         openingPending = false
         intentRevision += 1
         run += 1
+        failedInScope = []
         captions.detach()
         tuneTask?.cancel()
         changeTask?.cancel()
+        skipTask?.cancel()
         controller.stop()
         if case .transmission = source { transmission.stop() }
         clips.clear()
@@ -256,6 +278,15 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
+        if case .failed = new, let tuned, case .live(let showing) = source,
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: showing.id)
+           ) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
+        }
         guard !changing, source != nil else { return }
         if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
             Task {
@@ -298,23 +329,72 @@ final class ReceiverTuner {
 
     // MARK: - Live channels
 
+    /// Lock-screen Play on the dial. Resolves the carrier again instead of resuming the old item.
+    private func replayLive() {
+        guard case .live(let channel) = source else { return }
+        tune(channel)
+    }
+
     private func tune(_ target: Channel) {
+        keepOnDial = false
         captions.detach()
         tuneTask?.cancel()
         controller.stop()
         controller.state = .tuning
         source = .live(target)
         captions.attach(target, player: controller)
+        let ticket = intentRevision
+        tuned = (id: target.id, revision: ticket)
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
                 try Task.checkCancellation()
+                guard ReceiverRules.mayActOnFailure(failedID: target.id, tuneRevision: ticket,
+                                                    currentRevision: self.intentRevision, showingID: target.id) else { return }
                 controller.attach(url: url, seekTo: nil, title: target.name, subtitle: target.place.isEmpty ? nil : target.place)
             } catch {
                 if Task.isCancelled { return }
+                guard case .live(let showing) = self.source,
+                      ReceiverRules.mayActOnFailure(failedID: target.id, tuneRevision: ticket,
+                                                    currentRevision: self.intentRevision, showingID: showing.id) else { return }
+                let withdraw = (error as? ReceiverStoreError)?.withdraws ?? true
+                if !withdraw { keepOnDial = true }
                 controller.state = .failed(error.localizedDescription)
+                guard withdraw else { return }
+                self.scheduleSkip(failedID: target.id, ticket: ticket)
             }
         }
+    }
+
+    /// A failed play moves to the next verified signal in this list, and only if this tune is
+    /// still the one showing. The viewer having moved on withdraws nothing and skips nothing.
+    private func scheduleSkip(failedID: String, ticket: Int) {
+        guard ReceiverRules.scheduleSkipProceeds(keepOnDial: keepOnDial) else { return }
+        guard case .live(let current) = source else { return }
+        guard ReceiverRules.mayActOnFailure(failedID: failedID, tuneRevision: ticket,
+                                            currentRevision: intentRevision, showingID: current.id) else { return }
+        guard case .failed = controller.state else { return }
+        guard !failedInScope.contains(failedID) else { return }
+        failedInScope.insert(failedID)
+        receiver.withdraw(failedID)
+        guard let next = ReceiverRules.nextLive(after: failedID, in: list, excluding: failedInScope) else {
+            list.removeAll { failedInScope.contains($0.id) }
+            return
+        }
+        list.removeAll { failedInScope.contains($0.id) }
+        skipTask?.cancel()
+        skipTask = Task { await self.retune(next, failedID: failedID, ticket: ticket) }
+    }
+
+    private func retune(_ channel: Channel, failedID: String, ticket: Int) async {
+        // The viewer stepped away while this skip was waiting. Leave their tune alone.
+        guard !Task.isCancelled, ticket == intentRevision else { return }
+        _ = failedID
+        list.removeAll { failedInScope.contains($0.id) }
+        if !list.contains(where: { $0.id == channel.id }) { list.append(channel) }
+        changeTask?.cancel()
+        tune(channel)
+        changeTask = Task { await self.open(channel) }
     }
 
     private func begin() -> Int {
@@ -332,6 +412,15 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
+        if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == channel.id,
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: on.id)
+           ) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
+        }
     }
 
     private func change(to target: Channel) async {
@@ -350,6 +439,15 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
+        if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == target.id,
+           ReceiverRules.openSchedulesSkip(
+               keepOnDial: keepOnDial,
+               failed: true,
+               mayAct: ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                                     currentRevision: intentRevision, showingID: on.id)
+           ) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
+        }
     }
 
     // MARK: - Khajistan Transmission

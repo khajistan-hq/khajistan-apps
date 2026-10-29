@@ -37,13 +37,39 @@ final class PlayerController {
 
     /// The controller that last started a signal: the one the lock screen's buttons reach.
     private static weak var active: PlayerController?
+    /// True only for the Receiver's live dial. External Play must resolve again, not call `resume`.
+    @ObservationIgnored var servesLiveDial = false
+    /// `ReceiverTuner.tune` for the channel on the dial. Nil for film and Pics/Vids.
+    @ObservationIgnored var onLivePlay: (() -> Void)?
+    /// `ReceiverTuner.playPause` for the lock screen's play/pause button.
+    @ObservationIgnored var onLiveToggle: (() -> Void)?
+
+    /// Lock-screen and headphone Play. The live dial retunes. Anything else resumes.
+    static func performRemotePlay() {
+        guard let active else { return }
+        ReceiverRules.performRemotePlay(
+            liveDial: active.servesLiveDial,
+            resume: { if ReceiverRules.resumeMayCallPlay(liveDial: active.servesLiveDial) { active.resume() } },
+            retune: { active.onLivePlay?() }
+        )
+    }
+
+    /// Lock-screen play/pause. The live dial goes through the tuner. Film and Pics/Vids toggle the item.
+    static func performRemoteToggle() {
+        guard let active else { return }
+        if active.servesLiveDial {
+            active.onLiveToggle?()
+        } else {
+            active.toggle()
+        }
+    }
     private static let audioQueue = DispatchQueue(label: "com.khajistan.audio-session", qos: .userInitiated)
 
     /// The lock screen and headphone buttons, wired once for the life of the app.
     private static let remoteCommands: Void = {
         let commands = MPRemoteCommandCenter.shared()
         commands.playCommand.addTarget { _ in
-            Task { @MainActor in PlayerController.active?.resume() }
+            Task { @MainActor in PlayerController.performRemotePlay() }
             return .success
         }
         commands.pauseCommand.addTarget { _ in
@@ -51,7 +77,7 @@ final class PlayerController {
             return .success
         }
         commands.togglePlayPauseCommand.addTarget { _ in
-            Task { @MainActor in PlayerController.active?.toggle() }
+            Task { @MainActor in PlayerController.performRemoteToggle() }
             return .success
         }
     }()
@@ -78,6 +104,7 @@ final class PlayerController {
         timeoutTask?.cancel()
         removeItemObservers()
 
+        // A receiver row only reaches here with the carrier whose every rendition already passed.
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": KJConfig.userAgent]])
         let item = AVPlayerItem(asset: asset)
         // A transmission joined part-way through starts where the clock has got to. The seek
@@ -157,6 +184,8 @@ final class PlayerController {
     }
 
     func resume() {
+        // A live dial item is started only by resolve. Lock-screen Play must not reach `play()`.
+        guard ReceiverRules.resumeMayCallPlay(liveDial: servesLiveDial) else { return }
         guard player.currentItem != nil else { return }
         wantsPlayback = true
         state = .tuning

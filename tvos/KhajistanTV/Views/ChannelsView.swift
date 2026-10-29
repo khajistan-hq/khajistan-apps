@@ -43,9 +43,12 @@ struct ChannelsView: View {
     /// The media this region carries, in shelf order. A medium with nothing in it has no shelf.
     private var media: [String] {
         var found: [String] = []
-        if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
-        if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
-        if hasCameras { found.append("camera") }
+        let live = model.receiver.shown(regionId: region.id, cameras: false)
+        if live.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
+        if live.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
+        if hasCameras && !(camerasLoaded && cameraError == nil && !cameraChannels.contains(where: { model.receiver.lists($0) })) {
+            found.append("camera")
+        }
         if !films.isEmpty { found.append("vod") }
         if camerasFirst, let at = found.firstIndex(of: "camera") { found.insert(found.remove(at: at), at: 0) }
         return found
@@ -66,10 +69,17 @@ struct ChannelsView: View {
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
+        .onDisappear {
+            model.receiver.cancelChannels(regionId: region.id, cameras: false)
+            model.receiver.cancelChannels(regionId: region.id, cameras: true)
+        }
         .task { await model.saves.load() }
         .task { await model.films.load() }
         .fullScreenCover(item: $playing) { choice in
             ReceiverPlayerView(channel: choice.channel, list: choice.list)
+        }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            playing = nil
         }
     }
 
@@ -90,6 +100,16 @@ struct ChannelsView: View {
         }
     }
 
+    /// The page loader stays up only while there is nothing to show. Television that has
+    /// already been verified is not held back for the camera walk.
+    private var waitingForShelves: Bool {
+        let main = model.receiver.shown(regionId: region.id, cameras: false)
+        let waitingForMain = !model.receiver.walkFinished(regionId: region.id, cameras: false) && main.isEmpty
+        let waitingForCameras = camerasFirst && hasCameras && !camerasLoaded && cameraError == nil
+            && model.receiver.shown(regionId: region.id, cameras: true).isEmpty && main.isEmpty
+        return waitingForMain || waitingForCameras
+    }
+
     // MARK: - Shelves
 
     @ViewBuilder
@@ -105,7 +125,7 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
-        } else if !mainLoaded || (camerasFirst && hasCameras && !camerasLoaded && cameraError == nil) {
+        } else if waitingForShelves {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
@@ -129,7 +149,7 @@ struct ChannelsView: View {
         case "camera":
             cameraShelf
         default:
-            let list = channels.filter { $0.mediaType == kind }
+            let list = model.receiver.shown(regionId: region.id, cameras: false).filter { $0.mediaType == kind }
             channelShelf(kind, list)
         }
     }
@@ -154,11 +174,10 @@ struct ChannelsView: View {
     /// place with the index's own count.
     @ViewBuilder
     private var cameraShelf: some View {
-        if camerasLoaded {
-            channelShelf("camera", cameraChannels)
+        if camerasLoaded || model.receiver.walkFinished(regionId: region.id, cameras: true) {
+            channelShelf("camera", model.receiver.shown(regionId: region.id, cameras: true))
         } else {
-            let count = model.receiver.index?.regionCounts[region.id]?.byMedium["camera"]
-            Shelf(ReceiverRules.mediumLabel("camera"), count: count.map { "\($0)" }) {
+            Shelf(ReceiverRules.mediumLabel("camera"), count: "\u{2026}") {
                 if let cameraError {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(cameraError).kjBody().lineLimit(2)
@@ -181,10 +200,11 @@ struct ChannelsView: View {
 
     // MARK: - Loading
 
-    /// Loads the television and radio shard, then the camera shard where the region has one.
+    /// Loads the television and radio shard and, where the region has one, the camera shard.
+    /// The two walks run together, so television can appear while the cameras are still being read.
     /// Safe to run again: each step skips what it already has.
     private func start() async {
-        if camerasFirst && hasCameras { await loadCameras() }
+        async let cameras: Void = loadCamerasIfNeeded()
         await loadMain()
         #if DEBUG
         // With `-kjautochange`, a region link opens straight onto its first channel (see
@@ -194,32 +214,55 @@ struct ChannelsView: View {
             if let first = tv.first ?? channels.first { playing = Playing(channel: first, list: tv.isEmpty ? channels : tv) }
         }
         #endif
-        if mainLoaded && hasCameras && !camerasLoaded && cameraError == nil {
-            await loadCameras()
-        }
+        await cameras
+    }
+
+    private func loadCamerasIfNeeded() async {
+        guard hasCameras else { return }
+        await loadCameras()
     }
 
     private func loadMain() async {
         guard !mainLoaded else { return }
         errorText = nil
-        do {
-            channels = try await model.receiver.channels(regionId: region.id, cameras: false)
-            mainLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            errorText = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                channels = try await model.receiver.channels(regionId: region.id, cameras: false)
+            } catch {
+                if Task.isCancelled { return }
+                errorText = error.localizedDescription
+                return
+            }
+            let unfinished = model.receiver.walkFinished(regionId: region.id, cameras: false) ? 0 : 1
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: unfinished) else {
+                if unfinished == 0 { mainLoaded = true }
+                return
+            }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 
     private func loadCameras() async {
         guard !camerasLoaded else { return }
         cameraError = nil
-        do {
-            cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
-            camerasLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            cameraError = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
+            } catch {
+                if Task.isCancelled { return }
+                cameraError = error.localizedDescription
+                return
+            }
+            let unfinished = model.receiver.walkFinished(regionId: region.id, cameras: true) ? 0 : 1
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: unfinished) else {
+                if unfinished == 0 { camerasLoaded = true }
+                return
+            }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 

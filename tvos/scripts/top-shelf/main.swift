@@ -52,7 +52,7 @@ if args[2] == "--slides", args.count == 5 {
     let schedule = repo.appendingPathComponent("data/khajistan-tv/programming-\(StationClock.stationMonth(now)).json")
     let programming = FileManager.default.fileExists(atPath: schedule.path) ? decode(Programming.self, schedule) : nil
     for skin in Skin.allCases {
-        write(ShelfArt.receiver(skin: skin, scale: 1, map: map, live: index.totals.live), to: out.appendingPathComponent("receiver-\(skin.rawValue).png"))
+        write(ShelfArt.receiver(skin: skin, scale: 1, map: map), to: out.appendingPathComponent("receiver-\(skin.rawValue).png"))
         write(ShelfArt.transmission(skin: skin, scale: 1, pigeon: pigeon), to: out.appendingPathComponent("transmission-\(skin.rawValue).png"))
         guard let p = programming else { continue }
         for number in [1, 2] {

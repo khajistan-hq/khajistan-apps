@@ -47,13 +47,13 @@ enum ShelfArt {
         }
     }
 
-    /// The receiver: the live count and the website's sentence at left, the map at right.
-    static func receiver(skin: Skin, scale: CGFloat, map: ComposedMap, live: Int) -> ShelfCanvas? {
+    /// The receiver: the name and the website's sentence at left, the map at right.
+    /// The index's live total is not drawn: this extension has not probed the streams.
+    static func receiver(skin: Skin, scale: CGFloat, map: ComposedMap) -> ShelfCanvas? {
         guard let c = slide(skin, scale) else { return nil }
         c.map(map, in: CGRect(x: 780, y: 140, width: 940, height: 600), skin: skin)
         c.text("KHAJISTAN RECEIVER", size: 26, weight: .black, em: 0.13, hex: skin.accentHex, x: margin, top: 170)
-        c.text(live.formatted(), size: 220, weight: .black, em: -0.05, hex: skin.inkHex, x: margin - 10, top: 230, maxWidth: 540)
-        c.text("LIVE NOW", size: 26, weight: .black, em: 0.13, hex: skin.accentHex, x: margin, top: 480)
+        c.text("LIVE NOW", size: 72, weight: .black, em: -0.04, hex: skin.inkHex, x: margin - 4, top: 280, maxWidth: 540)
         c.paragraph("Live television, live radio and public cameras from the Middle World.", size: 34, weight: .regular,
                     hex: skin.inkHex, x: margin, top: 540, width: 520)
         return c

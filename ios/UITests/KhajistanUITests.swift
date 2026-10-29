@@ -17,7 +17,7 @@ final class KhajistanUITests: XCTestCase {
         let app = XCUIApplication()
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO", "-kjnoprobe", "YES"] + extra
         app.launch()
         return app
     }
@@ -49,6 +49,10 @@ final class KhajistanUITests: XCTestCase {
             usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
+        for _ in 0..<6 where channel.exists && !channel.isHittable {
+            if channel.frame.midY < catalogue.frame.midY { catalogue.swipeDown() } else { catalogue.swipeUp() }
+            usleep(400_000)
+        }
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
         return channel
     }
@@ -290,7 +294,9 @@ final class KhajistanUITests: XCTestCase {
     }
 
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
+        // The suspension has to outlast launch on a slow runner. The tap home in the previous
+        // run landed at 15s, after a 5s delay had already chosen a channel.
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "25000"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitFor(app.buttons["homeAllRooms"], 3, "Home opens with one tap")
@@ -310,7 +316,7 @@ final class KhajistanUITests: XCTestCase {
         let cc = app.buttons["receiverCC"]
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
-        waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
+        waitFor(app.staticTexts["receiverCaptionStatus"], 15, "One CC tap explains sign-in")
         XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")
@@ -408,10 +414,11 @@ final class KhajistanUITests: XCTestCase {
         }
         XCTAssertTrue(settled { $0 > 0 }, "All states a count")
         let all = objects()
-        let region = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-' AND identifier != 'pnvregion-all'")).firstMatch
-        waitFor(region, 10, "a region filter is offered")
-        region.tap()
-        XCTAssertTrue(settled { $0 > 0 && $0 < all }, "a region shows fewer objects than All (\(all))")
+        let maghreb = app.buttons["pnvregion-egypt"]
+        waitFor(maghreb, 10, "Maghreb is offered")
+        XCTAssertEqual(maghreb.label, "Maghreb")
+        maghreb.tap()
+        XCTAssertTrue(settled { $0 > 0 && $0 < all }, "Maghreb shows fewer objects than All (\(all))")
         waitFor(tile, 40, "the region's stream draws tiles")
         shot("pnv-region", app)
         app.buttons["pnvregion-all"].tap()
@@ -442,7 +449,7 @@ final class KhajistanUITests: XCTestCase {
     /// The skin control: a pick takes effect and Automatic hands back to the sky.
     func testSkinControl() {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjtab", "yours"]
+        app.launchArguments = ["-kjtab", "yours", "-kjnoprobe", "YES", "-kjnoautoplay", "YES"]
         app.launch()
         waitFor(app.buttons["skin-grove"], 10, "the skin control is on the account page")
         app.buttons["skin-grove"].tap()

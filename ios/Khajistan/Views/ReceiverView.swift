@@ -45,6 +45,10 @@ struct ReceiverView: View {
         .onChange(of: model.tab) { _, tab in
             if tab != .receiver { model.tuner.receiverClosed() }
         }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            model.tuner.stop()
+            fullScreen = false
+        }
         .fullScreenCover(isPresented: $fullScreen) {
             Group {
                 if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
@@ -82,16 +86,17 @@ struct ReceiverView: View {
         .scrollDismissesKeyboard(.interactively)
         .task {
             await model.receiver.loadIndex()
+            // The count walks every region. Surf must not wait for that walk.
+            model.receiver.watchHealthClock()
             await model.playIfOpening()
         }
     }
 
     /// The four figures of the receiver index, laid out before they arrive so nothing moves.
     private var figures: some View {
-        let totals = model.receiver.index?.totals
-        func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2014}" }
-        let items = [("Live now", value(totals?.live)), ("Television", value(totals?.byMedium["tv"])),
-                     ("Radio", value(totals?.byMedium["radio"])), ("Cameras", value(totals?.byMedium["camera"]))]
+        func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2026}" }
+        let items = [("Live now", value(model.receiver.liveNow)), ("Television", value(model.receiver.televisionNow)),
+                     ("Radio", value(model.receiver.radioNow)), ("Cameras", value(model.receiver.camerasNow))]
         // One row while the four fit; two rows of two at large type.
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 12) {
@@ -150,6 +155,10 @@ private struct LiveSection: View {
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
+        .onDisappear {
+            model.receiver.cancelChannels(regionId: selected, cameras: false)
+            model.receiver.cancelChannels(regionId: selected, cameras: true)
+        }
     }
 
     // MARK: Map and strip
@@ -167,9 +176,11 @@ private struct LiveSection: View {
     private var map: some View {
         ZStack {
             if let composed {
-                RegionMapView(map: composed, highlighted: selected, onTap: choose) { passing in
-                    hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
-                }
+                RegionMapView(map: composed, highlighted: selected, onTap: choose,
+                              onScrub: { passing in
+                                  hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
+                              },
+                              liveCount: { model.receiver.regionLiveCount(regionId: $0) })
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }
             } else {
@@ -200,14 +211,16 @@ private struct LiveSection: View {
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(region.label)
-                                if let live = region.live { Text(live.formatted()).monospacedDigit().opacity(0.7) }
+                                Text(ReceiverRules.regionLiveFigure(verified: model.receiver.regionLiveCount(regionId: region.id)))
+                                    .monospacedDigit().opacity(0.7)
                             }
                         }
                         .buttonStyle(ChipStyle(on: region.id == selected))
                         .padding(.trailing, 8)
                         .id(region.id)
                         .accessibilityIdentifier("region-\(region.id)")
-                        .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                        .accessibilityLabel(ReceiverRules.regionChipAccessibility(label: region.label,
+                            verified: model.receiver.regionLiveCount(regionId: region.id)))
                     }
                 }
             }
@@ -253,16 +266,20 @@ private struct LiveSection: View {
 
     private var hasCameras: Bool { index?.cameraURL(regionId: selected) != nil }
 
+    /// Liked and saved rows use the same gate as the rest of the dial. Rows appear as each probe succeeds.
+    private var liveChannels: [Channel] { model.receiver.shown(regionId: selected, cameras: false) }
+    private var liveCameras: [Channel] { model.receiver.shown(regionId: selected, cameras: true) }
+
     private var media: [String] {
         var found: [String] = []
-        if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
-        if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
+        if liveChannels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
+        if liveChannels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
         if hasCameras { found.append("camera") }
         return found
     }
 
     private var shown: [Channel] {
-        let list = medium == "camera" ? cameraChannels : channels.filter { $0.mediaType == medium }
+        let list = medium == "camera" ? liveCameras : liveChannels.filter { $0.mediaType == medium }
         let needle = filter.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return list }
         return list.filter { "\($0.name) \($0.place) \($0.broadcaster ?? "")".localizedCaseInsensitiveContains(needle) }
@@ -280,12 +297,21 @@ private struct LiveSection: View {
                         Text(native).font(.system(KJType.title, weight: .bold)).foregroundStyle(palette.faint).lineLimit(1)
                     }
                 }
-                if let line = index?.mediumLine(regionId: selected), !line.isEmpty { Text(line).kjSmall(faint: true) }
+                if model.receiver.walkFinished(regionId: selected, cameras: false) {
+                    let line = ReceiverRules.verifiedMediumLine(
+                        tv: model.receiver.verifiedChannels(regionId: selected, medium: "tv").count,
+                        radio: model.receiver.verifiedChannels(regionId: selected, medium: "radio").count,
+                        camera: model.receiver.walkFinished(regionId: selected, cameras: true)
+                            ? model.receiver.shown(regionId: selected, cameras: true).count : nil)
+                    if !line.isEmpty { Text(line).kjSmall(faint: true) }
+                } else {
+                    Text("\u{2026}").kjSmall(faint: true)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("regionTitle")
             if loadedRegion == selected && media.count > 1 { mediumSwitch }
-            if channels.count + cameraChannels.count > 10 {
+            if liveChannels.count + liveCameras.count > 10 {
                 SearchField(prompt: "Name, place or language", text: $filter, id: "channelFilter")
             }
             list
@@ -313,17 +339,18 @@ private struct LiveSection: View {
 
     private func switchTitle(_ kind: String) -> String {
         let title = ReceiverRules.mediumLabel(kind)
-        let count = kind == "camera"
-            ? (camerasLoaded ? cameraChannels.count : index?.regionCounts[selected]?.byMedium["camera"])
-            : channels.filter { $0.mediaType == kind }.count
-        return count.map { "\(title) \($0)" } ?? title
+        let count: Int? = kind == "camera"
+            ? (model.receiver.walkFinished(regionId: selected, cameras: true) ? liveCameras.count : nil)
+            : (model.receiver.walkFinished(regionId: selected, cameras: false)
+                ? liveChannels.filter { $0.mediaType == kind }.count : nil)
+        return count.map { "\(title) \($0)" } ?? "\(title) \u{2026}"
     }
 
     @ViewBuilder
     private var list: some View {
         if let listError {
             problem(listError) { Task { await loadRegion(force: true) } }
-        } else if loading || loadedRegion != selected {
+        } else if (loading || loadedRegion != selected) && shown.isEmpty {
             TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
         } else if shown.isEmpty {
             Text(filter.isEmpty ? "No \(ReceiverRules.mediumLabel(medium).lowercased()) here right now." : "Nothing here matches.")
@@ -376,6 +403,8 @@ private struct LiveSection: View {
     }
 
     /// The region's television and radio shard, and its camera shard when it opens on cameras.
+    /// A walk that still has unprobed rows is asked again, a bounded number of times, once a
+    /// slot has had time to free. The region is not marked loaded until that walk finishes.
     private func loadRegion(force: Bool = false) async {
         guard force || loadedRegion != selected else { return }
         await model.receiver.loadIndex()
@@ -385,10 +414,29 @@ private struct LiveSection: View {
         filter = ""
         camerasLoaded = false
         cameraChannels = []
-        do {
-            let list = try await model.receiver.channels(regionId: region, cameras: false)
+        var attempt = 0
+        var list: [Channel] = []
+        var finished = false
+        while !Task.isCancelled && region == selected {
+            attempt += 1
+            do {
+                list = try await model.receiver.channels(regionId: region, cameras: false)
+            } catch {
+                if Task.isCancelled || region != selected { return }
+                listError = error.localizedDescription
+                break
+            }
             guard region == selected else { return }
             channels = list
+            if model.receiver.walkFinished(regionId: region, cameras: false) {
+                finished = true
+                break
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { break }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
+        }
+        guard region == selected else { return }
+        if finished {
             if list.contains(where: { $0.mediaType == medium }) && medium != "camera" {
                 // Stay on the medium the reader was on.
             } else if list.contains(where: { $0.mediaType == "tv" }) {
@@ -402,9 +450,6 @@ private struct LiveSection: View {
             loadedRegion = region
             // The list arrives below the strip, out of VoiceOver's way: say that it did.
             UIAccessibility.post(notification: .announcement, argument: "\(regionLabel): \(list.count) channels")
-        } catch {
-            if Task.isCancelled || region != selected { return }
-            listError = error.localizedDescription
         }
         if region == selected { loading = false }
     }
@@ -412,14 +457,24 @@ private struct LiveSection: View {
     private func loadCameras() async {
         guard !camerasLoaded else { return }
         let region = selected
-        do {
-            let list = try await model.receiver.channels(regionId: region, cameras: true)
-            guard region == selected else { return }
-            cameraChannels = list
-            camerasLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            listError = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled && region == selected {
+            attempt += 1
+            do {
+                let list = try await model.receiver.channels(regionId: region, cameras: true)
+                guard region == selected else { return }
+                cameraChannels = list
+            } catch {
+                if Task.isCancelled { return }
+                listError = error.localizedDescription
+                return
+            }
+            if model.receiver.walkFinished(regionId: region, cameras: true) {
+                camerasLoaded = true
+                return
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { return }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 }
@@ -528,19 +583,25 @@ private struct CamerasSection: View {
         VStack(alignment: .leading, spacing: 20) {
             if let index = model.receiver.index {
                 let regions = CameraRegions.ordered(index)
-                Text("\(CameraRegions.total(index).formatted()) cameras in \(regions.count) regions").kjSmall(faint: true)
+                Text(model.receiver.camerasNow.map { "\($0.formatted()) cameras in \(regions.count) regions" } ?? "\u{2026}")
+                    .kjSmall(faint: true)
                     .accessibilityIdentifier("camerasTotal")
                 ForEach(regions) { region in
                     VStack(alignment: .leading, spacing: 8) {
                         HouseRule()
                         Text(region.label).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
                             .accessibilityAddTraits(.isHeader)
-                        if let list = lists[region.id], list.isEmpty {
+                        let live = model.receiver.shown(regionId: region.id, cameras: true)
+                        if model.receiver.walkFinished(regionId: region.id, cameras: true) && live.isEmpty {
                             Text("No cameras here right now.").kjSmall(faint: true)
-                        } else if let list = lists[region.id] {
+                        } else if live.isEmpty && !failed.contains(region.id) {
+                            Text("\u{2026}").kjSmall(faint: true)
+                        } else if failed.contains(region.id) && live.isEmpty {
+                            Text("These cameras did not load.").kjSmall(faint: true)
+                        } else if !live.isEmpty {
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(list) { channel in
-                                    Button { model.tuner.play(channel, in: list) } label: {
+                                ForEach(live) { channel in
+                                    Button { model.tuner.play(channel, in: live) } label: {
                                         ChannelRow(channel: channel)
                                     }
                                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)))
@@ -559,14 +620,33 @@ private struct CamerasSection: View {
                 TuningLoader("Loading the receiver\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
             }
         }
+        .onDisappear {
+            guard let index = model.receiver.index else { return }
+            for region in CameraRegions.ordered(index) {
+                model.receiver.cancelChannels(regionId: region.id, cameras: true)
+            }
+        }
     }
 
     private func load(_ region: String) async {
         guard lists[region] == nil else { return }
-        do {
-            lists[region] = try await model.receiver.channels(regionId: region, cameras: true)
-        } catch {
-            failed.insert(region)
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                _ = try await model.receiver.channels(regionId: region, cameras: true)
+            } catch {
+                if Task.isCancelled { return }
+                failed.insert(region)
+                return
+            }
+            let rows = model.receiver.shown(regionId: region, cameras: true)
+            if ReceiverRules.assignCameraList(shown: rows.map(\.id), walkFinished: model.receiver.walkFinished(regionId: region, cameras: true)) != nil {
+                lists[region] = rows
+                return
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { return }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 }

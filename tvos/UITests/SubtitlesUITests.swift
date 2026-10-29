@@ -148,8 +148,12 @@ final class SubtitlesUITests: XCTestCase {
         kjLaunch(app, autoplay: true)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 90), "opening Receiver presents a tuning player without Select")
+        let surface = app.buttons["playerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 20), "the cover's surface is up")
+        XCTAssertTrue(waitFor(20) { surface.hasFocus }, "the cover's surface has focus")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(app.buttons["shuffle"].waitForExistence(timeout: 10))
+        // Menu dismisses the cover on the main actor. Three seconds covers the animation.
         kjPause(3)
         XCTAssertFalse(state.exists, "dismissing the player does not surf again")
     }

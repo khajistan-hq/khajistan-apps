@@ -39,6 +39,16 @@ struct ReceiverPlayerView: View {
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
     @State private var guideRow: Int?
+    /// Rows in this visit that failed to play. The skip does not return to them, and the guide hides them.
+    @State private var failedIDs: Set<String> = []
+    /// The tune in flight, so a failure withdraws that id only while its ticket is still current.
+    @State private var tuneStamp: (id: String, ticket: Int)?
+    /// The row whose probe the viewer just asked for. A resolve miss in that window must not skip it.
+    @State private var confirmingID: String?
+    /// A skipped probe. The row stays on the dial.
+    @State private var keepOnDial = false
+    /// Replay after a failure. Cancelled when the screen stops, when health ages out, and when the view goes.
+    @State private var replay: Task<Void, Never>?
     private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
@@ -48,6 +58,12 @@ struct ReceiverPlayerView: View {
     private var controller: PlayerController { aIsFront ? playerA : playerB }
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
+
+    /// The shelf still worth showing: not failed, and still on the dial. A liked row that has
+    /// gone dead is not in here.
+    private var dial: [Channel] {
+        list.filter { !failedIDs.contains($0.id) && model.receiver.lists($0) }
+    }
 
     init(channel: Channel, list: [Channel]) {
         self.list = list
@@ -82,7 +98,8 @@ struct ReceiverPlayerView: View {
             // through to here and captions could not be turned on (owner, 2026-10-06).
             Button {
                 if let guideRow {
-                    pick(list[guideRow])
+                    let rows = dial
+                    if rows.indices.contains(guideRow) { pick(rows[guideRow]) }
                     return
                 }
                 switch armed {
@@ -97,6 +114,7 @@ struct ReceiverPlayerView: View {
             .buttonStyle(SurfaceButtonStyle())
             .focused($focus, equals: .surface)
             .defaultFocus($focus, .surface)
+            .accessibilityIdentifier("playerSurface")
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
@@ -107,8 +125,8 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
             overlay(palette)
-            if let guideRow {
-                ReceiverGuide(list: list, current: current, lit: guideRow)
+            if let guideRow, !dial.isEmpty {
+                ReceiverGuide(list: dial, current: current, lit: min(guideRow, dial.count - 1))
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
             CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
@@ -119,9 +137,10 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             wake()
             if let row = guideRow {
+                let count = max(dial.count, 1)
                 switch direction {
-                case .up: guideRow = (row - 1 + list.count) % list.count
-                case .down: guideRow = (row + 1) % list.count
+                case .up: guideRow = (row - 1 + count) % count
+                case .down: guideRow = (row + 1) % count
                 case .left: closeGuide()
                 default: break
                 }
@@ -140,7 +159,27 @@ struct ReceiverPlayerView: View {
             case .playing, .tuning:
                 pauseReceiver()
             case .idle, .paused, .failed:
-                if destination != nil { pauseReceiver() } else { tune(current) }
+                if destination != nil {
+                    pauseReceiver()
+                } else if case .failed = controller.state {
+                    // Replay probes that row again, the way the phone does, and stays if the viewer has moved on.
+                    failedIDs.remove(current.id)
+                    let channel = current
+                    confirmingID = channel.id
+                    replay?.cancel()
+                    let epoch = model.receiver.playbackEpoch
+                    replay = Task {
+                        let live = await model.receiver.confirm(channel)
+                        guard !Task.isCancelled else { return }
+                        if confirmingID == channel.id { confirmingID = nil }
+                        guard live, !Task.isCancelled else { return }
+                        guard model.receiver.playbackEpoch == epoch else { return }
+                        guard destination == nil, current.id == channel.id else { return }
+                        tune(channel)
+                    }
+                } else {
+                    tune(current)
+                }
             }
             wake()
         }
@@ -158,7 +197,15 @@ struct ReceiverPlayerView: View {
             stopEverything()
             dismiss()
         }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) { _, new in
+            wake()
+            // A channel change keeps the old picture up until the cut. Its failure must not
+            // withdraw the channel the viewer just asked for.
+            guard destination == nil || tuneStamp?.id == current.id else { return }
+            if case .failed = new, let tune = tuneStamp, tune.id == current.id, confirmingID != tune.id {
+                skipFailed(id: tune.id, ticket: tune.ticket)
+            }
+        }
         .task {
             await open()
             #if DEBUG
@@ -174,6 +221,14 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
+        .onChange(of: model.receiver.playbackEpoch) { previous, epoch in
+            // Same value, including the one this cover opened on. Stopping here
+            // cancels the tune while the cover is still coming up: Menu then
+            // lands on the front, and the player stays.
+            guard epoch != previous else { return }
+            stopEverything()
+            dismiss()
+        }
         .onDisappear { stopEverything() }
     }
 
@@ -229,7 +284,7 @@ struct ReceiverPlayerView: View {
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
-        case .failed(let message): return message + " Press Down for the next channel."
+        case .failed(let message): return message
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
@@ -255,7 +310,7 @@ struct ReceiverPlayerView: View {
         HStack(spacing: 14) {
             captionsControl
             likeControl
-            if list.count > 1 { guideControl }
+            if dial.count > 1 { guideControl }
         }
     }
 
@@ -271,10 +326,10 @@ struct ReceiverPlayerView: View {
     }
 
     private func openGuide() {
-        guard list.count > 1 else { return }
+        guard dial.count > 1 else { return }
         hideTask?.cancel()
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-            guideRow = list.firstIndex { $0.id == (destination ?? current).id } ?? 0
+            guideRow = dial.firstIndex { $0.id == (destination ?? current).id } ?? 0
         }
     }
 
@@ -319,7 +374,7 @@ struct ReceiverPlayerView: View {
         switch armed {
         case nil: armed = .captions
         case .captions: armed = .like
-        case .like: if list.count > 1 { armed = .guide }
+        case .like: if dial.count > 1 { armed = .guide }
         case .guide: break
         }
     }
@@ -389,8 +444,10 @@ struct ReceiverPlayerView: View {
     /// change, on the one behind it, silent until the cut. A tuning the viewer has already moved
     /// on from is cancelled and says nothing.
     private func tune(_ target: Channel, behind: Bool = false) {
+        keepOnDial = false
         tuneTask?.cancel()
         let ticket = tuneIntent.begin()
+        tuneStamp = (id: target.id, ticket: ticket)
         let player = behind ? incoming : controller
         player.stop()
         player.holdsSound = behind
@@ -417,9 +474,36 @@ struct ReceiverPlayerView: View {
             } catch {
                 if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                let withdraw = (error as? ReceiverStoreError)?.withdraws ?? true
+                if !withdraw { keepOnDial = true }
                 player.state = .failed(PlayerController.unreachable)
+                // The viewer just asked for this row, and a probe of it is still the request.
+                // A resolve miss in that window must not skip it. A skipped probe stays on the dial.
+                guard withdraw else { return }
+                guard confirmingID != target.id else { return }
+                guard destination == nil || tuneStamp?.id == current.id else { return }
+                guard !behind || target.id == current.id else { return }
+                skipFailed(id: target.id, ticket: ticket)
             }
         }
+    }
+
+    /// Moves on only for the tune that failed. A newer tune means the viewer has moved on:
+    /// that row is not withdrawn and the new tune is not cancelled.
+    private func skipFailed(id: String, ticket: Int) {
+        guard !keepOnDial else { return }
+        guard tuneIntent.admits(ticket) else { return }
+        guard confirmingID != id else { return }
+        guard destination == nil || tuneStamp?.id == current.id else { return }
+        guard id == current.id else { return }
+        guard !failedIDs.contains(id) else { return }
+        failedIDs.insert(id)
+        model.receiver.withdraw(id)
+        guard let next = ReceiverRules.nextLive(after: id, in: list, excluding: failedIDs) else { return }
+        guard tuneIntent.admits(ticket) else { return }
+        destination = next
+        changeTask?.cancel()
+        changeTask = Task { await change(to: next) }
     }
 
     /// The dancer: radio, not reverent, and not for a viewer who has asked for less motion (who
@@ -432,8 +516,15 @@ struct ReceiverPlayerView: View {
     /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
         let from = destination ?? current
-        guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
-        let target = list[(position + delta + list.count) % list.count]
+        let order = dial
+        let target: Channel
+        if let position = order.firstIndex(where: { $0.id == from.id }), order.count > 1 {
+            target = order[(position + delta + order.count) % order.count]
+        } else if let fallback = delta >= 0 ? order.first : order.last, fallback.id != from.id {
+            target = fallback
+        } else {
+            return
+        }
         destination = target
         changeTask?.cancel()
         changeTask = Task { await change(to: target) }
@@ -479,8 +570,12 @@ struct ReceiverPlayerView: View {
             case .playing, .failed:
                 // Ready: cut now, with the bird flying on over the new picture (owner,
                 // 2026-10-07). Waiting for the wing to cover the cut cost ~4 s a press.
+                let failed = next.state.isFailed
                 cut(to: target, from: outgoing, into: next, tookSince: started)
                 await quiet
+                if failed, let tune = tuneStamp, tune.id == target.id {
+                    skipFailed(id: tune.id, ticket: tune.ticket)
+                }
                 return
             default:
                 // Still tuning and the bird has gone: cut now. One press is one flight, never a
@@ -534,9 +629,13 @@ struct ReceiverPlayerView: View {
         model.pigeon.clear()
     }
 
-    /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
+    /// Everything this screen started: the tuning, the wipe, the timer, the signal, the clip, and a replay probe.
     private func stopEverything() {
         guideRow = nil
+        if let replay {
+            replay.cancel()
+            self.replay = nil
+        }
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()

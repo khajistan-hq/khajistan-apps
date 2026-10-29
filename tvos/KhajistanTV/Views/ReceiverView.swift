@@ -35,6 +35,9 @@ struct ReceiverView: View {
         .fullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list)
         }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            shuffled = nil
+        }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         .task(id: AutomaticOpening(active: model.section == .receiver, ready: model.receiver.index != nil)) {
@@ -127,12 +130,12 @@ struct ReceiverView: View {
             surf
             Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
                 GridRow {
-                    Figure(label: "Live now", value: figure(index.totals.live))
-                    Figure(label: "Television", value: figure(index.totals.byMedium["tv"]))
+                    Figure(label: "Live now", value: model.receiver.liveNow.map { $0.formatted() } ?? "\u{2026}")
+                    Figure(label: "Television", value: model.receiver.televisionNow.map { $0.formatted() } ?? "\u{2026}")
                 }
                 GridRow {
-                    Figure(label: "Radio", value: figure(index.totals.byMedium["radio"]))
-                    Figure(label: "Cameras", value: figure(index.totals.byMedium["camera"]))
+                    Figure(label: "Radio", value: model.receiver.radioNow.map { $0.formatted() } ?? "\u{2026}")
+                    Figure(label: "Cameras", value: model.receiver.camerasNow.map { $0.formatted() } ?? "\u{2026}")
                 }
             }
             HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: extendedBinding)
@@ -250,6 +253,20 @@ struct ReceiverView: View {
                 return
             }
         }
+        // The three draws were empty. Stay inside the same scope, and only use a signal already verified.
+        guard !Task.isCancelled else { return }
+        for region in index.listedRegions where scope.includes(tier: region.tier) {
+            let pool = model.receiver.verifiedChannels(regionId: region.id, medium: medium.rawValue)
+            guard !Task.isCancelled else { return }
+            if let ticket = automaticTicket {
+                guard openingPlayback.admits(ticket), model.section == .receiver,
+                      model.receiverPath.isEmpty, (model.link == nil || model.link == .receiver), shuffled == nil else { return }
+            }
+            if let channel = pool.randomElement() {
+                shuffled = ShufflePick(channel: channel, list: pool)
+                return
+            }
+        }
         surfNote = "Nothing to surf there right now."
     }
 
@@ -261,7 +278,7 @@ struct ReceiverView: View {
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("Cameras", count: "\(CameraRegions.total(index).formatted()) in \(regions.count) regions") {
+            Shelf("Cameras", count: model.receiver.camerasNow.map { "\($0.formatted()) in \(regions.count) regions" } ?? "\u{2026}") {
                 ForEach(regions) { region in
                     Button {
                         openingPlayback.manualInteraction()
@@ -272,8 +289,11 @@ struct ReceiverView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(region.label).kjName().lineLimit(2)
                                 Spacer(minLength: 0)
-                                if let count = index.regionCounts[region.id]?.byMedium["camera"] {
+                                if model.receiver.walkFinished(regionId: region.id, cameras: true) {
+                                    let count = model.receiver.shown(regionId: region.id, cameras: true).count
                                     Text("\(count.formatted()) \(count == 1 ? "camera" : "cameras")").kjSmall(faint: true)
+                                } else {
+                                    Text("\u{2026}").kjSmall(faint: true)
                                 }
                             }
                         }
@@ -339,6 +359,8 @@ struct ReceiverView: View {
         await model.receiver.loadIndex()
         if Task.isCancelled { return }
         guard model.receiver.index != nil else { return }
+        // The count walks every region. The map and Surf must not wait for that walk.
+        model.receiver.watchHealthClock()
         await loadMap()
     }
 
@@ -375,6 +397,7 @@ private struct AtlasPanel: View {
     let mapError: String?
     let failure: (String) -> AnyView
     let open: (MapRegion) -> Void
+    @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -383,7 +406,8 @@ private struct AtlasPanel: View {
                 failure(mapError)
             } else if let composed {
                 VStack(alignment: .leading, spacing: 24) {
-                    RegionMapView(map: composed, highlighted: focusedRegion)
+                    RegionMapView(map: composed, highlighted: focusedRegion,
+                                  liveCount: { model.receiver.regionLiveCount(regionId: $0) })
                         .frame(height: 600)
                     regionStrip(composed)
                 }
@@ -429,15 +453,15 @@ private struct AtlasPanel: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(region.label).kjKicker()
-                            if let live = region.live {
-                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
-                            }
+                            Text(ReceiverRules.regionLiveFigure(verified: model.receiver.regionLiveCount(regionId: region.id)))
+                                .kjSmall(faint: true).monospacedDigit()
                         }
                     }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
                     .focused($focusedRegion, equals: region.id)
                     .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                    .accessibilityLabel(ReceiverRules.regionChipAccessibility(label: region.label,
+                        verified: model.receiver.regionLiveCount(regionId: region.id)))
                     // A chip mostly scrolled under the sidebar is not drawn: its label went first
                     // and left its count ("44") standing alone at the edge. A quarter out is still
                     // drawn, so the first chip's pulled-back plate at rest is untouched. Resting

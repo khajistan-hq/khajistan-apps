@@ -166,6 +166,14 @@ final class ReceiverProbe: @unchecked Sendable {
         commit(id, live: nil, generation: gen, now: Date())
     }
 
+    /// Drops every remembered verdict. A stale flip calls this so the next probe is a real read.
+    func dropMemory() {
+        lock.lock()
+        cache.removeAll()
+        generation.removeAll()
+        lock.unlock()
+    }
+
     /// Probes `channels`. `found` runs as soon as one row passes, not after the whole list.
     /// `bypassCache` reads the network even when a recent verdict is remembered.
     func verify(_ channels: [Channel], bypassCache: Bool = false,
@@ -276,15 +284,25 @@ final class ReceiverProbe: @unchecked Sendable {
         case .go:
             break
         }
-        let read = await bounded(carrier, hls: hls, session: session)
+        var read = await bounded(carrier, hls: hls, session: session)
+        if let variant = read.variant {
+            // A master is not live until its first media playlist passes the same test.
+            read = await bounded(variant, hls: true, session: session)
+        }
         let throttled = read.status == 403 || read.status == 429
         gate.finish(host: host, throttled: throttled)
         if Task.isCancelled { return .skipped }
         return ReceiverRules.probeMark(status: read.status, skipped: throttled, bodyLive: read.live)
     }
 
-    private static func bounded(_ url: URL, hls: Bool, session: URLSession) async -> (status: Int?, live: Bool) {
-        await withTaskGroup(of: (Int?, Bool)?.self) { group in
+    private struct Read {
+        var status: Int?
+        var live: Bool
+        var variant: URL?
+    }
+
+    private static func bounded(_ url: URL, hls: Bool, session: URLSession) async -> Read {
+        await withTaskGroup(of: Read?.self) { group in
             group.addTask { await read(url, hls: hls, session: session) }
             group.addTask {
                 try? await Task.sleep(for: .seconds(timeout))
@@ -292,18 +310,20 @@ final class ReceiverProbe: @unchecked Sendable {
             }
             let first = await group.next() ?? nil
             group.cancelAll()
-            return first ?? (nil, false)
+            return first ?? Read(status: nil, live: false, variant: nil)
         }
     }
 
-    private static func read(_ url: URL, hls: Bool, session: URLSession) async -> (Int?, Bool) {
+    private static func read(_ url: URL, hls: Bool, session: URLSession) async -> Read {
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
         do {
             let (bytes, response) = try await session.bytes(for: request)
             defer { bytes.task.cancel() }
-            guard let http = response as? HTTPURLResponse else { return (nil, false) }
-            if http.statusCode == 403 || http.statusCode == 429 { return (http.statusCode, false) }
+            guard let http = response as? HTTPURLResponse else { return Read(status: nil, live: false, variant: nil) }
+            if http.statusCode == 403 || http.statusCode == 429 {
+                return Read(status: http.statusCode, live: false, variant: nil)
+            }
             let type = http.mimeType ?? http.value(forHTTPHeaderField: "Content-Type")
             let playlist = hls || url.path.lowercased().contains(".m3u8")
                 || (type ?? "").lowercased().contains("mpegurl") || (type ?? "").lowercased().contains("m3u8")
@@ -322,11 +342,20 @@ final class ReceiverProbe: @unchecked Sendable {
             }
             let sawEnd = playlist && data.range(of: endTag) != nil
             let truncated = playlist && hitCap && !sawEnd
+            let bodyEnded = !hitCap && !Task.isCancelled
+            if playlist, ReceiverRules.isMasterPlaylist(data),
+               let variant = ReceiverRules.firstVariantURL(in: data, relativeTo: url) {
+                return Read(status: http.statusCode, live: false, variant: variant)
+            }
+            let icy = http.allHeaderFields.keys.contains { "\($0)".lowercased().hasPrefix("icy-") }
+            let length = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
+            let chunked = (http.value(forHTTPHeaderField: "Transfer-Encoding") ?? "").lowercased().contains("chunked")
+            let signal = ReceiverRules.StreamSignal(icy: icy, contentLength: length, chunked: chunked, bodyEnded: bodyEnded)
             let live = ReceiverRules.responseIsLive(status: http.statusCode, contentType: type, body: data, hls: playlist,
-                                                     playlistTruncated: truncated)
-            return (http.statusCode, live)
+                                                     playlistTruncated: truncated, signal: signal)
+            return Read(status: http.statusCode, live: live, variant: nil)
         } catch {
-            return (nil, false)
+            return Read(status: nil, live: false, variant: nil)
         }
     }
 }

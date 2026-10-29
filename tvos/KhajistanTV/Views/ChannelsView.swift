@@ -78,6 +78,9 @@ struct ChannelsView: View {
         .fullScreenCover(item: $playing) { choice in
             ReceiverPlayerView(channel: choice.channel, list: choice.list)
         }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            playing = nil
+        }
     }
 
     private var header: some View {

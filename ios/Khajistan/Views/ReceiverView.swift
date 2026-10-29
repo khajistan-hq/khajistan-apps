@@ -45,6 +45,10 @@ struct ReceiverView: View {
         .onChange(of: model.tab) { _, tab in
             if tab != .receiver { model.tuner.receiverClosed() }
         }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            model.tuner.stop()
+            fullScreen = false
+        }
         .fullScreenCover(isPresented: $fullScreen) {
             Group {
                 if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }

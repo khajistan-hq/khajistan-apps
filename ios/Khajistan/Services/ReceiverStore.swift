@@ -38,6 +38,8 @@ final class ReceiverStore {
     private(set) var camerasNow: Int?
     /// Bumped when rows appear, when one is withdrawn, or when the health clock moves.
     private(set) var dialGeneration = 0
+    /// Bumped when health ages out, so a channel that was playing stops until a new probe.
+    private(set) var playbackEpoch = 0
 
     @ObservationIgnored private var extendedShapes: RegionShapes?
     @ObservationIgnored private var denylistFile: Denylist?
@@ -136,12 +138,12 @@ final class ReceiverStore {
 
     /// The channels of one region the receiver may offer, after probing them. `cameras` picks the
     /// camera shard. Rows appear on `shown` as each probe succeeds. Cancelling the caller stops the walk.
-    func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
+    func channels(regionId: String, cameras: Bool, bypassProbeCache: Bool = false) async throws -> [Channel] {
         let key = cameras ? regionId + "-camera" : regionId
         if let existing = channelLoads[key] { return try await existing.value }
         let token = (loadToken[key] ?? 0) + 1
         loadToken[key] = token
-        let task = Task { try await self.loadChannels(regionId: regionId, cameras: cameras, key: key, token: token) }
+        let task = Task { try await self.loadChannels(regionId: regionId, cameras: cameras, key: key, token: token, bypassProbeCache: bypassProbeCache) }
         channelLoads[key] = task
         defer { if channelLoads[key] == task { channelLoads[key] = nil } }
         return try await withTaskCancellationHandler {
@@ -259,6 +261,7 @@ final class ReceiverStore {
     /// Fresh health has aged out. Nothing verified under it may stay, and the next fresh file
     /// has to be probed again before a row can show.
     private func clearSession() {
+        let open = ReceiverRules.regionsToReprobe(Set(offerings.keys).union(walksFinished))
         probeEpoch += 1
         verified = []
         offerings = [:]
@@ -267,6 +270,18 @@ final class ReceiverStore {
         radioNow = nil
         camerasNow = nil
         liveNow = nil
+        playbackEpoch += 1
+        for key in open {
+            channelLoads[key]?.cancel()
+            channelLoads[key] = nil
+            loadToken[key] = (loadToken[key] ?? 0) + 1
+        }
+        probe.dropMemory()
+        for key in open {
+            let cameras = key.hasSuffix("-camera")
+            let regionId = cameras ? String(key.dropLast("-camera".count)) : key
+            Task { _ = try? await self.channels(regionId: regionId, cameras: cameras, bypassProbeCache: true) }
+        }
     }
 
     /// Verified rows for one region once its walks have finished. Nil until then, so the chip
@@ -287,7 +302,7 @@ final class ReceiverStore {
         return min(max(remain + 0.5, 1), 30)
     }
 
-    private func loadChannels(regionId: String, cameras: Bool, key: String, token: Int) async throws -> [Channel] {
+    private func loadChannels(regionId: String, cameras: Bool, key: String, token: Int, bypassProbeCache: Bool = false) async throws -> [Channel] {
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
         let epoch = probeEpoch
         let raw = try await rawChannels(regionId: regionId, cameras: cameras, key: key, index: index)
@@ -318,7 +333,7 @@ final class ReceiverStore {
             return shown(regionId: regionId, cameras: cameras)
         }
         #endif
-        _ = await probe.verify(candidates) { [weak self] id in
+        _ = await probe.verify(candidates, bypassCache: bypassProbeCache) { [weak self] id in
             await self?.reveal(id, key: key, token: token, raw: raw, epoch: epoch)
         }
         guard !Task.isCancelled, loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
@@ -338,15 +353,11 @@ final class ReceiverStore {
             return
         }
         var rows = offerings[key] ?? []
-        guard !rows.contains(where: { $0.id == id }) else {
-            publishCounts()
-            return
-        }
+        guard !rows.contains(where: { $0.id == id }) else { return }
         rows.append(channel)
         rows.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         offerings[key] = rows
         dialGeneration += 1
-        publishCounts()
     }
 
     /// Each medium is published only after a walk of that medium has finished.
@@ -358,10 +369,8 @@ final class ReceiverStore {
         var cameras = 0
         var sawBroadcast = false
         var sawCameras = false
-        for (key, rows) in offerings {
-            let finished = walksFinished.contains(key)
+        for (key, rows) in offerings where ReceiverRules.countsTowardFigure(key: key, finished: walksFinished) {
             let listed = rows.filter { !withdrawn.contains($0.id) && lists($0) }
-            if !finished && listed.isEmpty { continue }
             if key.hasSuffix("-camera") {
                 sawCameras = true
                 cameras += listed.filter { $0.mediaType == "camera" }.count
@@ -482,8 +491,8 @@ final class ReceiverStore {
         async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
         let (denied, suspects, graded) = await (denylist, offAir, health)
-        denylistFile = denied
-        offAirFile = suspects
+        denylistFile = ReceiverRules.keptFeed(denied, previous: denylistFile)
+        offAirFile = ReceiverRules.keptFeed(suspects, previous: offAirFile)
         switch ReceiverRules.controlRefresh(now: now, clock: nil, retryAt: nil, healthArrived: graded != nil) {
         case .replace:
             healthFile = graded

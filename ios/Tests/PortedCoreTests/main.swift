@@ -601,9 +601,67 @@ func regionChipUsesTheVerifiedCount() throws {
     try expectEqual(ReceiverRules.regionPlateLine(verified: 2), "2 LIVE")
 }
 
+func masterPlaylistIsNotLiveUntilItsVariantIs() throws {
+    let master = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)
+    try expect(ReceiverRules.isMasterPlaylist(master))
+    try expect(!ReceiverRules.playlistIsLive(master))
+    let base = try require(URL(string: "https://cdn.example/live/master.m3u8"))
+    try expectEqual(ReceiverRules.firstVariantURL(in: master, relativeTo: base)?.absoluteString,
+                    "https://cdn.example/live/prog.m3u8")
+    let absolute = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nhttps://cdn.example/a/media.m3u8\n".utf8)
+    try expectEqual(ReceiverRules.firstVariantURL(in: absolute, relativeTo: base)?.absoluteString,
+                    "https://cdn.example/a/media.m3u8")
+    let ended = Data("#EXTM3U\n#EXTINF:4,\nseg.ts\n#EXT-X-ENDLIST\n".utf8)
+    try expect(!ReceiverRules.playlistIsLive(ended))
+    try expect(!ReceiverRules.playlistIsLive(ended, truncated: true))
+    let live = Data("#EXTM3U\n#EXTINF:4,\nseg.ts\n".utf8)
+    try expect(ReceiverRules.playlistIsLive(live))
+    try expect(!ReceiverRules.playlistIsLive(live, truncated: true))
+}
+
+func finiteMediaIsNotALiveMount() throws {
+    let bytes = Data([0xff, 0xfb])
+    try expect(!ReceiverRules.nonHLSIsLive(.init(contentLength: 1_000_000)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init(bodyEnded: true)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init(contentLength: 320, chunked: true)))
+    try expect(ReceiverRules.nonHLSIsLive(.init(icy: true, contentLength: 1_000_000)))
+    try expect(ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false)))
+    try expect(ReceiverRules.nonHLSIsLive(.init(bodyEnded: false)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init()))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: bytes, hls: false,
+                                             signal: .init(contentLength: 8000)))
+    try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: bytes, hls: false,
+                                            signal: .init(chunked: true, bodyEnded: false)))
+}
+
+func staleFlipDropsProbeMemoryAndReopensTheWalks() throws {
+    var memory = ReceiverRules.ProbeMemory()
+    memory.remember("a", live: false)
+    try expect(memory.blocks("a"))
+    try expect(ReceiverRules.clearSessionAfterFreshnessFlip(wasFresh: true, isFresh: false))
+    memory.drop()
+    try expect(!memory.blocks("a"), "a remembered failure must not block the probe after a stale flip")
+    let open: Set<String> = ["indus", "indus-camera"]
+    try expectEqual(ReceiverRules.regionsToReprobe(open), open)
+}
+
+func aFailedFeedKeepsThePreviousCopy() throws {
+    try expectEqual(ReceiverRules.keptFeed("new", previous: "old"), "new")
+    try expectEqual(ReceiverRules.keptFeed(nil as String?, previous: "old"), "old")
+    try expectEqual(ReceiverRules.keptFeed(nil as String?, previous: nil), nil)
+}
+
+func figuresPublishOnlyAfterTheWalkFinishes() throws {
+    let finished: Set<String> = ["indus"]
+    try expect(ReceiverRules.countsTowardFigure(key: "indus", finished: finished))
+    try expect(!ReceiverRules.countsTowardFigure(key: "makran", finished: finished),
+               "a walk still in its first wave, retries included, is not a published count")
+}
+
 func playlistCheckAndHealthStamp() throws {
     try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n".utf8)))
-    try expect(ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)),
+               "a master is not live until its media playlist is read")
     try expect(ReceiverRules.playlistIsLive(Data("\u{FEFF}#EXTM3U\n#EXTINF:2,\n".utf8)))
     try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n".utf8)),
                "an ended playlist is not live, even with segments")
@@ -616,7 +674,10 @@ func playlistCheckAndHealthStamp() throws {
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/json", body: Data("{}".utf8), hls: false))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data("<!DOCTYPE html>".utf8), hls: false))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: nil, body: Data("abc".utf8), hls: false))
-    try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false),
+               "a media body with no stream signal is a file")
+    try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false,
+                                            signal: .init(icy: true)))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
                                              body: Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8), hls: true))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
@@ -2487,6 +2548,11 @@ let tests: [(String, () throws -> Void)] = [
     ("A host retry stays inside the walk", hostRetryStaysInsideTheWalk),
     ("An end tag past the first block is not live", playlistEndListPastTheFirstBlockIsNotLive),
     ("A region chip uses the verified count", regionChipUsesTheVerifiedCount),
+    ("A master playlist is not live until its variant is", masterPlaylistIsNotLiveUntilItsVariantIs),
+    ("A finite media file is not a live mount", finiteMediaIsNotALiveMount),
+    ("A stale flip drops probe memory and reopens the walks", staleFlipDropsProbeMemoryAndReopensTheWalks),
+    ("A failed feed keeps the previous copy", aFailedFeedKeepsThePreviousCopy),
+    ("Figures publish only after the walk finishes", figuresPublishOnlyAfterTheWalkFinishes),
     ("Playlist check and health stamp", playlistCheckAndHealthStamp),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

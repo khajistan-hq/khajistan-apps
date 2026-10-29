@@ -295,6 +295,25 @@ enum ReceiverRules {
         wasFresh && !isFresh
     }
 
+    /// Walks that were on screen when health aged out. Each is probed again, and the old verdicts are dropped.
+    static func regionsToReprobe(_ keys: Set<String>) -> Set<String> { keys }
+
+    /// A published figure counts a walk only after that walk has finished.
+    static func countsTowardFigure(key: String, finished: Set<String>) -> Bool {
+        finished.contains(key)
+    }
+
+    /// Session probe memory. A stale flip drops it, or a remembered failure would block the new probe.
+    struct ProbeMemory: Equatable {
+        private var values: [String: Bool] = [:]
+        mutating func remember(_ id: String, live: Bool) { values[id] = live }
+        mutating func drop() { values.removeAll() }
+        func blocks(_ id: String) -> Bool { values[id] != nil }
+    }
+
+    /// A feed that failed to load leaves the previous copy in place.
+    static func keptFeed<T>(_ fetched: T?, previous: T?) -> T? { fetched ?? previous }
+
     /// A 403 or 429 is retried inside the walk that asked, and a cancelled walk does not retry.
     static func awaitHostRetry(skipped: Int, retriesLeft: Int, cancelled: Bool) -> Bool {
         skipped > 0 && retriesLeft > 0 && !cancelled
@@ -372,35 +391,85 @@ enum ReceiverRules {
         return nil
     }
 
-    /// An HLS playlist is live when it has a segment or a variant stream and has not ended.
-    /// A header alone is not enough. `#EXT-X-ENDLIST` is not live, with or without segments,
+    /// An HLS playlist is live when it has a segment and has not ended.
+    /// A header alone is not enough. A master (`#EXT-X-STREAM-INF` and no segment) is not live
+    /// until its media playlist is read. `#EXT-X-ENDLIST` is not live, with or without segments,
     /// wherever it sits in the body. `truncated` means the read stopped before the playlist
     /// ended, so an end tag may still be coming: that body is not live.
     static func playlistIsLive(_ data: Data, truncated: Bool = false) -> Bool {
         if truncated { return false }
-        let slice = data.prefix(playlistReadCap)
-        guard let text = String(data: slice, encoding: .utf8)
-                ?? String(data: slice, encoding: .isoLatin1) else { return false }
-        let cleaned = text.replacingOccurrences(of: "\u{FEFF}", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let cleaned = playlistText(data) else { return false }
         guard cleaned.hasPrefix("#EXTM3U") else { return false }
-        let segment = cleaned.contains("#EXTINF") || cleaned.contains("#EXT-X-BYTERANGE") || cleaned.contains("#EXT-X-MAP")
-        let variant = cleaned.contains("#EXT-X-STREAM-INF")
-        // A playlist that has ended is not a live signal, even if it still lists segments.
         if cleaned.contains("#EXT-X-ENDLIST") { return false }
-        return segment || variant
+        if isMasterPlaylist(cleaned) { return false }
+        let segment = cleaned.contains("#EXTINF") || cleaned.contains("#EXT-X-BYTERANGE") || cleaned.contains("#EXT-X-MAP")
+        return segment
     }
 
-    /// What a probe may treat as a live body. 403 is refused. HLS must be a real playlist.
-    /// Anything else needs a media content type, and an HTML or JSON body is not a stream.
-    static func responseIsLive(status: Int, contentType: String?, body: Data, hls: Bool, playlistTruncated: Bool = false) -> Bool {
+    /// A master names variants and carries no segments. The first variant is the one to read.
+    static func isMasterPlaylist(_ data: Data) -> Bool {
+        guard let cleaned = playlistText(data) else { return false }
+        return isMasterPlaylist(cleaned)
+    }
+
+    /// The first variant in a master, resolved against the master URL. Nil when there is none.
+    static func firstVariantURL(in data: Data, relativeTo base: URL) -> URL? {
+        guard let cleaned = playlistText(data) else { return nil }
+        var after = false
+        for raw in cleaned.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#EXT-X-STREAM-INF") { after = true; continue }
+            guard after else { continue }
+            if line.isEmpty || line.hasPrefix("#") { continue }
+            return URL(string: line, relativeTo: base)?.absoluteURL
+        }
+        return nil
+    }
+
+    private static func isMasterPlaylist(_ cleaned: String) -> Bool {
+        let segment = cleaned.contains("#EXTINF") || cleaned.contains("#EXT-X-BYTERANGE") || cleaned.contains("#EXT-X-MAP")
+        return cleaned.contains("#EXT-X-STREAM-INF") && !segment
+    }
+
+    private static func playlistText(_ data: Data) -> String? {
+        let slice = data.prefix(playlistReadCap)
+        guard let text = String(data: slice, encoding: .utf8)
+                ?? String(data: slice, encoding: .isoLatin1) else { return nil }
+        return text.replacingOccurrences(of: "\u{FEFF}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A non-HLS body is a live mount only with a positive stream signal.
+    /// ICY metadata is one. No content length, while the body is still open and chunked or
+    /// streaming, is the other. A bounded content length, or a body that has already ended, is a file.
+    struct StreamSignal: Equatable {
+        var icy: Bool = false
+        var contentLength: Int? = nil
+        var chunked: Bool = false
+        /// True when the body finished. The default is a finished body, so a caller that
+        /// names no stream signal does not pass.
+        var bodyEnded: Bool = true
+    }
+
+    static func nonHLSIsLive(_ signal: StreamSignal) -> Bool {
+        if signal.icy { return true }
+        if signal.contentLength != nil { return false }
+        if signal.bodyEnded { return false }
+        // No length, and the body was still open: chunked or a raw stream.
+        return signal.chunked || !signal.bodyEnded
+    }
+
+    /// What a probe may treat as a live body. 403 is refused. HLS must be a real media playlist.
+    /// Anything else needs a media content type and a stream signal, and an HTML or JSON body is not a stream.
+    static func responseIsLive(status: Int, contentType: String?, body: Data, hls: Bool,
+                               playlistTruncated: Bool = false, signal: StreamSignal = StreamSignal()) -> Bool {
         if status == 403 || !(200..<300).contains(status) { return false }
         if hls { return playlistIsLive(body, truncated: playlistTruncated) }
         let type = (contentType ?? "").lowercased()
         if type.contains("text/html") || type.contains("application/json") || type.contains("text/json") { return false }
         if markupOrJSON(body) { return false }
         guard mediaContentType(type), !body.isEmpty else { return false }
-        return true
+        return nonHLSIsLive(signal)
     }
 
     private static func mediaContentType(_ type: String) -> Bool {

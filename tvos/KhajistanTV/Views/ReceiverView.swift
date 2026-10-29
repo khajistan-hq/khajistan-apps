@@ -35,6 +35,9 @@ struct ReceiverView: View {
         .fullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list)
         }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            shuffled = nil
+        }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         .task(id: AutomaticOpening(active: model.section == .receiver, ready: model.receiver.index != nil)) {

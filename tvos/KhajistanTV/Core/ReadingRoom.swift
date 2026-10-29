@@ -166,8 +166,13 @@ enum RRCatalogue {
         editionLanguages.contains((label ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
     }
 
-    private static func firstMatch(_ pattern: String, in text: String, options: NSRegularExpression.Options = []) -> [String?]? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else { return nil }
+    // Compiled once: building the shelf runs these over every row of the feed, and compiling a
+    // pattern per call was most of what the title building cost.
+    private static let labelledTitle = try! NSRegularExpression(pattern: #"^(.*?)\s*\((.+)\)\s*$"#)
+    private static let partTitle = try! NSRegularExpression(pattern: #"^(.*?),\s*(part\s+\S+)\s*$"#, options: [.caseInsensitive])
+    private static let nativeRun = try! NSRegularExpression(pattern: "[\u{0600}-\u{06FF}][^()]*")
+
+    private static func firstMatch(_ regex: NSRegularExpression, in text: String) -> [String?]? {
         let whole = NSRange(text.startIndex..., in: text)
         guard let match = regex.firstMatch(in: text, options: [], range: whole) else { return nil }
         return (0..<match.numberOfRanges).map { index in
@@ -181,7 +186,7 @@ enum RRCatalogue {
 
     /// rrSplitTitle (:1126): [family, label] only where the title declares its label itself.
     static func splitTitle(_ title: String) -> (base: String, label: String)? {
-        if let m = firstMatch(#"^(.*?)\s*\((.+)\)\s*$"#, in: title), let base = m[1], let label = m[2], !trimmed(base).isEmpty {
+        if let m = firstMatch(labelledTitle, in: title), let base = m[1], let label = m[2], !trimmed(base).isEmpty {
             return (trimmed(base), trimmed(label))
         }
         for separator in [" \u{2014} ", " \u{2013} "] {
@@ -189,7 +194,7 @@ enum RRCatalogue {
                 return (trimmed(String(title[..<range.lowerBound])), trimmed(String(title[range.upperBound...])))
             }
         }
-        if let m = firstMatch(#"^(.*?),\s*(part\s+\S+)\s*$"#, in: title, options: [.caseInsensitive]),
+        if let m = firstMatch(partTitle, in: title),
            let base = m[1], let label = m[2], !trimmed(base).isEmpty {
             return (trimmed(base), trimmed(label))
         }
@@ -330,7 +335,7 @@ enum RRCatalogue {
         if let family = bucket.family {
             native = family.native
         } else {
-            native = firstMatch("[\u{0600}-\u{06FF}][^()]*", in: title)?[0].map(trimmed) ?? ""
+            native = firstMatch(nativeRun, in: title)?[0].map(trimmed) ?? ""
         }
         let name = isEditionLanguage(splitTitle(title)?.label)
             ? trimmed(title)

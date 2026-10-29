@@ -157,16 +157,21 @@ final class ReadingStore {
         // Rights first and awaited, as the site does: the room's figures must not count what the reader cannot open.
         rights = held
         clock("rights")
-        let built = RRCatalogue.titles(from: collections)
-        clock("titles built")
-        titles = built
         // Ranked before the first paint, so a shelf never reorders under the viewer.
-        provenance = await ranks
+        let ranked = await ranks
         clock("provenance")
         let modules = await index
         clock("modules")
-        var shelf = RRRank.ranked(RRShelves.tabs(titles: built, index: modules, rights: rights), provenance: provenance)
-        clock("shelf ranked")
+        // Built off the main thread: a thousand-odd rows grouped, shelved and ranked would hold
+        // the remote's focus still while the room opens.
+        let (built, ordered) = await Task.detached(priority: .userInitiated) {
+            let built = RRCatalogue.titles(from: collections)
+            return (built, RRRank.ranked(RRShelves.tabs(titles: built, index: modules, rights: held), provenance: ranked))
+        }.value
+        clock("titles built and ranked")
+        titles = built
+        provenance = ranked
+        var shelf = ordered
         #if DEBUG
         // UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
         // row, past where a remote walking down the shelf can see it, so the test brings it forward.
@@ -215,19 +220,19 @@ final class ReadingStore {
             for pageNo in 0..<64 {
                 let request = RRAPI.catalogueRequest(offset: pageNo * RRAPI.feedPage)
                 let key = RRShelfDisk.key(request)
-                guard let rows = await fetch(request, fromDevice: fromDevice, decode: { data -> [RRCollection]? in
-                    pages.append((key, data))
-                    return RRAPI.titles(fromFeed: data)
+                guard let (rows, data) = await fetch(request, fromDevice: fromDevice, decode: { data in
+                    RRAPI.titles(fromFeed: data).map { ($0, data) }
                 }) else {
                     failed = true
                     break
                 }
+                pages.append((key, data))
                 all.append(contentsOf: rows)
                 // A short page is the only honest end of the data.
                 if rows.count < RRAPI.feedPage { break }
             }
             if !failed {
-                if !fromDevice { RRShelfDisk.keepFeed(pages) }
+                if !fromDevice { await Task.detached(priority: .utility) { [pages] in RRShelfDisk.keepFeed(pages) }.value }
                 return all
             }
         }
@@ -235,7 +240,7 @@ final class ReadingStore {
     }
 
     private func loadRights(fromDevice: Bool) async -> Set<String>? {
-        await fetch(RRAPI.rightsRequest(), fromDevice: fromDevice, keep: true, decode: RRAPI.slugs(fromRights:))
+        await fetch(RRAPI.rightsRequest(), fromDevice: fromDevice, keep: true, decode: { RRAPI.slugs(fromRights: $0) })
     }
 
     /// data/rr-modules.json. Without the preview password the site answers 401 and the room is one tab of every title.
@@ -244,21 +249,23 @@ final class ReadingStore {
         // Kept per site and per gate state: the index is behind the site password, and a copy read
         // with the password must not stand in once it is gone (nor a test server's for the site's).
         let key = RRShelfDisk.key(request) + " @" + (origin.host ?? "") + (authorization == nil ? " open" : " gated")
-        if fromDevice { return RRShelfDisk.read(key).flatMap(RRModuleIndex.parse) }
+        if fromDevice { return await Task.detached(priority: .userInitiated) { RRShelfDisk.read(key).flatMap(RRModuleIndex.parse) }.value }
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await urlSession.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let index = RRModuleIndex.parse(data) else { return nil }
-        RRShelfDisk.write(data, key)
-        return index
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            guard let index = RRModuleIndex.parse(data) else { return nil }
+            RRShelfDisk.write(data, key)
+            return index
+        }.value
     }
 
     private func loadProvenance(fromDevice: Bool) async -> [String: RRProvenanceRow] {
         var all: [String: RRProvenanceRow] = [:]
         for pageNo in 0..<16 {
             guard let rows = await fetch(RRAPI.provenanceRequest(offset: pageNo * RRAPI.feedPage), fromDevice: fromDevice, keep: true,
-                                         decode: RRProvenance.rows(from:)) else { break }
+                                         decode: { RRProvenance.rows(from: $0) }) else { break }
             for row in rows { all[row.collection_slug] = row }
             if rows.count < RRAPI.feedPage { break }
         }
@@ -266,9 +273,12 @@ final class ReadingStore {
     }
 
     /// `fromDevice` reads the copy kept for this request (nil when there is none); `keep` keeps a
-    /// network answer that decoded, for the shelf's next open.
-    private func fetch<T>(_ request: URLRequest, fromDevice: Bool = false, keep: Bool = false, decode: (Data) -> T?) async -> T? {
-        if fromDevice { return RRShelfDisk.read(RRShelfDisk.key(request)).flatMap(decode) }
+    /// network answer that decoded, for the shelf's next open. Reading, decoding and keeping run off
+    /// the main thread: the catalogue alone is about 3 MB of JSON.
+    private func fetch<T: Sendable>(_ request: URLRequest, fromDevice: Bool = false, keep: Bool = false,
+                                    decode: @escaping @Sendable (Data) -> T?) async -> T? {
+        let key = RRShelfDisk.key(request)
+        if fromDevice { return await Task.detached(priority: .userInitiated) { RRShelfDisk.read(key).flatMap(decode) }.value }
         let asked = ContinuousClock.now
         let name = request.url?.path.split(separator: "/").last.map(String.init) ?? "?"
         let data: Data, response: URLResponse
@@ -283,9 +293,12 @@ final class ReadingStore {
             return nil
         }
         clock("fetch \(name) \(data.count) bytes in \(ContinuousClock.now - asked)")
-        let decoded = decode(data)
+        let decoded = await Task.detached(priority: .userInitiated) { () -> T? in
+            let decoded = decode(data)
+            if keep, decoded != nil { RRShelfDisk.write(data, key) }
+            return decoded
+        }.value
         clock("decoded \(name) \(decoded == nil ? "FAILED" : "ok")")
-        if keep, decoded != nil { RRShelfDisk.write(data, RRShelfDisk.key(request)) }
         return decoded
     }
 
@@ -499,7 +512,7 @@ final class ReadingStore {
     /// The live page numbers of an issue, and the page count they leave (rrLoadPageMap).
     func pageMap(_ issue: RRIssue) async -> (pages: Int, map: [Int]?) {
         let prefix = RRPath.issuePrefix(issue, extra: pad4)
-        let numbers = await fetch(RRAPI.pageNumbersRequest(prefix: prefix), decode: RRAPI.pageNumbers(from:))
+        let numbers = await fetch(RRAPI.pageNumbersRequest(prefix: prefix), decode: { RRAPI.pageNumbers(from: $0) })
         return RRPageMap.resolve(numbers, declared: issue.pages)
     }
 

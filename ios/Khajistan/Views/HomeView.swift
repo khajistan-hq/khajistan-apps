@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// HOME: the masthead, what was opened last on this device, and the rooms the app draws itself.
+/// HOME: the masthead, what was opened last on this device, a shelf for each part of Khajistan,
+/// and the rooms the app draws itself.
 /// Nothing on it is picked by hand or ranked; the website's whole menu is ROOMS. Membership is
 /// offered in the Reading Room itself, on the website's own page, and nowhere else in the app
 /// (owner, 2026-10-07: the Home card was too aggressive).
@@ -18,6 +19,7 @@ struct HomeView: View {
                     if model.reading.phase == .ready { ContinueShelf(fromHome: true) } else { continueText }
                 }
                 upNext
+                HomeShelves()
                 rooms
                 if !recent.isEmpty { recentBlock }
                 Button(kicker: "Every room \u{2192}") { model.tab = .rooms }

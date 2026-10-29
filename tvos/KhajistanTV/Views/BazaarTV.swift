@@ -47,7 +47,7 @@ struct TVBazaar: View {
 }
 
 /// An object on its soft plate, fitted whole, then the price and the name under it.
-private struct TVProductCard: View {
+struct TVProductCard: View {
     static let side: CGFloat = 340
 
     let item: BazaarItem

@@ -96,6 +96,7 @@ struct ReceiverView: View {
                     .padding(.bottom, 12)
                     camerasRow(index)
                     filmsRow
+                    HomeRows()
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)

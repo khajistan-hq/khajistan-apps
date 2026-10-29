@@ -116,7 +116,7 @@ private struct EntryCard: View {
 }
 
 /// A writing: its picture fitted on the soft plate, the date, the title in a serif and its summary.
-private struct PostCard: View {
+struct PostCard: View {
     static let width: CGFloat = 520
 
     let post: MadrassaPost

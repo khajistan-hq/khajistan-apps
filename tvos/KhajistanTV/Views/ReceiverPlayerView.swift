@@ -204,6 +204,7 @@ struct ReceiverPlayerView: View {
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
         #if DEBUG
+        .overlay(alignment: .topLeading) { KeepAwakeReadout() }
         // The state and the channel id, for the UI tests. Debug builds only: VoiceOver read the
         // raw id aloud, and the surface's label carries the name.
         .overlay(alignment: .bottomLeading) {

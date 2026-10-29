@@ -42,6 +42,7 @@ struct RootView: View {
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG
+        .overlay(alignment: .topLeading) { KeepAwakeReadout() }
         .overlay(alignment: .bottomTrailing) {
             if UserDefaults.standard.bool(forKey: "kjframemeter") { FrameMeterLabel() }
         }
@@ -103,3 +104,18 @@ private struct BackToAtlas: ViewModifier {
         }
     }
 }
+
+#if DEBUG
+/// For the UI tests: whether the app is holding the Apple TV awake (KeepAwake), read once a second.
+struct KeepAwakeReadout: View {
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            Text(UIApplication.shared.isIdleTimerDisabled ? "on" : "off")
+                .font(.system(size: 1))
+                .opacity(0.01)
+                .accessibilityIdentifier("keepAwake")
+        }
+        .allowsHitTesting(false)
+    }
+}
+#endif

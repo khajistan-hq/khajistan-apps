@@ -86,7 +86,16 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(focused.exists, "down reaches the radio shelf")
         XCUIRemote.shared.press(.select)
         let nowPlaying = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] '\u{25CF} Now playing'")).firstMatch
+        // A playing station keeps the Apple TV awake: radio plays through the app's own audio
+        // engine, which tvOS does not count as playing, and the box slept and stopped the sound
+        // (owner, 2026-10-29).
+        let awake = app.staticTexts["keepAwake"].firstMatch
+        func awakeIs(_ value: String) -> Bool {
+            let match = NSPredicate { _, _ in awake.exists && awake.label == value }
+            return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: match, object: nil)], timeout: 5) == .completed
+        }
         if nowPlaying.waitForExistence(timeout: 40) {
+            XCTAssertTrue(awakeIs("on"), "a playing station holds the Apple TV awake")
             kjPause(2)
             kjScreenshot("\(skin)-g4-radio", app: app)
         } else {
@@ -104,7 +113,9 @@ final class ReceiverGuideUITests: XCTestCase {
         kjScreenshot("\(skin)-g5-radio-bar", app: app)
         let off = app.buttons["radioBarOff"]
         XCTAssertTrue(kjFocus(off, app: app), "the remote reaches the bar's Off")
+        XCTAssertTrue(awakeIs("on"), "the station playing on in the small player still holds it awake")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
+        XCTAssertTrue(awakeIs("off"), "with nothing playing the Apple TV may sleep again")
     }
 }

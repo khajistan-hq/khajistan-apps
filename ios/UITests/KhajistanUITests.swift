@@ -740,6 +740,13 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label BEGINSWITH 'Page 2 of '"), evaluatedWith: label)
         waitForExpectations(timeout: 10)
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 2 is on screen")
+        // A keyboard's arrows turn as the arrows on screen do (iPad, Mac), the controls hidden or not.
+        let rtl = waitForPage(app, 2).contains("|rtl")
+        app.typeKey(rtl ? .rightArrow : .leftArrow, modifierFlags: [])
+        XCTAssertTrue(waitForPage(app, 1, 20).hasPrefix("1/"), "the arrow key back turns to page 1 (\(readerState(app)))")
+        app.typeKey(rtl ? .leftArrow : .rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitForPage(app, 2, 20).hasPrefix("2/"), "the arrow key forward turns to page 2 (\(readerState(app)))")
+        showControls(app)
         app.buttons["rrReaderClose"].tap()
         waitFor(app.buttons["rrContinue"], 10, "the title offers to continue where reading stopped")
         app.buttons["stackBack"].tap()

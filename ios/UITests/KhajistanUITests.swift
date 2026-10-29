@@ -317,6 +317,80 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    /// Share of the pixels in `rect` (points) that are not near black, read off a screenshot.
+    private func litShare(_ rect: CGRect, _ app: XCUIApplication) -> Double {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return 0 }
+        let scale = CGFloat(image.width) / app.frame.width
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return 0 }
+        let box = CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
+            .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
+        var lit = 0, total = 0
+        for y in stride(from: Int(box.minY), to: Int(box.maxY), by: 4) {
+            for x in stride(from: Int(box.minX), to: Int(box.maxX), by: 4) {
+                let i = (y * width + x) * 4
+                if max(pixels[i], pixels[i + 1], pixels[i + 2]) > 40 { lit += 1 }
+                total += 1
+            }
+        }
+        return total == 0 ? 0 : Double(lit) / Double(total)
+    }
+
+    /// "Play with the app closed" (DECISIONS 24): the picture lets go of the player while the app
+    /// is away, so a television channel's sound carries on. Back in the app, the picture comes
+    /// back, full screen and then docked; Bugbot found both black while the state said Playing.
+    func testReceiverPictureComesBackAfterTheBackground() {
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let first = firstReceiverChannel(app)
+        first.tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 10, "the receiver is on the page")
+        expectation(for: NSPredicate(format: "label == 'Playing'"), evaluatedWith: state)
+        waitForExpectations(timeout: 60)
+        sleep(4)
+        // The docked screen sits on the remote, 16:9 across the set; the middle of it is read.
+        let surf = app.buttons["surf"].frame
+        let set = app.descendants(matching: .any)["receiverScreen"].frame
+        let dockHeight = (set.width - 12) * 9 / 16
+        let dock = CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
+                          width: set.width * 0.6, height: dockHeight * 0.6)
+        XCTAssertGreaterThan(litShare(dock, app), 0.05, "the docked picture shows before the background")
+
+        app.buttons["fullScreen"].tap()
+        waitFor(app.buttons["closePlayer"], 10, "full screen opens")
+        sleep(5)
+        // Full screen, the picture is fitted across the middle of the screen.
+        let screen = app.frame
+        let fullHeight = screen.width * 9 / 16
+        let full = CGRect(x: screen.width * 0.2, y: screen.midY - fullHeight * 0.3,
+                          width: screen.width * 0.6, height: fullHeight * 0.6)
+        XCTAssertGreaterThan(litShare(full, app), 0.05, "the full-screen picture shows before the background")
+
+        XCUIDevice.shared.press(.home)
+        sleep(6)
+        app.activate()
+        sleep(6)
+        shot("receiver-full-screen-after-background", app)
+        XCTAssertEqual(app.staticTexts["playerState"].label, "Playing", "the channel played on")
+        XCTAssertGreaterThan(litShare(full, app), 0.05, "the full-screen picture comes back after the background")
+
+        let close = app.buttons["closePlayer"].frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: close.midX, dy: close.midY)).tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: app.buttons["receiverOff"])
+        waitForExpectations(timeout: 10)
+        sleep(4)
+        shot("receiver-dock-after-background", app)
+        XCTAssertGreaterThan(litShare(dock, app), 0.05, "the docked picture comes back after full screen closes")
+    }
+
     /// Real controls receive one tap each: connecting Pause cancels tuning; Stop survives tab navigation.
     func testReceiverAutoplaysAndOneTapStopStaysOff() {
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])

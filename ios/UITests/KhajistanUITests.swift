@@ -650,9 +650,66 @@ final class KhajistanUITests: XCTestCase {
         shot("tv-approve-done", app)
     }
 
-    /// The Reading Room on the phone: a free title opens, its first issue reads page by page,
-    /// and the place is kept; a members' title stops at the website's preview, two pages, and
-    /// never shows the third. Reads the live shelf and page server.
+    // MARK: - The reader
+
+    /// The page element, which carries "3/76|page|rtl|spread|zoom" as its value in debug builds.
+    private func readerState(_ app: XCUIApplication) -> String {
+        let page = app.descendants(matching: .any)["rrReaderPage"]
+        return page.exists ? (page.value as? String ?? "") : ""
+    }
+
+    @discardableResult
+    private func waitForPage(_ app: XCUIApplication, _ position: Int, _ timeout: TimeInterval = 45) -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var state = ""
+        while Date() < deadline {
+            state = readerState(app)
+            if state.hasPrefix("\(position)/") && state.contains("|page") { return state }
+            usleep(300_000)
+        }
+        return state
+    }
+
+    /// A tap on the page at `x` across (0 left, 1 right), half way down.
+    private func tapPage(_ app: XCUIApplication, at x: CGFloat) {
+        app.descendants(matching: .any)["rrReaderPage"].coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.5)).tap()
+    }
+
+    /// The reader opens with its controls hidden; a tap in the middle of the page brings them.
+    private func showControls(_ app: XCUIApplication) {
+        let label = app.staticTexts["rrPageLabel"]
+        if label.exists && label.isHittable { return }
+        tapPage(app, at: 0.5)
+        waitFor(label, 5, "a tap in the middle of the page shows the controls")
+    }
+
+    /// Opens a free title's first issue from the Reading Room shelf; with `severalIssues`, the first
+    /// free title on the shelf that has more than one. Returns the title's card identifier.
+    @discardableResult
+    private func openFreeIssue(_ app: XCUIApplication, severalIssues: Bool = false) -> String {
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-' AND label CONTAINS[c] 'read in full'"))
+        waitFor(titles.firstMatch, 60, "a free title is on the shelf")
+        let ids = titles.allElementsBoundByIndex.map(\.identifier)
+        for id in ids.prefix(severalIssues ? 8 : 1) {
+            let card = app.buttons[id]
+            for _ in 0..<6 where !card.isHittable { app.swipeUp() }
+            card.tap()
+            waitFor(app.buttons["rr-issue-0"], 20, "the title lists its issues")
+            if !severalIssues || app.buttons["rr-issue-1"].exists {
+                app.buttons["rr-issue-0"].tap()
+                waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
+                return id
+            }
+            app.buttons["stackBack"].tap()
+        }
+        XCTFail("no free title with several issues on the first rows of the shelf")
+        return ""
+    }
+
+    /// The Reading Room on the phone: a free title opens to its first page full screen with the
+    /// controls hidden, a tap in the middle brings them, its first issue reads page by page, and
+    /// the place is kept; a members' title stops at the website's preview, two pages, and never
+    /// shows the third. Reads the live shelf and page server.
     func testReadingRoomReadsAFreeTitleAndStopsAMembersTitleAtThePreview() {
         let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
         let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
@@ -669,24 +726,16 @@ final class KhajistanUITests: XCTestCase {
         issue.tap()
         let label = app.staticTexts["rrPageLabel"]
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
-        XCTAssertTrue(label.label.hasPrefix("p. 1 / "), "the band says page 1 (\(label.label))")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let rail = app.descendants(matching: .any)["rrPageRail"]
-            waitFor(rail, 10, "a wide screen keeps the page rail beside the page")
-            let pageTwo = rail.buttons["Page 2"]
-            waitFor(pageTwo, 10, "the rail lists the pages")
-            pageTwo.tap()
-            expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
-            waitForExpectations(timeout: 10)
-            sleep(3)
-            shot("rr-reader-rail", app)
-            app.buttons["rrPrevious"].tap()
-        } else {
-            XCTAssertFalse(app.descendants(matching: .any)["rrPageRail"].exists, "a phone keeps the page to itself")
-        }
+        XCTAssertTrue(waitForPage(app, 1).hasPrefix("1/"), "the reader opens on page 1")
+        XCTAssertFalse(label.exists, "the page opens alone, the controls hidden")
+        sleep(2)
+        shot("rr-reader-immersive", app)
+        showControls(app)
+        XCTAssertTrue(label.label.hasPrefix("Page 1 of "), "the controls say page 1 (\(label.label))")
+        XCTAssertFalse(app.descendants(matching: .any)["rrPageRail"].exists, "no rail: the page has the screen")
         shot("rr-reader-p1", app)
         app.buttons["rrNext"].tap()
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Page 2 of '"), evaluatedWith: label)
         waitForExpectations(timeout: 10)
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 2 is on screen")
         app.buttons["rrReaderClose"].tap()
@@ -698,7 +747,8 @@ final class KhajistanUITests: XCTestCase {
         members.tap()
         waitFor(app.buttons["rr-issue-0"], 20, "the members' title lists its issues")
         app.buttons["rr-issue-0"].tap()
-        waitFor(label, 45, "the reader opens")
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the reader opens")
+        showControls(app)
         let gate = app.descendants(matching: .any)["rrGate"]
         for _ in 0..<3 where !gate.exists {
             let next = app.buttons["rrNext"]
@@ -710,6 +760,133 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertFalse(app.buttons["rrNext"].isEnabled, "nothing past the gate can be turned to")
         XCTAssertFalse(app.descendants(matching: .any)["rrReaderPage"].exists, "no page image stands behind the gate")
         shot("rr-members-gate", app)
+    }
+
+    /// Kindle's touch: the edge in the issue's direction turns forward and the other edge back
+    /// (the left edge is next in a right-to-left issue), a tap in the middle shows and hides the
+    /// controls, and a bookmark on a page outlives the app. Run in each skin for the screenshots.
+    func testReaderTapZonesChromeAndBookmarkAcrossRelaunch() {
+        for skin in skins {
+            let app = launch(skin: skin, extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+            let card = openFreeIssue(app)
+            let first = waitForPage(app, 1)
+            let rtl = first.contains("|rtl")
+            let forwardX: CGFloat = rtl ? 0.08 : 0.92
+            let backX: CGFloat = rtl ? 0.92 : 0.08
+            sleep(2)
+            shot("rr-\(skin)-phone-page", app)
+            tapPage(app, at: forwardX)
+            XCTAssertTrue(waitForPage(app, 2, 30).hasPrefix("2/"), "the \(rtl ? "left" : "right") edge turns forward (\(readerState(app)))")
+            XCTAssertFalse(app.staticTexts["rrPageLabel"].exists, "a turn by the edge leaves the controls hidden")
+            tapPage(app, at: backX)
+            XCTAssertTrue(waitForPage(app, 1, 30).hasPrefix("1/"), "the other edge turns back (\(readerState(app)))")
+            tapPage(app, at: forwardX)
+            waitForPage(app, 2, 30)
+
+            showControls(app)
+            sleep(1)
+            shot("rr-\(skin)-phone-chrome", app)
+            tapPage(app, at: 0.5)
+            XCTAssertTrue(app.staticTexts["rrPageLabel"].waitForNonExistence(timeout: 5), "a second tap in the middle hides them")
+            showControls(app)
+
+            let mark = app.buttons["rrBookmark"]
+            waitFor(mark, 5, "the controls carry a bookmark for the page")
+            if (mark.value as? String) == "On" { mark.tap() }
+            mark.tap()
+            XCTAssertEqual(mark.value as? String, "On", "the page is marked")
+            app.buttons["rrPagesButton"].tap()
+            waitFor(app.buttons["rrMark-2"], 10, "the pages grid lists the mark")
+            sleep(4)
+            shot("rr-\(skin)-pages-grid", app)
+            app.buttons["rrGridDone"].tap()
+            app.terminate()
+
+            // The mark is there after a relaunch, and comes off (once; the other skins are for the pictures).
+            for wanted in ["On", "Off"] where skin == skins.first {
+                let again = launch(skin: skin, extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+                let title = again.buttons[card]
+                waitFor(title, 60, "the same title is on the shelf")
+                for _ in 0..<6 where !title.isHittable { again.swipeUp() }
+                title.tap()
+                waitFor(again.buttons["rrContinue"], 20, "the title offers to continue at page 2")
+                again.buttons["rrContinue"].tap()
+                XCTAssertTrue(waitForPage(again, 2).hasPrefix("2/"), "Continue opens page 2")
+                showControls(again)
+                let kept = again.buttons["rrBookmark"]
+                waitFor(kept, 5, "the bookmark control")
+                XCTAssertEqual(kept.value as? String, wanted, "the bookmark reads \(wanted) after a relaunch")
+                if wanted == "On" { kept.tap() }
+                again.terminate()
+            }
+        }
+    }
+
+    /// Wide: two facing pages, the cover alone, in the issue's order; the grid jumps and the
+    /// scrubber offers the way back; the last page leads to the next issue. On a phone the device
+    /// is turned to landscape; an iPad runs it in both orientations.
+    func testReaderSpreadGridBackAndEndOfIssue() {
+        let orientations: [UIDeviceOrientation] = UIDevice.current.userInterfaceIdiom == .pad ? [.portrait, .landscapeLeft] : [.landscapeLeft]
+        for orientation in orientations {
+            XCUIDevice.shared.orientation = orientation
+            defer { XCUIDevice.shared.orientation = .portrait }
+            let wide = orientation.isLandscape
+            let app = launch(skin: wide ? "grove" : "smut", extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+            let tag = UIDevice.current.userInterfaceIdiom == .pad ? "ipad-\(wide ? "landscape" : "portrait")" : "phone-landscape"
+            openFreeIssue(app, severalIssues: true)
+            let first = waitForPage(app, 1)
+            XCTAssertFalse(first.contains("|spread"), "the cover is alone (\(first))")
+            let rtl = first.contains("|rtl")
+            tapPage(app, at: rtl ? 0.08 : 0.92)
+            let second = waitForPage(app, 2, 30)
+            if wide {
+                // The facing page arrives after the first; give it a moment.
+                for _ in 0..<20 where !readerState(app).contains("|spread") { usleep(500_000) }
+                XCTAssertTrue(readerState(app).contains("|spread"), "a wide screen shows pages 2 and 3 together (\(readerState(app)))")
+            } else {
+                XCTAssertFalse(second.contains("|spread"), "a tall screen shows one page (\(second))")
+            }
+            sleep(2)
+            shot("rr-\(tag)-page-two", app)
+
+            // The grid jumps, and the way back is offered.
+            showControls(app)
+            app.buttons["rrPagesButton"].tap()
+            let five = app.buttons["rrGridPage-5"]
+            waitFor(five, 10, "the grid lists the pages")
+            sleep(3)
+            shot("rr-\(tag)-grid", app)
+            five.tap()
+            XCTAssertTrue(waitForPage(app, wide ? 4 : 5, 30).contains("|page"), "the grid opens the page chosen (\(readerState(app)))")
+            showControls(app)
+            let back = app.buttons["rrBackToPage"]
+            waitFor(back, 5, "after a jump the controls offer the way back")
+            XCTAssertEqual(back.label.lowercased(), "back to page 2", "it names the page left")
+            shot("rr-\(tag)-back-to-page", app)
+            back.tap()
+            XCTAssertTrue(waitForPage(app, 2, 30).hasPrefix("2/"), "back goes to the page left")
+
+            // The scrubber to its far end, then one more turn: the end of the issue.
+            showControls(app)
+            let slider = app.descendants(matching: .any)["rrPageSlider"]
+            let start = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.3, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: rtl ? 0 : 1, dy: 0.5)))
+            let total = Int(first.split(separator: "/")[1].split(separator: "|")[0]) ?? 0
+            let last = wide && total > 1 && !total.isMultiple(of: 2) ? total - 1 : total
+            XCTAssertTrue(waitForPage(app, last, 45).hasPrefix("\(last)/"), "the scrubber's end is the last page (\(readerState(app)))")
+            tapPage(app, at: rtl ? 0.08 : 0.92)
+            let end = app.descendants(matching: .any)["rrEnd"]
+            waitFor(end, 15, "turning past the last page is the end of the issue")
+            shot("rr-\(tag)-end", app)
+            let next = app.buttons["rrNextIssue"]
+            XCTAssertTrue(next.exists, "a title with more issues offers the next one")
+            let before = app.descendants(matching: .any)["rrReaderTitle"].label
+            next.tap()
+            XCTAssertTrue(waitForPage(app, 1).hasPrefix("1/"), "the next issue opens at page 1")
+            showControls(app)
+            XCTAssertNotEqual(app.descendants(matching: .any)["rrReaderTitle"].label, before, "the reader names the next issue")
+            app.terminate()
+        }
     }
 
     /// Madrassa, the databases and the Bazaar read the site's own files. The live site holds them
@@ -770,9 +947,9 @@ final class KhajistanUITests: XCTestCase {
         shot("database-record", app)
         app.buttons["recordLink"].tap()
         let pageLabel = app.staticTexts["rrPageLabel"]
-        waitFor(pageLabel, 45, "the scan opens in the app's own reader, not the website")
-        XCTAssertTrue(pageLabel.label.hasPrefix("p. 1 / "), "on the page the link names (\(pageLabel.label))")
-        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the certificate's page is on screen")
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the scan opens in the app's own reader, not the website")
+        showControls(app)
+        XCTAssertTrue(pageLabel.label.hasPrefix("Page 1 of "), "on the page the link names (\(pageLabel.label))")
         shot("censor-scan", app)
         app.terminate()
 

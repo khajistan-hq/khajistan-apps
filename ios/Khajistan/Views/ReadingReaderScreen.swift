@@ -283,7 +283,7 @@ struct ReadingReaderScreen: View {
 
     private var bottomBar: some View {
         VStack(spacing: 4) {
-            if let back = jumpedFrom, back != position {
+            if phase != .end, let back = jumpedFrom, back != position {
                 Button(kicker: "Back to page \(back)") {
                     jumpedFrom = nil
                     show(back)

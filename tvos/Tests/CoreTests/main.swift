@@ -4040,7 +4040,72 @@ func savesFilmAndPnvRefs() throws {
     try expect(list.contains("wing=in.(receiver,reading-room,born-digital,other)"))
 }
 
+// MARK: - Live stills: the cache's bound and the plan's throttle
+
+func stillCacheKeepsItsBoundAndDropsTheOldestFirst() throws {
+    var cache = StillCache<String>(costLimit: 1000, maxAge: 600)
+    for i in 0..<5 { cache.insert("p\(i)", for: "c\(i)", cost: 300, now: Double(i)) }
+    // 5 x 300 into 1000: only the last three fit, and the first two went first.
+    try expectEqual(cache.count, 3)
+    try expectEqual(cache.totalCost, 900)
+    try expect(cache.value(for: "c0", now: 5) == nil && cache.value(for: "c1", now: 5) == nil)
+    try expectEqual(cache.value(for: "c4", now: 5), "p4")
+    // Taking a channel again replaces it and moves it to the back of the queue.
+    cache.insert("p2b", for: "c2", cost: 300, now: 6)
+    try expectEqual(cache.totalCost, 900)
+    cache.insert("p5", for: "c5", cost: 300, now: 7)
+    try expect(cache.value(for: "c3", now: 7) == nil, "c3 is now the oldest and goes")
+    try expectEqual(cache.value(for: "c2", now: 7), "p2b")
+    // Never over the bound, and a still bigger than the whole bound is refused outright.
+    cache.insert("huge", for: "big", cost: 1001, now: 8)
+    try expect(cache.value(for: "big", now: 8) == nil && cache.totalCost <= 1000)
+    // Old stills read as missing; removeAll empties it.
+    try expect(cache.value(for: "c5", now: 7 + 601) == nil)
+    try expectEqual(cache.value(for: "c5", now: 7 + 600), "p5")
+    cache.removeAll()
+    try expectEqual(cache.count, 0)
+    try expectEqual(cache.totalCost, 0)
+}
+
+func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
+    var plan = StillPlan()
+    let wanted = (0..<30).map { "c\($0)" }
+    var have: Set<String> = ["c0"]
+    // c0 already has a still: the first taken is c1.
+    try expectEqual(plan.next(wanted: wanted, has: { have.contains($0) }, now: 0), "c1")
+    // Busy: nothing else starts while one is being taken, however long it takes.
+    try expect(plan.next(wanted: wanted, has: { have.contains($0) }, now: 10) == nil)
+    plan.finished()
+    have.insert("c1")
+    // Spaced: not before 1.5 s after the last start.
+    var plan2 = StillPlan()
+    try expectEqual(plan2.next(wanted: wanted, has: { _ in false }, now: 100), "c0")
+    plan2.finished()
+    try expect(plan2.next(wanted: wanted, has: { _ in false }, now: 101.4) == nil)
+    try expectClose(plan2.wait(now: 101), 0.5)
+    try expectEqual(plan2.next(wanted: wanted, has: { _ in false }, now: 101.5), "c1")
+    plan2.finished()
+    // A channel tried once is not tried again in the visit, even with no still from it.
+    try expectEqual(plan2.next(wanted: ["c1", "c2"], has: { _ in false }, now: 103), "c2")
+    plan2.finished()
+    try expect(plan2.next(wanted: ["c1", "c2"], has: { _ in false }, now: 105) == nil)
+    // Capped: twelve in a visit and no more.
+    var plan3 = StillPlan()
+    var taken: [String] = []
+    var now = 0.0
+    while now < 1000 {
+        if let id = plan3.next(wanted: wanted, has: { _ in false }, now: now) { taken.append(id); plan3.finished() }
+        now += 0.5
+    }
+    try expectEqual(taken.count, StillPlan.perVisit)
+    try expectEqual(StillPlan.perVisit, 12)
+    try expect(plan3.exhausted)
+    try expectEqual(Set(taken).count, taken.count, "no channel twice")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
+    ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
     ("Caption continuation rejects stale paid work after token refresh", captionContinuationRejectsStalePaidWork),
     ("Receiver opening starts once and respects manual/deep-link intent", receiverOpeningDoesNotRestartOrOverrideIntent),

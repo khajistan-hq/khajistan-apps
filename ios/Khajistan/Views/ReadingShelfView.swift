@@ -11,10 +11,12 @@ struct ReadingShelfView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var tabID: String?
     @State private var query = ""
+    /// The query a moment after the last keystroke, which is what the shelf is searched for.
+    @State private var settled = ""
 
     private var store: ReadingStore { model.reading }
     private var tab: RRTab? { store.tabs.first { $0.id == tabID } ?? store.tabs.first }
-    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmed: String { settled.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         ScrollView {
@@ -50,6 +52,12 @@ struct ReadingShelfView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .task { await store.start() }
+        // Searching a thousand-odd titles waits for a pause in typing, as Search does.
+        .task(id: query) {
+            // A cleared field clears at once.
+            if !query.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            if !Task.isCancelled { settled = query }
+        }
     }
 
     // MARK: - Search

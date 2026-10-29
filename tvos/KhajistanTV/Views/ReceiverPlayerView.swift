@@ -45,6 +45,8 @@ struct ReceiverPlayerView: View {
     @State private var tuneStamp: (id: String, ticket: Int)?
     /// The row whose probe the viewer just asked for. A resolve miss in that window must not skip it.
     @State private var confirmingID: String?
+    /// A skipped probe. The row stays on the dial.
+    @State private var keepOnDial = false
     /// Replay after a failure. Cancelled when the screen stops, when health ages out, and when the view goes.
     @State private var replay: Task<Void, Never>?
     private enum Chip { case captions, like, guide }
@@ -442,6 +444,7 @@ struct ReceiverPlayerView: View {
     /// change, on the one behind it, silent until the cut. A tuning the viewer has already moved
     /// on from is cancelled and says nothing.
     private func tune(_ target: Channel, behind: Bool = false) {
+        keepOnDial = false
         tuneTask?.cancel()
         let ticket = tuneIntent.begin()
         tuneStamp = (id: target.id, ticket: ticket)
@@ -471,9 +474,12 @@ struct ReceiverPlayerView: View {
             } catch {
                 if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                let withdraw = (error as? ReceiverStoreError)?.withdraws ?? true
+                if !withdraw { keepOnDial = true }
                 player.state = .failed(PlayerController.unreachable)
                 // The viewer just asked for this row, and a probe of it is still the request.
-                // A resolve miss in that window must not skip it.
+                // A resolve miss in that window must not skip it. A skipped probe stays on the dial.
+                guard withdraw else { return }
                 guard confirmingID != target.id else { return }
                 guard destination == nil || tuneStamp?.id == current.id else { return }
                 guard !behind || target.id == current.id else { return }
@@ -485,6 +491,7 @@ struct ReceiverPlayerView: View {
     /// Moves on only for the tune that failed. A newer tune means the viewer has moved on:
     /// that row is not withdrawn and the new tune is not cancelled.
     private func skipFailed(id: String, ticket: Int) {
+        guard !keepOnDial else { return }
         guard tuneIntent.admits(ticket) else { return }
         guard confirmingID != id else { return }
         guard destination == nil || tuneStamp?.id == current.id else { return }

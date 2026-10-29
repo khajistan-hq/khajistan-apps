@@ -40,6 +40,8 @@ final class ReceiverTuner {
     @ObservationIgnored private var failedInScope: Set<String> = []
     /// The tune now in flight: its channel and the intent revision it started with.
     @ObservationIgnored private var tuned: (id: String, revision: Int)?
+    /// A skipped probe failed the tune without taking the row off the dial.
+    @ObservationIgnored private var keepOnDial = false
     /// True while a channel opens or changes: those flows cover and uncover the picture themselves.
     @ObservationIgnored private var changing = false
     /// When the last change settled. A stream often stalls once just after it starts; covering
@@ -55,6 +57,9 @@ final class ReceiverTuner {
         self.receiver = receiver
         self.transmission = transmission
         controller.onPlaybackUnavailable = { [weak captions] in captions?.suspendForPlaybackInterruption() }
+        controller.servesLiveDial = true
+        controller.onLivePlay = { [weak self] in self?.replayLive() }
+        controller.onLiveToggle = { [weak self] in self?.playPause() }
     }
 
     var channel: Channel? {
@@ -273,7 +278,9 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
-        if case .failed = new, let tuned, case .live(let showing) = source,
+        if case .failed = new, keepOnDial {
+            keepOnDial = false
+        } else if case .failed = new, let tuned, case .live(let showing) = source,
            ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
                                          currentRevision: intentRevision, showingID: showing.id) {
             scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
@@ -320,7 +327,14 @@ final class ReceiverTuner {
 
     // MARK: - Live channels
 
+    /// Lock-screen Play on the dial. Resolves the carrier again instead of resuming the old item.
+    private func replayLive() {
+        guard case .live(let channel) = source else { return }
+        tune(channel)
+    }
+
     private func tune(_ target: Channel) {
+        keepOnDial = false
         captions.detach()
         tuneTask?.cancel()
         controller.stop()
@@ -341,7 +355,10 @@ final class ReceiverTuner {
                 guard case .live(let showing) = self.source,
                       ReceiverRules.mayActOnFailure(failedID: target.id, tuneRevision: ticket,
                                                     currentRevision: self.intentRevision, showingID: showing.id) else { return }
+                let withdraw = (error as? ReceiverStoreError)?.withdraws ?? true
+                if !withdraw { keepOnDial = true }
                 controller.state = .failed(error.localizedDescription)
+                guard withdraw else { return }
                 self.scheduleSkip(failedID: target.id, ticket: ticket)
             }
         }

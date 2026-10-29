@@ -7,14 +7,24 @@ enum ReceiverStoreError: LocalizedError {
     case unreadable
     case notOnDial
     case unplayable
+    /// The probe did not get a verdict (timeout, 403, 429, or no free slot). Not a dead row.
+    case skipped
     case http(Int)
+
+    /// A skipped probe must not leave the dial. A dead probe does.
+    var withdraws: Bool {
+        switch self {
+        case .skipped: return false
+        default: return true
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .indexNotLoaded: return "The receiver list has not loaded."
         case .unreadable: return "The receiver sent an answer that could not be read."
         case .notOnDial: return "This channel is not on the dial right now."
-        case .unplayable: return "This signal could not be played."
+        case .unplayable, .skipped: return "This signal could not be played."
         case .http(let code): return "The receiver returned HTTP \(code)."
         }
     }
@@ -494,10 +504,9 @@ final class ReceiverStore {
     /// A missing or older verdict is probed again. The stored URL is only the match. A dead probe
     /// throws, and the player withdraws the row. An expired entry is not itself stored as dead.
     private func playbackURL(for channel: Channel, fresh: URL) async throws -> URL {
-        let memory = ReceiverRules.CarrierMemory(
+        let memory = ReceiverRules.carrierMemory(
             verified: verified.contains(channel.id),
-            playback: probe.playback(for: channel.id),
-            verdictAt: probe.verdictDate(channel.id)
+            snapshot: probe.remembered(channel.id)
         )
         switch memory.tune(fresh) {
         case .play:
@@ -507,13 +516,19 @@ final class ReceiverStore {
         case .reprobe:
             let epoch = probeEpoch
             let report = await probe.verify([channel], bypassCache: true)
-            guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch),
-                  report.live.contains(channel.id),
-                  let probed = probe.playback(for: channel.id),
-                  ReceiverRules.playbackMatches(probed: probed, fresh: fresh) else {
+            guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else {
                 throw ReceiverStoreError.notOnDial
             }
-            return fresh
+            let probed = probe.remembered(channel.id)
+            let live = report.live.contains(channel.id)
+            let skipped = report.skipped.contains(channel.id) || report.unprobed.contains(channel.id)
+            if live, ReceiverRules.playbackMatches(probed: probed.playback, fresh: fresh) {
+                return fresh
+            }
+            if ReceiverRules.withdrawsAfterReprobe(live: live, skipped: skipped) {
+                throw ReceiverStoreError.notOnDial
+            }
+            throw ReceiverStoreError.skipped
         }
     }
 

@@ -185,26 +185,20 @@ final class ReceiverProbe: @unchecked Sendable {
         commit(id, live: nil, ticket: ticket, now: Date())
     }
 
-    /// The carrier whose renditions passed. Kept until the id is forgotten, marked dead, or the
-    /// session drops its memory. The ten-minute verdict clock does not clear it. A tune still
-    /// has to probe again once the verdict is older than that clock. The URL is only for the match.
-    func playback(for id: String) -> URL? {
+    /// The carrier and the verdict time, taken under one lock. A tune builds `CarrierMemory`
+    /// only from this pair, so a fresh time cannot be matched with the previous URL.
+    func remembered(_ id: String, now: Date = Date()) -> ReceiverRules.CarrierSnapshot {
         lock.lock()
         defer { lock.unlock() }
-        return playbacks[id]
-    }
-
-    /// When the live verdict was stored, if it is still inside the ten-minute clock.
-    /// Nil when it is missing or older than that. Older verdicts are dropped here. The playback URL stays.
-    func verdictDate(_ id: String, now: Date = Date()) -> Date? {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let entry = cache[id], entry.live else { return nil }
+        let url = playbacks[id]
+        guard let entry = cache[id], entry.live else {
+            return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: nil)
+        }
         if now.timeIntervalSince(entry.at) >= Self.memory {
             cache[id] = nil
-            return nil
+            return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: nil)
         }
-        return entry.at
+        return ReceiverRules.CarrierSnapshot(playback: url, verdictAt: entry.at)
     }
 
     /// Drops every remembered verdict and moves the epoch. Generation numbers are not reused,
@@ -223,10 +217,11 @@ final class ReceiverProbe: @unchecked Sendable {
     /// A slot that does not free in time does not drop the rest of the list on the floor.
     func verify(_ channels: [Channel], bypassCache: Bool = false,
                 retriesLeft: Int = ReceiverRules.HostBudget.retryLimit,
-                found: @escaping @Sendable (String) async -> Void = { _ in }) async -> (live: Set<String>, unprobed: Set<String>) {
+                found: @escaping @Sendable (String) async -> Void = { _ in }) async -> (live: Set<String>, unprobed: Set<String>, skipped: Set<String>) {
         let pending = bypassCache ? channels : channels.filter { cached($0.id) == nil }
         let session = self.session
         let skipped = SkipBox()
+        let probedSkip = IDBox()
         var neverStarted: [Channel] = []
         await withTaskGroup(of: Void.self) { group in
             for (index, channel) in pending.enumerated() {
@@ -254,6 +249,7 @@ final class ReceiverProbe: @unchecked Sendable {
                         self.commit(channel.id, live: false, ticket: ticket)
                     case .skipped:
                         skipped.insert(channel)
+                        probedSkip.insert(channel.id)
                     }
                 }
             }
@@ -266,11 +262,30 @@ final class ReceiverProbe: @unchecked Sendable {
             // A cancelled wait commits nothing. The walk that owns this retry is the one that was cancelled.
             if !Task.isCancelled {
                 let nested = await verify(again, bypassCache: true, retriesLeft: retriesLeft - 1, found: found)
-                return (Set(channels.map(\.id).filter { cached($0) == true }), nested.unprobed)
+                let live = Set(channels.map(\.id).filter { cached($0) == true })
+                return (live, nested.unprobed, nested.skipped)
             }
         }
+        let live = Set(channels.map(\.id).filter { cached($0) == true })
         let unprobed = Set(neverStarted.map(\.id))
-        return (Set(channels.map(\.id).filter { cached($0) == true }), unprobed)
+        return (live, unprobed, probedSkip.take().subtracting(live))
+    }
+
+    private final class IDBox: @unchecked Sendable {
+        private var values: Set<String> = []
+        private let lock = NSLock()
+        func insert(_ id: String) {
+            lock.lock()
+            values.insert(id)
+            lock.unlock()
+        }
+        func take() -> Set<String> {
+            lock.lock()
+            defer { lock.unlock() }
+            let copy = values
+            values = []
+            return copy
+        }
     }
 
     private func admit(_ host: String, now: Date = Date()) -> ReceiverRules.HostBudget.Admit {

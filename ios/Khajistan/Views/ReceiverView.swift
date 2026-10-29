@@ -630,11 +630,22 @@ private struct CamerasSection: View {
 
     private func load(_ region: String) async {
         guard lists[region] == nil else { return }
-        do {
-            lists[region] = try await model.receiver.channels(regionId: region, cameras: true)
-        } catch {
-            if Task.isCancelled { return }
-            failed.insert(region)
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                _ = try await model.receiver.channels(regionId: region, cameras: true)
+            } catch {
+                if Task.isCancelled { return }
+                failed.insert(region)
+                return
+            }
+            if model.receiver.walkFinished(regionId: region, cameras: true) {
+                lists[region] = model.receiver.shown(regionId: region, cameras: true)
+                return
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { return }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 }

@@ -788,6 +788,49 @@ func aTuneElevenMinutesLaterKeepsTheVerifiedCarrier() throws {
     try expectEqual(memory.tune(url, now: later), .refuse)
 }
 
+func remotePlayOnTheLiveDialRetunesInsteadOfResuming() throws {
+    var resumed = false
+    var retuned = false
+    ReceiverRules.performRemotePlay(liveDial: true, resume: { resumed = true }, retune: { retuned = true })
+    try expect(!resumed, "resume must never start a live dial item")
+    try expect(retuned, "lock-screen Play on the dial resolves again")
+    resumed = false
+    retuned = false
+    ReceiverRules.performRemotePlay(liveDial: false, resume: { resumed = true }, retune: { retuned = true })
+    try expect(resumed && !retuned, "film and Pics/Vids resume the attached item")
+    try expectEqual(ReceiverRules.remotePlay(liveDial: true), .retune)
+    try expectEqual(ReceiverRules.remotePlay(liveDial: false), .resume)
+}
+
+func aFreshVerdictIsPairedWithItsOwnCarrier() throws {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let previous = try require(URL(string: "https://cdn.example/old.m3u8"))
+    let current = try require(URL(string: "https://cdn.example/new.m3u8"))
+    let split = ReceiverRules.carrierMemory(
+        verified: true,
+        snapshot: .init(playback: previous, verdictAt: now)
+    )
+    try expectEqual(split.tune(current, now: now), .refuse, "a fresh time must not play a different URL")
+    let paired = ReceiverRules.carrierMemory(
+        verified: true,
+        snapshot: .init(playback: current, verdictAt: now)
+    )
+    try expectEqual(paired.tune(current, now: now), .play)
+}
+
+func aSkippedReprobeDoesNotWithdraw() throws {
+    try expect(!ReceiverRules.withdrawsAfterReprobe(live: false, skipped: true))
+    try expect(ReceiverRules.withdrawsAfterReprobe(live: false, skipped: false), "a dead probe leaves the dial")
+    try expect(!ReceiverRules.withdrawsAfterReprobe(live: true, skipped: false))
+}
+
+func anUnfinishedCameraWalkStaysUnset() throws {
+    try expect(ReceiverRules.shouldRetryUnfinishedWalk(attempt: 1, unprobed: 1))
+    try expect(!ReceiverRules.shouldRetryUnfinishedWalk(attempt: ReceiverRules.unfinishedWalkAttempts, unprobed: 1),
+               "the retries stop, and the row stays unset")
+    try expect(!ReceiverRules.shouldRetryUnfinishedWalk(attempt: 1, unprobed: 0))
+}
+
 func aSlowProbeDoesNotFinishTheUnstartedTail() throws {
     let pending = ["a", "b", "c"]
     let tail = ReceiverRules.unstarted(pending, from: 1)
@@ -2725,6 +2768,10 @@ let tests: [(String, () throws -> Void)] = [
     ("A finite media file is not a live mount", finiteMediaIsNotALiveMount),
     ("A stale flip drops probe memory and reopens the walks", staleFlipDropsProbeMemoryAndReopensTheWalks),
     ("A tune eleven minutes later keeps the verified carrier", aTuneElevenMinutesLaterKeepsTheVerifiedCarrier),
+    ("Lock-screen Play on the live dial retunes", remotePlayOnTheLiveDialRetunesInsteadOfResuming),
+    ("A fresh verdict stays paired with its own carrier", aFreshVerdictIsPairedWithItsOwnCarrier),
+    ("A skipped reprobe does not withdraw", aSkippedReprobeDoesNotWithdraw),
+    ("An unfinished camera walk stays unset", anUnfinishedCameraWalkStaysUnset),
     ("A slow probe does not finish the unstarted tail", aSlowProbeDoesNotFinishTheUnstartedTail),
     ("A failed feed keeps the previous copy", aFailedFeedKeepsThePreviousCopy),
     ("Figures publish only after the walk finishes", figuresPublishOnlyAfterTheWalkFinishes),

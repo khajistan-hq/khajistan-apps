@@ -355,6 +355,36 @@ enum ReceiverRules {
         decision == .refuse
     }
 
+    /// Lock-screen and headphone Play. A live dial item is tuned again, through resolve.
+    /// Film and Pics/Vids resume the item already attached. `resume` must not run for the dial.
+    enum RemotePlay: Equatable { case resume, retune }
+
+    static func remotePlay(liveDial: Bool) -> RemotePlay {
+        liveDial ? .retune : .resume
+    }
+
+    static func performRemotePlay(liveDial: Bool, resume: () -> Void, retune: () -> Void) {
+        switch remotePlay(liveDial: liveDial) {
+        case .resume: resume()
+        case .retune: retune()
+        }
+    }
+
+    /// A reprobe that did not get a verdict must not be stored as dead. Withdraw only a dead probe.
+    static func withdrawsAfterReprobe(live: Bool, skipped: Bool) -> Bool {
+        !live && !skipped
+    }
+
+    /// The URL and the verdict time from one read, so a fresh time cannot be paired with an older URL.
+    struct CarrierSnapshot: Equatable {
+        var playback: URL?
+        var verdictAt: Date?
+    }
+
+    static func carrierMemory(verified: Bool, snapshot: CarrierSnapshot) -> CarrierMemory {
+        CarrierMemory(verified: verified, playback: snapshot.playback, verdictAt: snapshot.verdictAt)
+    }
+
     /// A confirm may insert only in the probe epoch it captured before the probe.
     static func confirmStillCurrent(capturedEpoch: Int, epochNow: Int) -> Bool {
         capturedEpoch == epochNow

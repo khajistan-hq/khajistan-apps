@@ -184,10 +184,16 @@ final class KhajistanUITests: XCTestCase {
         // under half way down, at the same place on every screen because the map is drawn from one
         // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map
         // element's own frame, so it follows the map to any screen size.
-        map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.48)).tap()
         let maghreb = NSPredicate(format: "label CONTAINS[c] %@", "Maghreb")
+        // A slow runner can still be settling the map under the first tap (the page scroll
+        // above). One more tap at the same point is the same gesture, not a different target.
+        for _ in 0..<2 {
+            map.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.48)).tap()
+            let landed = XCTNSPredicateExpectation(predicate: maghreb, object: title)
+            if XCTWaiter.wait(for: [landed], timeout: 8) == .completed { break }
+        }
         expectation(for: maghreb, evaluatedWith: title)
-        waitForExpectations(timeout: 10)
+        waitForExpectations(timeout: 5)
         shot("map-tap-maghreb", app)
         // Choosing a region scrolls the strip to centre it, animated. On a slow runner the chips
         // are still sliding when the next tap is placed, and it lands where Anatolia was (CI,
@@ -290,7 +296,9 @@ final class KhajistanUITests: XCTestCase {
     }
 
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
+        // The suspension has to outlast launch on a slow runner. The tap home in the previous
+        // run landed at 15s, after a 5s delay had already chosen a channel.
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "25000"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitFor(app.buttons["homeAllRooms"], 3, "Home opens with one tap")

@@ -97,7 +97,7 @@ final class ReceiverTuner {
         // Reproduce a tab change while automatic selection is suspended without depending on network speed.
         let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
         if delay > 0 {
-            try? await Task.sleep(for: .milliseconds(min(delay, 10_000)))
+            try? await Task.sleep(for: .milliseconds(min(delay, 60_000)))
             guard !Task.isCancelled, isActive(), opening == openingRevision else { return }
         }
         #endif

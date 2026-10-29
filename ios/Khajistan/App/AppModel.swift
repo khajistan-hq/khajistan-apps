@@ -328,6 +328,11 @@ final class AppModel {
     /// Where reading or watching stopped, kept on this device.
     func record(_ place: Resume) { updateLibrary { $0.record(place) } }
 
+    /// A page marked in the reader, kept with the reading places.
+    func togglePageMark(title: String, issue: String, page: Int) {
+        updateLibrary { $0.togglePageMark(title: title, issue: issue, page: page) }
+    }
+
     func toggleSaved(_ url: URL, title: String) { updateLibrary { $0.toggleBookmark(url, title: title) } }
     func removeSaved(_ id: UUID) { updateLibrary { $0.bookmarks.removeAll { $0.id == id } } }
     func clearHistory() { updateLibrary { $0.history = [] } }

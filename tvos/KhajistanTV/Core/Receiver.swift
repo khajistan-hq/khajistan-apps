@@ -210,12 +210,14 @@ enum ReceiverRules {
     static let playlistReadCap = 256 * 1024
     /// How many masters a variant may point through. Deeper than this is not verified.
     static let masterDepth = 3
-    /// LiveRadio's preroll: bytes have to keep arriving at least this long.
+    /// LiveRadio's preroll. The sample lasts this long, and a byte has to arrive at the end of it.
     static let streamMinDuration: TimeInterval = 1.5
-    /// LiveRadio's stall window, and the 64 KB it reads before calling a mount silent.
+    /// LiveRadio's stall. Twelve seconds with no bytes is a dead carrier. It is not a bitrate.
     static let streamStall: TimeInterval = 12
+    /// How far LiveRadio reads before it gives up looking for a frame. The probe keeps at most
+    /// this many bytes. It is not a minimum rate: 64 KB over 12 s is about 5.5 KB/s, and a
+    /// 32 kbps mount is about 4 KB/s.
     static let streamFirstBytes = 65536
-    static var streamMinByteRate: Double { Double(streamFirstBytes) / streamStall }
 
     /// Fresh only when the stamp is not more than five minutes ahead and not more than two hours behind.
     static func healthIsFresh(generatedAt stamp: Date, now: Date) -> Bool {
@@ -567,8 +569,10 @@ enum ReceiverRules {
     /// A non-HLS body is a live mount only while bytes are still arriving.
     /// A content length is a file. A body that has ended is a file, including one with no
     /// content length. Hitting a read cap is not the same as a body that is still open.
-    /// What remains has to be ICY, chunked, or open-ended, and it has to keep arriving
-    /// through the sample: at least `streamMinDuration`, at at least `streamMinByteRate`.
+    /// What remains has to be ICY, chunked, or open-ended, and a byte has to arrive at the
+    /// end of the preroll (`streamMinDuration`). There is no bitrate floor. `streamStall` is
+    /// how long LiveRadio waits with no bytes before calling the carrier dead, and
+    /// `streamFirstBytes` is only how much of the body is kept.
     struct StreamSignal: Equatable {
         var icy: Bool = false
         var contentLength: Int? = nil
@@ -589,8 +593,11 @@ enum ReceiverRules {
         if signal.bodyEnded { return false }
         let transfer = signal.icy || signal.chunked || signal.openEnded
         guard transfer, signal.stillArriving else { return false }
-        guard signal.elapsed >= streamMinDuration, signal.elapsed > 0 else { return false }
-        return Double(signal.bytes) / signal.elapsed >= streamMinByteRate
+        // No bitrate floor. `streamStall` (twelve seconds with no bytes) is when LiveRadio
+        // calls a carrier dead. `streamFirstBytes` is only how much of the body is kept.
+        // A 32 kbps mount is about 4 KB/s, which is under 64 KB across those twelve seconds.
+        guard signal.elapsed >= streamMinDuration, signal.bytes > 0 else { return false }
+        return true
     }
 
     /// What a probe may treat as a live body. 403 is refused. HLS must be a real media playlist.

@@ -765,8 +765,9 @@ func everyRenditionHasToPass() throws {
 func finiteMediaIsNotALiveMount() throws {
     let bytes = Data([0xff, 0xfb])
     let elapsed = ReceiverRules.streamMinDuration
-    let enough = Int(ReceiverRules.streamMinByteRate * elapsed)
-    func flowing(icy: Bool = false, chunked: Bool = false, openEnded: Bool = false, bytes n: Int = enough, over seconds: TimeInterval = elapsed) -> ReceiverRules.StreamSignal {
+    // 32 kbps is 4,000 bytes a second. Across the 1.5 s preroll that is 6,000 bytes.
+    let radio32 = Int(Double(32_000 / 8) * elapsed)
+    func flowing(icy: Bool = false, chunked: Bool = false, openEnded: Bool = false, bytes n: Int = radio32, over seconds: TimeInterval = elapsed) -> ReceiverRules.StreamSignal {
         .init(icy: icy, chunked: chunked, openEnded: openEnded, bodyEnded: false, stillArriving: true, elapsed: seconds, bytes: n)
     }
     try expect(!ReceiverRules.nonHLSIsLive(.init(contentLength: 1_000_000)))
@@ -781,9 +782,12 @@ func finiteMediaIsNotALiveMount() throws {
     try expect(!ReceiverRules.nonHLSIsLive(.init(bodyEnded: false, bytes: 256)),
                "hitting a read cap is not proof the body is still open")
     try expect(!ReceiverRules.nonHLSIsLive(.init()))
-    try expect(!ReceiverRules.nonHLSIsLive(flowing(chunked: true, bytes: enough - 1)))
+    try expect(!ReceiverRules.nonHLSIsLive(flowing(chunked: true, bytes: 0)))
     try expect(!ReceiverRules.nonHLSIsLive(flowing(chunked: true, over: elapsed - 0.1)))
-    try expect(!ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false, stillArriving: false, elapsed: elapsed, bytes: enough)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false, stillArriving: false, elapsed: elapsed, bytes: radio32)))
+    let mistakenRate = Double(ReceiverRules.streamFirstBytes) / ReceiverRules.streamStall
+    try expect(Double(radio32) / elapsed < mistakenRate, "64 KB over 12 s is above a 32 kbps mount")
+    try expect(ReceiverRules.nonHLSIsLive(flowing(icy: true, bytes: radio32)), "a 32 kbps mount is live")
     try expect(ReceiverRules.nonHLSIsLive(flowing(icy: true)))
     try expect(ReceiverRules.nonHLSIsLive(flowing(chunked: true)))
     try expect(ReceiverRules.nonHLSIsLive(flowing(openEnded: true)))
@@ -859,7 +863,7 @@ func playlistCheckAndHealthStamp() throws {
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false),
                "a media body with no stream signal is a file")
     let sample = ReceiverRules.streamMinDuration
-    let sampleBytes = Int(ReceiverRules.streamMinByteRate * sample)
+    let sampleBytes = Int(Double(32_000 / 8) * sample)
     try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false,
                                             signal: .init(icy: true, bodyEnded: false, stillArriving: true, elapsed: sample, bytes: sampleBytes)))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",

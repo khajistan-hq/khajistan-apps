@@ -42,8 +42,11 @@ final class ReceiverGuideUITests: XCTestCase {
         let start = current.label
         let guideControl = app.buttons["guideControl"]
         XCTAssertTrue(guideControl.waitForExistence(timeout: 30), "the strip offers the guide once the channel plays")
-        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
-        XCTAssertTrue(guideControl.isSelected, "Right three times lights Guide, after CC and Like")
+        // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
+        // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
+        kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived
+        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(guideControl.isSelected, "Right lights Guide, after CC and Like")
         XCUIRemote.shared.press(.select)
 
         let guide = app.descendants(matching: .any)["receiverGuide"]
@@ -65,7 +68,7 @@ final class ReceiverGuideUITests: XCTestCase {
         kjScreenshot("\(skin)-g3-tuned", app: app)
 
         // Left closes the guide and lets go of its control, so the strip can hide again.
-        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
+        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(guide.waitForExistence(timeout: 5), "the guide opens again")
         XCUIRemote.shared.press(.left)

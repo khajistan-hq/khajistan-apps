@@ -4159,7 +4159,6 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
-    ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
@@ -4194,7 +4193,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Database route: direct, or the site's /sb/ proxy", supabaseRouteRewrites),
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
-    ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
+    ("Surf: All, TV only, Radio only", surfMediumChoices),
+    ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
 // MARK: - Database route
@@ -4335,14 +4335,20 @@ func tvSignInFromAPhone() throws {
 
 // MARK: - Shuffle
 
-func shuffleDrawsRegionsByLiveCount() throws {
-    let w = [("indus", 30), ("persia", 0), ("khorasan", 10)]
-    try expectEqual(ShufflePick.region(w, roll: { _ in 0 }), "indus")
-    try expectEqual(ShufflePick.region(w, roll: { _ in 29 }), "indus")
-    // A region with nothing live is never drawn: the roll after Indus lands on Khorasan.
-    try expectEqual(ShufflePick.region(w, roll: { _ in 30 }), "khorasan")
-    try expectEqual(ShufflePick.region(w, roll: { $0 - 1 }), "khorasan")
-    try expectEqual(ShufflePick.region([("persia", 0)]), nil)
+func surfChannel(_ id: String, _ medium: String, _ regions: [String]) throws -> Channel {
+    let object: [String: Any] = ["id": id, "name": id, "mediaType": medium, "regionIds": regions,
+                                 "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"]
+    return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+}
+
+func surfMediumChoices() throws {
+    try expect(ShuffleMedium.all.includes("tv") && ShuffleMedium.all.includes("radio"), "All takes TV and radio")
+    try expect(!ShuffleMedium.all.includes("camera"), "All is not cameras")
+    try expect(ShuffleMedium.tv.includes("tv") && !ShuffleMedium.tv.includes("radio"), "TV only")
+    try expect(ShuffleMedium.radio.includes("radio") && !ShuffleMedium.radio.includes("tv"), "Radio only")
+    try expectEqual(ShuffleMedium.stored(nil), .all, "a new device surfs everything")
+    try expectEqual(ShuffleMedium.stored("tv"), .tv, "a kept choice stays")
+    try expectEqual(ShuffleScope.stored("nonsense"), .main)
 }
 
 func shuffleScopesAndCameraRegions() throws {
@@ -4359,12 +4365,32 @@ func shuffleScopesAndCameraRegions() throws {
      "totals":{"channels":538,"live":538,"byMedium":{"tv":62,"radio":76,"camera":400}}}
     """
     let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(json.utf8))
-    func names(_ w: [(String, Int)]) -> [String] { w.map { "\($0.0):\($0.1)" } }
-    try expectEqual(names(ShufflePick.weights(index, medium: .tv, scope: .main)), ["indus:38", "anatolia:20"])
-    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .extended)), ["nusantara:20"])
-    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .everywhere)), ["indus:40", "anatolia:16", "nusantara:20"])
-    // Kashmir has no shard of its own (a people's region): never drawn.
-    try expect(!ShufflePick.weights(index, medium: .tv, scope: .everywhere).contains { $0.0 == "kashmir" }, "people's region")
+    // The lists read for each scope. Kashmir has no list of its own (a people's region).
+    try expectEqual(ShufflePick.regions(index, scope: .main), ["indus", "anatolia"])
+    try expectEqual(ShufflePick.regions(index, scope: .extended), ["nusantara"])
+    try expectEqual(ShufflePick.regions(index, scope: .everywhere), ["indus", "anatolia", "nusantara"])
+
+    let indusTV = try surfChannel("indus-tv", "tv", ["indus"])
+    let indusRadio = try surfChannel("indus-radio", "radio", ["indus"])
+    let bothTV = try surfChannel("both-tv", "tv", ["anatolia", "nusantara"])  // filed in both atlases
+    let nusRadio = try surfChannel("nus-radio", "radio", ["nusantara"])
+    let camera = try surfChannel("cam", "camera", ["indus"])
+    let lists: [String: [Channel]] = [
+        "indus": [indusTV, indusRadio, camera],
+        "anatolia": [bothTV, indusTV],  // indus-tv listed twice: surfed once
+        "nusantara": [bothTV, nusRadio],
+    ]
+    func pool(_ medium: ShuffleMedium, _ scope: ShuffleScope) -> [String] {
+        let read = ShufflePick.regions(index, scope: scope).map { (region: $0, channels: lists[$0] ?? []) }
+        return ShufflePick.pool(read, index: index, medium: medium, scope: scope).map(\.id)
+    }
+    try expectEqual(pool(.all, .main), ["indus-tv", "indus-radio", "both-tv"], "main: every channel of the main atlas, once")
+    try expectEqual(pool(.tv, .main), ["indus-tv", "both-tv"])
+    try expectEqual(pool(.radio, .main), ["indus-radio"])
+    try expectEqual(pool(.all, .extended), ["nus-radio"], "extended: a channel also filed in the main atlas is not surfed")
+    try expectEqual(pool(.tv, .extended), [], "extended TV here is all main-atlas")
+    try expectEqual(pool(.all, .everywhere), ["indus-tv", "indus-radio", "both-tv", "nus-radio"])
+    try expect(!pool(.all, .everywhere).contains("cam"), "cameras are never surfed")
     // Cameras: the main atlas first, then the extensions; the total is the index's own count.
     try expectEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
     try expectEqual(CameraRegions.total(index), 400)

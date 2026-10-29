@@ -264,8 +264,8 @@ private struct LiveSection: View {
         }
         Task {
             guard let all = try? await model.receiver.channels(regionId: id, cameras: false) else { return }
-            let medium = UserDefaults.standard.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
-            let pool = all.filter { $0.mediaType == medium.rawValue }
+            let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
+            let pool = all.filter { medium.includes($0.mediaType) }
             let list = pool.isEmpty ? all : pool
             guard let channel = list.randomElement() else { return }
             model.tuner.play(channel, in: list)
@@ -511,16 +511,16 @@ struct ChannelRow: View {
 /// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
 /// of the atlas. Kept on the device (owner, 2026-10-07).
 private struct SurfSettings: View {
-    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
 
-    private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
+    private var medium: ShuffleMedium { .stored(mediumRaw) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("Surf").font(.system(.subheadline, weight: .bold))
-                Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
+                Text("A live \(medium == .tv ? "television " : medium == .radio ? "radio " : "")channel at random").kjSmall(faint: true)
             }
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
             chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }

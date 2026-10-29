@@ -157,14 +157,15 @@ struct ReceiverDevice: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular || verticalClass == .compact {
-                // A phone on its side is as short as it is wide: the set sits beside its words,
-                // small enough to leave the page room under it.
+            if sizeClass == .regular && verticalClass != .compact {
+                // An iPad: the set sits beside its words.
                 HStack(alignment: .top, spacing: 28) {
-                    set.frame(width: verticalClass == .compact ? 300 : 560)
+                    set.frame(width: 560)
                     if !fullScreen { copy.padding(.top, 52) }
                 }
             } else {
+                // A phone, upright or on its side (where ReceiverView stands the set beside the
+                // page): the words under the set.
                 VStack(alignment: .leading, spacing: 10) {
                     set
                     if !fullScreen { copy }

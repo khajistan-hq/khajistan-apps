@@ -28,18 +28,36 @@ struct ReceiverView: View {
     @AppStorage(ReceiverTuner.keepsPlayingKey) private var keepsPlaying = true
     @AppStorage(ReceiverTuner.playsInBackgroundKey) private var playsInBackground = true
     private static let sectionAnchor = "receiverSection"
+    /// The set's width beside the page on a phone on its side.
+    private static let sideSetWidth: CGFloat = 320
+    @Environment(\.verticalSizeClass) private var verticalClass
 
     var body: some View {
-        VStack(spacing: 0) {
-            // On, the set stays above the page while the reader browses; off, it is the top of
-            // the page and scrolls away with it.
-            if model.tuner.source != nil {
-                device
-                    .padding(.horizontal, KJLayout.inset)
-                    .kjColumn(KJLayout.wideWidth)
-                    .padding(.vertical, 8)
+        Group {
+            if model.tuner.source != nil && verticalClass == .compact {
+                // A phone on its side is too short for the set above the page: the screen was
+                // squeezed to a sliver and a station's name broke mid-word. The set stands beside
+                // the page instead, its screen at full 16:9.
+                HStack(alignment: .top, spacing: 20) {
+                    ScrollView { device.padding(.vertical, 8) }
+                        .frame(width: Self.sideSetWidth)
+                        .scrollBounceBehavior(.basedOnSize)
+                    page
+                }
+                .padding(.leading, KJLayout.inset)
+            } else {
+                VStack(spacing: 0) {
+                    // On, the set stays above the page while the reader browses; off, it is the
+                    // top of the page and scrolls away with it.
+                    if model.tuner.source != nil {
+                        device
+                            .padding(.horizontal, KJLayout.inset)
+                            .kjColumn(KJLayout.wideWidth)
+                            .padding(.vertical, 8)
+                    }
+                    page
+                }
             }
-            page
         }
         .task(id: model.tab) {
             guard model.tab == .receiver else { return }

@@ -490,21 +490,25 @@ final class ReceiverStore {
         return try await playbackURL(for: channel, fresh: fresh)
     }
 
-    /// The remembered carrier when it still matches. A verified id whose URL has aged out of
-    /// the ten-minute verdict is probed again. That miss does not withdraw the row: the caller
-    /// withdraws on throw, and an expired entry alone does not throw.
+    /// Plays a carrier only while its verdict is inside the ten-minute clock and the URL matches.
+    /// A missing or older verdict is probed again. The stored URL is only the match. A dead probe
+    /// throws, and the player withdraws the row. An expired entry is not itself stored as dead.
     private func playbackURL(for channel: Channel, fresh: URL) async throws -> URL {
-        let remembered = probe.playback(for: channel.id)
-        switch ReceiverRules.CarrierMemory(verified: verified.contains(channel.id), playback: remembered).tune(fresh) {
+        let memory = ReceiverRules.CarrierMemory(
+            verified: verified.contains(channel.id),
+            playback: probe.playback(for: channel.id),
+            verdictAt: probe.verdictDate(channel.id)
+        )
+        switch memory.tune(fresh) {
         case .play:
             return fresh
         case .refuse:
             throw ReceiverStoreError.notOnDial
         case .reprobe:
             let epoch = probeEpoch
-            let live = await probe.verify([channel], bypassCache: true).live
+            let report = await probe.verify([channel], bypassCache: true)
             guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch),
-                  live.contains(channel.id),
+                  report.live.contains(channel.id),
                   let probed = probe.playback(for: channel.id),
                   ReceiverRules.playbackMatches(probed: probed, fresh: fresh) else {
                 throw ReceiverStoreError.notOnDial

@@ -768,18 +768,24 @@ func aTuneElevenMinutesLaterKeepsTheVerifiedCarrier() throws {
     try expect(later.timeIntervalSince(at) > ReceiverRules.verdictMemory)
     memory.age(to: later)
     try expect(memory.verdictAt == nil, "the ten-minute verdict has expired")
-    try expectEqual(memory.tune(url), .play, "a verified id still holds its carrier at eleven minutes")
-    try expect(!ReceiverRules.withdrawsOnResolveMiss(memory.tune(url)))
+    try expect(memory.playback == url, "the stored URL stays for the match")
+    try expectEqual(memory.tune(url, now: later), .reprobe, "an expired verdict is probed again before it plays")
+    try expect(!ReceiverRules.withdrawsOnResolveMiss(.reprobe), "an expired entry is not itself a withdrawal")
+    memory.pass(url: url, at: later)
+    try expectEqual(memory.tune(url, now: later), .play, "a fresh verdict with the same URL plays")
+    try expectEqual(memory.tune(url, now: later.addingTimeInterval(ReceiverRules.verdictMemory)), .reprobe)
     memory.playback = nil
-    try expectEqual(memory.tune(url), .reprobe, "a missing URL on a verified id is probed again")
+    memory.pass(url: url, at: later)
+    memory.playback = nil
+    try expectEqual(memory.tune(url, now: later), .reprobe, "a missing URL on a verified id is probed again")
     try expect(!ReceiverRules.withdrawsOnResolveMiss(.reprobe))
     try expect(ReceiverRules.withdrawsOnResolveMiss(.refuse))
     memory.playback = other
-    try expectEqual(memory.tune(url), .refuse, "a different remembered carrier is not played")
+    try expectEqual(memory.tune(url, now: later), .refuse, "a different remembered carrier is not played")
     memory.verified = false
     memory.playback = nil
     memory.age(to: later)
-    try expectEqual(memory.tune(url), .refuse)
+    try expectEqual(memory.tune(url, now: later), .refuse)
 }
 
 func aSlowProbeDoesNotFinishTheUnstartedTail() throws {

@@ -186,11 +186,25 @@ final class ReceiverProbe: @unchecked Sendable {
     }
 
     /// The carrier whose renditions passed. Kept until the id is forgotten, marked dead, or the
-    /// session drops its memory. The ten-minute verdict clock does not clear it.
+    /// session drops its memory. The ten-minute verdict clock does not clear it. A tune still
+    /// has to probe again once the verdict is older than that clock. The URL is only for the match.
     func playback(for id: String) -> URL? {
         lock.lock()
         defer { lock.unlock() }
         return playbacks[id]
+    }
+
+    /// When the live verdict was stored, if it is still inside the ten-minute clock.
+    /// Nil when it is missing or older than that. Older verdicts are dropped here. The playback URL stays.
+    func verdictDate(_ id: String, now: Date = Date()) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = cache[id], entry.live else { return nil }
+        if now.timeIntervalSince(entry.at) >= Self.memory {
+            cache[id] = nil
+            return nil
+        }
+        return entry.at
     }
 
     /// Drops every remembered verdict and moves the epoch. Generation numbers are not reused,

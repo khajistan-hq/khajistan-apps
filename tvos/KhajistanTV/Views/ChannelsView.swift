@@ -225,24 +225,44 @@ struct ChannelsView: View {
     private func loadMain() async {
         guard !mainLoaded else { return }
         errorText = nil
-        do {
-            channels = try await model.receiver.channels(regionId: region.id, cameras: false)
-            mainLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            errorText = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                channels = try await model.receiver.channels(regionId: region.id, cameras: false)
+            } catch {
+                if Task.isCancelled { return }
+                errorText = error.localizedDescription
+                return
+            }
+            let unfinished = model.receiver.walkFinished(regionId: region.id, cameras: false) ? 0 : 1
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: unfinished) else {
+                if unfinished == 0 { mainLoaded = true }
+                return
+            }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 
     private func loadCameras() async {
         guard !camerasLoaded else { return }
         cameraError = nil
-        do {
-            cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
-            camerasLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            cameraError = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled {
+            attempt += 1
+            do {
+                cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
+            } catch {
+                if Task.isCancelled { return }
+                cameraError = error.localizedDescription
+                return
+            }
+            let unfinished = model.receiver.walkFinished(regionId: region.id, cameras: true) ? 0 : 1
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: unfinished) else {
+                if unfinished == 0 { camerasLoaded = true }
+                return
+            }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 

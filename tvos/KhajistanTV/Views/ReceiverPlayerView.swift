@@ -112,6 +112,7 @@ struct ReceiverPlayerView: View {
             .buttonStyle(SurfaceButtonStyle())
             .focused($focus, equals: .surface)
             .defaultFocus($focus, .surface)
+            .accessibilityIdentifier("playerSurface")
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))

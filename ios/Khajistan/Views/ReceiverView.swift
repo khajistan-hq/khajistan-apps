@@ -403,6 +403,8 @@ private struct LiveSection: View {
     }
 
     /// The region's television and radio shard, and its camera shard when it opens on cameras.
+    /// A walk that still has unprobed rows is asked again, a bounded number of times, once a
+    /// slot has had time to free. The region is not marked loaded until that walk finishes.
     private func loadRegion(force: Bool = false) async {
         guard force || loadedRegion != selected else { return }
         await model.receiver.loadIndex()
@@ -412,10 +414,29 @@ private struct LiveSection: View {
         filter = ""
         camerasLoaded = false
         cameraChannels = []
-        do {
-            let list = try await model.receiver.channels(regionId: region, cameras: false)
+        var attempt = 0
+        var list: [Channel] = []
+        var finished = false
+        while !Task.isCancelled && region == selected {
+            attempt += 1
+            do {
+                list = try await model.receiver.channels(regionId: region, cameras: false)
+            } catch {
+                if Task.isCancelled || region != selected { return }
+                listError = error.localizedDescription
+                break
+            }
             guard region == selected else { return }
             channels = list
+            if model.receiver.walkFinished(regionId: region, cameras: false) {
+                finished = true
+                break
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { break }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
+        }
+        guard region == selected else { return }
+        if finished {
             if list.contains(where: { $0.mediaType == medium }) && medium != "camera" {
                 // Stay on the medium the reader was on.
             } else if list.contains(where: { $0.mediaType == "tv" }) {
@@ -429,9 +450,6 @@ private struct LiveSection: View {
             loadedRegion = region
             // The list arrives below the strip, out of VoiceOver's way: say that it did.
             UIAccessibility.post(notification: .announcement, argument: "\(regionLabel): \(list.count) channels")
-        } catch {
-            if Task.isCancelled || region != selected { return }
-            listError = error.localizedDescription
         }
         if region == selected { loading = false }
     }
@@ -439,14 +457,24 @@ private struct LiveSection: View {
     private func loadCameras() async {
         guard !camerasLoaded else { return }
         let region = selected
-        do {
-            let list = try await model.receiver.channels(regionId: region, cameras: true)
-            guard region == selected else { return }
-            cameraChannels = list
-            camerasLoaded = true
-        } catch {
-            if Task.isCancelled { return }
-            listError = error.localizedDescription
+        var attempt = 0
+        while !Task.isCancelled && region == selected {
+            attempt += 1
+            do {
+                let list = try await model.receiver.channels(regionId: region, cameras: true)
+                guard region == selected else { return }
+                cameraChannels = list
+            } catch {
+                if Task.isCancelled { return }
+                listError = error.localizedDescription
+                return
+            }
+            if model.receiver.walkFinished(regionId: region, cameras: true) {
+                camerasLoaded = true
+                return
+            }
+            guard ReceiverRules.shouldRetryUnfinishedWalk(attempt: attempt, unprobed: 1) else { return }
+            try? await Task.sleep(for: .seconds(ReceiverRules.unfinishedWalkDelay()))
         }
     }
 }

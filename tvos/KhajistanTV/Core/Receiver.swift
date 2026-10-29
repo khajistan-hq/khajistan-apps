@@ -301,12 +301,25 @@ enum ReceiverRules {
     /// while the id is still verified.
     static let verdictMemory: TimeInterval = 600
 
-    /// What a tune may do with a remembered carrier. Age does not drop a URL the id still holds
-    /// as verified. A verified id with no URL left is probed again, and that miss is not a withdrawal.
+    /// What a tune may do with a remembered carrier. A missing or expired verdict is probed
+    /// again. The stored URL is only compared after that probe. An expired entry is not itself
+    /// a dead verdict.
     enum TuneMemory: Equatable {
         case play
         case reprobe
         case refuse
+    }
+
+    /// How many times a screen may ask again for a walk that still has unprobed rows.
+    static let unfinishedWalkAttempts = HostBudget.retryLimit
+
+    /// Wait long enough for a held slot to finish, then ask again. Not a spin.
+    static func unfinishedWalkDelay(timeout: TimeInterval = 6) -> TimeInterval {
+        min(slotWait(timeout: timeout), HostBudget.backoff)
+    }
+
+    static func shouldRetryUnfinishedWalk(attempt: Int, unprobed: Int) -> Bool {
+        unprobed > 0 && attempt < unfinishedWalkAttempts
     }
 
     struct CarrierMemory: Equatable {
@@ -320,7 +333,8 @@ enum ReceiverRules {
             verdictAt = at
         }
 
-        /// Drops the verdict once it is older than `memory`. The playback URL stays while verified.
+        /// Drops the verdict once it is older than `memory`. The playback URL stays so a later
+        /// probe can be matched against it. The tune does not play on that URL alone.
         mutating func age(to now: Date, memory: TimeInterval = ReceiverRules.verdictMemory) {
             if let at = verdictAt, now.timeIntervalSince(at) >= memory {
                 verdictAt = nil
@@ -328,13 +342,12 @@ enum ReceiverRules {
             if !verified { playback = nil }
         }
 
-        func tune(_ fresh: URL) -> TuneMemory {
-            if let playback {
-                return playback.absoluteString == fresh.absoluteString ? .play : .refuse
-            }
-            // Still verified, but the remembered URL is gone. Probe again. Do not withdraw.
-            if verified { return .reprobe }
-            return .refuse
+        func tune(_ fresh: URL, now: Date = Date(), memory: TimeInterval = ReceiverRules.verdictMemory) -> TuneMemory {
+            guard verified else { return .refuse }
+            let verdictFresh = verdictAt.map { now.timeIntervalSince($0) < memory } ?? false
+            guard verdictFresh else { return .reprobe }
+            guard let playback else { return .reprobe }
+            return playback.absoluteString == fresh.absoluteString ? .play : .refuse
         }
     }
 

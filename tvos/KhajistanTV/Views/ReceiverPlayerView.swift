@@ -86,8 +86,12 @@ struct ReceiverPlayerView: View {
                     return
                 }
                 switch armed {
-                case .captions: model.captions.toggle()
-                case .like: like()
+                case .captions:
+                    model.captions.toggle()
+                    hideAfterChoice()
+                case .like:
+                    like()
+                    hideAfterChoice()
                 case .guide: openGuide()
                 case nil: wake()
                 }
@@ -554,6 +558,21 @@ struct ReceiverPlayerView: View {
         if model.radioAway?.controller !== playerB { playerB.stop() }
         model.clips.clear()
         model.pigeon.clear()
+    }
+
+    /// After Captions or Like is chosen the strip lets go of the control and hides 4 seconds
+    /// later (owner, 2026-10-29: captions "shows the timer but doesnt auto hide the bar, can you
+    /// hide it after 4 secs"). It stayed up for good before: an armed control holds the strip.
+    /// A press in those 4 seconds keeps it, as any press does.
+    private func hideAfterChoice() {
+        hideTask?.cancel()
+        guard OverlayTiming.hidesItself else { return }
+        hideTask = Task {
+            try? await Task.sleep(for: OverlayTiming.afterChoice)
+            guard !Task.isCancelled, guideRow == nil, controller.state == .playing else { return }
+            armed = nil
+            overlayVisible = false
+        }
     }
 
     /// Shows the overlay. Once the signal is playing it hides again after 2.6 seconds without

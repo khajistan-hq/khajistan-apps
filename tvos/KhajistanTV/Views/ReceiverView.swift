@@ -10,7 +10,6 @@ struct ReceiverView: View {
     @State private var mapError: String?
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
-    @State private var openingPlayback = ReceiverOpeningPlayback()
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
     @State private var surfNote: String?
@@ -37,26 +36,13 @@ struct ReceiverView: View {
         }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
-        .task(id: AutomaticOpening(active: model.section == .receiver, ready: model.receiver.index != nil)) {
-            #if DEBUG
-            // Navigation tests exercise the map without opening a live player.
-            if UserDefaults.standard.bool(forKey: "kjnoautoplay") { return }
-            #endif
-            guard let ticket = openingPlayback.begin(
-                active: model.section == .receiver, ready: model.receiver.index != nil,
-                explicitDestination: !model.receiverPath.isEmpty || (model.link != nil && model.link != .receiver)
-            ) else { return }
-            await shuffle(automaticTicket: ticket)
-        }
+        // Nothing plays until it is chosen (owner, 2026-10-29: "it goes straight to playing a
+        // channel, which is not what I want. I need to be able to select a channel and then play
+        // it"). Surf is focused at launch, so a channel is still one press away.
         // vod.json opens with the preview password, so a password entered later loads it.
         .task(id: model.auth.previewPassword) { await model.films.load() }
         // Read again when the index lands: a link that opened the app arrives before it.
         .task(id: PendingLink(link: model.link, indexReady: model.receiver.index != nil)) { follow(model.link) }
-    }
-
-    private struct AutomaticOpening: Hashable {
-        let active: Bool
-        let ready: Bool
     }
 
     private struct PendingLink: Hashable {
@@ -94,6 +80,7 @@ struct ReceiverView: View {
                         mapArea
                     }
                     .padding(.bottom, 12)
+                    HomeSections()
                     camerasRow(index)
                     filmsRow
                     HomeRows()
@@ -157,7 +144,6 @@ struct ReceiverView: View {
         Binding(
             get: { model.extendedAtlas },
             set: {
-                openingPlayback.manualInteraction()
                 model.extendedAtlas = $0
             }
         )
@@ -179,7 +165,6 @@ struct ReceiverView: View {
     private var surf: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                openingPlayback.manualInteraction()
                 Task { await shuffle() }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
@@ -219,7 +204,6 @@ struct ReceiverView: View {
         HStack(spacing: 4) {
             ForEach(items, id: \.0) { item in
                 Button {
-                    openingPlayback.manualInteraction()
                     set(item.0)
                 } label: { Text(item.1).kjKicker() }
                     .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
@@ -230,7 +214,7 @@ struct ReceiverView: View {
         .padding(.leading, -22)
     }
 
-    private func shuffle(automaticTicket: Int? = nil) async {
+    private func shuffle() async {
         guard let index = model.receiver.index, !shuffling else { return }
         shuffling = true
         surfNote = nil
@@ -239,10 +223,6 @@ struct ReceiverView: View {
             try? await model.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled else { return }
-        if let ticket = automaticTicket {
-            guard openingPlayback.admits(ticket), model.section == .receiver,
-                  model.receiverPath.isEmpty, (model.link == nil || model.link == .receiver), shuffled == nil else { return }
-        }
         if let channel = pool.first {
             shuffled = ShufflePick(channel: channel, list: pool)
             return
@@ -261,7 +241,6 @@ struct ReceiverView: View {
             Shelf("Cameras", count: "\(CameraRegions.total(index).formatted()) in \(regions.count) regions") {
                 ForEach(regions) { region in
                     Button {
-                        openingPlayback.manualInteraction()
                         model.camerasFirst = region.id
                         model.receiverPath.append(region)
                     } label: {
@@ -293,8 +272,7 @@ struct ReceiverView: View {
             FilmShelf(
                 title: "The Screening Room",
                 count: "\(films.count) \(films.count == 1 ? "film" : "films") on demand",
-                films: films,
-                onChoose: { openingPlayback.manualInteraction() }
+                films: films
             )
             .accessibilityIdentifier("screeningRoom")
         }
@@ -319,7 +297,6 @@ struct ReceiverView: View {
     /// Opens a region from the strip. The region is the index's own line for it; a map shape the
     /// index has no line for is still opened, as what the map says it is.
     private func open(_ mapRegion: MapRegion) {
-        openingPlayback.manualInteraction()
         guard let index = model.receiver.index else { return }
         let region = index.regions.first { $0.id == mapRegion.id }
             ?? ReceiverIndex.Region(

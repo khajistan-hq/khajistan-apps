@@ -392,7 +392,9 @@ final class ReadingStore {
                 pad4.insert(twin.slug)
                 cover = answer
             }
-            job.state.access = job.probe.flatMap { RRAccess.classify(answers[$0]) }
+            // A job with no probe (an issue's cover, or a cover read back after the memory budget
+            // let it go) leaves the card's access line as it was.
+            if let probe = job.probe { job.state.access = RRAccess.classify(answers[probe]) }
             if job.state.access == nil, job.probe != nil, let title = job.title, answers[job.probe!]?.status == 404 {
                 unresolved.append((job.state, title))
             }

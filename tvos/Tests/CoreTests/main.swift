@@ -487,7 +487,10 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty).count, 0)
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty, verified: everyID).count, 0,
                     "a missing health file shows nothing")
-    let shard = ReceiverRules.eligible(channels, controls: .empty, verified: everyID, allowWithoutHealth: true).map(\.id)
+    try expectEqual(ReceiverRules.eligible(channels, controls: .empty, verified: everyID, allowWithoutHealth: true).count, 0,
+                    "a debug launch still withholds every row until both withdrawal files have loaded")
+    let debugControls = Controls(denylist: Denylist(disabledChannelIds: []), offAir: OffAir(offAirChannelIds: []), health: nil)
+    let shard = ReceiverRules.eligible(channels, controls: debugControls, verified: everyID, allowWithoutHealth: true).map(\.id)
     try expectEqual(Set(shard), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
                                 "degraded", "degraded-tv", "denied", "off-air", "offline-by-feed", "blocked-by-feed",
                                 "slow-0-2", "slow-0-49"],
@@ -512,7 +515,7 @@ func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
         #"{"channelId":"\#($0)","status":"online","deliveryRatio":1}"#
     }.joined(separator: ",")
     let health = try decode(Health.self, #"{"generatedAt":"\#(stamp(now))","results":[\#(rows)]}"#)
-    let controls = Controls(denylist: nil, offAir: nil, health: health, now: now)
+    let controls = Controls(denylist: Denylist(disabledChannelIds: []), offAir: OffAir(offAirChannelIds: []), health: health, now: now)
     let result = ReceiverRules.eligible(channels, controls: controls, verified: Set(channels.map(\.id)))
     try expectEqual(result.map(\.id).filter { $0.hasPrefix("dup") }.sorted(), ["dup", "dup2"])
     try expectEqual(result.count, 7)
@@ -596,14 +599,32 @@ func probeLedgerDropsAnOvertakenWrite() throws {
     var ledger = ReceiverRules.ProbeLedger()
     let first = ledger.begin("a")
     let second = ledger.begin("a")
-    try expect(!ledger.commit("a", live: false, generation: first), "an older write must not land")
+    try expect(!ledger.commit("a", live: false, ticket: first), "an older write must not land")
     try expect(ledger.live("a") == nil)
-    try expect(ledger.commit("a", live: true, generation: second))
+    try expect(ledger.commit("a", live: true, ticket: second))
     try expectEqual(ledger.live("a"), true as Bool?)
     let forgotten = ledger.begin("a")
-    try expect(!ledger.commit("a", live: false, generation: second), "forget took the next generation")
-    try expect(ledger.commit("a", live: nil, generation: forgotten))
+    try expect(!ledger.commit("a", live: false, ticket: second), "forget took the next generation")
+    try expect(ledger.commit("a", live: nil, ticket: forgotten))
     try expect(ledger.live("a") == nil)
+}
+
+func ageOutDuringAProbeDoesNotLand() throws {
+    var ledger = ReceiverRules.ProbeLedger()
+    let inflight = ledger.begin("a")
+    try expectEqual(inflight.generation, 1)
+    ledger.drop()
+    try expect(!ledger.commit("a", live: true, ticket: inflight),
+               "a write that started before the age-out must not land, even when its generation was 1")
+    try expect(ledger.live("a") == nil)
+    let again = ledger.begin("a")
+    try expect(again.epoch != inflight.epoch)
+    try expect(again.generation != 1, "generation numbers are not handed out again from 1")
+    try expect(!ledger.commit("a", live: true, ticket: inflight))
+    try expect(ledger.commit("a", live: true, ticket: again))
+    try expectEqual(ledger.live("a"), true as Bool?)
+    try expect(!ReceiverRules.confirmStillCurrent(capturedEpoch: inflight.epoch, epochNow: again.epoch))
+    try expect(ReceiverRules.confirmStillCurrent(capturedEpoch: again.epoch, epochNow: again.epoch))
 }
 
 func failedHealthFetchKeepsTheFileAndRetriesPromptly() throws {
@@ -629,7 +650,7 @@ func staleFlipClearsVerifiedUntilANewProbe() throws {
     let now = Date(timeIntervalSince1970: 1_700_000_000)
     let channel = try eligibilityChannel("good")
     let health = try decode(Health.self, #"{"generatedAt":"\#(stamp(now))","results":[{"channelId":"good","status":"online","deliveryRatio":1}]}"#)
-    let fresh = Controls(denylist: nil, offAir: nil, health: health, now: now)
+    let fresh = Controls(denylist: Denylist(disabledChannelIds: []), offAir: OffAir(offAirChannelIds: []), health: health, now: now)
     try expectEqual(ReceiverRules.eligible([channel], controls: fresh, verified: ["good"]).map(\.id), ["good"])
     // The session was cleared on the way to stale. The same fresh file, with nothing verified, shows nothing.
     try expect(ReceiverRules.eligible([channel], controls: fresh, verified: []).isEmpty,
@@ -684,19 +705,102 @@ func masterPlaylistIsNotLiveUntilItsVariantIs() throws {
     try expect(!ReceiverRules.playlistIsLive(live, truncated: true))
 }
 
+func everyRenditionHasToPass() throws {
+    let requested = try require(URL(string: "https://cdn.example/live/master.m3u8"))
+    let redirected = try require(URL(string: "https://edge.example/hls/master.m3u8"))
+    let final = ReceiverRules.renditionBase(requested: requested, redirected: redirected)
+    try expectEqual(final.absoluteString, redirected.absoluteString)
+    let master = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=100\nfirst.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=200\nsecond.m3u8\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"a\",NAME=\"en\",URI=\"audio.m3u8\"\n".utf8)
+    try expectEqual(ReceiverRules.renditionReferences(in: master), ["first.m3u8", "second.m3u8", "audio.m3u8"])
+    let root = ReceiverRules.FetchedPlaylist(data: master, finalURL: final, truncated: false)
+    func media(_ url: URL, ended: Bool) -> ReceiverRules.FetchedPlaylist {
+        let body = ended
+            ? "#EXTM3U\n#EXTINF:4,\nseg.ts\n#EXT-X-ENDLIST\n"
+            : "#EXTM3U\n#EXTINF:4,\nseg.ts\n"
+        return ReceiverRules.FetchedPlaylist(data: Data(body.utf8), finalURL: url, truncated: false)
+    }
+    func fetch(_ dead: String) -> (URL) -> ReceiverRules.FetchedPlaylist? {
+        return { url in
+            let name = url.lastPathComponent
+            guard name == "first.m3u8" || name == "second.m3u8" || name == "audio.m3u8" else { return nil }
+            return media(url, ended: name == dead)
+        }
+    }
+    try expect(!ReceiverRules.allRenditionsLive(root, fetch: fetch("first.m3u8")),
+               "a dead first rendition keeps the row off even when a later one is live")
+    try expect(!ReceiverRules.allRenditionsLive(root, fetch: fetch("second.m3u8")),
+               "a dead later rendition keeps the row off even when the first is live")
+    try expect(!ReceiverRules.allRenditionsLive(root, fetch: fetch("audio.m3u8")),
+               "an alternate audio rendition is probed too")
+    try expect(ReceiverRules.allRenditionsLive(root, fetch: fetch("none")))
+    // The relative URI resolves against the URL after the redirect, not the URL that was requested.
+    var asked: [String] = []
+    let one = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)
+    let redirectedMaster = ReceiverRules.FetchedPlaylist(data: one, finalURL: final, truncated: false)
+    let liveChild = media(try require(URL(string: "https://edge.example/hls/prog.m3u8")), ended: false)
+    try expect(ReceiverRules.allRenditionsLive(redirectedMaster) { url in
+        asked.append(url.absoluteString)
+        return url.absoluteString == liveChild.finalURL.absoluteString ? liveChild : nil
+    })
+    try expectEqual(asked, ["https://edge.example/hls/prog.m3u8"])
+    let nestedBody = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nnested.m3u8\n".utf8)
+    let childMaster = Data("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nmedia.m3u8\n".utf8)
+    let nestedURL = try require(URL(string: "https://edge.example/hls/nested.m3u8"))
+    let mediaURL = try require(URL(string: "https://edge.example/hls/media.m3u8"))
+    let tree: [String: ReceiverRules.FetchedPlaylist] = [
+        nestedURL.absoluteString: .init(data: childMaster, finalURL: nestedURL, truncated: false),
+        mediaURL.absoluteString: media(mediaURL, ended: false),
+    ]
+    let nestedRoot = ReceiverRules.FetchedPlaylist(data: nestedBody, finalURL: redirected, truncated: false)
+    try expect(ReceiverRules.allRenditionsLive(nestedRoot) { tree[$0.absoluteString] },
+               "a master that points at another master is live when the leaf is")
+    let deadLeaf = tree.merging([mediaURL.absoluteString: media(mediaURL, ended: true)]) { _, new in new }
+    try expect(!ReceiverRules.allRenditionsLive(nestedRoot) { deadLeaf[$0.absoluteString] })
+    let probed = try require(URL(string: "https://edge.example/hls/master.m3u8"))
+    try expect(ReceiverRules.playbackMatches(probed: probed, fresh: probed))
+    try expect(!ReceiverRules.playbackMatches(probed: requested, fresh: probed))
+    try expect(!ReceiverRules.playbackMatches(probed: nil, fresh: probed))
+}
+
 func finiteMediaIsNotALiveMount() throws {
     let bytes = Data([0xff, 0xfb])
+    let elapsed = ReceiverRules.streamMinDuration
+    let enough = Int(ReceiverRules.streamMinByteRate * elapsed)
+    func flowing(icy: Bool = false, chunked: Bool = false, openEnded: Bool = false, bytes n: Int = enough, over seconds: TimeInterval = elapsed) -> ReceiverRules.StreamSignal {
+        .init(icy: icy, chunked: chunked, openEnded: openEnded, bodyEnded: false, stillArriving: true, elapsed: seconds, bytes: n)
+    }
     try expect(!ReceiverRules.nonHLSIsLive(.init(contentLength: 1_000_000)))
     try expect(!ReceiverRules.nonHLSIsLive(.init(bodyEnded: true)))
     try expect(!ReceiverRules.nonHLSIsLive(.init(contentLength: 320, chunked: true)))
-    try expect(ReceiverRules.nonHLSIsLive(.init(icy: true, contentLength: 1_000_000)))
-    try expect(ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false)))
-    try expect(ReceiverRules.nonHLSIsLive(.init(bodyEnded: false)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init(icy: true, contentLength: 1_000_000)),
+               "ICY metadata does not make a bounded file a stream")
+    try expect(!ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false)),
+               "chunked alone is not a stream that is still arriving")
+    try expect(!ReceiverRules.nonHLSIsLive(.init(bodyEnded: false)),
+               "an open body with no transfer and no sample is not live")
+    try expect(!ReceiverRules.nonHLSIsLive(.init(bodyEnded: false, bytes: 256)),
+               "hitting a read cap is not proof the body is still open")
     try expect(!ReceiverRules.nonHLSIsLive(.init()))
+    try expect(!ReceiverRules.nonHLSIsLive(flowing(chunked: true, bytes: enough - 1)))
+    try expect(!ReceiverRules.nonHLSIsLive(flowing(chunked: true, over: elapsed - 0.1)))
+    try expect(!ReceiverRules.nonHLSIsLive(.init(chunked: true, bodyEnded: false, stillArriving: false, elapsed: elapsed, bytes: enough)))
+    try expect(ReceiverRules.nonHLSIsLive(flowing(icy: true)))
+    try expect(ReceiverRules.nonHLSIsLive(flowing(chunked: true)))
+    try expect(ReceiverRules.nonHLSIsLive(flowing(openEnded: true)))
+    try expectEqual(ReceiverRules.probeOuterWait(timeout: 6), 6 + elapsed)
+    let errorPage = Data(repeating: 0xff, count: 256)
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: errorPage, hls: false,
+                                             signal: .init(openEnded: true, bodyEnded: true, bytes: errorPage.count)),
+               "an audio error page of 256 bytes or more that ends is a file")
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: bytes, hls: false,
                                              signal: .init(contentLength: 8000)))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/aac", body: Data(repeating: 0xff, count: 4096), hls: false,
+                                             signal: .init(openEnded: true, bodyEnded: true, bytes: 4096)),
+               "a finite file with no content length is a file once the body ends")
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: bytes, hls: false,
+                                             signal: .init(chunked: true, bodyEnded: false)))
     try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: bytes, hls: false,
-                                            signal: .init(chunked: true, bodyEnded: false)))
+                                            signal: flowing(chunked: true)))
 }
 
 func staleFlipDropsProbeMemoryAndReopensTheWalks() throws {
@@ -714,6 +818,19 @@ func aFailedFeedKeepsThePreviousCopy() throws {
     try expectEqual(ReceiverRules.keptFeed("new", previous: "old"), "new")
     try expectEqual(ReceiverRules.keptFeed(nil as String?, previous: "old"), "old")
     try expectEqual(ReceiverRules.keptFeed(nil as String?, previous: nil), nil)
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let channel = try eligibilityChannel("good")
+    let health = try decode(Health.self, #"{"generatedAt":"\#(stamp(now))","results":[{"channelId":"good","status":"online","deliveryRatio":1}]}"#)
+    let missingDeny = Controls(denylist: nil, offAir: OffAir(offAirChannelIds: []), health: health, now: now)
+    let missingOff = Controls(denylist: Denylist(disabledChannelIds: []), offAir: nil, health: health, now: now)
+    try expect(ReceiverRules.eligible([channel], controls: missingDeny, verified: ["good"]).isEmpty,
+               "a denylist that has not loaded withdraws every row")
+    try expect(ReceiverRules.eligible([channel], controls: missingOff, verified: ["good"]).isEmpty,
+               "an off-air list that has not loaded withdraws every row")
+    let loadedEmpty = Controls(denylist: Denylist(disabledChannelIds: []), offAir: OffAir(offAirChannelIds: []), health: health, now: now)
+    try expect(loadedEmpty.denylistLoaded && loadedEmpty.offAirLoaded)
+    try expectEqual(ReceiverRules.eligible([channel], controls: loadedEmpty, verified: ["good"]).map(\.id), ["good"],
+                    "a loaded file that lists nobody withdraws nobody")
 }
 
 func figuresPublishOnlyAfterTheWalkFinishes() throws {
@@ -741,8 +858,10 @@ func playlistCheckAndHealthStamp() throws {
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: nil, body: Data("abc".utf8), hls: false))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false),
                "a media body with no stream signal is a file")
+    let sample = ReceiverRules.streamMinDuration
+    let sampleBytes = Int(ReceiverRules.streamMinByteRate * sample)
     try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false,
-                                            signal: .init(icy: true)))
+                                            signal: .init(icy: true, bodyEnded: false, stillArriving: true, elapsed: sample, bytes: sampleBytes)))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
                                              body: Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8), hls: true))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
@@ -4359,12 +4478,14 @@ let tests: [(String, () throws -> Void)] = [
     ("A failed tune does not take the viewer's later channel", failureSkipStaysWithTheTuneThatFailed),
     ("A host backoff does not fail a sibling that is live", hostBackoffLeavesTheSiblingLive),
     ("A probe write lands only at its own generation", probeLedgerDropsAnOvertakenWrite),
+    ("An age-out during a probe does not land", ageOutDuringAProbeDoesNotLand),
     ("A failed health fetch keeps the file and retries promptly", failedHealthFetchKeepsTheFileAndRetriesPromptly),
     ("A stale flip clears verified rows until a new probe", staleFlipClearsVerifiedUntilANewProbe),
     ("A host retry stays inside the walk", hostRetryStaysInsideTheWalk),
     ("An end tag past the first block is not live", playlistEndListPastTheFirstBlockIsNotLive),
     ("A region chip uses the verified count", regionChipUsesTheVerifiedCount),
     ("A master playlist is not live until its variant is", masterPlaylistIsNotLiveUntilItsVariantIs),
+    ("Every rendition has to pass", everyRenditionHasToPass),
     ("A finite media file is not a live mount", finiteMediaIsNotALiveMount),
     ("A stale flip drops probe memory and reopens the walks", staleFlipDropsProbeMemoryAndReopensTheWalks),
     ("A failed feed keeps the previous copy", aFailedFeedKeepsThePreviousCopy),

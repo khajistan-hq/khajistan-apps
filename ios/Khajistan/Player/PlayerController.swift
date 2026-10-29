@@ -78,6 +78,7 @@ final class PlayerController {
         timeoutTask?.cancel()
         removeItemObservers()
 
+        // A receiver row only reaches here with the carrier whose every rendition already passed.
         let asset = AVURLAsset(url: url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": KJConfig.userAgent]])
         let item = AVPlayerItem(asset: asset)
         // A transmission joined part-way through starts where the clock has got to. The seek

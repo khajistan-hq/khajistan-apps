@@ -45,6 +45,8 @@ struct ReceiverPlayerView: View {
     @State private var tuneStamp: (id: String, ticket: Int)?
     /// The row whose probe the viewer just asked for. A resolve miss in that window must not skip it.
     @State private var confirmingID: String?
+    /// Replay after a failure. Cancelled when the screen stops, when health ages out, and when the view goes.
+    @State private var replay: Task<Void, Never>?
     private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
@@ -161,10 +163,14 @@ struct ReceiverPlayerView: View {
                     failedIDs.remove(current.id)
                     let channel = current
                     confirmingID = channel.id
-                    Task {
+                    replay?.cancel()
+                    let epoch = model.receiver.playbackEpoch
+                    replay = Task {
                         let live = await model.receiver.confirm(channel)
+                        guard !Task.isCancelled else { return }
                         if confirmingID == channel.id { confirmingID = nil }
-                        guard live else { return }
+                        guard live, !Task.isCancelled else { return }
+                        guard model.receiver.playbackEpoch == epoch else { return }
                         guard destination == nil, current.id == channel.id else { return }
                         tune(channel)
                     }
@@ -212,6 +218,9 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
+        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+            stopEverything()
+        }
         .onDisappear { stopEverything() }
     }
 
@@ -607,9 +616,11 @@ struct ReceiverPlayerView: View {
         model.pigeon.clear()
     }
 
-    /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
+    /// Everything this screen started: the tuning, the wipe, the timer, the signal, the clip, and a replay probe.
     private func stopEverything() {
         guideRow = nil
+        replay?.cancel()
+        replay = nil
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()

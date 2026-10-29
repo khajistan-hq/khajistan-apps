@@ -15,8 +15,9 @@ final class ReceiverProbe: @unchecked Sendable {
     static let cap = 8
 
     private struct Entry {
-        let live: Bool
-        let at: Date
+        var live: Bool
+        var at: Date
+        var playback: URL?
     }
 
     /// One shared cap. A waiter takes the slot of the check that just finished.
@@ -114,7 +115,10 @@ final class ReceiverProbe: @unchecked Sendable {
 
     private var cache: [String: Entry] = [:]
     /// Each remember or forget takes the next number under the lock, so a later call wins.
+    /// The map is not cleared when memory is dropped. `writeEpoch` moves instead, so a write
+    /// that was already in flight cannot match a generation that would otherwise start again at 1.
     private var generation: [String: Int] = [:]
+    private var writeEpoch = 0
     private var hosts = ReceiverRules.HostBudget()
     private let lock = NSLock()
     private let slots = Slots(cap: ReceiverProbe.cap)
@@ -125,31 +129,38 @@ final class ReceiverProbe: @unchecked Sendable {
             self.session = session
         } else {
             let config = URLSessionConfiguration.ephemeral
-            config.timeoutIntervalForRequest = Self.timeout
-            config.timeoutIntervalForResource = Self.timeout + 2
+            let limit = ReceiverRules.probeOuterWait(timeout: Self.timeout)
+            config.timeoutIntervalForRequest = limit
+            config.timeoutIntervalForResource = limit + 2
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
             config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
             self.session = URLSession(configuration: config)
         }
     }
 
-    /// The next write number for `id`. A later begin makes an earlier commit miss.
-    func beginWrite(_ id: String) -> Int {
+    /// The epoch and generation of one write. Both have to still be current for the commit to land.
+    private struct WriteTicket {
+        var epoch: Int
+        var generation: Int
+    }
+
+    /// The next write for `id`. A later begin, or a drop, makes an earlier commit miss.
+    private func beginWrite(_ id: String) -> WriteTicket {
         lock.lock()
         defer { lock.unlock() }
         let next = (generation[id] ?? 0) + 1
         generation[id] = next
-        return next
+        return WriteTicket(epoch: writeEpoch, generation: next)
     }
 
-    /// Lands only when `gen` is still the current write. An overtaken write does nothing.
+    /// Lands only when the ticket's epoch and generation are still current. An overtaken write does nothing.
     @discardableResult
-    func commit(_ id: String, live: Bool?, generation gen: Int, now: Date = Date()) -> Bool {
+    private func commit(_ id: String, live: Bool?, ticket: WriteTicket, playback: URL? = nil, now: Date = Date()) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard gen == generation[id] else { return false }
+        guard ticket.epoch == writeEpoch, ticket.generation == generation[id] else { return false }
         if let live {
-            cache[id] = Entry(live: live, at: now)
+            cache[id] = Entry(live: live, at: now, playback: live ? playback : nil)
         } else {
             cache[id] = nil
         }
@@ -157,20 +168,33 @@ final class ReceiverProbe: @unchecked Sendable {
     }
 
     func remember(_ id: String, live: Bool, now: Date = Date()) async {
-        let gen = beginWrite(id)
-        commit(id, live: live, generation: gen, now: now)
+        let ticket = beginWrite(id)
+        commit(id, live: live, ticket: ticket, now: now)
     }
 
     func forget(_ id: String) async {
-        let gen = beginWrite(id)
-        commit(id, live: nil, generation: gen, now: Date())
+        let ticket = beginWrite(id)
+        commit(id, live: nil, ticket: ticket, now: Date())
     }
 
-    /// Drops every remembered verdict. A stale flip calls this so the next probe is a real read.
+    /// The carrier whose renditions passed, while that verdict is still remembered.
+    func playback(for id: String, now: Date = Date()) -> URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = cache[id], entry.live else { return nil }
+        if now.timeIntervalSince(entry.at) >= Self.memory {
+            cache[id] = nil
+            return nil
+        }
+        return entry.playback
+    }
+
+    /// Drops every remembered verdict and moves the epoch. Generation numbers are not reused,
+    /// so an in-flight commit from before the drop cannot land on the next probe.
     func dropMemory() {
         lock.lock()
         cache.removeAll()
-        generation.removeAll()
+        writeEpoch += 1
         lock.unlock()
     }
 
@@ -193,15 +217,15 @@ final class ReceiverProbe: @unchecked Sendable {
                 group.addTask { [slots] in
                     defer { slots.release() }
                     if Task.isCancelled { return }
-                    let gen = self.beginWrite(channel.id)
-                    let mark = await ReceiverProbe.sample(channel, session: session, gate: self)
+                    let ticket = self.beginWrite(channel.id)
+                    let sample = await ReceiverProbe.sample(channel, session: session, gate: self)
                     if Task.isCancelled { return }
-                    switch mark {
+                    switch sample.mark {
                     case .live:
-                        guard self.commit(channel.id, live: true, generation: gen) else { return }
+                        guard self.commit(channel.id, live: true, ticket: ticket, playback: sample.playback) else { return }
                         await found(channel.id)
                     case .dead:
-                        self.commit(channel.id, live: false, generation: gen)
+                        self.commit(channel.id, live: false, ticket: ticket)
                     case .skipped:
                         skipped.insert(channel)
                     }
@@ -260,11 +284,19 @@ final class ReceiverProbe: @unchecked Sendable {
         }
     }
 
-    /// Resolves the carrier, then reads an HLS playlist or the first bytes of anything else.
-    /// A live mount is cancelled as soon as those bytes arrive, so a radio stream is not downloaded.
-    /// The whole check gives up at `timeout`, so a quiet socket cannot hold a slot.
-    private static func sample(_ channel: Channel, session: URLSession, gate: ReceiverProbe) async -> ReceiverRules.ProbeMark {
-        guard let stream = channel.activeStream else { return .dead }
+    private struct Sample {
+        var mark: ReceiverRules.ProbeMark
+        /// The carrier that was probed, and only when every rendition of it passed.
+        var playback: URL?
+    }
+
+    /// Resolves the carrier, then reads an HLS playlist or a timed sample of anything else.
+    /// A master is live only when every rendition is. The player later opens this same carrier,
+    /// so it cannot choose a variant the probe did not read.
+    /// A quiet socket cannot hold a slot: the outer wait is just longer than the sample, so a
+    /// read that is still delivering bytes is not replaced with a dead verdict.
+    private static func sample(_ channel: Channel, session: URLSession, gate: ReceiverProbe) async -> Sample {
+        guard let stream = channel.activeStream else { return Sample(mark: .dead, playback: nil) }
         let hls = stream.format?.lowercased() == "hls"
         let carrier: URL
         do {
@@ -272,90 +304,165 @@ final class ReceiverProbe: @unchecked Sendable {
             request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
             let (data, response) = try await session.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200,
-                  let url = try? ReceiverRules.carrier(from: data) else { return .dead }
+                  let url = try? ReceiverRules.carrier(from: data) else { return Sample(mark: .dead, playback: nil) }
             carrier = url
         } catch {
-            return Task.isCancelled ? .skipped : .dead
+            return Sample(mark: Task.isCancelled ? .skipped : .dead, playback: nil)
         }
         let host = carrier.host?.lowercased() ?? ""
         switch gate.admit(host) {
         case .skip, .giveUp:
-            return .skipped
+            return Sample(mark: .skipped, playback: nil)
         case .go:
             break
         }
-        var read = await bounded(carrier, hls: hls, session: session)
-        if let variant = read.variant {
-            // A master is not live until its first media playlist passes the same test.
-            read = await bounded(variant, hls: true, session: session)
+        let read = await bounded(carrier, hls: hls, session: session)
+        let outcome = await renditions(read, session: session, depth: 0)
+        gate.finish(host: host, throttled: outcome.throttled)
+        if Task.isCancelled { return Sample(mark: .skipped, playback: nil) }
+        let playback = outcome.mark == .live ? carrier : nil
+        return Sample(mark: outcome.mark, playback: playback)
+    }
+
+    private struct Outcome {
+        var mark: ReceiverRules.ProbeMark
+        var throttled: Bool
+    }
+
+    /// Every `#EXT-X-STREAM-INF` and `#EXT-X-MEDIA` URI, including a master that points at another
+    /// master, up to `masterDepth`. One dead rendition fails the carrier. A 403 or a cancelled
+    /// read is skipped, not stored as dead.
+    private static func renditions(_ read: Read, session: URLSession, depth: Int) async -> Outcome {
+        if read.cancelled || Task.isCancelled { return Outcome(mark: .skipped, throttled: false) }
+        if read.status == 403 || read.status == 429 { return Outcome(mark: .skipped, throttled: true) }
+        guard let status = read.status, (200..<300).contains(status) else {
+            return Outcome(mark: .dead, throttled: false)
         }
-        let throttled = read.status == 403 || read.status == 429
-        gate.finish(host: host, throttled: throttled)
-        if Task.isCancelled { return .skipped }
-        return ReceiverRules.probeMark(status: read.status, skipped: throttled, bodyLive: read.live)
+        if !read.playlist {
+            let live = ReceiverRules.responseIsLive(status: status, contentType: read.contentType, body: read.data,
+                                                     hls: false, signal: read.signal)
+            return Outcome(mark: live ? .live : .dead, throttled: false)
+        }
+        let playlist = ReceiverRules.FetchedPlaylist(data: read.data, finalURL: read.finalURL, truncated: read.truncated)
+        switch ReceiverRules.nextRendition(playlist) {
+        case .media(let ok):
+            return Outcome(mark: ok ? .live : .dead, throttled: false)
+        case .master(let urls):
+            if depth >= ReceiverRules.masterDepth || urls.isEmpty {
+                return Outcome(mark: .dead, throttled: false)
+            }
+            for url in urls {
+                if Task.isCancelled { return Outcome(mark: .skipped, throttled: false) }
+                let child = await bounded(url, hls: true, session: session)
+                let outcome = await renditions(child, session: session, depth: depth + 1)
+                if outcome.mark != .live { return outcome }
+            }
+            return Outcome(mark: .live, throttled: false)
+        }
     }
 
     private struct Read {
         var status: Int?
-        var live: Bool
-        var variant: URL?
+        var data: Data
+        var finalURL: URL
+        var truncated: Bool
+        var cancelled: Bool
+        var signal: ReceiverRules.StreamSignal
+        var contentType: String?
+        var playlist: Bool
+    }
+
+    private static func emptyRead(_ url: URL, playlist: Bool, cancelled: Bool) -> Read {
+        Read(status: nil, data: Data(), finalURL: url, truncated: false, cancelled: cancelled,
+             signal: ReceiverRules.StreamSignal(), contentType: nil, playlist: playlist)
     }
 
     private static func bounded(_ url: URL, hls: Bool, session: URLSession) async -> Read {
         await withTaskGroup(of: Read?.self) { group in
             group.addTask { await read(url, hls: hls, session: session) }
             group.addTask {
-                try? await Task.sleep(for: .seconds(timeout))
+                // Longer than the sample, so a mount that is still sending is judged by the sample.
+                try? await Task.sleep(for: .seconds(ReceiverRules.probeOuterWait(timeout: timeout)))
                 return nil
             }
             let first = await group.next() ?? nil
             group.cancelAll()
-            return first ?? Read(status: nil, live: false, variant: nil)
+            return first ?? emptyRead(url, playlist: hls, cancelled: true)
         }
     }
 
     private static func read(_ url: URL, hls: Bool, session: URLSession) async -> Read {
-        var request = URLRequest(url: url, timeoutInterval: timeout)
+        var request = URLRequest(url: url, timeoutInterval: ReceiverRules.probeOuterWait(timeout: timeout))
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
         do {
             let (bytes, response) = try await session.bytes(for: request)
             defer { bytes.task.cancel() }
-            guard let http = response as? HTTPURLResponse else { return Read(status: nil, live: false, variant: nil) }
-            if http.statusCode == 403 || http.statusCode == 429 {
-                return Read(status: http.statusCode, live: false, variant: nil)
-            }
+            guard let http = response as? HTTPURLResponse else { return emptyRead(url, playlist: hls, cancelled: false) }
+            let finalURL = http.url ?? url
             let type = http.mimeType ?? http.value(forHTTPHeaderField: "Content-Type")
-            let playlist = hls || url.path.lowercased().contains(".m3u8")
+            let playlist = hls || finalURL.path.lowercased().contains(".m3u8") || url.path.lowercased().contains(".m3u8")
                 || (type ?? "").lowercased().contains("mpegurl") || (type ?? "").lowercased().contains("m3u8")
+            if http.statusCode == 403 || http.statusCode == 429 {
+                return Read(status: http.statusCode, data: Data(), finalURL: finalURL, truncated: false, cancelled: false,
+                            signal: ReceiverRules.StreamSignal(), contentType: type, playlist: playlist)
+            }
             var data = Data()
-            let limit = playlist ? ReceiverRules.playlistReadCap : 256
+            var count = 0
             let endTag = Data("#EXT-X-ENDLIST".utf8)
             var hitCap = false
-            for try await byte in bytes {
-                if Task.isCancelled { break }
-                data.append(byte)
-                if playlist, data.count.isMultiple(of: 4096), data.range(of: endTag) != nil { break }
-                if data.count >= limit {
-                    hitCap = true
-                    break
+            var stillArriving = false
+            var cancelled = false
+            let started = Date()
+            let deadline = started.addingTimeInterval(ReceiverRules.streamMinDuration)
+            let storeCap = playlist ? ReceiverRules.playlistReadCap : ReceiverRules.streamFirstBytes
+            do {
+                for try await byte in bytes {
+                    if Task.isCancelled {
+                        cancelled = true
+                        break
+                    }
+                    // A non-HLS body is still a stream only when a byte arrives at the sample deadline.
+                    // Stopping at a byte cap is not that, and a body that ends before the deadline is a file.
+                    if !playlist && Date() >= deadline {
+                        stillArriving = true
+                        count += 1
+                        if data.count < storeCap { data.append(byte) }
+                        break
+                    }
+                    count += 1
+                    if data.count < storeCap { data.append(byte) }
+                    if playlist {
+                        if data.count.isMultiple(of: 4096), data.range(of: endTag) != nil { break }
+                        if data.count >= ReceiverRules.playlistReadCap {
+                            hitCap = true
+                            break
+                        }
+                    }
                 }
+            } catch is CancellationError {
+                cancelled = true
+            } catch {
+                if Task.isCancelled { cancelled = true }
+                else { return emptyRead(url, playlist: playlist, cancelled: false) }
             }
+            if Task.isCancelled { cancelled = true }
             let sawEnd = playlist && data.range(of: endTag) != nil
             let truncated = playlist && hitCap && !sawEnd
-            let bodyEnded = !hitCap && !Task.isCancelled
-            if playlist, ReceiverRules.isMasterPlaylist(data),
-               let variant = ReceiverRules.firstVariantURL(in: data, relativeTo: url) {
-                return Read(status: http.statusCode, live: false, variant: variant)
-            }
+            // A playlist that hit its cap is unfinished, not a stream that is still open.
+            // A non-HLS body ends unless a byte was still arriving at the deadline.
+            let bodyEnded = playlist ? (!hitCap && !cancelled) : (!stillArriving && !cancelled)
             let icy = http.allHeaderFields.keys.contains { "\($0)".lowercased().hasPrefix("icy-") }
             let length = http.value(forHTTPHeaderField: "Content-Length").flatMap(Int.init)
             let chunked = (http.value(forHTTPHeaderField: "Transfer-Encoding") ?? "").lowercased().contains("chunked")
-            let signal = ReceiverRules.StreamSignal(icy: icy, contentLength: length, chunked: chunked, bodyEnded: bodyEnded)
-            let live = ReceiverRules.responseIsLive(status: http.statusCode, contentType: type, body: data, hls: playlist,
-                                                     playlistTruncated: truncated, signal: signal)
-            return Read(status: http.statusCode, live: live, variant: nil)
+            let signal = ReceiverRules.StreamSignal(
+                icy: icy, contentLength: length, chunked: chunked, openEnded: length == nil && !chunked,
+                bodyEnded: bodyEnded, stillArriving: stillArriving, elapsed: Date().timeIntervalSince(started), bytes: count)
+            return Read(status: http.statusCode, data: data, finalURL: finalURL, truncated: truncated, cancelled: cancelled,
+                        signal: signal, contentType: type, playlist: playlist)
+        } catch is CancellationError {
+            return emptyRead(url, playlist: hls, cancelled: true)
         } catch {
-            return Read(status: nil, live: false, variant: nil)
+            return emptyRead(url, playlist: hls, cancelled: Task.isCancelled)
         }
     }
 }

@@ -146,11 +146,16 @@ struct Health: Decodable, Sendable {
 }
 
 /// The three withdrawal feeds folded into what the eligibility rules look up.
-/// A missing denylist or off-air list withdraws nothing. Health does not work that way:
+/// Until both the denylist and the off-air list have loaded once, every row is withheld.
+/// A loaded file that names nobody withdraws nobody. Health does not work that way:
 /// a missing or stale `health.json` withdraws every row the probe has not verified.
 struct Controls: Sendable {
     let denied: Set<String>
     let health: [String: Health.Result]
+    /// True once `denylist.json` has decoded. A failed first fetch is false.
+    let denylistLoaded: Bool
+    /// True once `off-air-suspects.json` has decoded. A failed first fetch is false.
+    let offAirLoaded: Bool
     /// True when `health.json` decoded. A failed fetch is false.
     let healthLoaded: Bool
     /// True when `generatedAt` is no older than two hours at `now`.
@@ -159,6 +164,8 @@ struct Controls: Sendable {
     /// `treatAsFresh` is for a debug launch that must not depend on the live file's age.
     /// Production calls leave it false, so a stale file still withdraws every row.
     init(denylist: Denylist?, offAir: OffAir?, health: Health?, now: Date = Date(), treatAsFresh: Bool = false) {
+        denylistLoaded = denylist != nil
+        offAirLoaded = offAir != nil
         denied = Set(denylist?.disabledChannelIds ?? []).union(offAir?.offAirChannelIds ?? [])
         // Last record wins, as it does on the iOS radio lane.
         self.health = Dictionary((health?.results ?? []).map { ($0.channelId, $0) },
@@ -201,6 +208,14 @@ enum ReceiverRules {
     static let healthRetry: TimeInterval = 15
     /// How much of an HLS playlist is read before an unfinished body is unverifiable.
     static let playlistReadCap = 256 * 1024
+    /// How many masters a variant may point through. Deeper than this is not verified.
+    static let masterDepth = 3
+    /// LiveRadio's preroll: bytes have to keep arriving at least this long.
+    static let streamMinDuration: TimeInterval = 1.5
+    /// LiveRadio's stall window, and the 64 KB it reads before calling a mount silent.
+    static let streamStall: TimeInterval = 12
+    static let streamFirstBytes = 65536
+    static var streamMinByteRate: Double { Double(streamFirstBytes) / streamStall }
 
     /// Fresh only when the stamp is not more than five minutes ahead and not more than two hours behind.
     static func healthIsFresh(generatedAt stamp: Date, now: Date) -> Bool {
@@ -253,20 +268,51 @@ enum ReceiverRules {
         return bodyLive ? .live : .dead
     }
 
-    /// Ordered probe writes. A commit whose generation is no longer current does not land.
+    /// The outer race has to outlast the non-HLS sample. A read that is still open at `timeout`
+    /// would otherwise be replaced with a dead verdict.
+    static func probeOuterWait(timeout: TimeInterval) -> TimeInterval {
+        timeout + streamMinDuration
+    }
+
+    /// A confirm may insert only in the probe epoch it captured before the probe.
+    static func confirmStillCurrent(capturedEpoch: Int, epochNow: Int) -> Bool {
+        capturedEpoch == epochNow
+    }
+
+    /// The player may open `fresh` only when it is the carrier the probe already checked.
+    /// A different answer from the carrier endpoint is a playlist this session has not read.
+    static func playbackMatches(probed: URL?, fresh: URL) -> Bool {
+        probed?.absoluteString == fresh.absoluteString
+    }
+
+    /// Ordered probe writes. A commit lands only for the epoch it began in and the generation
+    /// still current for that id. Dropping memory moves the epoch and does not hand generation
+    /// numbers out again, so a write that was in flight cannot match a number that starts over.
     struct ProbeLedger {
+        struct Ticket: Equatable {
+            var epoch: Int
+            var generation: Int
+        }
+
         private var generation: [String: Int] = [:]
+        private var epoch = 0
         private var value: [String: Bool] = [:]
 
-        mutating func begin(_ id: String) -> Int {
+        mutating func begin(_ id: String) -> Ticket {
             let next = (generation[id] ?? 0) + 1
             generation[id] = next
-            return next
+            return Ticket(epoch: epoch, generation: next)
+        }
+
+        /// Forgets every verdict and moves the epoch forward. Generation numbers stay.
+        mutating func drop() {
+            value.removeAll()
+            epoch += 1
         }
 
         @discardableResult
-        mutating func commit(_ id: String, live: Bool?, generation gen: Int) -> Bool {
-            guard gen == self.generation[id] else { return false }
+        mutating func commit(_ id: String, live: Bool?, ticket: Ticket) -> Bool {
+            guard ticket.epoch == epoch, ticket.generation == generation[id] else { return false }
             if let live { value[id] = live } else { value.removeValue(forKey: id) }
             return true
         }
@@ -343,8 +389,9 @@ enum ReceiverRules {
 
     /// Channels the receiver may offer, sorted by name.
     ///
-    /// A row is kept only when it is published, switched on, absent from the denylist and the
-    /// off-air list, has an active stream, and delivers at least half the expected stream.
+    /// A row is kept only when both withdrawal files have loaded, and the row is published,
+    /// switched on, absent from the denylist and the off-air list, has an active stream,
+    /// and delivers at least half the expected stream. An empty loaded file withdraws nobody.
     /// The grade has to be `online`, or `degraded` on television and radio. Unknown,
     /// intermittent, missing, offline, blocked and `blocked_vantage` rows are never kept, and
     /// a degraded camera is not either. Any other status string is not playable either: a grade
@@ -360,6 +407,8 @@ enum ReceiverRules {
         var seen = Set<String>()
         var kept: [Channel] = []
         for channel in channels {
+            // Neither withdrawal file has loaded: show nothing. An empty loaded file withdraws nobody.
+            guard controls.denylistLoaded, controls.offAirLoaded else { continue }
             // A missing health file shows nothing, unless a debug launch has asked to grade the shard.
             if !(controls.healthLoaded && controls.healthFresh) && !allowWithoutHealth { continue }
             if controls.healthLoaded && !controls.healthFresh { continue }
@@ -406,24 +455,100 @@ enum ReceiverRules {
         return segment
     }
 
-    /// A master names variants and carries no segments. The first variant is the one to read.
+    /// A master names variants and carries no segments. Every rendition has to be read.
     static func isMasterPlaylist(_ data: Data) -> Bool {
         guard let cleaned = playlistText(data) else { return false }
         return isMasterPlaylist(cleaned)
     }
 
-    /// The first variant in a master, resolved against the master URL. Nil when there is none.
-    static func firstVariantURL(in data: Data, relativeTo base: URL) -> URL? {
-        guard let cleaned = playlistText(data) else { return nil }
-        var after = false
+    /// Every rendition a player might select: the URI after each `#EXT-X-STREAM-INF`,
+    /// and the `URI` of each `#EXT-X-MEDIA`.
+    static func renditionReferences(in data: Data) -> [String] {
+        guard let cleaned = playlistText(data) else { return [] }
+        var refs: [String] = []
+        var afterStream = false
         for raw in cleaned.split(whereSeparator: \.isNewline) {
             let line = raw.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("#EXT-X-STREAM-INF") { after = true; continue }
-            guard after else { continue }
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            return URL(string: line, relativeTo: base)?.absoluteURL
+            if line.hasPrefix("#EXT-X-STREAM-INF") {
+                afterStream = true
+                continue
+            }
+            if line.hasPrefix("#EXT-X-MEDIA") {
+                afterStream = false
+                if let uri = mediaAttributeURI(line) { refs.append(uri) }
+                continue
+            }
+            if afterStream {
+                if line.isEmpty || line.hasPrefix("#") { continue }
+                refs.append(line)
+                afterStream = false
+            }
         }
-        return nil
+        return refs
+    }
+
+    /// A relative rendition resolves against the playlist's final URL, after redirects.
+    static func renditionBase(requested: URL, redirected: URL?) -> URL { redirected ?? requested }
+
+    static func resolveRendition(_ reference: String, against finalURL: URL) -> URL? {
+        URL(string: reference, relativeTo: finalURL)?.absoluteURL
+    }
+
+    /// The first variant, kept for callers that only need one. Nil when the master has none.
+    static func firstVariantURL(in data: Data, relativeTo base: URL) -> URL? {
+        renditionReferences(in: data).first.flatMap { resolveRendition($0, against: base) }
+    }
+
+    /// One fetched playlist. `finalURL` is `http.url ??` the URL that was requested.
+    struct FetchedPlaylist: Equatable {
+        var data: Data
+        var finalURL: URL
+        var truncated: Bool
+    }
+
+    /// A media playlist is live or not. A master lists the rendition URLs still to read.
+    enum RenditionStep: Equatable {
+        case media(Bool)
+        case master([URL])
+    }
+
+    static func nextRendition(_ playlist: FetchedPlaylist) -> RenditionStep {
+        if playlist.truncated { return .media(false) }
+        guard let text = playlistText(playlist.data), text.hasPrefix("#EXTM3U") else { return .media(false) }
+        if text.contains("#EXT-X-ENDLIST") { return .media(false) }
+        let refs = renditionReferences(in: playlist.data)
+        if refs.isEmpty { return .media(playlistIsLive(playlist.data)) }
+        var urls: [URL] = []
+        for ref in refs {
+            guard let url = resolveRendition(ref, against: playlist.finalURL) else { return .media(false) }
+            urls.append(url)
+        }
+        return .master(urls)
+    }
+
+    /// Live only when every rendition is a live media playlist. A nested master is read up to
+    /// `masterDepth`. One dead rendition fails the whole master, so the player is never handed
+    /// a playlist that still contains an unverified choice.
+    static func allRenditionsLive(_ root: FetchedPlaylist, depth: Int = 0, fetch: (URL) -> FetchedPlaylist?) -> Bool {
+        switch nextRendition(root) {
+        case .media(let ok):
+            return ok
+        case .master(let urls):
+            if depth >= masterDepth || urls.isEmpty { return false }
+            for url in urls {
+                guard let child = fetch(url) else { return false }
+                if !allRenditionsLive(child, depth: depth + 1, fetch: fetch) { return false }
+            }
+            return true
+        }
+    }
+
+    private static func mediaAttributeURI(_ line: String) -> String? {
+        guard let start = line.range(of: "URI=\"") else { return nil }
+        let rest = line[start.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        let uri = rest[..<end]
+        return uri.isEmpty ? nil : String(uri)
     }
 
     private static func isMasterPlaylist(_ cleaned: String) -> Bool {
@@ -439,24 +564,33 @@ enum ReceiverRules {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// A non-HLS body is a live mount only with a positive stream signal.
-    /// ICY metadata is one. No content length, while the body is still open and chunked or
-    /// streaming, is the other. A bounded content length, or a body that has already ended, is a file.
+    /// A non-HLS body is a live mount only while bytes are still arriving.
+    /// A content length is a file. A body that has ended is a file, including one with no
+    /// content length. Hitting a read cap is not the same as a body that is still open.
+    /// What remains has to be ICY, chunked, or open-ended, and it has to keep arriving
+    /// through the sample: at least `streamMinDuration`, at at least `streamMinByteRate`.
     struct StreamSignal: Equatable {
         var icy: Bool = false
         var contentLength: Int? = nil
         var chunked: Bool = false
+        /// No content length and not chunked. The body runs until the server closes it.
+        var openEnded: Bool = false
         /// True when the body finished. The default is a finished body, so a caller that
         /// names no stream signal does not pass.
         var bodyEnded: Bool = true
+        /// A byte arrived at or after the sample deadline. A cap is not this.
+        var stillArriving: Bool = false
+        var elapsed: TimeInterval = 0
+        var bytes: Int = 0
     }
 
     static func nonHLSIsLive(_ signal: StreamSignal) -> Bool {
-        if signal.icy { return true }
         if signal.contentLength != nil { return false }
         if signal.bodyEnded { return false }
-        // No length, and the body was still open: chunked or a raw stream.
-        return signal.chunked || !signal.bodyEnded
+        let transfer = signal.icy || signal.chunked || signal.openEnded
+        guard transfer, signal.stillArriving else { return false }
+        guard signal.elapsed >= streamMinDuration, signal.elapsed > 0 else { return false }
+        return Double(signal.bytes) / signal.elapsed >= streamMinByteRate
     }
 
     /// What a probe may treat as a live body. 403 is refused. HLS must be a real media playlist.

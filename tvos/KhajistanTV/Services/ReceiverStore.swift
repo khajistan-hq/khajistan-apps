@@ -193,15 +193,24 @@ final class ReceiverStore {
         await enqueueProbe { await self.probe.forget(id) }.value
     }
 
-    /// Probes one channel the viewer asked for again. True only when that probe says it is live.
+    /// Probes one channel the viewer asked for again. True only when that probe says it is live
+    /// and the probe epoch is still the one captured before the probe. A stale flip in the
+    /// middle drops the result instead of inserting it.
     func confirm(_ channel: Channel) async -> Bool {
         await refreshControlsIfStale()
         await restore(channel.id)
         guard ReceiverRules.probeCandidates([channel], controls: controls()).first != nil else { return false }
+        let epoch = probeEpoch
         let live = await probe.verify([channel], bypassCache: true)
+        guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else { return false }
         guard !Task.isCancelled, live.contains(channel.id), !withdrawn.contains(channel.id) else { return false }
+        guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else { return false }
         verified.insert(channel.id)
         dialGeneration += 1
+        guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else {
+            verified.remove(channel.id)
+            return false
+        }
         return lists(channel)
     }
 
@@ -454,11 +463,18 @@ final class ReceiverStore {
         let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
+        let fresh: URL
         do {
-            return try ReceiverRules.carrier(from: data)
+            fresh = try ReceiverRules.carrier(from: data)
         } catch {
             throw ReceiverStoreError.unplayable
         }
+        // Debug launches do not probe. A release play opens only the carrier whose renditions passed.
+        if probesOff { return fresh }
+        guard ReceiverRules.playbackMatches(probed: probe.playback(for: channel.id), fresh: fresh) else {
+            throw ReceiverStoreError.notOnDial
+        }
+        return fresh
     }
 
     /// Denylist, off-air list and health, fetched together. A failed health fetch keeps the

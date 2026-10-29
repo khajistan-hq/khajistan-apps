@@ -591,7 +591,8 @@ private struct TVDatabaseScreen: View {
         .lineLimit(1)
         .padding(.horizontal, 16)
         .accessibilityHidden(true)
-        VStack(alignment: .leading, spacing: 0) {
+        // Lazy: up to 300 rows, and only those on screen are built.
+        LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(found.prefix(Self.shown)) { item in
                 Button { record = item } label: { row(item, columns: columns) }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)))

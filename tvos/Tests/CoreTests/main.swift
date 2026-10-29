@@ -3523,26 +3523,29 @@ func passportSaveRequests() throws {
 }
 
 func chatRoomsGrouped() throws {
-    func room(_ slug: String, region: String?, kind: String = "atlas", category: String = "public", adult: Bool = false, status: String = "approved") -> ChatRoom {
+    func room(_ slug: String, region: String? = nil, kind: String = "house", category: String = "public", adult: Bool = false, status: String = "approved") -> ChatRoom {
         ChatRoom(slug: slug, label: slug, kind: kind, region: region, country: nil, category: category, adult: adult, description: nil, status: status, slow_mode_seconds: 0)
     }
+    // created_at order, as the rooms request returns them
     let rooms = [
-        room("indus-visitor-a", region: "indus", kind: "visitor"),
-        room("indus-fashion", region: "indus"),
-        room("indus-daily-feelings", region: "indus"),
-        room("indus-partners", region: "indus", category: "partners"),
-        room("indus-adult", region: "indus", adult: true),
-        room("khajistan", region: nil, kind: "house"),
-        room("maghreb-food", region: "maghreb"),
-        room("persia-pending", region: "persia", status: "pending"),
+        room("khajistan"),
+        room("food"),
+        room("w4w"),
+        room("het4het", category: "partners", adult: true),
+        room("m4m"),
+        room("t4t"),
+        room("lahore-tea", region: "indus", kind: "visitor"),
+        room("persia-pending", region: "persia", kind: "visitor", status: "pending"),
+        room("grown-ups", adult: true),
     ]
     let groups = ChatRules.grouped(rooms)
-    try expectEqual(groups.map(\.title), ["Khajistan", "Maghreb", "Indus"])
-    try expectEqual(groups[2].rooms.map(\.slug), ["indus-daily-feelings", "indus-fashion", "indus-visitor-a"])
+    try expectEqual(groups.count, 1, "one list, no region groups")
+    // T4T, M4M, W4W first (owner, 2026-10-29), then the rest in the order they were made.
+    try expectEqual(groups[0].rooms.map(\.slug), ["t4t", "m4m", "w4w", "khajistan", "food", "lahore-tea"])
     // Never offered: a Partners or adult room, or one the desk has not approved.
-    let all = groups.flatMap(\.rooms).map(\.slug)
-    try expect(!all.contains("indus-partners") && !all.contains("indus-adult") && !all.contains("persia-pending"), "\(all)")
-    try expectEqual(groups.first?.rooms.first?.slug, "khajistan")
+    try expectEqual(ChatRules.grouped([room("het4het", category: "partners", adult: true)]).count, 0, "no rooms, no group")
+    // A main room still marked 18+ is left out like any other.
+    try expect(!ChatRules.grouped([room("t4t", category: "partners", adult: true), room("food")])[0].rooms.contains { $0.slug == "t4t" })
 }
 
 func chatRequestsAndRefusals() throws {

@@ -362,7 +362,8 @@ struct ReadingReaderView: View {
                                 show(page)
                             } label: {
                                 VStack(spacing: 10) {
-                                    StripThumb(issue: issue, stored: RRPageMap.stored(page, map: map))
+                                    StripThumb(issue: issue, stored: RRPageMap.stored(page, map: map),
+                                               curtained: !revealed && flags[store.endpoint(issue, page: RRPageMap.stored(page, map: map))] != nil)
                                         .frame(width: 150, height: 206)
                                         .kjCardArt()
                                     Text("\(page)").kjSmall().monospacedDigit()
@@ -609,19 +610,24 @@ struct ReadingReaderView: View {
 private struct StripThumb: View {
     let issue: RRIssue
     let stored: Int
+    /// A page behind its content warning, not yet shown: the plate only. The warning is the
+    /// reader's own, so the server hands the small picture over regardless.
+    var curtained = false
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
 
     var body: some View {
         ZStack {
-            if let image {
+            if let image, !curtained {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
                 palette.lift
             }
         }
         .accessibilityHidden(true)
-        .task(id: stored) { image = await model.reading.thumbnail(issue, stored: stored) }
+        .task(id: "\(stored)|\(curtained)") {
+            image = curtained ? nil : await model.reading.thumbnail(issue, stored: stored)
+        }
     }
 }

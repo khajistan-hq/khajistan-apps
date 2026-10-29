@@ -167,17 +167,22 @@ final class SpreadView: UIView {
 }
 
 /// A page at the small size, if the page server allows it to this viewer; nothing otherwise.
+/// A page held behind its content warning (`curtained`) is not drawn small either: the warning is
+/// the reader's own (client-side), so the server hands the small picture over regardless.
 struct PageThumb: View {
     let issue: RRIssue
     let stored: Int
+    var curtained = false
     @Environment(AppModel.self) private var model
     @State private var image: UIImage?
 
     var body: some View {
         Color.clear
-            .overlay { if let image { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
+            .overlay { if let image, !curtained { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
             .accessibilityHidden(true)
-            .task(id: stored) { image = await model.reading.thumbnail(issue, stored: stored) }
+            .task(id: "\(stored)|\(curtained)") {
+                image = curtained ? nil : await model.reading.thumbnail(issue, stored: stored)
+            }
     }
 }
 
@@ -246,6 +251,8 @@ struct PagesGrid: View {
     let current: Int
     let marks: [Int]
     let rightToLeft: Bool
+    /// A page behind its content warning, not yet shown: its number only.
+    let curtained: (Int) -> Bool
     let choose: (Int) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -303,7 +310,7 @@ struct PagesGrid: View {
             ForEach(1...pages, id: \.self) { page in
                 Button { choose(page) } label: {
                     VStack(spacing: 4) {
-                        PageThumb(issue: issue, stored: RRPageMap.stored(page, map: map)).frame(height: 132)
+                        PageThumb(issue: issue, stored: RRPageMap.stored(page, map: map), curtained: curtained(page)).frame(height: 132)
                         HStack(spacing: 3) {
                             if marks.contains(page) { Image(systemName: "bookmark.fill").font(.caption2) }
                             Text("\(page)").kjSmall().monospacedDigit()

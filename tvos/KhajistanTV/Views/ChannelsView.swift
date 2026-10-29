@@ -43,9 +43,11 @@ struct ChannelsView: View {
     /// The media this region carries, in shelf order. A medium with nothing in it has no shelf.
     private var media: [String] {
         var found: [String] = []
-        if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
-        if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
-        if hasCameras { found.append("camera") }
+        if channels.contains(where: { $0.mediaType == "tv" && model.receiver.lists($0) }) { found.append("tv") }
+        if channels.contains(where: { $0.mediaType == "radio" && model.receiver.lists($0) }) { found.append("radio") }
+        if hasCameras && !(camerasLoaded && cameraError == nil && !cameraChannels.contains(where: { model.receiver.lists($0) })) {
+            found.append("camera")
+        }
         if !films.isEmpty { found.append("vod") }
         if camerasFirst, let at = found.firstIndex(of: "camera") { found.insert(found.remove(at: at), at: 0) }
         return found
@@ -129,7 +131,7 @@ struct ChannelsView: View {
         case "camera":
             cameraShelf
         default:
-            let list = channels.filter { $0.mediaType == kind }
+            let list = channels.filter { $0.mediaType == kind && model.receiver.lists($0) }
             channelShelf(kind, list)
         }
     }
@@ -155,7 +157,7 @@ struct ChannelsView: View {
     @ViewBuilder
     private var cameraShelf: some View {
         if camerasLoaded {
-            channelShelf("camera", cameraChannels)
+            channelShelf("camera", cameraChannels.filter { model.receiver.lists($0) })
         } else {
             let count = model.receiver.index?.regionCounts[region.id]?.byMedium["camera"]
             Shelf(ReceiverRules.mediumLabel("camera"), count: count.map { "\($0)" }) {

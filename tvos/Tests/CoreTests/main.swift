@@ -373,9 +373,9 @@ func channelSourceLineIsTheFirstClause() throws {
 // MARK: - Eligibility
 
 func eligibilityChannel(_ id: String, name: String? = nil, publication: String? = "published", disabled: Bool? = false,
-                        health: String? = "online", streams: [String] = ["s1"], active: String? = "s1") throws -> Channel {
+                        health: String? = "online", media: String = "radio", streams: [String] = ["s1"], active: String? = "s1") throws -> Channel {
     var object: [String: Any] = [
-        "id": id, "name": name ?? id, "mediaType": "radio",
+        "id": id, "name": name ?? id, "mediaType": media,
         "streams": streams.map { ["id": $0, "format": "hls"] },
     ]
     if let publication { object["publicationStatus"] = publication }
@@ -385,9 +385,16 @@ func eligibilityChannel(_ id: String, name: String? = nil, publication: String? 
     return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
 }
 
+func stamp(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.string(from: date)
+}
+
 func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
     let channels: [Channel] = [
-        // kept
+        // kept while the grade is fresh
         try eligibilityChannel("good"),
         try eligibilityChannel("publication-absent", publication: nil),
         try eligibilityChannel("disabled-absent", disabled: nil),
@@ -395,13 +402,21 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
         try eligibilityChannel("ratio-null"),
         try eligibilityChannel("health-feed-outranks-channel", health: "offline"),
         try eligibilityChannel("degraded", health: "degraded"),
+        try eligibilityChannel("degraded-tv", health: "degraded", media: "tv"),
         // dropped
+        try eligibilityChannel("degraded-camera", health: "degraded", media: "camera"),
+        try eligibilityChannel("intermittent", health: "intermittent"),
+        try eligibilityChannel("unknown", health: "unknown"),
+        try eligibilityChannel("missing-grade", health: nil),
         try eligibilityChannel("denied"),
         try eligibilityChannel("off-air"),
         try eligibilityChannel("offline-by-feed"),
         try eligibilityChannel("offline-by-channel", health: "offline"),
         try eligibilityChannel("blocked-by-feed"),
         try eligibilityChannel("blocked-by-channel", health: "blocked"),
+        try eligibilityChannel("blocked-vantage", health: "blocked_vantage"),
+        try eligibilityChannel("vantage-case", health: "Blocked_Vantage"),
+        try eligibilityChannel("future-status", health: "not_a_grade_yet"),
         try eligibilityChannel("manually-disabled", disabled: true),
         try eligibilityChannel("draft", publication: "draft"),
         try eligibilityChannel("no-active-stream", active: nil),
@@ -411,28 +426,63 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     ]
     let denylist = try decode(Denylist.self, #"{"disabledChannelIds":["denied"],"reasonCodes":{}}"#)
     let offAir = try decode(OffAir.self, #"{"offAirChannelIds":["off-air"]}"#)
-    let health = try decode(Health.self, #"""
-    {"results":[
+    let health = try decode(Health.self, """
+    {"generatedAt":"\(stamp(now))","results":[
+     {"channelId":"good","status":"online","deliveryRatio":1},
+     {"channelId":"publication-absent","status":"online"},
+     {"channelId":"disabled-absent","status":"online"},
+     {"channelId":"degraded","status":"degraded","deliveryRatio":0.9},
+     {"channelId":"degraded-tv","status":"degraded","deliveryRatio":0.9},
+     {"channelId":"degraded-camera","status":"degraded","deliveryRatio":0.9},
+     {"channelId":"intermittent","status":"intermittent"},
+     {"channelId":"unknown","status":"unknown"},
      {"channelId":"offline-by-feed","status":"offline","deliveryRatio":3.0},
      {"channelId":"blocked-by-feed","status":"blocked","deliveryRatio":null},
+     {"channelId":"blocked-vantage","status":"blocked_vantage","deliveryRatio":1},
+     {"channelId":"vantage-case","status":"Blocked_Vantage","deliveryRatio":1},
+     {"channelId":"future-status","status":"not_a_grade_yet","deliveryRatio":1},
      {"channelId":"health-feed-outranks-channel","status":"online","deliveryRatio":1.0},
      {"channelId":"slow-0-2","status":"online","deliveryRatio":0.2},
      {"channelId":"slow-0-49","status":"online","deliveryRatio":0.49},
      {"channelId":"ratio-at-bar","status":"online","deliveryRatio":0.5},
-     {"channelId":"ratio-null","status":"online","deliveryRatio":null}]}
-    """#)
-    let controls = Controls(denylist: denylist, offAir: offAir, health: health)
+     {"channelId":"ratio-null","status":"online","deliveryRatio":null},
+     {"channelId":"denied","status":"online"},
+     {"channelId":"off-air","status":"online"},
+     {"channelId":"manually-disabled","status":"online"},
+     {"channelId":"draft","status":"online"}]}
+    """)
+    let controls = Controls(denylist: denylist, offAir: offAir, health: health, now: now)
+    try expect(controls.healthLoaded && controls.healthFresh)
     try expectEqual(controls.denied, ["denied", "off-air"])
-    try expectEqual(controls.health.count, 7)
     let kept = ReceiverRules.eligible(channels, controls: controls).map(\.id)
     try expectEqual(Set(kept), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
-                                "health-feed-outranks-channel", "degraded"])
-    try expectEqual(kept.count, 7)
-    // Without any feed nothing is withdrawn by a feed: only the channels' own fields count.
-    let bare = ReceiverRules.eligible(channels, controls: .empty).map(\.id)
-    try expectEqual(Set(bare), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null", "degraded",
-                                "denied", "off-air", "offline-by-feed", "blocked-by-feed", "slow-0-2", "slow-0-49"])
-    try expectEqual(bare.count, 12)
+                                "health-feed-outranks-channel", "degraded", "degraded-tv"])
+    // A missing health row is not filled in from the shard, and a degraded camera stays off.
+    try expect(!kept.contains("missing-grade") && !kept.contains("degraded-camera"))
+    try expect(!kept.contains("intermittent") && !kept.contains("unknown"))
+    // blocked_vantage is the same refusal as blocked, in any case, and an unknown status fails closed.
+    try expect(!kept.contains("blocked-vantage") && !kept.contains("vantage-case") && !kept.contains("future-status"))
+    // Exactly two hours is still fresh. One second past that, the grade is not.
+    let onTheHour = Controls(denylist: denylist, offAir: offAir, health: health,
+                             now: now.addingTimeInterval(ReceiverRules.healthMaxAge))
+    try expect(onTheHour.healthFresh)
+    try expectEqual(ReceiverRules.eligible(channels, controls: onTheHour).count, kept.count)
+    let stale = Controls(denylist: denylist, offAir: offAir, health: health,
+                         now: now.addingTimeInterval(ReceiverRules.healthMaxAge + 1))
+    try expect(!stale.healthFresh)
+    try expectEqual(ReceiverRules.eligible(channels, controls: stale).count, 0)
+    // A stale grade shows a row only after this session has verified it, and still never a bad grade.
+    let probed = ReceiverRules.eligible(channels, controls: stale,
+                                        verified: ["good", "degraded", "degraded-camera", "intermittent", "offline-by-feed",
+                                                   "missing-grade", "blocked-vantage", "vantage-case", "future-status"])
+    try expectEqual(Set(probed.map(\.id)), ["good", "degraded"])
+    // No health file: nothing is shown until a probe verifies it. The shard grade still refuses
+    // unknown, intermittent, missing, offline, blocked, blocked_vantage, any other status, and a degraded camera.
+    try expectEqual(ReceiverRules.eligible(channels, controls: .empty).count, 0)
+    let bare = ReceiverRules.eligible(channels, controls: .empty, verified: Set(channels.map(\.id))).map(\.id)
+    try expectEqual(Set(bare), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
+                                "degraded", "degraded-tv", "denied", "off-air", "offline-by-feed", "blocked-by-feed",
+                                "slow-0-2", "slow-0-49"])
 }
 
 func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
@@ -448,7 +498,7 @@ func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
         try eligibilityChannel("r10", name: "Radio 10"),
         try eligibilityChannel("r2", name: "Radio 2"),
     ]
-    let result = ReceiverRules.eligible(channels, controls: .empty)
+    let result = ReceiverRules.eligible(channels, controls: .empty, verified: Set(channels.map(\.id)))
     try expectEqual(result.map(\.id).filter { $0.hasPrefix("dup") }.sorted(), ["dup", "dup2"])
     try expectEqual(result.count, 7)
     try expectEqual(result.map(\.name), ["Alpha", "beta", "Dup", "Dup Two", "Radio 2", "Radio 10", "zeta"])
@@ -464,8 +514,36 @@ func controlsFoldTheFeedsAndLastHealthRecordWins() throws {
     try expectEqual(Controls.empty.denied.count + Controls.empty.health.count, 0)
     let health = try decode(Health.self, #"{"results":[{"channelId":"x","status":"offline"},{"channelId":"x","status":"online","deliveryRatio":2.5}]}"#)
     let controls = Controls(denylist: nil, offAir: nil, health: health)
+    try expect(controls.healthLoaded)
+    try expect(!controls.healthFresh, "a health file with no generatedAt is not fresh")
     try expectEqual(controls.health["x"]?.status, "online")
     try expectEqual(controls.health["x"]?.deliveryRatio, 2.5)
+    try expect(!Controls.empty.healthLoaded && !Controls.empty.healthFresh)
+}
+
+func nextLiveStopsWhenTheScopeIsExhausted() throws {
+    let a = try eligibilityChannel("a", name: "A")
+    let b = try eligibilityChannel("b", name: "B")
+    let c = try eligibilityChannel("c", name: "C")
+    let list = [a, b, c]
+    try expectEqual(ReceiverRules.nextLive(after: "a", in: list, excluding: [])?.id, "b")
+    try expectEqual(ReceiverRules.nextLive(after: "c", in: list, excluding: [])?.id, "a")
+    try expectEqual(ReceiverRules.nextLive(after: "a", in: list, excluding: ["b"])?.id, "c")
+    try expectEqual(ReceiverRules.nextLive(after: "b", in: list, excluding: ["a", "c"]), nil)
+    try expectEqual(ReceiverRules.nextLive(after: "missing", in: list, excluding: ["a"])?.id, "b")
+    try expectEqual(ReceiverRules.nextLive(after: "a", in: [a], excluding: []), nil)
+}
+
+func playlistCheckAndHealthStamp() throws {
+    try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\n".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("\u{FEFF}#EXTM3U".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data("not a playlist".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data()))
+    let plain = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49Z"))
+    let fraction = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49.120Z"))
+    try expect(fraction.timeIntervalSince(plain) > 0 && fraction.timeIntervalSince(plain) < 1)
+    try expectEqual(ReceiverRules.parseStamp("yesterday"), nil)
 }
 
 func tiersAndMediumLabels() throws {
@@ -1367,26 +1445,42 @@ func realShardsAndWithdrawalFeedsDecode() throws {
     let denylist = try JSONDecoder().decode(Denylist.self, from: try realFile("data/open-frequencies/denylist.json"))
     let offAir = try JSONDecoder().decode(OffAir.self, from: try realFile("data/open-frequencies/off-air-suspects.json"))
     let health = try JSONDecoder().decode(Health.self, from: try realFile("data/open-frequencies/health.json"))
-    let controls = Controls(denylist: denylist, offAir: offAir, health: health)
+    let stamp = try require(health.generatedAtDate, "health.json has no generatedAt")
+    let controls = Controls(denylist: denylist, offAir: offAir, health: health, now: stamp)
+    try expect(controls.healthFresh)
     try expectEqual(controls.denied, Set(denylist.disabledChannelIds).union(offAir.offAirChannelIds))
     try expect(controls.health.count > 1000, "only \(controls.health.count) health results")
 
     for shard in [indus, cameras] {
         let eligible = ReceiverRules.eligible(shard.channels, controls: controls)
-        try expect(!eligible.isEmpty, "\(shard.region): nothing eligible")
+        try expect(!eligible.isEmpty, "\(shard.region): nothing eligible on a fresh grade")
         try expect(eligible.count <= shard.channels.count)
         try expectEqual(Set(eligible.map(\.id)).count, eligible.count)
         try expect(eligible.allSatisfy { $0.activeStream != nil && !controls.denied.contains($0.id) })
-        try expect(eligible.allSatisfy { controls.health[$0.id]?.status != "offline" && controls.health[$0.id]?.status != "blocked" })
         try expect(eligible.allSatisfy { ($0.manualDisabled ?? false) == false })
+        try expect(eligible.allSatisfy { channel in
+            let status = controls.health[channel.id]?.status
+            if status == "online" { return true }
+            if status == "degraded" { return channel.mediaType == "tv" || channel.mediaType == "radio" }
+            return false
+        })
+        let stale = Controls(denylist: denylist, offAir: offAir, health: health,
+                             now: stamp.addingTimeInterval(ReceiverRules.healthMaxAge + 1))
+        try expectEqual(ReceiverRules.eligible(shard.channels, controls: stale).count, 0, shard.region)
+        if let sample = eligible.first {
+            let back = ReceiverRules.eligible(shard.channels, controls: stale, verified: [sample.id])
+            try expectEqual(back.map(\.id), [sample.id], shard.region)
+        }
         // The withdrawn are exactly the channels a rule names: recount them by a separate route.
         let dropped = Set(shard.channels.map(\.id)).subtracting(eligible.map(\.id))
         for channel in shard.channels where dropped.contains(channel.id) {
             let check = controls.health[channel.id]
-            let status = check?.status ?? channel.healthStatus
+            let status = check?.status?.lowercased()
+            let medium = channel.mediaType.lowercased()
+            let gradeOK = status == "online" || (status == "degraded" && (medium == "tv" || medium == "radio"))
             let reason = controls.denied.contains(channel.id) || channel.manualDisabled == true
                 || (channel.publicationStatus ?? "published") != "published"
-                || status == "offline" || status == "blocked" || (check?.deliveryRatio ?? 1) < 0.5
+                || !gradeOK || (check?.deliveryRatio ?? 1) < 0.5
                 || channel.activeStream == nil
             try expect(reason, "\(channel.id) was dropped for no reason")
         }
@@ -4055,6 +4149,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Channel.sourceLine is the attribution's first clause", channelSourceLineIsTheFirstClause),
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
+    ("Next live signal stops when the scope is exhausted", nextLiveStopsWhenTheScopeIsExhausted),
+    ("Playlist check and health stamp", playlistCheckAndHealthStamp),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),

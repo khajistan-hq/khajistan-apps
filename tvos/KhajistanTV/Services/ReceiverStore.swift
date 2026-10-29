@@ -31,11 +31,22 @@ final class ReceiverStore {
     private(set) var coreShapes: RegionShapes?
     var isLoading = false
 
+    /// How many channels the dial is actually offering. Nil until that count has been made.
+    /// The index's own live total is not this number.
+    private(set) var liveNow: Int?
+
     @ObservationIgnored private var extendedShapes: RegionShapes?
     @ObservationIgnored private var controls = Controls.empty
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
+    @ObservationIgnored private var channelLoads: [String: Task<[Channel], Error>] = [:]
+    @ObservationIgnored private var liveNowTask: Task<Void, Never>?
+    /// Ids the probe has verified and that have not since failed.
+    @ObservationIgnored private var verified: Set<String> = []
+    /// Ids that failed in this session. A liked or saved row with one of these ids is not shown.
+    private(set) var withdrawn: Set<String> = []
+    @ObservationIgnored private let probe = ReceiverProbe()
     private let urlSession: URLSession
 
     /// How long a fetched index or set of feeds is trusted before the next look.
@@ -83,10 +94,73 @@ final class ReceiverStore {
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera
-    /// shard instead of the television and radio one.
+    /// shard instead of the television and radio one. A liked or saved channel is included
+    /// only when it passes the same rule as every other row.
     func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
-        guard let index else { throw ReceiverStoreError.indexNotLoaded }
         let key = cameras ? regionId + "-camera" : regionId
+        if let existing = channelLoads[key] { return try await existing.value }
+        let task = Task { try await self.loadChannels(regionId: regionId, cameras: cameras, key: key) }
+        channelLoads[key] = task
+        defer { channelLoads[key] = nil }
+        return try await task.value
+    }
+
+    /// True when this channel may be shown, including a liked or saved one. A withdrawn id is not shown.
+    func lists(_ channel: Channel) -> Bool {
+        guard !withdrawn.contains(channel.id) else { return false }
+        return ReceiverRules.eligible([channel], controls: controls, verified: verified).first != nil
+    }
+
+    /// The channel failed to play. It leaves the dial for this session, saved or liked or not.
+    func withdraw(_ id: String) {
+        withdrawn.insert(id)
+        verified.remove(id)
+        Task { await probe.remember(id, live: false) }
+    }
+
+    /// A person asked for this channel again after it failed. The next check starts clean.
+    func restore(_ id: String) {
+        withdrawn.remove(id)
+        // The person asked again. The grade still has to allow it; this only clears the failure.
+        verified.insert(id)
+        Task { await probe.forget(id) }
+    }
+
+    /// Counts the dial from the filtered lists, not from the index total. While health is stale
+    /// the count rises as probes finish. It shares the probe's cap with any list on screen.
+    func loadLiveNow() async {
+        await loadIndex()
+        if let liveNowTask {
+            await liveNowTask.value
+            return
+        }
+        let task = Task { await self.countLive() }
+        liveNowTask = task
+        await task.value
+        liveNowTask = nil
+    }
+
+    private func countLive() async {
+        guard let index else { return }
+        var total = 0
+        var any = false
+        for region in index.listedRegions {
+            if Task.isCancelled { return }
+            if let list = try? await channels(regionId: region.id, cameras: false) {
+                any = true
+                total += list.count
+            }
+            if index.cameraURL(regionId: region.id) != nil,
+               let cameras = try? await channels(regionId: region.id, cameras: true) {
+                any = true
+                total += cameras.count
+            }
+            if any { liveNow = total }
+        }
+    }
+
+    private func loadChannels(regionId: String, cameras: Bool, key: String) async throws -> [Channel] {
+        guard let index else { throw ReceiverStoreError.indexNotLoaded }
         let raw: [Channel]
         if let cached = shards[key] {
             raw = cached
@@ -109,7 +183,15 @@ final class ReceiverStore {
             shards[key] = raw
         }
         await refreshControlsIfStale()
-        return ReceiverRules.eligible(raw, controls: controls)
+        if !controls.healthFresh {
+            let candidates = ReceiverRules.probeCandidates(raw, controls: controls)
+            let live = await probe.verify(candidates)
+            let ids = Set(candidates.map(\.id))
+            verified.subtract(ids)
+            verified.formUnion(live)
+        }
+        return ReceiverRules.eligible(raw, controls: controls, verified: verified)
+            .filter { !withdrawn.contains($0.id) }
     }
 
     /// The shape files the map is drawn from. The extended file comes only when asked for. Both are
@@ -161,8 +243,7 @@ final class ReceiverStore {
     /// feeds are looked at again first: a channel that was listed a minute ago may be withdrawn.
     func resolve(_ channel: Channel) async throws -> URL {
         await refreshControlsIfStale()
-        guard ReceiverRules.eligible([channel], controls: controls).first != nil,
-              let stream = channel.activeStream else {
+        guard lists(channel), let stream = channel.activeStream else {
             throw ReceiverStoreError.notOnDial
         }
         let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))

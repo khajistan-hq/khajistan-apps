@@ -127,7 +127,7 @@ struct ReceiverView: View {
             surf
             Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
                 GridRow {
-                    Figure(label: "Live now", value: figure(index.totals.live))
+                    Figure(label: "Live now", value: model.receiver.liveNow.map { $0.formatted() } ?? "\u{2026}")
                     Figure(label: "Television", value: figure(index.totals.byMedium["tv"]))
                 }
                 GridRow {
@@ -339,6 +339,8 @@ struct ReceiverView: View {
         await model.receiver.loadIndex()
         if Task.isCancelled { return }
         guard model.receiver.index != nil else { return }
+        // The count walks every region. The map and Surf must not wait for that walk.
+        Task { await model.receiver.loadLiveNow() }
         await loadMap()
     }
 

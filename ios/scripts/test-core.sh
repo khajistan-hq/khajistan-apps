@@ -19,6 +19,7 @@ SHARED="$SHARED Views/ChatMedia Core/Shuffle"
 SHARED="$SHARED Core/SupabaseRoute"
 SHARED="$SHARED Core/TVSignIn"
 SHARED="$SHARED Core/ReadingRoom Core/Films Core/PassportSaves Services/ReadingStore Services/FilmStore Services/SavesStore Services/PnvImages Core/Bazaar Core/Madrassa Core/Databases Services/SiteFeed"
+SHARED="$SHARED Services/ReceiverProbe"
 for f in $SHARED; do
     if [ ! -L "Khajistan/$f.swift" ] || [ ! -f "Khajistan/$f.swift" ]; then
         echo "FAIL shared file Khajistan/$f.swift is not a working link to tvos/KhajistanTV/$f.swift" >&2

@@ -136,20 +136,37 @@ struct Health: Decodable, Sendable {
         let deliveryRatio: Double?
     }
 
+    /// When `health.json` was written. Absent or unreadable means the grade cannot be trusted.
+    let generatedAt: String?
     let results: [Result]
+
+    var generatedAtDate: Date? {
+        generatedAt.flatMap(ReceiverRules.parseStamp)
+    }
 }
 
-/// The three withdrawal feeds folded into what the eligibility rules look up. Any of them may
-/// be missing (offline, not yet fetched): a missing feed withdraws nothing.
+/// The three withdrawal feeds folded into what the eligibility rules look up.
+/// A missing denylist or off-air list withdraws nothing. Health does not work that way:
+/// a missing or stale `health.json` withdraws every row the probe has not verified.
 struct Controls: Sendable {
     let denied: Set<String>
     let health: [String: Health.Result]
+    /// True when `health.json` decoded. A failed fetch is false.
+    let healthLoaded: Bool
+    /// True when `generatedAt` is no older than two hours at `now`.
+    let healthFresh: Bool
 
-    init(denylist: Denylist?, offAir: OffAir?, health: Health?) {
+    init(denylist: Denylist?, offAir: OffAir?, health: Health?, now: Date = Date()) {
         denied = Set(denylist?.disabledChannelIds ?? []).union(offAir?.offAirChannelIds ?? [])
         // Last record wins, as it does on the iOS radio lane.
         self.health = Dictionary((health?.results ?? []).map { ($0.channelId, $0) },
                                  uniquingKeysWith: { _, latest in latest })
+        healthLoaded = health != nil
+        if let stamp = health?.generatedAtDate {
+            healthFresh = now.timeIntervalSince(stamp) <= ReceiverRules.healthMaxAge
+        } else {
+            healthFresh = false
+        }
     }
 
     static let empty = Controls(denylist: nil, offAir: nil, health: nil)
@@ -170,27 +187,108 @@ enum ReceiverRules {
     /// MIN_DELIVERY_RATIO).
     private static let minimumDeliveryRatio = 0.5
 
-    /// Channels the receiver may offer, sorted by name. A channel is dropped when it is not
-    /// published, is switched off, is on the denylist or the off-air list, is graded offline or
-    /// blocked, delivers under half the expected stream, or has no active stream. The health
-    /// feed's grade outranks the channel's own `healthStatus`. A repeated id is kept once, at
-    /// its first eligible occurrence.
-    static func eligible(_ channels: [Channel], controls: Controls) -> [Channel] {
+    /// A grade older than this is not a reason to show a row. The probe has to verify it.
+    static let healthMaxAge: TimeInterval = 2 * 60 * 60
+
+    /// Channels the receiver may offer, sorted by name.
+    ///
+    /// A row is kept only when it is published, switched on, absent from the denylist and the
+    /// off-air list, has an active stream, and delivers at least half the expected stream.
+    /// The grade has to be `online`, or `degraded` on television and radio. Unknown,
+    /// intermittent, missing, offline, blocked and `blocked_vantage` rows are never kept, and
+    /// a degraded camera is not either. Any other status string is not playable either: a grade
+    /// this build does not know stays off the dial. The health feed's grade outranks the
+    /// channel's own `healthStatus` once
+    /// `health.json` has loaded. That grade is used only while `generatedAt` is no older than
+    /// two hours. When the file is stale or did not load, a row is kept only if `verified`
+    /// contains its id (a probe in this session). A repeated id is kept once, at its first
+    /// eligible occurrence.
+    static func eligible(_ channels: [Channel], controls: Controls, verified: Set<String> = []) -> [Channel] {
         var seen = Set<String>()
         var kept: [Channel] = []
         for channel in channels {
-            if let published = channel.publicationStatus, published != "published" { continue }
-            if channel.manualDisabled == true { continue }
-            if controls.denied.contains(channel.id) { continue }
-            let check = controls.health[channel.id]
-            let status = check?.status ?? channel.healthStatus
-            if status == "offline" || status == "blocked" { continue }
-            if (check?.deliveryRatio ?? 1) < minimumDeliveryRatio { continue }
-            if channel.activeStream == nil { continue }
+            guard held(channel, controls: controls) else { continue }
+            if !controls.healthFresh && !verified.contains(channel.id) { continue }
             if !seen.insert(channel.id).inserted { continue }
             kept.append(channel)
         }
         return kept.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Rows whose grade is allowed on the dial. When health is fresh these are the rows to show.
+    /// When it is not, these are the rows the probe may verify. Nothing else is probed.
+    static func probeCandidates(_ channels: [Channel], controls: Controls) -> [Channel] {
+        eligible(channels, controls: controls, verified: Set(channels.map(\.id)))
+    }
+
+    /// The next row in `list` after `id`, wrapping once, that is not in `excluding`.
+    /// Nil when every other row is excluded: that scope has no signal left.
+    static func nextLive(after id: String, in list: [Channel], excluding: Set<String>) -> Channel? {
+        guard let start = list.firstIndex(where: { $0.id == id }) else {
+            return list.first { !excluding.contains($0.id) }
+        }
+        guard list.count > 1 else { return nil }
+        for step in 1..<list.count {
+            let channel = list[(start + step) % list.count]
+            if !excluding.contains(channel.id) { return channel }
+        }
+        return nil
+    }
+
+    /// An HLS playlist is live only when it announces itself. Leading space and a BOM are ignored.
+    static func playlistIsLive(_ data: Data) -> Bool {
+        guard let text = String(data: data.prefix(512), encoding: .utf8)
+                ?? String(data: data.prefix(512), encoding: .isoLatin1) else { return false }
+        let cleaned = text.replacingOccurrences(of: "\u{FEFF}", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.hasPrefix("#EXTM3U")
+    }
+
+    /// `health.json`'s `generatedAt`, internet date time, with or without fractional seconds.
+    static func parseStamp(_ text: String) -> Date? {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: text) { return date }
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: text)
+    }
+
+    /// Published, not switched off, not withdrawn, a usable stream, and a grade the dial may show.
+    private static func held(_ channel: Channel, controls: Controls) -> Bool {
+        if let published = channel.publicationStatus, published != "published" { return false }
+        if channel.manualDisabled == true { return false }
+        if controls.denied.contains(channel.id) { return false }
+        let check = controls.health[channel.id]
+        if (check?.deliveryRatio ?? 1) < minimumDeliveryRatio { return false }
+        if channel.activeStream == nil { return false }
+        return gradeAllows(channel, controls: controls)
+    }
+
+    /// `online` for any medium, `degraded` for television and radio. Everything else is refused.
+    /// That includes a missing grade, `offline`, `blocked`, `blocked_vantage` (the health job's
+    /// 403 or geo-block), and any status string this build has not been taught. The refusal is
+    /// an allow-list, so a future grade stays off the dial until a build names it.
+    /// Once health has loaded, a row with no result is missing: the shard's own `healthStatus`
+    /// is not a substitute. When the file did not load, the shard status is all there is, and
+    /// it still has to be one of those two grades.
+    private static func gradeAllows(_ channel: Channel, controls: Controls) -> Bool {
+        let status: String?
+        if controls.healthLoaded {
+            status = controls.health[channel.id]?.status
+        } else {
+            status = channel.healthStatus
+        }
+        switch status?.lowercased() {
+        case "online":
+            return true
+        case "degraded":
+            let medium = channel.mediaType.lowercased()
+            return medium == "tv" || medium == "radio"
+        case nil, "offline", "blocked", "blocked_vantage", "unknown", "intermittent", "missing":
+            return false
+        default:
+            return false
+        }
     }
 
     /// GET site/api/frequency?stream=<streamId>. The id is opaque, so it is encoded as one.

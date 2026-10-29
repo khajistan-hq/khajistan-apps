@@ -82,6 +82,8 @@ struct ReceiverView: View {
         .scrollDismissesKeyboard(.interactively)
         .task {
             await model.receiver.loadIndex()
+            // The count walks every region. Surf must not wait for that walk.
+            Task { await model.receiver.loadLiveNow() }
             await model.playIfOpening()
         }
     }
@@ -90,7 +92,7 @@ struct ReceiverView: View {
     private var figures: some View {
         let totals = model.receiver.index?.totals
         func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2014}" }
-        let items = [("Live now", value(totals?.live)), ("Television", value(totals?.byMedium["tv"])),
+        let items = [("Live now", value(model.receiver.liveNow)), ("Television", value(totals?.byMedium["tv"])),
                      ("Radio", value(totals?.byMedium["radio"])), ("Cameras", value(totals?.byMedium["camera"]))]
         // One row while the four fit; two rows of two at large type.
         return ViewThatFits(in: .horizontal) {
@@ -253,16 +255,20 @@ private struct LiveSection: View {
 
     private var hasCameras: Bool { index?.cameraURL(regionId: selected) != nil }
 
+    /// Liked and saved rows use the same gate as the rest of the dial.
+    private var liveChannels: [Channel] { channels.filter { model.receiver.lists($0) } }
+    private var liveCameras: [Channel] { cameraChannels.filter { model.receiver.lists($0) } }
+
     private var media: [String] {
         var found: [String] = []
-        if channels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
-        if channels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
+        if liveChannels.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
+        if liveChannels.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
         if hasCameras { found.append("camera") }
         return found
     }
 
     private var shown: [Channel] {
-        let list = medium == "camera" ? cameraChannels : channels.filter { $0.mediaType == medium }
+        let list = medium == "camera" ? liveCameras : liveChannels.filter { $0.mediaType == medium }
         let needle = filter.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return list }
         return list.filter { "\($0.name) \($0.place) \($0.broadcaster ?? "")".localizedCaseInsensitiveContains(needle) }
@@ -285,7 +291,7 @@ private struct LiveSection: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("regionTitle")
             if loadedRegion == selected && media.count > 1 { mediumSwitch }
-            if channels.count + cameraChannels.count > 10 {
+            if liveChannels.count + liveCameras.count > 10 {
                 SearchField(prompt: "Name, place or language", text: $filter, id: "channelFilter")
             }
             list
@@ -314,8 +320,8 @@ private struct LiveSection: View {
     private func switchTitle(_ kind: String) -> String {
         let title = ReceiverRules.mediumLabel(kind)
         let count = kind == "camera"
-            ? (camerasLoaded ? cameraChannels.count : index?.regionCounts[selected]?.byMedium["camera"])
-            : channels.filter { $0.mediaType == kind }.count
+            ? (camerasLoaded ? liveCameras.count : index?.regionCounts[selected]?.byMedium["camera"])
+            : liveChannels.filter { $0.mediaType == kind }.count
         return count.map { "\(title) \($0)" } ?? title
     }
 
@@ -538,9 +544,10 @@ private struct CamerasSection: View {
                         if let list = lists[region.id], list.isEmpty {
                             Text("No cameras here right now.").kjSmall(faint: true)
                         } else if let list = lists[region.id] {
+                            let live = list.filter { model.receiver.lists($0) }
                             LazyVStack(alignment: .leading, spacing: 0) {
-                                ForEach(list) { channel in
-                                    Button { model.tuner.play(channel, in: list) } label: {
+                                ForEach(live) { channel in
+                                    Button { model.tuner.play(channel, in: live) } label: {
                                         ChannelRow(channel: channel)
                                     }
                                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 12, leading: 0, bottom: 12, trailing: 0)))

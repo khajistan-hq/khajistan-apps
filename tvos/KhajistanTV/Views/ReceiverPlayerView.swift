@@ -619,8 +619,10 @@ struct ReceiverPlayerView: View {
     /// Everything this screen started: the tuning, the wipe, the timer, the signal, the clip, and a replay probe.
     private func stopEverything() {
         guideRow = nil
-        replay?.cancel()
-        replay = nil
+        if let replay {
+            replay.cancel()
+            self.replay = nil
+        }
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()

@@ -908,4 +908,64 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual((save.value as? String)?.lowercased(), "off", "nothing is saved on the device")
         shot("pnv-save-signin", app)
     }
+
+    /// Home carries a shelf for each part of Khajistan under the masthead (owner, 2026-10-29), and
+    /// scrolls down to them: the Receiver's Surf, the Reading Room's covers, Pics/Vids (its notice
+    /// line until the room's notice is answered) and Chat need no password.
+    func testHomeScrollsThroughAShelfForEachPart() {
+        let app = launch(skin: "day")
+        waitForHome(app, 15, "HOME is up")
+        sleep(6)   // the shelves load a moment after Home
+        let wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+        var seen = Set<String>()
+        for step in 0..<14 {
+            for shelf in wanted where app.descendants(matching: .any)[shelf].exists { seen.insert(shelf) }
+            shot(String(format: "home-scroll-%02d", step), app)
+            if seen.count == wanted.count && step >= 6 { break }
+            app.swipeUp(velocity: .slow)
+            usleep(800_000)
+        }
+        XCTAssertEqual(seen, Set(wanted), "Home scrolls through a shelf for each part")
+    }
+
+    /// Every native room fits the screen it is on, upright and turned: no text runs past the left
+    /// or right edge outside a scroll view (a shelf scrolls sideways; a line of text must not).
+    /// Run it on the small iPhone, the big one and the iPads, and with the largest text size
+    /// (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`).
+    func testEveryRoomFitsTheScreenUprightAndTurned() {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        var overflow: [String] = []
+        for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
+            let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
+            waitFor(app.buttons["tab-rooms"], 15, "the house bar is up in \(room)")
+            for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
+                XCUIDevice.shared.orientation = orientation
+                sleep(6)
+                let tag = "\(room)-\(orientation == .portrait ? "upright" : "turned")"
+                shot("fit-\(tag)", app)
+                overflow += offScreenText(app).map { "\(tag): \($0)" }
+            }
+            XCUIDevice.shared.orientation = .portrait
+            app.terminate()
+        }
+        XCTAssertTrue(overflow.isEmpty, "text runs past the screen edge:\n" + overflow.joined(separator: "\n"))
+    }
+
+    /// Text and buttons whose frame leaves the window sideways, outside every scroll view.
+    private func offScreenText(_ app: XCUIApplication) -> [String] {
+        guard let root = try? app.snapshot() else { return [] }
+        let width = app.windows.firstMatch.frame.width
+        var found: [String] = []
+        func walk(_ node: XCUIElementSnapshot, inScroll: Bool) {
+            let scroll = inScroll || [.scrollView, .collectionView, .table, .webView].contains(node.elementType)
+            let f = node.frame
+            if !scroll, [.staticText, .button, .textField].contains(node.elementType), f.width > 0, f.height > 0,
+               f.minX < -1 || f.maxX > width + 1 {
+                found.append("\(node.elementType.rawValue) '\(node.label.prefix(40))' x \(Int(f.minX))...\(Int(f.maxX)) of \(Int(width))")
+            }
+            for child in node.children { walk(child, inScroll: scroll) }
+        }
+        walk(root, inScroll: false)
+        return found
+    }
 }

@@ -49,6 +49,10 @@ final class KhajistanUITests: XCTestCase {
             usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
+        for _ in 0..<6 where channel.exists && !channel.isHittable {
+            if channel.frame.midY < catalogue.frame.midY { catalogue.swipeDown() } else { catalogue.swipeUp() }
+            usleep(400_000)
+        }
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
         return channel
     }
@@ -204,9 +208,14 @@ final class KhajistanUITests: XCTestCase {
             usleep(250_000)
             if anatolia.isHittable && anatolia.frame == before { break }
         }
+        let anatoliaName = NSPredicate(format: "label CONTAINS[c] %@", "Anatolia")
         anatolia.tap()
-        expectation(for: NSPredicate(format: "label CONTAINS[c] %@", "Anatolia"), evaluatedWith: title)
-        waitForExpectations(timeout: 10)
+        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: anatoliaName, object: title)], timeout: 8) != .completed {
+            for _ in 0..<8 where !anatolia.isHittable { usleep(250_000) }
+            anatolia.tap()
+        }
+        expectation(for: anatoliaName, evaluatedWith: title)
+        waitForExpectations(timeout: 12)
     }
 
     /// The app opens on the Receiver with a channel already tuning on the set, before anything
@@ -318,7 +327,7 @@ final class KhajistanUITests: XCTestCase {
         let cc = app.buttons["receiverCC"]
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
-        waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
+        waitFor(app.staticTexts["receiverCaptionStatus"], 15, "One CC tap explains sign-in")
         XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")

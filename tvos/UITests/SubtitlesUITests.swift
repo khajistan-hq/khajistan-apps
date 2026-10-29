@@ -150,6 +150,9 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 90), "opening Receiver presents a tuning player without Select")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(app.buttons["shuffle"].waitForExistence(timeout: 10))
+        let gone = NSPredicate(format: "exists == false")
+        expectation(for: gone, evaluatedWith: state)
+        waitForExpectations(timeout: 10)
         kjPause(3)
         XCTAssertFalse(state.exists, "dismissing the player does not surf again")
     }

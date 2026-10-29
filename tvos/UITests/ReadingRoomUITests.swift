@@ -261,9 +261,15 @@ final class ReadingRoomUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             waitForShelf(app)
-            let heading = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-shelf-'")).firstMatch
-            XCTAssertTrue(heading.exists, "each shelf is headed \"Name ›\"")
-            XCTAssertTrue(kjFocus(heading, app: app), "the remote reaches a shelf's heading")
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-shelf-'")).firstMatch.exists, "each shelf is headed \"Name ›\"")
+            // Up from a cover on a shelf lands on its heading, as on the remote.
+            XCTAssertTrue(kjFocus(cards(app).firstMatch, app: app), "the remote reaches a cover")
+            // From a cover well to the right of the heading, which sits at the left.
+            for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
+            XCUIRemote.shared.press(.up)
+            kjPause(0.8)
+            let heading = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            XCTAssertTrue(heading.identifier.hasPrefix("rr-shelf-"), "Up from a cover reaches its shelf's heading, not \(heading.identifier)")
             let name = heading.label.components(separatedBy: ",").first ?? ""
             XCUIRemote.shared.press(.select)
             let title = app.staticTexts[name]

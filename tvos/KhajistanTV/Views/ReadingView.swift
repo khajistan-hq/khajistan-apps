@@ -139,6 +139,9 @@ struct ReadingView: View {
         }
         .frame(maxWidth: 900, alignment: .leading)
         .accessibilityIdentifier("rrSearch")
+        // The width of the page, so Up from any cover reaches the search bar.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .focusSection()
     }
 
     /// Titles whose name, native name or byline holds what is typed, in shelf order. Reads the
@@ -231,6 +234,10 @@ struct ReadingView: View {
             .accessibilityLabel("\(row.name), \(row.titles.count) titles")
             .accessibilityHint("Opens the whole shelf")
             .accessibilityIdentifier("rr-shelf-\(row.id)")
+            // A section the width of the page, so Up from any cover on the row lands here, not on
+            // the top bar: the heading alone sits outside the line up from a cover at the right.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .focusSection()
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 24) {
                     ForEach(row.titles) { title in

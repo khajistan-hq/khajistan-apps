@@ -116,7 +116,9 @@ final class LiveStills {
         let current = visit
         driver = Task { [weak self] in
             while let self, !Task.isCancelled, current == self.visit, !self.plan.exhausted {
-                if self.costly || self.heldBack {
+                // A grab plays a muted player, and playing can take the audio session from another
+                // app's music: no still while something else is sounding.
+                if self.costly || self.heldBack || AVAudioSession.sharedInstance().isOtherAudioPlaying {
                     try? await Task.sleep(for: .seconds(1))
                     continue
                 }

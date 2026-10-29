@@ -414,10 +414,19 @@ final class KhajistanUITests: XCTestCase {
         }
         XCTAssertTrue(settled { $0 > 0 }, "All states a count")
         let all = objects()
-        let region = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-' AND identifier != 'pnvregion-all'")).firstMatch
-        waitFor(region, 10, "a region filter is offered")
-        region.tap()
-        XCTAssertTrue(settled { $0 > 0 && $0 < all }, "a region shows fewer objects than All (\(all))")
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pnvregion-' AND identifier != 'pnvregion-all'"))
+        waitFor(regions.firstMatch, 10, "a region filter is offered")
+        var narrowed = false
+        // The first chip can be a region whose feed is slow or as large as All. Try the next ones.
+        for index in 0..<min(regions.count, 3) {
+            let region = regions.element(boundBy: index)
+            guard region.exists else { continue }
+            region.tap()
+            if settled({ $0 > 0 && $0 < all }) { narrowed = true; break }
+            app.buttons["pnvregion-all"].tap()
+            _ = settled { $0 == all }
+        }
+        XCTAssertTrue(narrowed, "a region shows fewer objects than All (\(all))")
         waitFor(tile, 40, "the region's stream draws tiles")
         shot("pnv-region", app)
         app.buttons["pnvregion-all"].tap()

@@ -337,11 +337,13 @@ enum ReceiverRules {
     /// own `healthStatus` is not a fallback. A fresh grade is not enough on its
     /// own: `verified` must contain the id. A repeated id is kept once, at its first
     /// eligible occurrence.
-    static func eligible(_ channels: [Channel], controls: Controls, verified: Set<String> = []) -> [Channel] {
+    static func eligible(_ channels: [Channel], controls: Controls, verified: Set<String> = [], allowWithoutHealth: Bool = false) -> [Channel] {
         var seen = Set<String>()
         var kept: [Channel] = []
         for channel in channels {
-            guard controls.healthLoaded, controls.healthFresh else { continue }
+            // A missing health file shows nothing, unless a debug launch has asked to grade the shard.
+            if !(controls.healthLoaded && controls.healthFresh) && !allowWithoutHealth { continue }
+            if controls.healthLoaded && !controls.healthFresh { continue }
             guard held(channel, controls: controls) else { continue }
             if !verified.contains(channel.id) { continue }
             if !seen.insert(channel.id).inserted { continue }
@@ -352,8 +354,8 @@ enum ReceiverRules {
 
     /// Rows whose grade is allowed on the dial. When health is fresh these are the rows to show.
     /// When it is not, these are the rows the probe may verify. Nothing else is probed.
-    static func probeCandidates(_ channels: [Channel], controls: Controls) -> [Channel] {
-        eligible(channels, controls: controls, verified: Set(channels.map(\.id)))
+    static func probeCandidates(_ channels: [Channel], controls: Controls, allowWithoutHealth: Bool = false) -> [Channel] {
+        eligible(channels, controls: controls, verified: Set(channels.map(\.id)), allowWithoutHealth: allowWithoutHealth)
     }
 
     /// The next row in `list` after `id`, wrapping once, that is not in `excluding`.

@@ -175,7 +175,16 @@ final class ReceiverStore {
     func lists(_ channel: Channel) -> Bool {
         _ = dialGeneration
         guard !withdrawn.contains(channel.id) else { return false }
-        return ReceiverRules.eligible([channel], controls: controls(), verified: verified).first != nil
+        return ReceiverRules.eligible([channel], controls: controls(), verified: verified, allowWithoutHealth: probesOff).first != nil
+    }
+
+    /// Debug launches pass `-kjnoprobe`. Release builds compile this as false.
+    private var probesOff: Bool {
+        #if DEBUG
+        UserDefaults.standard.bool(forKey: "kjnoprobe")
+        #else
+        false
+        #endif
     }
 
     /// The channel failed to play. It leaves the dial until a later probe succeeds.
@@ -214,14 +223,9 @@ final class ReceiverStore {
     }
 
     private func controls(now: Date = Date()) -> Controls {
-        #if DEBUG
         // UI tests launch with `-kjnoprobe`. The live health file is often older than two hours,
         // and a stale file would blank the dial before any row could be shown. The grades still apply.
-        let tests = UserDefaults.standard.bool(forKey: "kjnoprobe")
-        #else
-        let tests = false
-        #endif
-        return Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now, treatAsFresh: tests)
+        Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now, treatAsFresh: probesOff)
     }
 
     @discardableResult
@@ -294,8 +298,8 @@ final class ReceiverStore {
         offerings[key] = offerings[key] ?? []
         dialGeneration += 1
         let folded = controls()
-        let candidates = ReceiverRules.probeCandidates(raw, controls: folded)
-        if !folded.healthLoaded || !folded.healthFresh {
+        let candidates = ReceiverRules.probeCandidates(raw, controls: folded, allowWithoutHealth: probesOff)
+        if !probesOff && (!folded.healthLoaded || !folded.healthFresh) {
             guard probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
             walksFinished.insert(key)
             publishCounts()
@@ -327,8 +331,12 @@ final class ReceiverStore {
     private func reveal(_ id: String, key: String, token: Int, raw: [Channel], epoch: Int) {
         guard probeEpoch == epoch, loadToken[key] == token, !withdrawn.contains(id) else { return }
         guard let channel = raw.first(where: { $0.id == id }) else { return }
-        guard lists(channel) else { return }
+        guard ReceiverRules.probeCandidates([channel], controls: controls(), allowWithoutHealth: probesOff).first != nil else { return }
         verified.insert(id)
+        guard lists(channel) else {
+            verified.remove(id)
+            return
+        }
         var rows = offerings[key] ?? []
         guard !rows.contains(where: { $0.id == id }) else {
             publishCounts()

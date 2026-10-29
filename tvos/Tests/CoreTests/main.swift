@@ -487,6 +487,11 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty).count, 0)
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty, verified: everyID).count, 0,
                     "a missing health file shows nothing")
+    let shard = ReceiverRules.eligible(channels, controls: .empty, verified: everyID, allowWithoutHealth: true).map(\.id)
+    try expectEqual(Set(shard), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
+                                "degraded", "degraded-tv", "denied", "off-air", "offline-by-feed", "blocked-by-feed",
+                                "slow-0-2", "slow-0-49"],
+                    "only a debug launch may grade the shard when health never loaded")
 }
 
 func eligibilityKeepsADuplicateOnceAndSortsByName() throws {

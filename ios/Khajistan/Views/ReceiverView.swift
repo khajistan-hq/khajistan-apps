@@ -116,6 +116,9 @@ struct ReceiverView: View {
                 .padding(.vertical, 16)
             }
             .accessibilityIdentifier("receiverCatalogue")
+            // A visit's share of channel stills: twelve while the Receiver is on screen.
+            .onAppear { model.stills.beginVisit() }
+            .onDisappear { model.stills.endVisit() }
             .scrollDismissesKeyboard(.interactively)
             .task {
                 await model.receiver.loadIndex()
@@ -486,14 +489,8 @@ struct ChannelRow: View {
     /// it is from, and LIVE in the accent on the channel playing now.
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isOn ? palette.band : palette.lift)
-                .frame(width: 52, height: 40)
-                .overlay {
-                    Image(systemName: isOn ? "speaker.wave.2.fill" : Self.symbol(channel.mediaType))
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(isOn ? palette.onBand : palette.ink)
-                }
+            picture
+                .frame(width: 64, height: 36)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel.name).font(.system(.body, weight: .semibold)).lineLimit(2)
@@ -512,6 +509,39 @@ struct ChannelRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+        .accessibilityValue(still != nil ? "live picture" : "")
+        // Only rows on screen are asked for a still, one at a time (Services/LiveStillsStore.swift).
+        .onAppear { if channel.mediaType != "radio" { model.stills.appeared(channel) } }
+        .onDisappear { model.stills.disappeared(channel.id) }
+    }
+
+    private var still: UIImage? {
+        channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
+    }
+
+    /// A television or camera channel: the still this device took of its live picture, until then
+    /// the medium's mark on a plate. A radio station: its sound line.
+    @ViewBuilder
+    private var picture: some View {
+        if channel.mediaType == "radio" {
+            SoundLine(seed: channel.id, lineWidth: 2, period: 3)
+        } else if let still {
+            Image(uiImage: still)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .transition(.opacity)
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isOn ? palette.band : palette.lift)
+                .overlay {
+                    Image(systemName: isOn ? "speaker.wave.2.fill" : Self.symbol(channel.mediaType))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isOn ? palette.onBand : palette.ink)
+                }
+        }
     }
 
     static func symbol(_ mediaType: String) -> String {

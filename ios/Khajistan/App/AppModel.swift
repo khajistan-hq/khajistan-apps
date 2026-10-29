@@ -84,6 +84,8 @@ final class AppModel {
     let browser = ArchiveBrowser()
     let auth: AuthStore
     let receiver = ReceiverStore()
+    /// The Receiver list's thumbnails: stills this device takes from the live streams, in memory only.
+    let stills: LiveStills
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
     /// The channel-change pigeon. One player for the life of the app.
@@ -122,6 +124,7 @@ final class AppModel {
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
         captions = LiveCaptionSession(auth: auth)
+        stills = LiveStills(receiver: receiver)
         tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission, captions: captions)
         pnv = PicsVidsStore(auth: auth)
         chat = ChatStore(auth: auth)

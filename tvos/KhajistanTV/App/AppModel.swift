@@ -17,6 +17,8 @@ final class AppModel {
     var section: Section
     let auth: AuthStore
     let receiver: ReceiverStore
+    /// The region page's picture cards: stills this device takes from the live streams, in memory only.
+    let stills: LiveStills
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
     /// Likes and saves, on the account (`passport_saves`), shared with the website and the dashboard.
@@ -103,6 +105,7 @@ final class AppModel {
         let auth = AuthStore()
         self.auth = auth
         self.receiver = ReceiverStore()
+        self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
         self.pnv = PicsVidsStore(auth: auth)
         self.saves = SavesStore(auth: auth)

@@ -392,6 +392,25 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// Real controls receive one tap each: connecting Pause cancels tuning; Stop survives tab navigation.
+    /// The Indus list's television rows carry a still this phone took from each live stream, one at
+    /// a time, only for rows on screen. Live network: a still gets two windows of 20 s.
+    func testReceiverListShowsLiveStills() {
+        for skin in skins {
+            let app = launch(skin: skin, tab: "receiver")
+            _ = firstReceiverChannel(app)
+            let stilled = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND value CONTAINS 'live picture'")).firstMatch
+            var got = stilled.waitForExistence(timeout: 20)
+            if !got {
+                app.scrollViews["receiverCatalogue"].swipeUp()
+                got = stilled.waitForExistence(timeout: 20)
+            }
+            XCTAssertTrue(got, "\(skin): a television row shows a still within 20 s (one retry)")
+            sleep(6)
+            shot("\(skin)-receiver-list-stills", app)
+            app.terminate()
+        }
+    }
+
     func testReceiverAutoplaysAndOneTapStopStaysOff() {
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let pause = app.buttons["screenPlayPause"]

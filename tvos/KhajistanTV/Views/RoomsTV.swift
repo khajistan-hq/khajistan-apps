@@ -210,7 +210,7 @@ struct RoomsTVView: View {
 /// pictures fitted whole on the lift plate, which lifts and casts the shadow as a picture card
 /// does; under it a count where the room's list is on the device, the name and the room's line,
 /// whole, in the ground's ink.
-private struct RoomTile: View {
+struct RoomTile: View {
     let picture: String
     let title: String
     let line: String
@@ -237,7 +237,7 @@ private struct RoomTile: View {
     }
 }
 
-private struct TVRoomScreen: View {
+struct TVRoomScreen: View {
     let room: RoomsTVView.Room
     @Environment(\.palette) private var palette
 

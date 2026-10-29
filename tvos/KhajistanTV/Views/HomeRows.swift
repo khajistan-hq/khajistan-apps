@@ -230,3 +230,91 @@ private struct SeeAll: View {
         .accessibilityIdentifier("home-all-\(place)")
     }
 }
+
+/// Every part of Khajistan as a picture tile, the first shelf under the Receiver's front (owner,
+/// 2026-10-29: "reading room, PixVids, rooms, chat as well on the home page of the apps so that
+/// people can just move down and select it instead of going to the navigation"). The same tiles
+/// and pictures as the Rooms door; a part this build leaves out (StoreBuild) has no tile.
+struct HomeSections: View {
+    private enum Door: String, CaseIterable, Identifiable {
+        case reading, picsvids, screening, bazaar, madrassa, databases, chat
+        var id: String { rawValue }
+    }
+
+    @Environment(AppModel.self) private var model
+    @State private var room: RoomsTVView.Room?
+
+    private static let tileWidth: CGFloat = 280
+
+    private var doors: [Door] {
+        Door.allCases.filter { door in
+            switch door {
+            case .picsvids: return StoreBuild.includes(.picsvids)
+            case .chat: return StoreBuild.includes(.chat)
+            default: return true
+            }
+        }
+    }
+
+    var body: some View {
+        Shelf("Khajistan", count: "Every part") {
+            ForEach(doors) { door in
+                Button { open(door) } label: {
+                    RoomTile(picture: picture(door), title: title(door), line: line(door), figure: nil, width: Self.tileWidth)
+                }
+                .buttonStyle(HouseCardStyle())
+                .accessibilityIdentifier("home-door-\(door.rawValue)")
+            }
+        }
+        .accessibilityIdentifier("home-shelf-doors")
+        .fullScreenCover(item: $room) { TVRoomScreen(room: $0) }
+    }
+
+    private func open(_ door: Door) {
+        switch door {
+        case .reading: model.section = .reading
+        case .picsvids: model.section = .picsvids
+        case .chat: model.section = .chat
+        case .screening: room = .screening
+        case .bazaar: room = .bazaar
+        case .madrassa: room = .madrassa
+        case .databases: room = .databases
+        }
+    }
+
+    private func title(_ door: Door) -> String {
+        switch door {
+        case .reading: return "Reading Room"
+        case .picsvids: return "Pics/Vids"
+        case .chat: return "Chat"
+        case .screening: return RoomsTVView.Room.screening.title
+        case .bazaar: return RoomsTVView.Room.bazaar.title
+        case .madrassa: return RoomsTVView.Room.madrassa.title
+        case .databases: return RoomsTVView.Room.databases.title
+        }
+    }
+
+    private func line(_ door: Door) -> String {
+        switch door {
+        case .reading: return "Periodicals, posters and books, page by page"
+        case .picsvids: return "Born Digital Media"
+        case .chat: return "The website's rooms, live"
+        case .screening: return RoomsTVView.Room.screening.line
+        case .bazaar: return RoomsTVView.Room.bazaar.line
+        case .madrassa: return RoomsTVView.Room.madrassa.line
+        case .databases: return RoomsTVView.Room.databases.line
+        }
+    }
+
+    private func picture(_ door: Door) -> String {
+        switch door {
+        case .reading: return "RoomReading"
+        case .picsvids: return "RoomPicsVids"
+        case .chat: return "RoomChat"
+        case .screening: return RoomsTVView.Room.screening.picture
+        case .bazaar: return RoomsTVView.Room.bazaar.picture
+        case .madrassa: return RoomsTVView.Room.madrassa.picture
+        case .databases: return RoomsTVView.Room.databases.picture
+        }
+    }
+}

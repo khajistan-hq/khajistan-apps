@@ -18,7 +18,7 @@ final class HomeRowsUITests: XCTestCase {
     /// The shelf a focused card belongs to, by its identifier.
     private func shelf(of id: String) -> String? {
         let prefixes: [(String, String)] = [
-            ("cameras-", "cameras"), ("film-", "films"), ("home-transmission-", "transmission"),
+            ("home-door-", "doors"), ("cameras-", "cameras"), ("film-", "films"), ("home-transmission-", "transmission"),
             ("rr-title-", "reading"), ("home-all-the Reading Room", "reading"),
             ("home-pnv-", "picsvids"), ("home-all-Pics/Vids", "picsvids"),
             ("home-post-", "madrassa"), ("home-all-the Madrassa", "madrassa"),
@@ -36,7 +36,7 @@ final class HomeRowsUITests: XCTestCase {
         kjPause(8)   // the shelves load a moment after the front
         XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
         var reached: [String] = []
-        for _ in 0..<14 {
+        for _ in 0..<16 {
             XCUIRemote.shared.press(.down)
             kjPause(1.2)
             guard let name = shelf(of: focusedID(app)) else { continue }
@@ -46,7 +46,7 @@ final class HomeRowsUITests: XCTestCase {
             }
         }
         print("KJHOME reached: \(reached.joined(separator: " > "))")
-        for required in ["transmission", "reading", "picsvids"] {
+        for required in ["doors", "transmission", "reading", "picsvids"] {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
         }
 

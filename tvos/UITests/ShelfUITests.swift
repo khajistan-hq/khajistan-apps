@@ -60,13 +60,15 @@ final class ShelfUITests: XCTestCase {
             XCTAssertEqual(focusedID(app), "region-indus", "\(skin): the walk east along the strip reaches Indus")
             shot("\(skin)-1-receiver-front", app)
 
-            // The Khajistan Radio mixes are not on the TV (owner, 2026-10-06: they play on
-            // Transmission's channel 2). The first shelf under the strip is the Screening Room,
-            // which loads only with the preview password.
-            // The first shelf under the strip is Cameras, a plate per region that has them
-            // (owner, 2026-10-07: "make cctv show up in the reciever").
+            // First under the strip is every part of Khajistan as a tile (owner, 2026-10-29), then
+            // Cameras, a plate per region that has them (owner, 2026-10-07), then the Screening
+            // Room, which loads only with the preview password.
             press(.down, app: app)
-            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down from the strip lands on the Cameras shelf, got \(focusedID(app))")
+            XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down from the strip lands on the parts of Khajistan, got \(focusedID(app))")
+            kjPause(1)
+            shot("\(skin)-2-receiver-doors-shelf", app)
+            press(.down, app: app)
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): the next shelf down is Cameras, got \(focusedID(app))")
             shot("\(skin)-2-receiver-cameras-shelf", app)
             let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
             if films.firstMatch.waitForExistence(timeout: 30) {
@@ -76,9 +78,9 @@ final class ShelfUITests: XCTestCase {
                 shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
             }
-            // Up returns to the front: the strip, or the sidebar's switch, which is what sits
-            // straight above the left-most plate.
-            press(.up, app: app)
+            // Up through the parts of Khajistan returns to the front: the strip, or the sidebar's
+            // switch, which is what sits straight above the left-most tile.
+            press(.up, times: 2, app: app)
             let back = focusedID(app)
             XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
@@ -92,9 +94,9 @@ final class ShelfUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         kjPause(3)
         XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        press(.down, app: app)
+        press(.down, times: 2, app: app)   // past the parts of Khajistan, to Cameras
         let plate = focusedID(app)
-        XCTAssertTrue(plate.hasPrefix("cameras-"), "down from the strip lands on a Cameras plate, got \(plate)")
+        XCTAssertTrue(plate.hasPrefix("cameras-"), "two down from the strip land on a Cameras plate, got \(plate)")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")

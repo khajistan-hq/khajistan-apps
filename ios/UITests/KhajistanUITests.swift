@@ -23,7 +23,9 @@ final class KhajistanUITests: XCTestCase {
     }
 
     private func shot(_ name: String, _ app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        // Turned on its side, the app's own capture comes out as a portrait frame; the screen's does not.
+        let picture = XCUIDevice.shared.orientation.isLandscape ? XCUIScreen.main.screenshot() : app.screenshot()
+        let attachment = XCTAttachment(screenshot: picture)
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)

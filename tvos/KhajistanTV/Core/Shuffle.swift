@@ -76,17 +76,39 @@ extension ShufflePick {
         return pool
     }
 
+    /// How long Surf waits for the slowest list once another has come: past it, Surf plays from
+    /// what has come, and a list still on its way is read (and kept) by the next surf.
+    static let patience: Duration = .seconds(4)
+
     /// Reads every list in `scope` at once and returns the pool shuffled: Surf plays the first,
     /// and next and previous walk the rest, so one surf crosses the whole of the scope rather than
-    /// one region. A list that will not load is left out; the others still surf.
+    /// one region. A list that will not load, or is still loading after `patience`, is left out;
+    /// the others still surf.
     @MainActor
     static func surf(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
+                     patience: Duration = patience,
                      load: @escaping @MainActor (String) async -> [Channel]?) async -> [Channel] {
         let ids = regions(index, scope: scope)
+        guard !ids.isEmpty else { return [] }
         var lists: [String: [Channel]] = [:]
-        await withTaskGroup(of: (String, [Channel]?).self) { group in
+        await withTaskGroup(of: (String, [Channel]?)?.self) { group in
             for id in ids { group.addTask { @MainActor in (id, await load(id)) } }
-            for await (id, list) in group { lists[id] = list }
+            // The clock: answers nil when the patience runs out.
+            group.addTask { try? await Task.sleep(for: patience); return nil }
+            var answered = 0
+            var waitedLongEnough = false
+            for await result in group {
+                if let (id, list) = result {
+                    answered += 1
+                    lists[id] = list
+                } else {
+                    waitedLongEnough = true
+                }
+                if answered == ids.count || (waitedLongEnough && !lists.isEmpty) {
+                    group.cancelAll()
+                    break
+                }
+            }
         }
         let read = ids.compactMap { id in lists[id].map { (region: id, channels: $0) } }
         return pool(read, index: index, medium: medium, scope: scope).shuffled()

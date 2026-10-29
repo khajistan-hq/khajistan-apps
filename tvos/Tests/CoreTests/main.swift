@@ -4458,6 +4458,13 @@ func shuffleScopesAndCameraRegions() throws {
     try expectEqual(pool(.tv, .extended), [], "extended TV here is all main-atlas")
     try expectEqual(pool(.all, .everywhere), ["indus-tv", "indus-radio", "both-tv", "nus-radio"])
     try expect(!pool(.all, .everywhere).contains("cam"), "cameras are never surfed")
+    // A channel that names no region is filed where its list came from.
+    let unfiled = try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: [
+        "id": "unfiled", "name": "unfiled", "mediaType": "tv",
+        "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"] as [String: Any]))
+    let read = [(region: "nusantara", channels: [unfiled])]
+    try expectEqual(ShufflePick.pool(read, index: index, medium: .all, scope: .extended).map(\.id), ["unfiled"])
+    try expectEqual(ShufflePick.pool(read, index: index, medium: .all, scope: .main).map(\.id), [])
     // Cameras: the main atlas first, then the extensions; the total is the index's own count.
     try expectEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
     try expectEqual(CameraRegions.total(index), 400)

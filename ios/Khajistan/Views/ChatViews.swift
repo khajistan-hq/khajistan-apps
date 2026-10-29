@@ -151,12 +151,14 @@ struct ChatRoomView: View {
         }
     }
 
-    private var shown: [ChatMessage] {
+    private var visibleLines: [ChatMessage] {
         (feed?.lines ?? []).filter { !ignored.contains($0.author_handle ?? "") }
     }
 
     private var lines: some View {
-        ScrollViewReader { proxy in
+        // Filtered once per draw: the list reads it four times.
+        let shown = visibleLines
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if let feed, feed.hasOlder, !shown.isEmpty {

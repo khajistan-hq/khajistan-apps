@@ -42,8 +42,11 @@ final class ReceiverGuideUITests: XCTestCase {
         let start = current.label
         let guideControl = app.buttons["guideControl"]
         XCTAssertTrue(guideControl.waitForExistence(timeout: 30), "the strip offers the guide once the channel plays")
-        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
-        XCTAssertTrue(guideControl.isSelected, "Right three times lights Guide, after CC and Like")
+        // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
+        // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
+        kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived
+        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(guideControl.isSelected, "Right lights Guide, after CC and Like")
         XCUIRemote.shared.press(.select)
 
         let guide = app.descendants(matching: .any)["receiverGuide"]
@@ -65,7 +68,7 @@ final class ReceiverGuideUITests: XCTestCase {
         kjScreenshot("\(skin)-g3-tuned", app: app)
 
         // Left closes the guide and lets go of its control, so the strip can hide again.
-        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
+        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(guide.waitForExistence(timeout: 5), "the guide opens again")
         XCUIRemote.shared.press(.left)
@@ -83,12 +86,36 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(focused.exists, "down reaches the radio shelf")
         XCUIRemote.shared.press(.select)
         let nowPlaying = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH[c] '\u{25CF} Now playing'")).firstMatch
+        // A playing station keeps the Apple TV awake: radio plays through the app's own audio
+        // engine, which tvOS does not count as playing, and the box slept and stopped the sound
+        // (owner, 2026-10-29).
+        let awake = app.staticTexts["keepAwake"].firstMatch
+        func awakeIs(_ value: String) -> Bool {
+            let match = NSPredicate { _, _ in awake.exists && awake.label == value }
+            return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: match, object: nil)], timeout: 5) == .completed
+        }
         if nowPlaying.waitForExistence(timeout: 40) {
+            XCTAssertTrue(awakeIs("on"), "a playing station holds the Apple TV awake")
             kjPause(2)
             kjScreenshot("\(skin)-g4-radio", app: app)
         } else {
             kjScreenshot("\(skin)-g4-radio-not-playing", app: app)
             XCTFail("the station played and showed Now Playing")
         }
+
+        // Menu leaves the station playing, in Sonos's small player under the region; Off stops it.
+        XCUIRemote.shared.press(.menu)
+        let bar = app.descendants(matching: .any)["radioBar"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "the radio plays on in the small player")
+        XCTAssertTrue(app.buttons["radioBarName"].label.contains("On air") || app.buttons["radioBarName"].label.contains("Tuning"),
+                      "the bar says the station is on: \(app.buttons["radioBarName"].label)")
+        kjPause(1)
+        kjScreenshot("\(skin)-g5-radio-bar", app: app)
+        let off = app.buttons["radioBarOff"]
+        XCTAssertTrue(kjFocus(off, app: app), "the remote reaches the bar's Off")
+        XCTAssertTrue(awakeIs("on"), "the station playing on in the small player still holds it awake")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
+        XCTAssertTrue(awakeIs("off"), "with nothing playing the Apple TV may sleep again")
     }
 }

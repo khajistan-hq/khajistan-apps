@@ -119,6 +119,10 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "signed out, the site's sentence and no request")
         XCTAssertEqual(control.label, "Captions", "nothing was turned on")
         kjScreenshot("live-2-signed-out-sentence", app: app)
+        // Four seconds after the choice the strip lets go of Captions and hides (owner,
+        // 2026-10-29); it stayed up for good before.
+        XCTAssertTrue(waitFor(8) { !control.isSelected }, "the strip lets go of Captions after the choice")
+        kjScreenshot("live-2b-strip-hidden", app: app)
         XCUIRemote.shared.press(.left)
         kjPause(0.5)
         XCTAssertFalse(control.hasFocus)
@@ -142,16 +146,23 @@ final class SubtitlesUITests: XCTestCase {
         kjScreenshot("live-3-kashmiri-no-control", app: app)
     }
 
-    func testReceiverStartsWithoutSelectAndDoesNotRestartOnDismissal() {
+    /// Opening the app plays nothing (owner, 2026-10-29: "it goes straight to playing a channel,
+    /// which is not what I want. I need to be able to select a channel and then play it"). Surf is
+    /// focused, so Select starts a channel. This test reversed the 2026-10-08 one that required a
+    /// channel to start without Select.
+    func testReceiverPlaysNothingUntilAChannelIsChosen() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "receiver"]
         kjLaunch(app, autoplay: true)
         let state = app.staticTexts["playerState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 90), "opening Receiver presents a tuning player without Select")
-        XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(app.buttons["shuffle"].waitForExistence(timeout: 10))
-        kjPause(3)
-        XCTAssertFalse(state.exists, "dismissing the player does not surf again")
+        let surf = app.buttons["shuffle"]
+        XCTAssertTrue(surf.waitForExistence(timeout: 60), "the front shows Surf")
+        XCTAssertFalse(state.waitForExistence(timeout: 20), "no player opens by itself")
+        let focusedSurf = NSPredicate { _, _ in surf.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focusedSurf, object: nil)], timeout: 10), .completed,
+                       "Surf has focus at launch")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(state.waitForExistence(timeout: 90), "Select on Surf opens a channel")
     }
 
     func testFilmPreviewEnglishTrack() throws {

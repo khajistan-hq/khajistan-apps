@@ -13,10 +13,11 @@ struct PicsVidsView: View {
 
     private enum Focus: Hashable { case noticeOK, firstTab }
 
-    /// An object chosen, and the shelf it was chosen from.
+    /// An object chosen, and the shelf it was chosen from: a region's stream, or a saved list.
     private struct Viewing: Identifiable {
         let row: PnvRow
-        let region: String
+        var region: String = ""
+        var list: [PnvRow]? = nil
         var id: String { row.id }
     }
 
@@ -40,8 +41,13 @@ struct PicsVidsView: View {
         // Down from the top bar lands on the first control, never on the tile under the bar item.
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         .task { await store.start() }
+        .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
-            PnvViewerView(row: choice.row, region: choice.region)
+            if let list = choice.list {
+                PnvViewerView(row: choice.row, list: list)
+            } else {
+                PnvViewerView(row: choice.row, region: choice.region)
+            }
         }
     }
 
@@ -126,6 +132,18 @@ struct PicsVidsView: View {
             problem(message)
         case .ready:
             LazyVStack(alignment: .leading, spacing: 8) {
+                // What this account saved, and its collections, above the regions, as Cosmos
+                // keeps them a press away. On the account, so the same on every device.
+                if model.auth.isSignedIn {
+                    PnvSavedShelf(title: "Saved", id: "saved", keys: model.saves.savedPnvKeys) { row, list in
+                        viewing = Viewing(row: row, list: list)
+                    }
+                    ForEach(model.saves.collections) { collection in
+                        PnvSavedShelf(title: collection.name, id: collection.id, keys: collection.media_keys) { row, list in
+                            viewing = Viewing(row: row, list: list)
+                        }
+                    }
+                }
                 ForEach(store.regions, id: \.self) { region in
                     PnvRegionShelf(region: region) { row in
                         viewing = Viewing(row: row, region: region)
@@ -146,6 +164,44 @@ struct PicsVidsView: View {
             .buttonStyle(HouseButtonStyle())
             .accessibilityIdentifier("pnvRetry")
         }
+    }
+}
+
+/// Saved objects, or one collection, as a shelf: the keys made rows through the gated public view,
+/// so an object taken off the shelf since is not drawn. The newest hundred; the rest are on the
+/// phone and the website. Nothing is drawn while there is nothing in it.
+private struct PnvSavedShelf: View {
+    let title: String
+    let id: String
+    let keys: [String]
+    let open: (PnvRow, [PnvRow]) -> Void
+    @Environment(AppModel.self) private var model
+    @State private var rows: [PnvRow] = []
+
+    var body: some View {
+        Group {
+            if !rows.isEmpty {
+                Shelf(title, count: rows.count.formatted()) {
+                    ForEach(rows) { row in
+                        PnvTile(row: row, handle: model.pnv.accountHandle(for: row)) { open(row, rows) }
+                            .accessibilityIdentifier("saved-\(id)-\(row.media_key)")
+                    }
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("pnv-saved-\(id)")
+            }
+        }
+        .task(id: keys) { await hydrate() }
+    }
+
+    private func hydrate() async {
+        let wanted = Array(keys.prefix(100))
+        guard !wanted.isEmpty else { rows = []; return }
+        guard let (data, response) = try? await URLSession.shared.data(for: PnvAPI.rowsRequest(mediaKeys: wanted)),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let page = try? JSONDecoder().decode([PnvRow].self, from: data), !Task.isCancelled else { return }
+        let found = Dictionary(page.map { ($0.media_key, $0) }, uniquingKeysWith: { first, _ in first })
+        rows = wanted.compactMap { found[$0] }
     }
 }
 
@@ -223,19 +279,30 @@ private struct PnvRegionShelf: View {
     }
 
     private func tile(_ row: PnvRow) -> some View {
-        Button {
-            open(row)
-        } label: {
+        PnvTile(row: row, handle: store.accountHandle(for: row)) { open(row) }
+            .accessibilityIdentifier("tile-\(row.media_key)")
+    }
+}
+
+/// A card: the object at its own shape at the shelf's height, never cropped, with *▶ Video* and
+/// the account under it.
+private struct PnvTile: View {
+    let row: PnvRow
+    let handle: String
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
             VStack(alignment: .leading, spacing: 12) {
-                PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, height: Self.tileHeight, maxPixel: 900)
+                PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, height: PnvRegionShelf.tileHeight, maxPixel: 900)
                     .kjCardArt()
                 // The caption takes the picture's width and is cut to it.
                 Color.clear
-                    .frame(height: Self.captionHeight)
+                    .frame(height: PnvRegionShelf.captionHeight)
                     .overlay(alignment: .topLeading) {
                         VStack(alignment: .leading, spacing: 4) {
                             if row.isVideo { Kicker("\u{25B6} Video").lineLimit(1) }
-                            Text("@" + store.accountHandle(for: row))
+                            Text("@" + handle)
                                 .kjSmall(faint: true)
                                 .lineLimit(1)
                         }
@@ -243,8 +310,7 @@ private struct PnvRegionShelf: View {
             }
         }
         .buttonStyle(HouseCardStyle())
-        .accessibilityIdentifier("tile-\(row.media_key)")
-        .accessibilityLabel("\(row.isVideo ? "Video" : "Picture") from @\(store.accountHandle(for: row))")
+        .accessibilityLabel("\(row.isVideo ? "Video" : "Picture") from @\(handle)")
     }
 }
 

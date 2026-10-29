@@ -23,7 +23,9 @@ final class KhajistanUITests: XCTestCase {
     }
 
     private func shot(_ name: String, _ app: XCUIApplication) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        // Turned on its side, the app's own capture comes out as a portrait frame; the screen's does not.
+        let picture = XCUIDevice.shared.orientation.isLandscape ? XCUIScreen.main.screenshot() : app.screenshot()
+        let attachment = XCTAttachment(screenshot: picture)
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
@@ -33,6 +35,12 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
     }
 
+    /// HOME is on screen. Its first room tile marks it: "Every room" sits below the picture tiles
+    /// (2e213d2), and HOME's LazyVStack does not build what is off screen, so it is not there to find.
+    private func waitForHome(_ app: XCUIApplication, _ timeout: TimeInterval, _ message: String) {
+        waitFor(app.buttons["home-room-reading"], timeout, message)
+    }
+
     /// An active dock occupies the top of the screen. The lazy channel rows only enter the
     /// accessibility tree after the reader scrolls the catalogue past the map.
     private func firstReceiverChannel(_ app: XCUIApplication) -> XCUIElement {
@@ -40,12 +48,19 @@ final class KhajistanUITests: XCTestCase {
         waitFor(catalogue, 10, "Receiver exposes its scrollable catalogue")
         waitFor(app.buttons["region-indus"], 40, "The region strip lists Indus")
         let channel = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
-        for _ in 0..<10 {
+        for _ in 0..<16 {
             if channel.exists && channel.isHittable { return channel }
-            // Flicks, because a press-and-drag on the map scrubs stations instead of scrolling. On
-            // a slow runner a flick's momentum can carry the first row past the top, under the
-            // dock (CI, 2026-10-28): a row above the middle is brought back down.
-            if channel.exists && channel.frame.midY < catalogue.frame.midY { catalogue.swipeDown() } else { catalogue.swipeUp() }
+            // Flicks until the first row is built, because a press-and-drag on the map scrubs
+            // stations instead of scrolling.
+            guard channel.exists else { catalogue.swipeUp(); usleep(400_000); continue }
+            // Then short drags with no momentum, started just above the house bar, where the list
+            // or the controls above it are. Since the Receiver's two switches (c9932fd) a flick
+            // carried the row across the whole gap between the docked player and the bar (about
+            // 370 pt on iPhone 17); 160 pt cannot jump it.
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
+            let move: CGFloat = channel.frame.midY < catalogue.frame.midY ? 160 : -160
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
             usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
@@ -58,7 +73,7 @@ final class KhajistanUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
-            waitFor(app.buttons["homeAllRooms"], 10, "HOME leads to every room")
+            waitForHome(app, 10, "HOME leads to every room")
             shot("\(skin)-01-home", app)
             app.buttons["tab-rooms"].tap()
             waitFor(app.buttons["destination-reading"], 10, "ROOMS lists the website's menu")
@@ -154,7 +169,7 @@ final class KhajistanUITests: XCTestCase {
     func testNoMembershipCardOutsideTheReadingRoom() {
         for code in ["USA", "GBR"] {
             let app = launch(skin: "day", extra: ["-kjstorefront", code])
-            waitFor(app.buttons["homeAllRooms"], 10, "HOME loads (\(code))")
+            waitForHome(app, 10, "HOME loads (\(code))")
             XCTAssertFalse(app.buttons["join-monthly"].exists, "no membership card on HOME (\(code))")
             app.buttons["tab-library"].tap()
             waitFor(app.buttons["skin-day"], 10, "ACCOUNT loads (\(code))")
@@ -268,7 +283,136 @@ final class KhajistanUITests: XCTestCase {
         shot("player-off", app)
     }
 
+    /// With a channel on, the docked set and the switches fill the screen above the section, so
+    /// Cameras and Transmission changed only what was under the house bar and looked dead
+    /// (owner, 2026-10-28: "every button needs to be immediately responsive"). Each part now
+    /// comes up on screen, under the set, on its first tap.
+    func testReceiverPartsComeUpUnderTheDockedSet() {
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        let houseBar = app.buttons["tab-receiver"].frame.minY
+        func onScreen(_ element: XCUIElement) -> Bool {
+            element.exists && element.frame.minY > 0 && element.frame.maxY < houseBar
+        }
+
+        app.buttons["part-cameras"].tap()
+        let cameras = app.staticTexts["camerasTotal"]
+        waitFor(cameras, 20, "Cameras lists its cameras")
+        expectation(for: NSPredicate { _, _ in onScreen(cameras) }, evaluatedWith: cameras)
+        waitForExpectations(timeout: 3)
+        shot("receiver-part-cameras", app)
+
+        app.buttons["part-transmission"].tap()
+        let transmission = NSPredicate { _, _ in
+            onScreen(app.buttons["transmission-channel-1"]) || onScreen(app.staticTexts["transmissionPreview"])
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: transmission, object: nil)], timeout: 40), .completed,
+                       "Transmission comes up on screen under the set")
+        shot("receiver-part-transmission", app)
+
+        app.buttons["part-live"].tap()
+        let surf = app.buttons["shuffle-medium-tv"]
+        expectation(for: NSPredicate { _, _ in onScreen(surf) }, evaluatedWith: surf)
+        waitForExpectations(timeout: 5)
+    }
+
+    /// Share of the pixels in `rect` (points) that are not near black, read off a screenshot.
+    private func litShare(_ rect: CGRect, _ app: XCUIApplication) -> Double {
+        guard let image = XCUIScreen.main.screenshot().image.cgImage else { return 0 }
+        let scale = CGFloat(image.width) / app.frame.width
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                                          bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return 0 }
+        let box = CGRect(x: rect.minX * scale, y: rect.minY * scale, width: rect.width * scale, height: rect.height * scale)
+            .intersection(CGRect(x: 0, y: 0, width: width, height: height)).integral
+        var lit = 0, total = 0
+        for y in stride(from: Int(box.minY), to: Int(box.maxY), by: 4) {
+            for x in stride(from: Int(box.minX), to: Int(box.maxX), by: 4) {
+                let i = (y * width + x) * 4
+                if max(pixels[i], pixels[i + 1], pixels[i + 2]) > 40 { lit += 1 }
+                total += 1
+            }
+        }
+        return total == 0 ? 0 : Double(lit) / Double(total)
+    }
+
+    /// "Play with the app closed" (DECISIONS 24): the picture lets go of the player while the app
+    /// is away, so a television channel's sound carries on. Back in the app, the picture comes
+    /// back, full screen and then docked; Bugbot found both black while the state said Playing.
+    func testReceiverPictureComesBackAfterTheBackground() {
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let first = firstReceiverChannel(app)
+        first.tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 10, "the receiver is on the page")
+        expectation(for: NSPredicate(format: "label == 'Playing'"), evaluatedWith: state)
+        waitForExpectations(timeout: 60)
+        sleep(4)
+        // The docked screen sits on the remote, 16:9 across the set; the middle of it is read.
+        let surf = app.buttons["surf"].frame
+        let set = app.descendants(matching: .any)["receiverScreen"].frame
+        let dockHeight = (set.width - 12) * 9 / 16
+        let dock = CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
+                          width: set.width * 0.6, height: dockHeight * 0.6)
+        XCTAssertGreaterThan(litShare(dock, app), 0.05, "the docked picture shows before the background")
+
+        app.buttons["fullScreen"].tap()
+        waitFor(app.buttons["closePlayer"], 10, "full screen opens")
+        sleep(5)
+        // Full screen, the picture is fitted across the middle of the screen.
+        let screen = app.frame
+        let fullHeight = screen.width * 9 / 16
+        let full = CGRect(x: screen.width * 0.2, y: screen.midY - fullHeight * 0.3,
+                          width: screen.width * 0.6, height: fullHeight * 0.6)
+        XCTAssertGreaterThan(litShare(full, app), 0.05, "the full-screen picture shows before the background")
+
+        XCUIDevice.shared.press(.home)
+        sleep(6)
+        app.activate()
+        sleep(6)
+        shot("receiver-full-screen-after-background", app)
+        XCTAssertEqual(app.staticTexts["playerState"].label, "Playing", "the channel played on")
+        XCTAssertGreaterThan(litShare(full, app), 0.05, "the full-screen picture comes back after the background")
+
+        let close = app.buttons["closePlayer"].frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: close.midX, dy: close.midY)).tap()
+        expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: app.buttons["receiverOff"])
+        waitForExpectations(timeout: 10)
+        sleep(4)
+        shot("receiver-dock-after-background", app)
+        XCTAssertGreaterThan(litShare(dock, app), 0.05, "the docked picture comes back after full screen closes")
+    }
+
     /// Real controls receive one tap each: connecting Pause cancels tuning; Stop survives tab navigation.
+    /// The Indus list's television rows carry a still this phone took from each live stream, one at
+    /// a time, only for rows on screen. Live network: a still gets two windows of 20 s.
+    func testReceiverListShowsLiveStills() {
+        for skin in skins {
+            let app = launch(skin: skin, tab: "receiver")
+            _ = firstReceiverChannel(app)
+            let stilled = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND value CONTAINS 'live picture'")).firstMatch
+            var got = stilled.waitForExistence(timeout: 20)
+            if !got {
+                app.scrollViews["receiverCatalogue"].swipeUp()
+                got = stilled.waitForExistence(timeout: 20)
+            }
+            XCTAssertTrue(got, "\(skin): a television row shows a still within 20 s (one retry)")
+            sleep(6)
+            shot("\(skin)-receiver-list-stills", app)
+            app.terminate()
+        }
+    }
+
     func testReceiverAutoplaysAndOneTapStopStaysOff() {
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let pause = app.buttons["screenPlayPause"]
@@ -283,17 +427,19 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
-        waitFor(app.buttons["homeAllRooms"], 5, "One edge tap selects Home")
+        waitForHome(app, 5, "One edge tap selects Home")
         app.buttons["tab-receiver"].coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
         waitFor(state, 5, "One edge tap selects Receiver")
         XCTAssertEqual(state.label, "Standing by", "Navigation does not undo an explicit Stop")
     }
 
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000"])
+        // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
+        // it off, for whom leaving the Receiver still cancels what it was opening.
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
-        waitFor(app.buttons["homeAllRooms"], 3, "Home opens with one tap")
+        waitForHome(app, 3, "Home opens with one tap")
         sleep(6)
         app.buttons["tab-receiver"].tap()
         let state = app.staticTexts["screenState"]
@@ -506,9 +652,66 @@ final class KhajistanUITests: XCTestCase {
         shot("tv-approve-done", app)
     }
 
-    /// The Reading Room on the phone: a free title opens, its first issue reads page by page,
-    /// and the place is kept; a members' title stops at the website's preview, two pages, and
-    /// never shows the third. Reads the live shelf and page server.
+    // MARK: - The reader
+
+    /// The page element, which carries "3/76|page|rtl|spread|zoom" as its value in debug builds.
+    private func readerState(_ app: XCUIApplication) -> String {
+        let page = app.descendants(matching: .any)["rrReaderPage"]
+        return page.exists ? (page.value as? String ?? "") : ""
+    }
+
+    @discardableResult
+    private func waitForPage(_ app: XCUIApplication, _ position: Int, _ timeout: TimeInterval = 45) -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var state = ""
+        while Date() < deadline {
+            state = readerState(app)
+            if state.hasPrefix("\(position)/") && state.contains("|page") { return state }
+            usleep(300_000)
+        }
+        return state
+    }
+
+    /// A tap on the page at `x` across (0 left, 1 right), half way down.
+    private func tapPage(_ app: XCUIApplication, at x: CGFloat) {
+        app.descendants(matching: .any)["rrReaderPage"].coordinate(withNormalizedOffset: CGVector(dx: x, dy: 0.5)).tap()
+    }
+
+    /// The reader opens with its controls hidden; a tap in the middle of the page brings them.
+    private func showControls(_ app: XCUIApplication) {
+        let label = app.staticTexts["rrPageLabel"]
+        if label.exists && label.isHittable { return }
+        tapPage(app, at: 0.5)
+        waitFor(label, 5, "a tap in the middle of the page shows the controls")
+    }
+
+    /// Opens a free title's first issue from the Reading Room shelf; with `severalIssues`, the first
+    /// free title on the shelf that has more than one. Returns the title's card identifier.
+    @discardableResult
+    private func openFreeIssue(_ app: XCUIApplication, severalIssues: Bool = false) -> String {
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-' AND label CONTAINS[c] 'read in full'"))
+        waitFor(titles.firstMatch, 60, "a free title is on the shelf")
+        let ids = titles.allElementsBoundByIndex.map(\.identifier)
+        for id in ids.prefix(severalIssues ? 8 : 1) {
+            let card = app.buttons[id]
+            for _ in 0..<6 where !card.isHittable { app.swipeUp() }
+            card.tap()
+            waitFor(app.buttons["rr-issue-0"], 20, "the title lists its issues")
+            if !severalIssues || app.buttons["rr-issue-1"].exists {
+                app.buttons["rr-issue-0"].tap()
+                waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
+                return id
+            }
+            app.buttons["stackBack"].tap()
+        }
+        XCTFail("no free title with several issues on the first rows of the shelf")
+        return ""
+    }
+
+    /// The Reading Room on the phone: a free title opens to its first page full screen with the
+    /// controls hidden, a tap in the middle brings them, its first issue reads page by page, and
+    /// the place is kept; a members' title stops at the website's preview, two pages, and never
+    /// shows the third. Reads the live shelf and page server.
     func testReadingRoomReadsAFreeTitleAndStopsAMembersTitleAtThePreview() {
         let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
         let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
@@ -525,26 +728,25 @@ final class KhajistanUITests: XCTestCase {
         issue.tap()
         let label = app.staticTexts["rrPageLabel"]
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
-        XCTAssertTrue(label.label.hasPrefix("p. 1 / "), "the band says page 1 (\(label.label))")
-        if UIDevice.current.userInterfaceIdiom == .pad {
-            let rail = app.descendants(matching: .any)["rrPageRail"]
-            waitFor(rail, 10, "a wide screen keeps the page rail beside the page")
-            let pageTwo = rail.buttons["Page 2"]
-            waitFor(pageTwo, 10, "the rail lists the pages")
-            pageTwo.tap()
-            expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
-            waitForExpectations(timeout: 10)
-            sleep(3)
-            shot("rr-reader-rail", app)
-            app.buttons["rrPrevious"].tap()
-        } else {
-            XCTAssertFalse(app.descendants(matching: .any)["rrPageRail"].exists, "a phone keeps the page to itself")
-        }
+        XCTAssertTrue(waitForPage(app, 1).hasPrefix("1/"), "the reader opens on page 1")
+        XCTAssertFalse(label.exists, "the page opens alone, the controls hidden")
+        sleep(2)
+        shot("rr-reader-immersive", app)
+        showControls(app)
+        XCTAssertTrue(label.label.hasPrefix("Page 1 of "), "the controls say page 1 (\(label.label))")
+        XCTAssertFalse(app.descendants(matching: .any)["rrPageRail"].exists, "no rail: the page has the screen")
         shot("rr-reader-p1", app)
         app.buttons["rrNext"].tap()
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'p. 2 / '"), evaluatedWith: label)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Page 2 of '"), evaluatedWith: label)
         waitForExpectations(timeout: 10)
         waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 2 is on screen")
+        // A keyboard's arrows turn as the arrows on screen do (iPad, Mac), the controls hidden or not.
+        let rtl = waitForPage(app, 2).contains("|rtl")
+        app.typeKey(rtl ? .rightArrow : .leftArrow, modifierFlags: [])
+        XCTAssertTrue(waitForPage(app, 1, 20).hasPrefix("1/"), "the arrow key back turns to page 1 (\(readerState(app)))")
+        app.typeKey(rtl ? .leftArrow : .rightArrow, modifierFlags: [])
+        XCTAssertTrue(waitForPage(app, 2, 20).hasPrefix("2/"), "the arrow key forward turns to page 2 (\(readerState(app)))")
+        showControls(app)
         app.buttons["rrReaderClose"].tap()
         waitFor(app.buttons["rrContinue"], 10, "the title offers to continue where reading stopped")
         app.buttons["stackBack"].tap()
@@ -554,7 +756,8 @@ final class KhajistanUITests: XCTestCase {
         members.tap()
         waitFor(app.buttons["rr-issue-0"], 20, "the members' title lists its issues")
         app.buttons["rr-issue-0"].tap()
-        waitFor(label, 45, "the reader opens")
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the reader opens")
+        showControls(app)
         let gate = app.descendants(matching: .any)["rrGate"]
         for _ in 0..<3 where !gate.exists {
             let next = app.buttons["rrNext"]
@@ -566,6 +769,133 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertFalse(app.buttons["rrNext"].isEnabled, "nothing past the gate can be turned to")
         XCTAssertFalse(app.descendants(matching: .any)["rrReaderPage"].exists, "no page image stands behind the gate")
         shot("rr-members-gate", app)
+    }
+
+    /// Kindle's touch: the edge in the issue's direction turns forward and the other edge back
+    /// (the left edge is next in a right-to-left issue), a tap in the middle shows and hides the
+    /// controls, and a bookmark on a page outlives the app. Run in each skin for the screenshots.
+    func testReaderTapZonesChromeAndBookmarkAcrossRelaunch() {
+        for skin in skins {
+            let app = launch(skin: skin, extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+            let card = openFreeIssue(app)
+            let first = waitForPage(app, 1)
+            let rtl = first.contains("|rtl")
+            let forwardX: CGFloat = rtl ? 0.08 : 0.92
+            let backX: CGFloat = rtl ? 0.92 : 0.08
+            sleep(2)
+            shot("rr-\(skin)-phone-page", app)
+            tapPage(app, at: forwardX)
+            XCTAssertTrue(waitForPage(app, 2, 30).hasPrefix("2/"), "the \(rtl ? "left" : "right") edge turns forward (\(readerState(app)))")
+            XCTAssertFalse(app.staticTexts["rrPageLabel"].exists, "a turn by the edge leaves the controls hidden")
+            tapPage(app, at: backX)
+            XCTAssertTrue(waitForPage(app, 1, 30).hasPrefix("1/"), "the other edge turns back (\(readerState(app)))")
+            tapPage(app, at: forwardX)
+            waitForPage(app, 2, 30)
+
+            showControls(app)
+            sleep(1)
+            shot("rr-\(skin)-phone-chrome", app)
+            tapPage(app, at: 0.5)
+            XCTAssertTrue(app.staticTexts["rrPageLabel"].waitForNonExistence(timeout: 5), "a second tap in the middle hides them")
+            showControls(app)
+
+            let mark = app.buttons["rrBookmark"]
+            waitFor(mark, 5, "the controls carry a bookmark for the page")
+            if (mark.value as? String) == "On" { mark.tap() }
+            mark.tap()
+            XCTAssertEqual(mark.value as? String, "On", "the page is marked")
+            app.buttons["rrPagesButton"].tap()
+            waitFor(app.buttons["rrMark-2"], 10, "the pages grid lists the mark")
+            sleep(4)
+            shot("rr-\(skin)-pages-grid", app)
+            app.buttons["rrGridDone"].tap()
+            app.terminate()
+
+            // The mark is there after a relaunch, and comes off (once; the other skins are for the pictures).
+            for wanted in ["On", "Off"] where skin == skins.first {
+                let again = launch(skin: skin, extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+                let title = again.buttons[card]
+                waitFor(title, 60, "the same title is on the shelf")
+                for _ in 0..<6 where !title.isHittable { again.swipeUp() }
+                title.tap()
+                waitFor(again.buttons["rrContinue"], 20, "the title offers to continue at page 2")
+                again.buttons["rrContinue"].tap()
+                XCTAssertTrue(waitForPage(again, 2).hasPrefix("2/"), "Continue opens page 2")
+                showControls(again)
+                let kept = again.buttons["rrBookmark"]
+                waitFor(kept, 5, "the bookmark control")
+                XCTAssertEqual(kept.value as? String, wanted, "the bookmark reads \(wanted) after a relaunch")
+                if wanted == "On" { kept.tap() }
+                again.terminate()
+            }
+        }
+    }
+
+    /// Wide: two facing pages, the cover alone, in the issue's order; the grid jumps and the
+    /// scrubber offers the way back; the last page leads to the next issue. On a phone the device
+    /// is turned to landscape; an iPad runs it in both orientations.
+    func testReaderSpreadGridBackAndEndOfIssue() {
+        let orientations: [UIDeviceOrientation] = UIDevice.current.userInterfaceIdiom == .pad ? [.portrait, .landscapeLeft] : [.landscapeLeft]
+        for orientation in orientations {
+            XCUIDevice.shared.orientation = orientation
+            defer { XCUIDevice.shared.orientation = .portrait }
+            let wide = orientation.isLandscape
+            let app = launch(skin: wide ? "grove" : "smut", extra: ["-kjroom", "reading", "-kjtestsignedout", "YES"])
+            let tag = UIDevice.current.userInterfaceIdiom == .pad ? "ipad-\(wide ? "landscape" : "portrait")" : "phone-landscape"
+            openFreeIssue(app, severalIssues: true)
+            let first = waitForPage(app, 1)
+            XCTAssertFalse(first.contains("|spread"), "the cover is alone (\(first))")
+            let rtl = first.contains("|rtl")
+            tapPage(app, at: rtl ? 0.08 : 0.92)
+            let second = waitForPage(app, 2, 30)
+            if wide {
+                // The facing page arrives after the first; give it a moment.
+                for _ in 0..<20 where !readerState(app).contains("|spread") { usleep(500_000) }
+                XCTAssertTrue(readerState(app).contains("|spread"), "a wide screen shows pages 2 and 3 together (\(readerState(app)))")
+            } else {
+                XCTAssertFalse(second.contains("|spread"), "a tall screen shows one page (\(second))")
+            }
+            sleep(2)
+            shot("rr-\(tag)-page-two", app)
+
+            // The grid jumps, and the way back is offered.
+            showControls(app)
+            app.buttons["rrPagesButton"].tap()
+            let five = app.buttons["rrGridPage-5"]
+            waitFor(five, 10, "the grid lists the pages")
+            sleep(3)
+            shot("rr-\(tag)-grid", app)
+            five.tap()
+            XCTAssertTrue(waitForPage(app, wide ? 4 : 5, 30).contains("|page"), "the grid opens the page chosen (\(readerState(app)))")
+            showControls(app)
+            let back = app.buttons["rrBackToPage"]
+            waitFor(back, 5, "after a jump the controls offer the way back")
+            XCTAssertEqual(back.label.lowercased(), "back to page 2", "it names the page left")
+            shot("rr-\(tag)-back-to-page", app)
+            back.tap()
+            XCTAssertTrue(waitForPage(app, 2, 30).hasPrefix("2/"), "back goes to the page left")
+
+            // The scrubber to its far end, then one more turn: the end of the issue.
+            showControls(app)
+            let slider = app.descendants(matching: .any)["rrPageSlider"]
+            let start = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.3, thenDragTo: slider.coordinate(withNormalizedOffset: CGVector(dx: rtl ? 0 : 1, dy: 0.5)))
+            let total = Int(first.split(separator: "/")[1].split(separator: "|")[0]) ?? 0
+            let last = wide && total > 1 && !total.isMultiple(of: 2) ? total - 1 : total
+            XCTAssertTrue(waitForPage(app, last, 45).hasPrefix("\(last)/"), "the scrubber's end is the last page (\(readerState(app)))")
+            tapPage(app, at: rtl ? 0.08 : 0.92)
+            let end = app.descendants(matching: .any)["rrEnd"]
+            waitFor(end, 15, "turning past the last page is the end of the issue")
+            shot("rr-\(tag)-end", app)
+            let next = app.buttons["rrNextIssue"]
+            XCTAssertTrue(next.exists, "a title with more issues offers the next one")
+            let before = app.descendants(matching: .any)["rrReaderTitle"].label
+            next.tap()
+            XCTAssertTrue(waitForPage(app, 1).hasPrefix("1/"), "the next issue opens at page 1")
+            showControls(app)
+            XCTAssertNotEqual(app.descendants(matching: .any)["rrReaderTitle"].label, before, "the reader names the next issue")
+            app.terminate()
+        }
     }
 
     /// Madrassa, the databases and the Bazaar read the site's own files. The live site holds them
@@ -626,9 +956,9 @@ final class KhajistanUITests: XCTestCase {
         shot("database-record", app)
         app.buttons["recordLink"].tap()
         let pageLabel = app.staticTexts["rrPageLabel"]
-        waitFor(pageLabel, 45, "the scan opens in the app's own reader, not the website")
-        XCTAssertTrue(pageLabel.label.hasPrefix("p. 1 / "), "on the page the link names (\(pageLabel.label))")
-        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the certificate's page is on screen")
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "the scan opens in the app's own reader, not the website")
+        showControls(app)
+        XCTAssertTrue(pageLabel.label.hasPrefix("Page 1 of "), "on the page the link names (\(pageLabel.label))")
         shot("censor-scan", app)
         app.terminate()
 
@@ -695,6 +1025,73 @@ final class KhajistanUITests: XCTestCase {
         waitForExpectations(timeout: 5)
     }
 
+    /// A channel left on plays while reading, and its small player is in the reader too, which
+    /// covers the house bar (owner, 2026-10-28: "play a tv channel as they read"). Its name closes
+    /// the reader and opens the Receiver.
+    func testNowPlayingBarStaysOverTheReader() {
+        let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        app.buttons["tab-receiver"].tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        app.buttons["tab-rooms"].tap()
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the shelf loads")
+        let free = titles.matching(NSPredicate(format: "label CONTAINS[c] 'read in full'")).firstMatch
+        waitFor(free, 30, "a free title is on the shelf")
+        free.tap()
+        let issue = app.buttons["rr-issue-0"]
+        waitFor(issue, 20, "the title lists its issues")
+        issue.tap()
+        waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
+        let bar = app.descendants(matching: .any)["nowPlaying"]
+        waitFor(bar, 5, "the small player is in the reader")
+        shot("now-playing-reader", app)
+        // The house bar's own small player is still in the tree under the reader: take the one on top.
+        let names = app.buttons.matching(identifier: "nowPlayingName").allElementsBoundByIndex
+        guard let name = names.first(where: { $0.isHittable }) else { return XCTFail("the reader's small player can be tapped") }
+        name.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["rrReaderPage"].waitForNonExistence(timeout: 5), "the reader closes")
+        waitFor(state, 5, "the Receiver is open")
+        XCTAssertFalse(bar.exists, "no small player on the Receiver itself")
+    }
+
+    /// With Keep playing off, leaving the Receiver turns the channel off: no bar, nothing on
+    /// returning. The choice comes as a launch argument so no test leaves it behind.
+    func testLeavingTheReceiverStopsItWhenKeepPlayingIsOff() {
+        let app = launch(skin: "smut", tab: "receiver",
+                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 40, "the receiver opens")
+        expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 40)
+        // A house switch carries the toggle trait, so it is not listed among the buttons.
+        let choice = app.descendants(matching: .any)["receiverKeepsPlaying"]
+        waitFor(choice, 10, "the Receiver offers the choice")
+        XCTAssertTrue(["Off", "0"].contains(String(describing: choice.value ?? "")), "the choice reads off (\(String(describing: choice.value)))")
+        app.buttons["tab-rooms"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
+        app.buttons["tab-receiver"].tap()
+        expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
+        waitForExpectations(timeout: 5)
+    }
+
+    /// "Keep playing" off, the viewer leaves while the launch Surf is still choosing: the Surf is
+    /// dropped and nothing starts under the other page. (A Surf has no source until it lands, so a
+    /// turn-off that only stopped what was on let it play under ROOMS.)
+    func testLeavingDuringTheLaunchSurfPlaysNothingWhenKeepPlayingIsOff() {
+        let app = launch(skin: "day", tab: "receiver",
+                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+        waitFor(app.buttons["tab-rooms"], 5, "the house bar is up")
+        app.buttons["tab-rooms"].tap()
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlayingName"].waitForExistence(timeout: 20),
+                       "a Surf that was still choosing does not land under another page")
+        app.buttons["tab-receiver"].tap()
+        let state = app.staticTexts["screenState"]
+        waitFor(state, 10, "the receiver reopens")
+    }
+
     /// Signed out, the film watchlist and the Pics/Vids save ask to sign in and keep nothing on
     /// the device: a save is on the account or nowhere.
     func testSavesAskASignedOutReaderToSignIn() {
@@ -715,5 +1112,65 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(app.buttons["closePlayer"].exists, "the viewer stays open")
         XCTAssertEqual((save.value as? String)?.lowercased(), "off", "nothing is saved on the device")
         shot("pnv-save-signin", app)
+    }
+
+    /// Home carries a shelf for each part of Khajistan under the masthead (owner, 2026-10-29), and
+    /// scrolls down to them: the Receiver's Surf, the Reading Room's covers, Pics/Vids (its notice
+    /// line until the room's notice is answered) and Chat need no password.
+    func testHomeScrollsThroughAShelfForEachPart() {
+        let app = launch(skin: "day")
+        waitForHome(app, 15, "HOME is up")
+        sleep(6)   // the shelves load a moment after Home
+        let wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+        var seen = Set<String>()
+        for step in 0..<14 {
+            for shelf in wanted where app.descendants(matching: .any)[shelf].exists { seen.insert(shelf) }
+            shot(String(format: "home-scroll-%02d", step), app)
+            if seen.count == wanted.count && step >= 6 { break }
+            app.swipeUp(velocity: .slow)
+            usleep(800_000)
+        }
+        XCTAssertEqual(seen, Set(wanted), "Home scrolls through a shelf for each part")
+    }
+
+    /// Every native room fits the screen it is on, upright and turned: no text runs past the left
+    /// or right edge outside a scroll view (a shelf scrolls sideways; a line of text must not).
+    /// Run it on the small iPhone, the big one and the iPads, and with the largest text size
+    /// (`xcrun simctl ui <udid> content_size accessibility-extra-extra-extra-large`).
+    func testEveryRoomFitsTheScreenUprightAndTurned() {
+        let isPad = UIDevice.current.userInterfaceIdiom == .pad
+        var overflow: [String] = []
+        for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
+            let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
+            waitFor(app.buttons["tab-rooms"], 15, "the house bar is up in \(room)")
+            for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
+                XCUIDevice.shared.orientation = orientation
+                sleep(6)
+                let tag = "\(room)-\(orientation == .portrait ? "upright" : "turned")"
+                shot("fit-\(tag)", app)
+                overflow += offScreenText(app).map { "\(tag): \($0)" }
+            }
+            XCUIDevice.shared.orientation = .portrait
+            app.terminate()
+        }
+        XCTAssertTrue(overflow.isEmpty, "text runs past the screen edge:\n" + overflow.joined(separator: "\n"))
+    }
+
+    /// Text and buttons whose frame leaves the window sideways, outside every scroll view.
+    private func offScreenText(_ app: XCUIApplication) -> [String] {
+        guard let root = try? app.snapshot() else { return [] }
+        let width = app.windows.firstMatch.frame.width
+        var found: [String] = []
+        func walk(_ node: XCUIElementSnapshot, inScroll: Bool) {
+            let scroll = inScroll || [.scrollView, .collectionView, .table, .webView].contains(node.elementType)
+            let f = node.frame
+            if !scroll, [.staticText, .button, .textField].contains(node.elementType), f.width > 0, f.height > 0,
+               f.minX < -1 || f.maxX > width + 1 {
+                found.append("\(node.elementType.rawValue) '\(node.label.prefix(40))' x \(Int(f.minX))...\(Int(f.maxX)) of \(Int(width))")
+            }
+            for child in node.children { walk(child, inScroll: scroll) }
+        }
+        walk(root, inScroll: false)
+        return found
     }
 }

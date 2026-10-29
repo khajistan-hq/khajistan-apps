@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// HOME: the masthead, what was opened last on this device, and the rooms the app draws itself.
+/// HOME: the masthead, what was opened last on this device, a shelf for each part of Khajistan,
+/// and the rooms the app draws itself.
 /// Nothing on it is picked by hand or ranked; the website's whole menu is ROOMS. Membership is
 /// offered in the Reading Room itself, on the website's own page, and nowhere else in the app
 /// (owner, 2026-10-07: the Home card was too aggressive).
@@ -18,6 +19,7 @@ struct HomeView: View {
                     if model.reading.phase == .ready { ContinueShelf(fromHome: true) } else { continueText }
                 }
                 upNext
+                HomeShelves()
                 rooms
                 if !recent.isEmpty { recentBlock }
                 Button(kicker: "Every room \u{2192}") { model.tab = .rooms }
@@ -98,11 +100,12 @@ struct HomeView: View {
         }
     }
 
-    /// The rooms, as the reference apps' browse tiles: an icon, the name and its line.
+    /// The rooms, as the Apple TV app's sections and Apple Books' categories: a picture first,
+    /// then the name and its line, whole.
     private var rooms: some View {
         VStack(alignment: .leading, spacing: 8) {
             ShelfHeader(title: "In the app")
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 220 : 160), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 220 : 150), spacing: 12, alignment: .top)], spacing: 18) {
                 ForEach(appRooms) { room in RoomTile(room: room) }
             }
         }
@@ -142,7 +145,8 @@ struct HomeView: View {
     }
 }
 
-/// A room on Home: its icon, name and line on the lift colour.
+/// A room on Home, picture first: one of the archive's own pictures on the lift plate, fitted
+/// whole, then the name and the room's line in full.
 private struct RoomTile: View {
     let room: ArchiveDestination
     @Environment(AppModel.self) private var model
@@ -151,24 +155,42 @@ private struct RoomTile: View {
     var body: some View {
         Button { model.open(room) } label: {
             VStack(alignment: .leading, spacing: 8) {
-                Image(systemName: room.nativeRoom?.symbol ?? "square").font(.system(.title2, weight: .semibold))
-                    .foregroundStyle(palette.accent)
-                    .frame(height: 30)
+                RoomPicture(room: room.nativeRoom)
+                    .aspectRatio(4 / 5, contentMode: .fit)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(room.title).font(.system(.headline, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
-                    Text(room.subtitle).kjSmall(faint: true).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(room.title).font(.system(.headline, weight: .bold)).lineLimit(2)
+                    Text(room.subtitle).kjSmall(faint: true).multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
             }
             .foregroundStyle(palette.ink)
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
-            .background(palette.lift, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("home-room-\(room.id)")
+    }
+}
+
+/// A room's picture on the lift plate, fitted whole and never cropped; the room's icon where it
+/// has no picture.
+struct RoomPicture: View {
+    let room: NativeRoom?
+    var corner: CGFloat = 14
+    var inset: CGFloat = 8
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .fill(palette.lift)
+            .overlay {
+                if let name = room?.picture {
+                    Image(name).resizable().aspectRatio(contentMode: .fit).padding(inset)
+                } else {
+                    Image(systemName: room?.symbol ?? "globe").font(.system(.title2, weight: .semibold)).foregroundStyle(palette.accent)
+                }
+            }
+            .accessibilityHidden(true)
     }
 }
 

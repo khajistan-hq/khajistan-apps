@@ -265,7 +265,7 @@ struct TransmissionPlayerView: View {
                 .padding(.horizontal, KJLayout.inset)
             } else {
                 Color.black.ignoresSafeArea()
-                PlayerLayerView(player: store.player.player).ignoresSafeArea()
+                PlayerLayerView(player: store.player.player, soundCarriesInBackground: true).ignoresSafeArea()
             }
             if store.player.state == .tuning { palette.ground.ignoresSafeArea() }
             Color.clear.channelGestures(step: { _ in switchChannel() }, tap: { overlay.toggle(settled: store.player.state == .playing) })

@@ -3,10 +3,13 @@ import SwiftUI
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
 /// sign-in sheet takes in place. Left and right move through the shelf the viewer came from
-/// (loading its next page at its end); play/pause pauses a video; menu goes back.
+/// (loading its next page at its end); play/pause pauses a video; menu goes back. Down lights Save,
+/// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
+/// one lit, Up or Menu lets go. Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.displayScale) private var displayScale
     @State private var current: PnvRow
     @State private var controller = PlayerController()
     @State private var picture: UIImage?
@@ -17,18 +20,32 @@ struct PnvViewerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    @State private var armed: Control?
+    @State private var saveNote: String?
+    @State private var showCollections = false
+
+    private enum Control { case save, collection }
 
     private enum Phase: Equatable {
         case loading, ready, needsSignIn
         case failed(String)
     }
 
-    /// The shelf the object was chosen from: left and right step through its region's stream.
+    /// The shelf the object was chosen from: left and right step through its region's stream, or
+    /// through the saved list it was opened from.
     private let region: String
+    private let list: [PnvRow]?
 
     init(row: PnvRow, region: String) {
         _current = State(initialValue: row)
         self.region = region
+        self.list = nil
+    }
+
+    init(row: PnvRow, list: [PnvRow]) {
+        _current = State(initialValue: row)
+        self.region = ""
+        self.list = list
     }
 
     private var store: PicsVidsStore { model.pnv }
@@ -56,7 +73,11 @@ struct PnvViewerView: View {
             overlay(palette)
             // The focus target: it draws nothing and holds focus so the remote's presses land.
             Button {
-                if phase == .needsSignIn { showSignIn = true } else { wake() }
+                switch armed {
+                case .save: wake(); toggleSave()
+                case .collection: wake(); openCollections()
+                case nil: if phase == .needsSignIn { showSignIn = true } else { wake() }
+                }
             } label: {
                 Color.clear
             }
@@ -67,9 +88,19 @@ struct PnvViewerView: View {
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
+            if let lit = armed {
+                switch direction {
+                case .right where lit == .save: armed = .collection
+                case .left where lit == .collection: armed = .save
+                case .up: armed = nil
+                default: break
+                }
+                return
+            }
             switch direction {
             case .left: step(by: -1)
             case .right: step(by: 1)
+            case .down: armed = .save
             default: break
             }
         }
@@ -78,6 +109,11 @@ struct PnvViewerView: View {
             if current.isVideo && phase == .ready { controller.toggle() }
         }
         .onExitCommand {
+            if armed != nil {
+                armed = nil
+                wake()
+                return
+            }
             stopEverything()
             dismiss()
         }
@@ -88,6 +124,10 @@ struct PnvViewerView: View {
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
         }
+        .fullScreenCover(isPresented: $showCollections) {
+            PnvCollectionsPanel(key: current.media_key).environment(\.palette, palette)
+        }
+        .task(id: model.auth.email) { await model.saves.load() }
     }
 
     /// A picture still on its way, or a video connecting.
@@ -129,10 +169,54 @@ struct PnvViewerView: View {
                 // Select opens the sign-in sheet; the line says so.
                 Kicker("Select to sign in")
             }
+            saveControls
         }
         .padding(.horizontal, KJLayout.inset)
         .padding(.vertical, 40)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
+    /// place while nothing is lit, as the Receiver's strip cues its controls.
+    private var saveControls: some View {
+        let saved = model.saves.isSaved(pnvKey: current.media_key)
+        return HStack(spacing: 14) {
+            StripChipStyle.face(Text((armed == nil ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(armed == .save ? .isSelected : [])
+                .accessibilityLabel(saved ? "Saved" : "Save")
+                .accessibilityValue(saved ? "On" : "Off")
+                .accessibilityIdentifier("pnvSave")
+                .accessibilityAction { toggleSave() }
+            StripChipStyle.face(Text("Collection"), isOn: false, selected: armed == .collection)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAddTraits(armed == .collection ? .isSelected : [])
+                .accessibilityIdentifier("pnvCollection")
+                .accessibilityAction { openCollections() }
+            if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("pnvSaveNote") }
+        }
+        // The strip's chips are drawn for a band; here they stand on one.
+        .padding(.vertical, 8)
+        .padding(.horizontal, 8)
+        .background(Palette(model.skin).band)
+        .padding(.top, 8)
+    }
+
+    /// Save, as the website's heart: on the account, with no title or picture kept, so an object
+    /// taken off the shelf leaves nothing of itself in a library.
+    private func toggleSave() {
+        guard model.saves.canSave else { saveNote = "Sign in under Account to save to your account."; return }
+        guard PassportSaves.pnvRef(current.media_key) != nil else { saveNote = "This object cannot be saved yet."; return }
+        let key = current.media_key
+        Task {
+            await model.saves.load()
+            saveNote = await model.saves.toggle(pnvKey: key) ? nil : "That did not save. Try again."
+        }
+    }
+
+    private func openCollections() {
+        guard model.saves.canSave else { saveNote = "Sign in under Account to keep collections."; return }
+        showCollections = true
     }
 
     private var stateText: String? {
@@ -156,6 +240,10 @@ struct PnvViewerView: View {
 
     // MARK: - Showing a row
 
+    /// The screen's own width in pixels (tvOS lays out 1,920 points wide), up to 2,400: an Apple
+    /// TV HD draws 1,920 pixels, and a larger decode is memory it can never show.
+    private var viewerPixels: Int { min(2400, Int(1920 * max(displayScale, 1))) }
+
     private func show(_ row: PnvRow) {
         loadTask?.cancel()
         controller.stop()
@@ -171,9 +259,10 @@ struct PnvViewerView: View {
                 if current.id == key { caption = text }
             }
             if row.isVideo {
+                model.silenceRadio()
                 await playVideo(row)
             } else {
-                let image = await PnvImages.shared.image(PnvMedia.pictureCandidates(row), maxPixel: 2400)
+                let image = await PnvImages.shared.image(PnvMedia.pictureCandidates(row), maxPixel: viewerPixels)
                 guard !Task.isCancelled, current.id == key else { return }
                 if let image {
                     picture = image
@@ -189,7 +278,7 @@ struct PnvViewerView: View {
     private func playVideo(_ row: PnvRow) async {
         let key = row.id
         Task { @MainActor in
-            let still = await PnvImages.shared.image([PnvMedia.poster(row), PnvMedia.thumb(row)].compactMap { $0 }, maxPixel: 2400)
+            let still = await PnvImages.shared.image([PnvMedia.poster(row), PnvMedia.thumb(row)].compactMap { $0 }, maxPixel: viewerPixels)
             if current.id == key, picture == nil { picture = still }
         }
         do {
@@ -217,6 +306,13 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         stepTask?.cancel()
         stepTask = Task {
+            if let list {
+                guard let index = list.firstIndex(where: { $0.id == current.id }), list.indices.contains(index + delta) else { return }
+                saveNote = nil
+                show(list[index + delta])
+                return
+            }
+            saveNote = nil
             guard var index = store.feed(region).items.firstIndex(where: { $0.id == current.id }) else { return }
             index += delta
             if index >= store.feed(region).items.count { await store.loadMore(region: region) }
@@ -244,7 +340,76 @@ struct PnvViewerView: View {
         guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
-            if !Task.isCancelled { overlayVisible = false }
+            // A lit control keeps the overlay up, so Select never works one that cannot be seen.
+            if !Task.isCancelled, armed == nil { overlayVisible = false }
         }
+    }
+}
+
+/// The account's collections, as Cosmos files a block: each ticked where this object is in it,
+/// Select puts it in or takes it out; a new one is named and made with this object in it. The same
+/// rows the website's Pics/Vids collections are. Menu comes back to the object.
+private struct PnvCollectionsPanel: View {
+    let key: String
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+    @State private var name = ""
+    @State private var note: String?
+
+    var body: some View {
+        ZStack {
+            palette.ground.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Collections").kjDisplay(KJType.headline, tracking: -0.055).accessibilityAddTraits(.isHeader)
+                        .padding(.bottom, 20)
+                    ForEach(model.saves.collections) { collection in
+                        let holds = collection.media_keys.contains(key)
+                        Button {
+                            Task { note = await model.saves.toggle(pnvKey: key, in: collection.id) ? nil : "That did not save. Try again." }
+                        } label: {
+                            HStack {
+                                Text(collection.name).kjBody().lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text("\(collection.media_keys.count)").kjSmall(faint: true)
+                                if holds { Image(systemName: "checkmark").font(.system(size: 28, weight: .bold)).accessibilityHidden(true) }
+                            }
+                            .frame(maxWidth: 900, alignment: .leading)
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 16, bottom: 14, trailing: 16)))
+                        .accessibilityAddTraits(holds ? .isSelected : [])
+                        .accessibilityIdentifier("pnvcollection-\(collection.id)")
+                        Hairline().frame(maxWidth: 932)
+                    }
+                    HStack(alignment: .bottom, spacing: 24) {
+                        HouseInputField("New collection", text: name, hint: "A name for it") {
+                            TextField("", text: $name)
+                        }
+                        .frame(width: 700)
+                        Button {
+                            let made = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !made.isEmpty else { return }
+                            Task {
+                                if await model.saves.createCollection(name: made, keys: [key]) == nil {
+                                    note = "That did not save. A name of 1 to 120 characters is needed."
+                                } else {
+                                    name = ""
+                                    note = nil
+                                }
+                            }
+                        } label: { Label("Make", systemImage: "plus").kjKicker() }
+                        .buttonStyle(HouseButtonStyle())
+                        .accessibilityIdentifier("pnvNewCollection")
+                    }
+                    .padding(.top, 28)
+                    .focusSection()
+                    if let note { Text(note).kjSmall(faint: true).padding(.top, 12) }
+                }
+                .padding(KJLayout.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .foregroundStyle(palette.ink)
+        .task { await model.saves.load() }
     }
 }

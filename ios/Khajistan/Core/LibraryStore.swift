@@ -29,11 +29,22 @@ struct Resume: Codable, Identifiable, Hashable, Sendable {
     var id: String { kind.rawValue + "|" + ref }
 }
 
+/// A page marked in the reader: the title slug, the issue key and the page number, never a page
+/// URL. Kept on this device beside the reading places.
+struct PageMark: Codable, Hashable, Sendable {
+    let title: String
+    let issue: String
+    let page: Int
+    var date: Date
+}
+
 struct LibraryState: Codable, Equatable, Sendable {
     var bookmarks: [SavedPage] = []
     var history: [SavedPage] = []
     /// Newest first, one per title or film.
     var resume: [Resume] = []
+    /// Pages marked in the reader, newest first.
+    var pageMarks: [PageMark] = []
 
     init() {}
 
@@ -44,6 +55,7 @@ struct LibraryState: Codable, Equatable, Sendable {
         bookmarks = try values.decodeIfPresent([SavedPage].self, forKey: .bookmarks) ?? []
         history = try values.decodeIfPresent([SavedPage].self, forKey: .history) ?? []
         resume = try values.decodeIfPresent([Resume].self, forKey: .resume) ?? []
+        pageMarks = try values.decodeIfPresent([PageMark].self, forKey: .pageMarks) ?? []
     }
 
     /// Keeps the newest place for this object, at the front, and at most forty places.
@@ -55,6 +67,20 @@ struct LibraryState: Codable, Equatable, Sendable {
 
     func place(_ kind: Resume.Kind, _ ref: String) -> Resume? {
         resume.first { $0.kind == kind && $0.ref == ref }
+    }
+
+    /// Marks the page, or takes the mark off when it is there.
+    mutating func togglePageMark(title: String, issue: String, page: Int, date: Date = .now) {
+        if let index = pageMarks.firstIndex(where: { $0.title == title && $0.issue == issue && $0.page == page }) {
+            pageMarks.remove(at: index)
+        } else {
+            pageMarks.insert(PageMark(title: title, issue: issue, page: page, date: date), at: 0)
+        }
+    }
+
+    /// The marked pages of one issue, in page order.
+    func pageMarks(title: String, issue: String) -> [Int] {
+        pageMarks.filter { $0.title == title && $0.issue == issue }.map(\.page).sorted()
     }
 
     mutating func visit(_ url: URL, title: String) {

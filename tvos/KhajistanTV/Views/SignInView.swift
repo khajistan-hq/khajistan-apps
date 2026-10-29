@@ -40,8 +40,6 @@ struct SignInView: View {
             if let line { UIAccessibility.post(notification: .announcement, argument: line) }
         }
         .onExitCommand { dismiss() }
-        // The colour scheme steers what tvOS draws itself: the keyboard this screen brings up.
-        .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 
     private var passwordForm: some View {

@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// One issue, a page at a time, full screen on the house ground. Right turns to the next page and left
-/// to the one before. Select zooms in a step at a time, 2x, 3x, 4x and 6x (the website's own ceiling),
-/// drawn from the page as stored; the arrows and a swipe move the page under the screen, and Menu
-/// steps back out before it leaves. The pages around this one are fetched while it is read.
+/// One issue, a page at a time, full screen on the house ground, with nothing over it once the band has
+/// shown where you are. Left and right turn the page in the issue's own direction (RRDirection, the
+/// website's rule: in a right-to-left issue the next page lies to the left), and the page slides in
+/// from that side. Down brings the controls: the band, "Page 3 of 76", how far in, and the issue's
+/// pages as a strip the remote walks, Select going to the page chosen. Select or Play/Pause zooms in a
+/// step at a time, 2x, 3x, 4x and 6x (the website's own ceiling), drawn from the page as stored; the
+/// arrows and a swipe move the page under the screen. Menu steps back out: the zoom, then the
+/// controls, then the reader. The pages around this one are fetched while it is read.
 ///
 /// The page server decides what a viewer may read, and what it answers is what is shown: a page, a
 /// sign-in for a free title, the membership gate for a paid one, the rights-held note (451), or the
@@ -37,6 +41,16 @@ struct ReadingReaderView: View {
     @State private var loadTask: Task<Void, Never>?
     @State private var fellBackToStart = false
     @State private var hideTask: Task<Void, Never>?
+    /// The controls: the band, the page line and the strip of pages. Down brings them, Menu puts them away.
+    @State private var chrome = false
+    @State private var turnedForward = true
+    @State private var bandShown = false
+    @FocusState private var focus: ReaderFocus?
+
+    private enum ReaderFocus: Hashable {
+        case surface
+        case thumb(Int)
+    }
 
     private enum Phase: Equatable {
         case loading
@@ -56,6 +70,7 @@ struct ReadingReaderView: View {
     }
 
     private var store: ReadingStore { model.reading }
+    private var rightToLeft: Bool { RRDirection.isRightToLeft(title, issue) }
 
     var body: some View {
         ZStack {
@@ -74,6 +89,8 @@ struct ReadingReaderView: View {
                             .offset(pan)
                             .animation(.easeOut(duration: 0.22), value: zoom)
                             .animation(.easeOut(duration: 0.18), value: pan)
+                            .id(position)
+                            .transition(pageTurn)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -94,10 +111,11 @@ struct ReadingReaderView: View {
                     Color.clear
                 }
                 .buttonStyle(SurfaceButtonStyle())
+                .focused($focus, equals: .surface)
                 .accessibilityIdentifier("rrReaderSurface")
                 // Spoken: "Page 3 of 76". The UI tests read the machine form, in debug builds.
                 .accessibilityLabel(pages > 0 ? "Page \(position) of \(pages)" : "Loading")
-                .accessibilityHint("Swipe left or right to turn the page. Select zooms in.")
+                .accessibilityHint("Swipe left or right to turn the page. Swipe down for the pages. Select zooms in.")
                 #if DEBUG
                 .accessibilityValue(stateValue)
                 #endif
@@ -105,27 +123,41 @@ struct ReadingReaderView: View {
         }
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
-            wake()
+            // On the strip the focus engine walks the pages; the reader leaves it alone.
+            if case .thumb = focus { return }
             if zoomed {
                 panBy(direction)
                 return
             }
             switch direction {
-            case .left: step(by: -1)
-            case .right: step(by: 1)
+            case .left: turn(towardsLeft: true)
+            case .right: turn(towardsLeft: false)
+            case .down: showChrome()
             default: break
             }
+        }
+        .onPlayPauseCommand { select() }
+        .onChange(of: focus) { _, now in
+            // Up off the strip lands on the page: the controls go with it.
+            if chrome, now == .surface { hideChrome() }
         }
         .onExitCommand {
             if zoomed {
                 setZoom(Self.zoomLevels.last { $0 < zoom } ?? 1)
+            } else if chrome {
+                hideChrome()
             } else {
                 loadTask?.cancel()
                 hideTask?.cancel()
                 dismiss()
             }
         }
-        .onChange(of: phase) { wake() }
+        // The band says where you are when the issue opens and over a refusal; turning a page leaves
+        // the page alone, as a book does.
+        .onChange(of: phase) { _, now in
+            if now != .page && now != .loading { wake() }
+            else if now == .page && !bandShown { bandShown = true; wake() }
+        }
         .task { await open() }
         .onDisappear {
             loadTask?.cancel()
@@ -134,7 +166,7 @@ struct ReadingReaderView: View {
         // Each page actually shown is this device's place in the title, for Continue. Kept as it is
         // read, not on leaving: the screen under the reader redraws before this one disappears.
         .onChange(of: phase == .page ? position : 0) { _, shown in
-            if shown > 0 { ReadingPlaces.record(title: title.slug, issue: issue, page: shown) }
+            if shown > 0 { ReadingPlaces.record(title: title.slug, name: title.name, issue: issue, page: shown) }
         }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { retryAfterSignIn() })
@@ -286,7 +318,7 @@ struct ReadingReaderView: View {
         case .gate: name = "gate"
         case .curtain: name = "curtain"
         }
-        return "\(position)/\(pages)|\(name)" + (zoomed ? "|zoom" : "")
+        return "\(position)/\(pages)|\(name)" + (rightToLeft ? "|rtl" : "|ltr") + (chrome ? "|chrome" : "") + (zoomed ? "|zoom" : "")
     }
 
     // MARK: - The band
@@ -294,12 +326,113 @@ struct ReadingReaderView: View {
     private var overlay: some View {
         VStack(spacing: 0) {
             // Select zooms, and nothing said so: the cue rides the band until the first zoom.
-            StatusBand(leading: bandLeading, trailing: (phase == .page && !zoomed && !zoomUsed ? ["Select to zoom"] : []) + [pageLabel])
+            StatusBand(leading: bandLeading, trailing: chrome ? [] : (phase == .page && !zoomed && !zoomUsed ? ["Select to zoom"] : []) + [pageLabel])
+                .opacity(overlayVisible || chrome ? 1 : 0)
+                .animation(.easeOut(duration: 0.25), value: overlayVisible || chrome)
+                .allowsHitTesting(false)
             Spacer(minLength: 0)
+            if chrome {
+                strip.transition(.opacity)
+            }
         }
-        .opacity(overlayVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: overlayVisible)
-        .allowsHitTesting(false)
+    }
+
+    /// The page line, how far into the issue, and the issue's pages, laid out the way they run.
+    private var strip: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(pageWords).kjBody().monospacedDigit()
+                .padding(.horizontal, KJLayout.inset)
+                .accessibilityIdentifier("rrReaderPageLabel")
+            GeometryReader { geometry in
+                let fraction = pages > 1 ? CGFloat(position - 1) / CGFloat(pages - 1) : 1
+                ZStack(alignment: rightToLeft ? .trailing : .leading) {
+                    Rectangle().fill(palette.faint)
+                    Rectangle().fill(palette.accent).frame(width: geometry.size.width * fraction)
+                }
+            }
+            .frame(height: 4)
+            .padding(.horizontal, KJLayout.inset)
+            .accessibilityHidden(true)
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 30) {
+                        ForEach(1...pages, id: \.self) { page in
+                            Button {
+                                hideChrome()
+                                show(page)
+                            } label: {
+                                VStack(spacing: 10) {
+                                    StripThumb(issue: issue, stored: RRPageMap.stored(page, map: map),
+                                               curtained: !revealed && flags[store.endpoint(issue, page: RRPageMap.stored(page, map: map))] != nil)
+                                        .frame(width: 150, height: 206)
+                                        .kjCardArt()
+                                    Text("\(page)").kjSmall().monospacedDigit()
+                                        .foregroundStyle(page == position ? palette.accent : palette.ink)
+                                }
+                            }
+                            .buttonStyle(HouseCardStyle())
+                            .focused($focus, equals: .thumb(page))
+                            .id(page)
+                            .accessibilityLabel("Page \(page)")
+                            .accessibilityAddTraits(page == position ? .isSelected : [])
+                            .accessibilityIdentifier("rrThumb-\(page)")
+                        }
+                    }
+                    .padding(.horizontal, KJLayout.inset)
+                    .padding(.vertical, 34)
+                }
+                .onAppear { proxy.scrollTo(position, anchor: .center) }
+            }
+            .frame(height: 320)
+            // A right-to-left issue's pages run from the right, as its pages do.
+            .environment(\.layoutDirection, rightToLeft ? .rightToLeft : .leftToRight)
+            .accessibilityIdentifier("rrStrip")
+        }
+        .padding(.top, 26)
+        .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
+    }
+
+    /// "Page 3 of 76".
+    private var pageWords: String { "Page \(position) of \(pages)" }
+
+    /// The new page slides in from the side the issue turns towards; Reduce Motion cuts.
+    private var pageTurn: AnyTransition {
+        guard !UIAccessibility.isReduceMotionEnabled else { return .identity }
+        let fromRight = turnedForward != rightToLeft
+        return .asymmetric(insertion: .move(edge: fromRight ? .trailing : .leading),
+                           removal: .move(edge: fromRight ? .leading : .trailing))
+    }
+
+    /// Down: the controls, with the remote on the page being read in the strip.
+    private func showChrome() {
+        guard !zoomed, phase == .page || phase == .loading, pages > 1 else { return }
+        hideTask?.cancel()
+        withAnimation(.easeOut(duration: 0.25)) { chrome = true }
+        let near = (1...pages).sorted { abs($0 - position) < abs($1 - position) }.prefix(60)
+        let stored = near.map { RRPageMap.stored($0, map: map) }
+        let issue = issue
+        let at = position
+        Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            focus = .thumb(at)
+            await store.signThumbnails(issue, stored: stored)
+        }
+    }
+
+    private func hideChrome() {
+        withAnimation(.easeOut(duration: 0.25)) { chrome = false }
+        overlayVisible = false
+        focus = .surface
+    }
+
+    /// The page on the left is the next one in a right-to-left issue and the one before in a
+    /// left-to-right one, so the arrow pressed is the side the page comes from.
+    private func turn(towardsLeft: Bool) {
+        let forward = towardsLeft == rightToLeft
+        turnedForward = forward
+        withAnimation(UIAccessibility.isReduceMotionEnabled ? nil : .easeOut(duration: 0.3)) {
+            step(by: forward ? 1 : -1)
+        }
     }
 
     private var bandLeading: [String] {
@@ -313,7 +446,7 @@ struct ReadingReaderView: View {
         if let blocked = blockedFrom, position >= blocked {
             return "Preview \u{2014} \(max(blocked - 1, 0)) of \(pages) pages"
         }
-        return (zoomed ? "\(Int(zoom))\u{00D7} \u{00B7} " : "") + "p. \(position) / \(pages)"
+        return (zoomed ? "\(Int(zoom))\u{00D7} \u{00B7} " : "") + pageWords
     }
 
     // MARK: - Opening and turning
@@ -468,6 +601,33 @@ struct ReadingReaderView: View {
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
             if !Task.isCancelled { overlayVisible = false }
+        }
+    }
+}
+
+/// A page at the small size in the strip, if the page server allows it to this viewer; the lift
+/// plate holds its place until then, and stays for a page it refuses.
+private struct StripThumb: View {
+    let issue: RRIssue
+    let stored: Int
+    /// A page behind its content warning, not yet shown: the plate only. The warning is the
+    /// reader's own, so the server hands the small picture over regardless.
+    var curtained = false
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var palette
+    @State private var image: UIImage?
+
+    var body: some View {
+        ZStack {
+            if let image, !curtained {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
+            } else {
+                palette.lift
+            }
+        }
+        .accessibilityHidden(true)
+        .task(id: "\(stored)|\(curtained)") {
+            image = curtained ? nil : await model.reading.thumbnail(issue, stored: stored)
         }
     }
 }

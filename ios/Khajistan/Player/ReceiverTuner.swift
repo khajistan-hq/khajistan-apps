@@ -15,6 +15,12 @@ final class ReceiverTuner {
         case transmission(Int)
     }
 
+    /// The viewer's choice, kept on the device (owner, 2026-10-28): leaving the Receiver keeps the
+    /// channel on in the small player (the default), or turns it off.
+    static let keepsPlayingKey = "kj.receiverKeepsPlaying"
+    /// And whether it plays on with the app closed or the phone locked (the default), or pauses.
+    static let playsInBackgroundKey = "kj.receiverPlaysInBackground"
+
     /// Nil when the receiver is off.
     private(set) var source: Source?
     /// The list a live channel was chosen from: up and down move through it.
@@ -111,7 +117,8 @@ final class ReceiverTuner {
         }
     }
 
-    /// Cancel only pending automatic selection. Already-playing radio remains background audio.
+    /// Cancel only pending automatic selection. Already-playing radio remains background audio,
+    /// unless the viewer turned "Keep playing on other pages" off (`turnOffOnLeaving`).
     func receiverClosed() {
         guard openingPending else { return }
         openingPending = false
@@ -196,14 +203,21 @@ final class ReceiverTuner {
         }
     }
 
+    /// The app left the screen with Play in the background off: what is on pauses, to be played
+    /// again on return.
+    func appLeftTheScreen() {
+        guard !(UserDefaults.standard.object(forKey: Self.playsInBackgroundKey) as? Bool ?? true) else { return }
+        if player.state == .playing || player.state == .tuning { playPause() }
+    }
+
     /// True while Surf is looking for a channel.
     private(set) var surfing = false
     /// Why the last Surf found nothing, until the next one.
     private(set) var surfNote: String?
 
     /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
-    /// settings (owner, 2026-10-07). The region is drawn by how many channels of that medium it
-    /// carries; next and previous then move through that region's list.
+    /// settings (owner, 2026-10-07); next and previous then walk every channel of that setting
+    /// (owner, 2026-10-29: "true surf").
     func surf(allowSelection: @escaping @MainActor () -> Bool = { true }) async {
         guard !surfing else { return }
         let revision = intentRevision
@@ -219,24 +233,29 @@ final class ReceiverTuner {
             return
         }
         let defaults = UserDefaults.standard
-        let medium = defaults.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
-        let scope = defaults.string(forKey: ShuffleScope.key).flatMap(ShuffleScope.init(rawValue:)) ?? .main
-        let weights = ShufflePick.weights(index, medium: medium, scope: scope)
-        // Up to three regions, in case one's list will not load.
-        for _ in 0..<3 {
-            guard let region = ShufflePick.region(weights) else { break }
-            guard let list = try? await receiver.channels(regionId: region, cameras: false) else { continue }
-            guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
-            let pool = list.filter { $0.mediaType == medium.rawValue }
-            if let channel = pool.randomElement() {
-                play(channel, in: pool)
-                return
-            }
+        let pool = await ShufflePick.surf(index, medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
+                                          scope: .stored(defaults.string(forKey: ShuffleScope.key))) { region in
+            try? await self.receiver.channels(regionId: region, cameras: false)
+        }
+        guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
+        if let channel = pool.first {
+            play(channel, in: pool)
+            return
         }
         surfNote = "Nothing to surf there right now."
     }
 
     /// Turns the receiver off.
+    /// Leaving the Receiver with "Keep playing on other pages" off: what is on turns off, and a
+    /// Surf or selection still in flight is dropped (stop() bumps intentRevision, which both check),
+    /// so nothing lands under another page. It is not an explicit Stop: a selection that leaving
+    /// canceled (receiverClosed() cleared initialOpenAttempted) is tried again on return.
+    func turnOffOnLeaving() {
+        let selectsOnReturn = !initialOpenAttempted
+        stop()
+        initialOpenAttempted = !selectsOnReturn
+    }
+
     func stop() {
         initialOpenAttempted = true
         openingPending = false

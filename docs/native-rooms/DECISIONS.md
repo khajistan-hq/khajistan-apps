@@ -103,3 +103,23 @@ Each entry: what was chosen, and why, in one or two lines.
     not used. Access stays the page server's answer on every page. Measured on the owner's TV:
     1.36–1.44 s to the shelf, 1.65–1.73 s to the first cover; the first open after an install 2.9 s.
 
+24. **The Receiver's two choices on the phone (owner, 2026-10-28: "both options should be there so
+    user can choose to play a tv channel as they read"; "play reciever in background even when
+    their phone is on home screen").** Two switches on the Receiver page, kept on the device, both on
+    by default. *Keep playing on other pages*: on, the small player follows the viewer, now also
+    inside the Reading Room reader, which covers the house bar (its name closes the reader and
+    opens the Receiver); off, leaving the Receiver turns the channel off. *Play with the app
+    closed*: on, the Receiver's picture lets go of its player while the app is in the background,
+    so a television channel's sound carries on (radio already did, `UIBackgroundModes audio`); off,
+    what is on pauses when the app leaves the screen. Pics/Vids videos and films are not covered:
+    the system still pauses them. Chat and the Pics/Vids viewer do not carry the small player yet.
+25. **The Apple TV reaches the reference apps too (owner, 2026-10-28: Bazaar "Bag + QR checkout";
+    Pics/Vids "Saves, keep shelves").** The TV Bazaar has a bag, steppers and one Checkout; the
+    checkout is the shop's own page shown as a QR for the phone, so nothing is paid on the remote.
+    This narrows DECISIONS 12: an address and now a code, never a payment form. The bag is the
+    phone's `BagStore`, one file for both apps. Pics/Vids keeps its region shelves (2026-10-06
+    ruling) and gains Save, Collection, and Saved and collection shelves from the account. A film's
+    Website is a QR of its page, the TV having no browser. A radio station closed with Menu plays on
+    in a small player under every top-bar section (a full-screen page over one covers it until Menu
+    comes back); unlike the phone's (DECISIONS 24) it is not a switch, and
+    any other signal stops it.

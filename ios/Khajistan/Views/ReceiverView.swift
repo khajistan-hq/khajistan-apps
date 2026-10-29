@@ -25,25 +25,48 @@ struct ReceiverView: View {
     /// Which full-screen view is up, fixed when it opens: read live from the tuner, turning the
     /// receiver off mid-dismissal swapped in an empty live view for a frame.
     @State private var fullScreenTransmission = false
+    @AppStorage(ReceiverTuner.keepsPlayingKey) private var keepsPlaying = true
+    @AppStorage(ReceiverTuner.playsInBackgroundKey) private var playsInBackground = true
+    private static let sectionAnchor = "receiverSection"
+    /// The set's width beside the page on a phone on its side.
+    private static let sideSetWidth: CGFloat = 320
+    @Environment(\.verticalSizeClass) private var verticalClass
 
     var body: some View {
-        VStack(spacing: 0) {
-            // On, the set stays above the page while the reader browses; off, it is the top of
-            // the page and scrolls away with it.
-            if model.tuner.source != nil {
-                device
-                    .padding(.horizontal, KJLayout.inset)
-                    .kjColumn(KJLayout.wideWidth)
-                    .padding(.vertical, 8)
+        Group {
+            if model.tuner.source != nil && verticalClass == .compact {
+                // A phone on its side is too short for the set above the page: the screen was
+                // squeezed to a sliver and a station's name broke mid-word. The set stands beside
+                // the page instead, its screen at full 16:9.
+                HStack(alignment: .top, spacing: 20) {
+                    ScrollView { device.padding(.vertical, 8) }
+                        .frame(width: Self.sideSetWidth)
+                        .scrollBounceBehavior(.basedOnSize)
+                    page
+                }
+                .padding(.leading, KJLayout.inset)
+            } else {
+                VStack(spacing: 0) {
+                    // On, the set stays above the page while the reader browses; off, it is the
+                    // top of the page and scrolls away with it.
+                    if model.tuner.source != nil {
+                        device
+                            .padding(.horizontal, KJLayout.inset)
+                            .kjColumn(KJLayout.wideWidth)
+                            .padding(.vertical, 8)
+                    }
+                    page
+                }
             }
-            page
         }
         .task(id: model.tab) {
             guard model.tab == .receiver else { return }
             await model.tuner.receiverOpened(isActive: { model.tab == .receiver })
         }
-        .onChange(of: model.tab) { _, tab in
-            if tab != .receiver { model.tuner.receiverClosed() }
+        .onChange(of: model.tab) { old, tab in
+            guard old == .receiver, tab != .receiver else { return }
+            model.tuner.receiverClosed()
+            if !keepsPlaying { model.tuner.turnOffOnLeaving() }
         }
         .fullScreenCover(isPresented: $fullScreen) {
             Group {
@@ -63,26 +86,52 @@ struct ReceiverView: View {
     }
 
     private var page: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
-                figures
-                if model.tuner.source == nil { device }
-                switch part {
-                case .live: LiveSection()
-                case .cameras: CamerasSection()
-                case .transmission: TransmissionSection()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
+                    figures
+                    HouseSwitch(title: "Keep playing on other pages",
+                                detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
+                                                     : "The channel turns off when you leave the Receiver",
+                                isOn: $keepsPlaying)
+                        .accessibilityIdentifier("receiverKeepsPlaying")
+                    HouseSwitch(title: "Play with the app closed",
+                                detail: playsInBackground ? "Keeps playing on the home screen and with the phone locked"
+                                                          : "Pauses when you leave the app",
+                                isOn: $playsInBackground)
+                        .accessibilityIdentifier("receiverPlaysInBackground")
+                    if model.tuner.source == nil { device }
+                    // A fixed mark above the section: an id on the section itself moved with the
+                    // swap, and the scroll overshot the new section's first line.
+                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
+                    switch part {
+                    case .live: LiveSection()
+                    case .cameras: CamerasSection()
+                    case .transmission: TransmissionSection()
+                    }
                 }
+                .padding(.horizontal, KJLayout.inset)
+                .kjColumn(KJLayout.wideWidth)
+                .padding(.vertical, 16)
             }
-            .padding(.horizontal, KJLayout.inset)
-            .kjColumn(KJLayout.wideWidth)
-            .padding(.vertical, 16)
-        }
-        .accessibilityIdentifier("receiverCatalogue")
-        .scrollDismissesKeyboard(.interactively)
-        .task {
-            await model.receiver.loadIndex()
-            await model.playIfOpening()
+            .accessibilityIdentifier("receiverCatalogue")
+            // A visit's share of channel stills: twelve while the Receiver is on screen.
+            .onAppear { model.stills.beginVisit() }
+            .onDisappear { model.stills.endVisit() }
+            .scrollDismissesKeyboard(.interactively)
+            .task {
+                await model.receiver.loadIndex()
+                await model.playIfOpening()
+            }
+            // With a channel on, the docked set and the switches fill the screen above the
+            // section, so a tab that changed only what is below them looked dead (owner,
+            // 2026-10-28: "every button needs to be immediately responsive"). The section comes
+            // up under the set. Off, the set's bar sits right above the section already.
+            .onChange(of: part) {
+                guard model.tuner.source != nil else { return }
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.sectionAnchor, anchor: .top) }
+            }
         }
     }
 
@@ -236,8 +285,8 @@ private struct LiveSection: View {
         }
         Task {
             guard let all = try? await model.receiver.channels(regionId: id, cameras: false) else { return }
-            let medium = UserDefaults.standard.string(forKey: ShuffleMedium.key).flatMap(ShuffleMedium.init(rawValue:)) ?? .tv
-            let pool = all.filter { $0.mediaType == medium.rawValue }
+            let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
+            let pool = all.filter { medium.includes($0.mediaType) }
             let list = pool.isEmpty ? all : pool
             guard let channel = list.randomElement() else { return }
             model.tuner.play(channel, in: list)
@@ -440,14 +489,8 @@ struct ChannelRow: View {
     /// it is from, and LIVE in the accent on the channel playing now.
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isOn ? palette.band : palette.lift)
-                .frame(width: 52, height: 40)
-                .overlay {
-                    Image(systemName: isOn ? "speaker.wave.2.fill" : Self.symbol(channel.mediaType))
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(isOn ? palette.onBand : palette.ink)
-                }
+            picture
+                .frame(width: 64, height: 36)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel.name).font(.system(.body, weight: .semibold)).lineLimit(2)
@@ -466,6 +509,39 @@ struct ChannelRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityAddTraits(isOn ? .isSelected : [])
+        .accessibilityValue(still != nil ? "live picture" : "")
+        // Only rows on screen are asked for a still, one at a time (Services/LiveStillsStore.swift).
+        .onAppear { if channel.mediaType != "radio" { model.stills.appeared(channel) } }
+        .onDisappear { model.stills.disappeared(channel.id) }
+    }
+
+    private var still: UIImage? {
+        channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
+    }
+
+    /// A television or camera channel: the still this device took of its live picture, until then
+    /// the medium's mark on a plate. A radio station: its sound line.
+    @ViewBuilder
+    private var picture: some View {
+        if channel.mediaType == "radio" {
+            SoundLine(seed: channel.id, lineWidth: 2, period: 3)
+        } else if let still {
+            Image(uiImage: still)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .transition(.opacity)
+        } else {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isOn ? palette.band : palette.lift)
+                .overlay {
+                    Image(systemName: isOn ? "speaker.wave.2.fill" : Self.symbol(channel.mediaType))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(isOn ? palette.onBand : palette.ink)
+                }
+        }
     }
 
     static func symbol(_ mediaType: String) -> String {
@@ -483,16 +559,16 @@ struct ChannelRow: View {
 /// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
 /// of the atlas. Kept on the device (owner, 2026-10-07).
 private struct SurfSettings: View {
-    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.tv.rawValue
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
 
-    private var medium: ShuffleMedium { ShuffleMedium(rawValue: mediumRaw) ?? .tv }
+    private var medium: ShuffleMedium { .stored(mediumRaw) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text("Surf").font(.system(.subheadline, weight: .bold))
-                Text("A live \(medium == .tv ? "television" : "radio") channel at random").kjSmall(faint: true)
+                Text("A live \(medium == .tv ? "television " : medium == .radio ? "radio " : "")channel at random").kjSmall(faint: true)
             }
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
             chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }

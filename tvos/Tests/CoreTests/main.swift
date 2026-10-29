@@ -3523,26 +3523,29 @@ func passportSaveRequests() throws {
 }
 
 func chatRoomsGrouped() throws {
-    func room(_ slug: String, region: String?, kind: String = "atlas", category: String = "public", adult: Bool = false, status: String = "approved") -> ChatRoom {
+    func room(_ slug: String, region: String? = nil, kind: String = "house", category: String = "public", adult: Bool = false, status: String = "approved") -> ChatRoom {
         ChatRoom(slug: slug, label: slug, kind: kind, region: region, country: nil, category: category, adult: adult, description: nil, status: status, slow_mode_seconds: 0)
     }
+    // created_at order, as the rooms request returns them
     let rooms = [
-        room("indus-visitor-a", region: "indus", kind: "visitor"),
-        room("indus-fashion", region: "indus"),
-        room("indus-daily-feelings", region: "indus"),
-        room("indus-partners", region: "indus", category: "partners"),
-        room("indus-adult", region: "indus", adult: true),
-        room("khajistan", region: nil, kind: "house"),
-        room("maghreb-food", region: "maghreb"),
-        room("persia-pending", region: "persia", status: "pending"),
+        room("khajistan"),
+        room("food"),
+        room("w4w"),
+        room("het4het", category: "partners", adult: true),
+        room("m4m"),
+        room("t4t"),
+        room("lahore-tea", region: "indus", kind: "visitor"),
+        room("persia-pending", region: "persia", kind: "visitor", status: "pending"),
+        room("grown-ups", adult: true),
     ]
     let groups = ChatRules.grouped(rooms)
-    try expectEqual(groups.map(\.title), ["Khajistan", "Maghreb", "Indus"])
-    try expectEqual(groups[2].rooms.map(\.slug), ["indus-daily-feelings", "indus-fashion", "indus-visitor-a"])
+    try expectEqual(groups.count, 1, "one list, no region groups")
+    // T4T, M4M, W4W first (owner, 2026-10-29), then the rest in the order they were made.
+    try expectEqual(groups[0].rooms.map(\.slug), ["t4t", "m4m", "w4w", "khajistan", "food", "lahore-tea"])
     // Never offered: a Partners or adult room, or one the desk has not approved.
-    let all = groups.flatMap(\.rooms).map(\.slug)
-    try expect(!all.contains("indus-partners") && !all.contains("indus-adult") && !all.contains("persia-pending"), "\(all)")
-    try expectEqual(groups.first?.rooms.first?.slug, "khajistan")
+    try expectEqual(ChatRules.grouped([room("het4het", category: "partners", adult: true)]).count, 0, "no rooms, no group")
+    // A main room still marked 18+ is left out like any other.
+    try expect(!ChatRules.grouped([room("t4t", category: "partners", adult: true), room("food")])[0].rooms.contains { $0.slug == "t4t" })
 }
 
 func chatRequestsAndRefusals() throws {
@@ -4040,7 +4043,72 @@ func savesFilmAndPnvRefs() throws {
     try expect(list.contains("wing=in.(receiver,reading-room,born-digital,other)"))
 }
 
+// MARK: - Live stills: the cache's bound and the plan's throttle
+
+func stillCacheKeepsItsBoundAndDropsTheOldestFirst() throws {
+    var cache = StillCache<String>(costLimit: 1000, maxAge: 600)
+    for i in 0..<5 { cache.insert("p\(i)", for: "c\(i)", cost: 300, now: Double(i)) }
+    // 5 x 300 into 1000: only the last three fit, and the first two went first.
+    try expectEqual(cache.count, 3)
+    try expectEqual(cache.totalCost, 900)
+    try expect(cache.value(for: "c0", now: 5) == nil && cache.value(for: "c1", now: 5) == nil)
+    try expectEqual(cache.value(for: "c4", now: 5), "p4")
+    // Taking a channel again replaces it and moves it to the back of the queue.
+    cache.insert("p2b", for: "c2", cost: 300, now: 6)
+    try expectEqual(cache.totalCost, 900)
+    cache.insert("p5", for: "c5", cost: 300, now: 7)
+    try expect(cache.value(for: "c3", now: 7) == nil, "c3 is now the oldest and goes")
+    try expectEqual(cache.value(for: "c2", now: 7), "p2b")
+    // Never over the bound, and a still bigger than the whole bound is refused outright.
+    cache.insert("huge", for: "big", cost: 1001, now: 8)
+    try expect(cache.value(for: "big", now: 8) == nil && cache.totalCost <= 1000)
+    // Old stills read as missing; removeAll empties it.
+    try expect(cache.value(for: "c5", now: 7 + 601) == nil)
+    try expectEqual(cache.value(for: "c5", now: 7 + 600), "p5")
+    cache.removeAll()
+    try expectEqual(cache.count, 0)
+    try expectEqual(cache.totalCost, 0)
+}
+
+func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
+    var plan = StillPlan()
+    let wanted = (0..<30).map { "c\($0)" }
+    var have: Set<String> = ["c0"]
+    // c0 already has a still: the first taken is c1.
+    try expectEqual(plan.next(wanted: wanted, has: { have.contains($0) }, now: 0), "c1")
+    // Busy: nothing else starts while one is being taken, however long it takes.
+    try expect(plan.next(wanted: wanted, has: { have.contains($0) }, now: 10) == nil)
+    plan.finished()
+    have.insert("c1")
+    // Spaced: not before 1.5 s after the last start.
+    var plan2 = StillPlan()
+    try expectEqual(plan2.next(wanted: wanted, has: { _ in false }, now: 100), "c0")
+    plan2.finished()
+    try expect(plan2.next(wanted: wanted, has: { _ in false }, now: 101.4) == nil)
+    try expectClose(plan2.wait(now: 101), 0.5)
+    try expectEqual(plan2.next(wanted: wanted, has: { _ in false }, now: 101.5), "c1")
+    plan2.finished()
+    // A channel tried once is not tried again in the visit, even with no still from it.
+    try expectEqual(plan2.next(wanted: ["c1", "c2"], has: { _ in false }, now: 103), "c2")
+    plan2.finished()
+    try expect(plan2.next(wanted: ["c1", "c2"], has: { _ in false }, now: 105) == nil)
+    // Capped: twelve in a visit and no more.
+    var plan3 = StillPlan()
+    var taken: [String] = []
+    var now = 0.0
+    while now < 1000 {
+        if let id = plan3.next(wanted: wanted, has: { _ in false }, now: now) { taken.append(id); plan3.finished() }
+        now += 0.5
+    }
+    try expectEqual(taken.count, StillPlan.perVisit)
+    try expectEqual(StillPlan.perVisit, 12)
+    try expect(plan3.exhausted)
+    try expectEqual(Set(taken).count, taken.count, "no channel twice")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
+    ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
     ("Caption continuation rejects stale paid work after token refresh", captionContinuationRejectsStalePaidWork),
     ("Receiver opening starts once and respects manual/deep-link intent", receiverOpeningDoesNotRestartOrOverrideIntent),
@@ -4159,8 +4227,9 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
-    ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
+    ("Reading Room: covers past the budget are let go oldest first, never on screen", readingCoverBudget),
+    ("Pics/Vids: a picture is kept by its address and its size", pnvImageKeyCarriesSize),
     ("Reading Room: direction set matches the site", readingDirectionMatchesTheSite),
     ("Bazaar: every shelf matches the site's own code (full catalogue)", bazaarShelvesMatchTheSite),
     ("Bazaar: shelves, retired lines, price gate, images, checkout", bazaarRules),
@@ -4194,7 +4263,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Database route: direct, or the site's /sb/ proxy", supabaseRouteRewrites),
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
-    ("Shuffle: medium and atlas scope; cameras by region", shuffleScopesAndCameraRegions),
+    ("Surf: All, TV only, Radio only", surfMediumChoices),
+    ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
 // MARK: - Database route
@@ -4335,14 +4405,20 @@ func tvSignInFromAPhone() throws {
 
 // MARK: - Shuffle
 
-func shuffleDrawsRegionsByLiveCount() throws {
-    let w = [("indus", 30), ("persia", 0), ("khorasan", 10)]
-    try expectEqual(ShufflePick.region(w, roll: { _ in 0 }), "indus")
-    try expectEqual(ShufflePick.region(w, roll: { _ in 29 }), "indus")
-    // A region with nothing live is never drawn: the roll after Indus lands on Khorasan.
-    try expectEqual(ShufflePick.region(w, roll: { _ in 30 }), "khorasan")
-    try expectEqual(ShufflePick.region(w, roll: { $0 - 1 }), "khorasan")
-    try expectEqual(ShufflePick.region([("persia", 0)]), nil)
+func surfChannel(_ id: String, _ medium: String, _ regions: [String]) throws -> Channel {
+    let object: [String: Any] = ["id": id, "name": id, "mediaType": medium, "regionIds": regions,
+                                 "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"]
+    return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+}
+
+func surfMediumChoices() throws {
+    try expect(ShuffleMedium.all.includes("tv") && ShuffleMedium.all.includes("radio"), "All takes TV and radio")
+    try expect(!ShuffleMedium.all.includes("camera"), "All is not cameras")
+    try expect(ShuffleMedium.tv.includes("tv") && !ShuffleMedium.tv.includes("radio"), "TV only")
+    try expect(ShuffleMedium.radio.includes("radio") && !ShuffleMedium.radio.includes("tv"), "Radio only")
+    try expectEqual(ShuffleMedium.stored(nil), .all, "a new device surfs everything")
+    try expectEqual(ShuffleMedium.stored("tv"), .tv, "a kept choice stays")
+    try expectEqual(ShuffleScope.stored("nonsense"), .main)
 }
 
 func shuffleScopesAndCameraRegions() throws {
@@ -4359,12 +4435,39 @@ func shuffleScopesAndCameraRegions() throws {
      "totals":{"channels":538,"live":538,"byMedium":{"tv":62,"radio":76,"camera":400}}}
     """
     let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data(json.utf8))
-    func names(_ w: [(String, Int)]) -> [String] { w.map { "\($0.0):\($0.1)" } }
-    try expectEqual(names(ShufflePick.weights(index, medium: .tv, scope: .main)), ["indus:38", "anatolia:20"])
-    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .extended)), ["nusantara:20"])
-    try expectEqual(names(ShufflePick.weights(index, medium: .radio, scope: .everywhere)), ["indus:40", "anatolia:16", "nusantara:20"])
-    // Kashmir has no shard of its own (a people's region): never drawn.
-    try expect(!ShufflePick.weights(index, medium: .tv, scope: .everywhere).contains { $0.0 == "kashmir" }, "people's region")
+    // The lists read for each scope. Kashmir has no list of its own (a people's region).
+    try expectEqual(ShufflePick.regions(index, scope: .main), ["indus", "anatolia"])
+    try expectEqual(ShufflePick.regions(index, scope: .extended), ["nusantara"])
+    try expectEqual(ShufflePick.regions(index, scope: .everywhere), ["indus", "anatolia", "nusantara"])
+
+    let indusTV = try surfChannel("indus-tv", "tv", ["indus"])
+    let indusRadio = try surfChannel("indus-radio", "radio", ["indus"])
+    let bothTV = try surfChannel("both-tv", "tv", ["anatolia", "nusantara"])  // filed in both atlases
+    let nusRadio = try surfChannel("nus-radio", "radio", ["nusantara"])
+    let camera = try surfChannel("cam", "camera", ["indus"])
+    let lists: [String: [Channel]] = [
+        "indus": [indusTV, indusRadio, camera],
+        "anatolia": [bothTV, indusTV],  // indus-tv listed twice: surfed once
+        "nusantara": [bothTV, nusRadio],
+    ]
+    func pool(_ medium: ShuffleMedium, _ scope: ShuffleScope) -> [String] {
+        let read = ShufflePick.regions(index, scope: scope).map { (region: $0, channels: lists[$0] ?? []) }
+        return ShufflePick.pool(read, index: index, medium: medium, scope: scope).map(\.id)
+    }
+    try expectEqual(pool(.all, .main), ["indus-tv", "indus-radio", "both-tv"], "main: every channel of the main atlas, once")
+    try expectEqual(pool(.tv, .main), ["indus-tv", "both-tv"])
+    try expectEqual(pool(.radio, .main), ["indus-radio"])
+    try expectEqual(pool(.all, .extended), ["nus-radio"], "extended: a channel also filed in the main atlas is not surfed")
+    try expectEqual(pool(.tv, .extended), [], "extended TV here is all main-atlas")
+    try expectEqual(pool(.all, .everywhere), ["indus-tv", "indus-radio", "both-tv", "nus-radio"])
+    try expect(!pool(.all, .everywhere).contains("cam"), "cameras are never surfed")
+    // A channel that names no region is filed where its list came from.
+    let unfiled = try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: [
+        "id": "unfiled", "name": "unfiled", "mediaType": "tv",
+        "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"] as [String: Any]))
+    let read = [(region: "nusantara", channels: [unfiled])]
+    try expectEqual(ShufflePick.pool(read, index: index, medium: .all, scope: .extended).map(\.id), ["unfiled"])
+    try expectEqual(ShufflePick.pool(read, index: index, medium: .all, scope: .main).map(\.id), [])
     // Cameras: the main atlas first, then the extensions; the total is the index's own count.
     try expectEqual(CameraRegions.ordered(index).map(\.id), ["anatolia", "nusantara"])
     try expectEqual(CameraRegions.total(index), 400)
@@ -4385,6 +4488,27 @@ func readingRoomRanksRareThenKhajistanThenRestThenStamped() throws {
     // Rare, then Khajistan's own scans, then the rest in the order they had (a received copy is
     // not Khajistan's), and a stamped cover last even when Khajistan scanned it.
     try expectEqual(ranked, ["rare-a", "kj-a", "rest-1", "rest-2", "kj-received", "kandahar-majalla"])
+}
+
+// MARK: - Reading Room cover memory
+
+func readingCoverBudget() throws {
+    let mb = 1024 * 1024
+    // Under the budget nothing goes.
+    try expectEqual(RRCoverBudget.letGo([(10 * mb, false), (10 * mb, false)], budget: 60 * mb), [])
+    // Over it, the oldest off screen go first, and only until the rest fit.
+    let held = (0..<8).map { (bytes: 10 * mb, onScreen: $0 == 0 || $0 == 7) }
+    try expectEqual(RRCoverBudget.letGo(held, budget: 60 * mb), [1, 2])
+    // Covers on screen are kept even when they alone are over the budget.
+    try expectEqual(RRCoverBudget.letGo([(40 * mb, true), (40 * mb, true)], budget: 60 * mb), [])
+}
+
+func pnvImageKeyCarriesSize() throws {
+    let url = URL(string: "https://example.org/a.jpg")!
+    // A 400 px tile and the 2,400 px viewer must not share a cache entry.
+    try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(url, maxPixel: 2400))
+    try expectEqual(PnvMedia.imageKey(url, maxPixel: 400), PnvMedia.imageKey(URL(string: "https://example.org/a.jpg")!, maxPixel: 400))
+    try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(URL(string: "https://example.org/b.jpg")!, maxPixel: 400))
 }
 
 var passed = 0, failed = 0, skipped = 0

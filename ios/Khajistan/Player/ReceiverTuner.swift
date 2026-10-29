@@ -371,9 +371,7 @@ final class ReceiverTuner {
         guard !Task.isCancelled, ticket == intentRevision else { return }
         _ = failedID
         list.removeAll { failedInScope.contains($0.id) }
-        guard list.contains(where: { $0.id == channel.id }) else {
-            list.append(channel)
-        }
+        if !list.contains(where: { $0.id == channel.id }) { list.append(channel) }
         changeTask?.cancel()
         tune(channel)
         changeTask = Task { await self.open(channel) }

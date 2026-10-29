@@ -43,6 +43,8 @@ struct ReceiverPlayerView: View {
     @State private var failedIDs: Set<String> = []
     /// The tune in flight, so a failure withdraws that id only while its ticket is still current.
     @State private var tuneStamp: (id: String, ticket: Int)?
+    /// The row whose probe the viewer just asked for. A resolve miss in that window must not skip it.
+    @State private var confirmingID: String?
     private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
@@ -154,11 +156,19 @@ struct ReceiverPlayerView: View {
             case .idle, .paused, .failed:
                 if destination != nil {
                     pauseReceiver()
-                } else {
-                    if case .failed = controller.state {
-                        failedIDs.remove(current.id)
-                        model.receiver.restore(current.id)
+                } else if case .failed = controller.state {
+                    // Replay probes that row again, the way the phone does, and stays if the viewer has moved on.
+                    failedIDs.remove(current.id)
+                    let channel = current
+                    confirmingID = channel.id
+                    Task {
+                        let live = await model.receiver.confirm(channel)
+                        if confirmingID == channel.id { confirmingID = nil }
+                        guard live else { return }
+                        guard destination == nil, current.id == channel.id else { return }
+                        tune(channel)
                     }
+                } else {
                     tune(current)
                 }
             }
@@ -180,7 +190,12 @@ struct ReceiverPlayerView: View {
         }
         .onChange(of: controller.state) { _, new in
             wake()
-            if case .failed = new, let tune = tuneStamp { skipFailed(id: tune.id, ticket: tune.ticket) }
+            // A channel change keeps the old picture up until the cut. Its failure must not
+            // withdraw the channel the viewer just asked for.
+            guard destination == nil || tuneStamp?.id == current.id else { return }
+            if case .failed = new, let tune = tuneStamp, tune.id == current.id, confirmingID != tune.id {
+                skipFailed(id: tune.id, ticket: tune.ticket)
+            }
         }
         .task {
             await open()
@@ -442,6 +457,11 @@ struct ReceiverPlayerView: View {
                 if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
                 player.state = .failed(PlayerController.unreachable)
+                // The viewer just asked for this row, and a probe of it is still the request.
+                // A resolve miss in that window must not skip it.
+                guard confirmingID != target.id else { return }
+                guard destination == nil || tuneStamp?.id == current.id else { return }
+                guard !behind || target.id == current.id else { return }
                 skipFailed(id: target.id, ticket: ticket)
             }
         }
@@ -451,8 +471,9 @@ struct ReceiverPlayerView: View {
     /// that row is not withdrawn and the new tune is not cancelled.
     private func skipFailed(id: String, ticket: Int) {
         guard tuneIntent.admits(ticket) else { return }
-        let showing = destination?.id ?? current.id
-        guard showing == id else { return }
+        guard confirmingID != id else { return }
+        guard destination == nil || tuneStamp?.id == current.id else { return }
+        guard id == current.id else { return }
         guard !failedIDs.contains(id) else { return }
         failedIDs.insert(id)
         model.receiver.withdraw(id)

@@ -203,6 +203,67 @@ enum ReceiverRules {
         tuneRevision == currentRevision && showingID == failedID
     }
 
+    /// How many probes one host may have in flight, and how a 403 or 429 is remembered.
+    struct HostBudget: Equatable {
+        static let cap = 2
+        static let retryLimit = 3
+        static let backoff: TimeInterval = 30
+
+        enum Admit: Equatable { case go, skip, giveUp }
+
+        private var flying: [String: Int] = [:]
+        private var until: [String: Date] = [:]
+        private var strikes: [String: Int] = [:]
+
+        mutating func begin(host: String, now: Date) -> Admit {
+            if (strikes[host] ?? 0) >= Self.retryLimit { return .giveUp }
+            if let until = until[host], now < until { return .skip }
+            if (flying[host] ?? 0) >= Self.cap { return .skip }
+            flying[host, default: 0] += 1
+            return .go
+        }
+
+        mutating func end(host: String, throttled: Bool, now: Date) {
+            flying[host] = max(0, (flying[host] ?? 1) - 1)
+            guard throttled else { return }
+            let count = (strikes[host] ?? 0) + 1
+            strikes[host] = count
+            until[host] = count >= Self.retryLimit
+                ? .distantFuture
+                : now.addingTimeInterval(Self.backoff)
+        }
+    }
+
+    /// A skipped probe is not a failure. The row stays hidden and can be tried again.
+    enum ProbeMark: Equatable { case live, dead, skipped }
+
+    static func probeMark(status: Int?, skipped: Bool, bodyLive: Bool) -> ProbeMark {
+        if skipped { return .skipped }
+        if status == 403 || status == 429 { return .skipped }
+        return bodyLive ? .live : .dead
+    }
+
+    /// Ordered probe writes. A commit whose generation is no longer current does not land.
+    struct ProbeLedger {
+        private var generation: [String: Int] = [:]
+        private var value: [String: Bool] = [:]
+
+        mutating func begin(_ id: String) -> Int {
+            let next = (generation[id] ?? 0) + 1
+            generation[id] = next
+            return next
+        }
+
+        @discardableResult
+        mutating func commit(_ id: String, live: Bool?, generation gen: Int) -> Bool {
+            guard gen == self.generation[id] else { return false }
+            if let live { value[id] = live } else { value.removeValue(forKey: id) }
+            return true
+        }
+
+        func live(_ id: String) -> Bool? { value[id] }
+    }
+
     /// Channels the receiver may offer, sorted by name.
     ///
     /// A row is kept only when it is published, switched on, absent from the denylist and the
@@ -251,8 +312,8 @@ enum ReceiverRules {
         return nil
     }
 
-    /// An HLS playlist is live when it has a segment or a variant stream.
-    /// A header alone is not enough. `#EXT-X-ENDLIST` with neither is a finished empty file.
+    /// An HLS playlist is live when it has a segment or a variant stream and has not ended.
+    /// A header alone is not enough. `#EXT-X-ENDLIST` is not live, with or without segments.
     static func playlistIsLive(_ data: Data) -> Bool {
         guard let text = String(data: data.prefix(8192), encoding: .utf8)
                 ?? String(data: data.prefix(8192), encoding: .isoLatin1) else { return false }
@@ -261,7 +322,8 @@ enum ReceiverRules {
         guard cleaned.hasPrefix("#EXTM3U") else { return false }
         let segment = cleaned.contains("#EXTINF") || cleaned.contains("#EXT-X-BYTERANGE") || cleaned.contains("#EXT-X-MAP")
         let variant = cleaned.contains("#EXT-X-STREAM-INF")
-        if cleaned.contains("#EXT-X-ENDLIST"), !segment, !variant { return false }
+        // A playlist that has ended is not a live signal, even if it still lists segments.
+        if cleaned.contains("#EXT-X-ENDLIST") { return false }
         return segment || variant
     }
 

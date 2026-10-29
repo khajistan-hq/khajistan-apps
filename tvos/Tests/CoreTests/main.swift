@@ -548,11 +548,56 @@ func failureSkipStaysWithTheTuneThatFailed() throws {
                "a different row is showing")
 }
 
+func hostBackoffLeavesTheSiblingLive() throws {
+    var budget = ReceiverRules.HostBudget()
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let host = "cdn.example"
+    // Two probes of one host are in flight. A third is not a failure: it waits.
+    try expectEqual(budget.begin(host: host, now: now), .go)
+    try expectEqual(budget.begin(host: host, now: now), .go)
+    try expectEqual(budget.begin(host: host, now: now), .skip)
+    try expectEqual(ReceiverRules.probeMark(status: nil, skipped: true, bodyLive: false), .skipped)
+    // The first answer is a 403. That skip is not a dead verdict.
+    try expectEqual(ReceiverRules.probeMark(status: 403, skipped: false, bodyLive: false), .skipped)
+    try expectEqual(ReceiverRules.probeMark(status: 429, skipped: false, bodyLive: false), .skipped)
+    budget.end(host: host, throttled: true, now: now)
+    // The sibling was already admitted. Its playlist is live, and the 403 does not take it down.
+    try expectEqual(ReceiverRules.probeMark(status: 200, skipped: false, bodyLive: true), .live)
+    budget.end(host: host, throttled: false, now: now)
+    // During the backoff a new probe is skipped, not failed.
+    try expectEqual(budget.begin(host: host, now: now.addingTimeInterval(1)), .skip)
+    let later = now.addingTimeInterval(ReceiverRules.HostBudget.backoff + 1)
+    try expectEqual(budget.begin(host: host, now: later), .go)
+    try expectEqual(ReceiverRules.probeMark(status: 200, skipped: false, bodyLive: true), .live)
+    budget.end(host: host, throttled: true, now: later)
+    let again = later.addingTimeInterval(ReceiverRules.HostBudget.backoff + 1)
+    try expectEqual(budget.begin(host: host, now: again), .go)
+    budget.end(host: host, throttled: true, now: again)
+    // Three throttles and the host is given up. The row stays hidden, not marked failed.
+    try expectEqual(budget.begin(host: host, now: again.addingTimeInterval(1)), .giveUp)
+    try expectEqual(ReceiverRules.probeMark(status: nil, skipped: true, bodyLive: false), .skipped)
+}
+
+func probeLedgerDropsAnOvertakenWrite() throws {
+    var ledger = ReceiverRules.ProbeLedger()
+    let first = ledger.begin("a")
+    let second = ledger.begin("a")
+    try expect(!ledger.commit("a", live: false, generation: first), "an older write must not land")
+    try expect(ledger.live("a") == nil)
+    try expect(ledger.commit("a", live: true, generation: second))
+    try expectEqual(ledger.live("a"), true as Bool?)
+    let forgotten = ledger.begin("a")
+    try expect(!ledger.commit("a", live: false, generation: second), "forget took the next generation")
+    try expect(ledger.commit("a", live: nil, generation: forgotten))
+    try expect(ledger.live("a") == nil)
+}
+
 func playlistCheckAndHealthStamp() throws {
     try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n".utf8)))
     try expect(ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)))
     try expect(ReceiverRules.playlistIsLive(Data("\u{FEFF}#EXTM3U\n#EXTINF:2,\n".utf8)))
-    try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n".utf8)),
+               "an ended playlist is not live, even with segments")
     try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n".utf8)))
     try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8)))
     try expect(!ReceiverRules.playlistIsLive(Data("not a playlist".utf8)))
@@ -565,6 +610,8 @@ func playlistCheckAndHealthStamp() throws {
     try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false))
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
                                              body: Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8), hls: true))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
+                                             body: Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n".utf8), hls: true))
     let plain = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49Z"))
     let fraction = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49.120Z"))
     try expect(fraction.timeIntervalSince(plain) > 0 && fraction.timeIntervalSince(plain) < 1)
@@ -4175,6 +4222,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Next live signal stops when the scope is exhausted", nextLiveStopsWhenTheScopeIsExhausted),
     ("A failed tune does not take the viewer's later channel", failureSkipStaysWithTheTuneThatFailed),
+    ("A host backoff does not fail a sibling that is live", hostBackoffLeavesTheSiblingLive),
+    ("A probe write lands only at its own generation", probeLedgerDropsAnOvertakenWrite),
     ("Playlist check and health stamp", playlistCheckAndHealthStamp),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

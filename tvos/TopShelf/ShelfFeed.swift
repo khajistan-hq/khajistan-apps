@@ -29,13 +29,12 @@ enum ShelfFeed {
               let shapes: RegionShapes = await fetch(KJConfig.site.appendingPathComponent("data/region-shapes.json")),
               let map = RegionMapRules.compose(core: shapes, extended: nil, index: index, showExtensions: false)
         else { return nil }
-        let live = index.totals.live
         let item = TVTopShelfCarouselItem(identifier: "receiver")
         item.contextTitle = "Khajistan Receiver"
-        item.title = "\(live.formatted()) live now"
+        item.title = "Live now"
         item.summary = "Live television, live radio and public cameras from the Middle World."
-        guard draw(item, name: "receiver-\(skin.rawValue)-\(live)", folder: folder, art: { scale in
-            ShelfArt.receiver(skin: skin, scale: scale, map: map, live: live)
+        guard draw(item, name: "receiver-\(skin.rawValue)", folder: folder, art: { scale in
+            ShelfArt.receiver(skin: skin, scale: scale, map: map)
         }) else { return nil }
         // No Play: the map is a place to choose from, not a signal.
         item.displayAction = TVTopShelfAction(url: DeepLink.receiver.url)

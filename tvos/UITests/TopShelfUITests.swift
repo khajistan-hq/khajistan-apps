@@ -5,7 +5,10 @@ import XCTest
 /// Screen shows above the row while the icon is focused.
 final class TopShelfUITests: XCTestCase {
     func testTopShelfShowsWhileTheIconHasFocus() {
-        XCUIApplication().launch()
+        let app = XCUIApplication()
+        // The install launch must not walk the dial or open a player, or the test waits on the network.
+        app.launchArguments += ["-kjnoprobe", "YES", "-kjnoautoplay", "YES"]
+        app.launch()
         XCUIRemote.shared.press(.home)
         let home = XCUIApplication(bundleIdentifier: "com.apple.HeadBoard")
         XCTAssertTrue(home.wait(for: .runningForeground, timeout: 20), "the Home Screen must come up")
@@ -43,7 +46,7 @@ final class TopShelfUITests: XCTestCase {
         }
         // The extension's slides are cells titled by ShelfFeed; the static image has none.
         let slide = home.cells.matching(NSPredicate(
-            format: "label ENDSWITH ' live now' OR label BEGINSWITH 'Channel ' OR label == 'Two scheduled channels'")).firstMatch
+            format: "label == 'Live now' OR label ENDSWITH ' live now' OR label BEGINSWITH 'Channel ' OR label == 'Two scheduled channels'")).firstMatch
         XCTAssertTrue(slide.exists, "the Top Shelf must show the extension's carousel, not only the static image")
         print("TOPSHELF " + home.debugDescription)
         XCUIRemote.shared.press(.menu)

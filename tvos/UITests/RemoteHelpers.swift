@@ -5,6 +5,9 @@ import XCTest
 extension XCTestCase {
     /// Existing navigation fixtures keep the map visible; autoplay has its own acceptance test.
     func kjLaunch(_ app: XCUIApplication, autoplay: Bool = false) {
+        // Probes stay off in tests: a live walk of a region never becomes idle, and the suite
+        // would wait on the network. Debug builds honour the flag.
+        app.launchArguments += ["-kjnoprobe", "YES"]
         if !autoplay { app.launchArguments += ["-kjnoautoplay", "YES"] }
         app.launch()
     }

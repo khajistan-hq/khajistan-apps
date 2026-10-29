@@ -130,6 +130,9 @@ final class ReceiverStore {
             try await task.value
         } onCancel: {
             task.cancel()
+            _ = Task { @MainActor in
+                if self.loadToken[key] == token { self.loadToken[key] = token + 1 }
+            }
         }
     }
 
@@ -143,6 +146,9 @@ final class ReceiverStore {
 
     /// Re-reads freshness on a timer so a grade that ages out leaves the screen without a refetch.
     func watchHealthClock() {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "kjnoprobe") { return }
+        #endif
         guard clockTask == nil else { return }
         clockTask = Task { await self.healthClock() }
     }
@@ -161,21 +167,23 @@ final class ReceiverStore {
         offerings = offerings.mapValues { $0.filter { $0.id != id } }
         dialGeneration += 1
         enqueueProbe { await self.probe.remember(id, live: false) }
+        publishCounts()
     }
 
     /// Clears the failure so a new probe may run. Does not mark the row verified.
-    func restore(_ id: String) {
+    /// The forget waits its turn on the probe queue, so a remember already queued cannot land after it.
+    func restore(_ id: String) async {
         withdrawn.remove(id)
         verified.remove(id)
-        enqueueProbe { await self.probe.forget(id) }
+        await enqueueProbe { await self.probe.forget(id) }.value
     }
 
     /// Probes one channel the viewer asked for again. True only when that probe says it is live.
     func confirm(_ channel: Channel) async -> Bool {
         await refreshControlsIfStale()
-        restore(channel.id)
+        await restore(channel.id)
         guard ReceiverRules.probeCandidates([channel], controls: controls()).first != nil else { return false }
-        let live = await probe.verify([channel])
+        let live = await probe.verify([channel], bypassCache: true)
         guard !Task.isCancelled, live.contains(channel.id), !withdrawn.contains(channel.id) else { return false }
         verified.insert(channel.id)
         dialGeneration += 1
@@ -191,12 +199,15 @@ final class ReceiverStore {
         Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now)
     }
 
-    private func enqueueProbe(_ work: @escaping @Sendable () async -> Void) {
+    @discardableResult
+    private func enqueueProbe(_ work: @escaping @Sendable () async -> Void) -> Task<Void, Never> {
         let previous = probeChain
-        probeChain = Task {
+        let task = Task {
             await previous.value
             await work()
         }
+        probeChain = task
+        return task
     }
 
     private func healthClock() async {
@@ -205,6 +216,7 @@ final class ReceiverStore {
             let fresh = controls().healthFresh
             if fresh != previous {
                 previous = fresh
+                publishCounts()
                 dialGeneration += 1
             }
             let wait = freshnessWait()
@@ -235,12 +247,23 @@ final class ReceiverStore {
             dialGeneration += 1
             return []
         }
-        await probe.verify(candidates) { [weak self] id in
-            Task { @MainActor in
-                self?.reveal(id, key: key, token: token, raw: raw)
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "kjnoprobe") {
+            for channel in candidates where !withdrawn.contains(channel.id) {
+                verified.insert(channel.id)
+                reveal(channel.id, key: key, token: token, raw: raw)
             }
+            guard !Task.isCancelled, loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+            walksFinished.insert(key)
+            publishCounts()
+            dialGeneration += 1
+            return shown(regionId: regionId, cameras: cameras)
         }
-        guard loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+        #endif
+        await probe.verify(candidates) { [weak self] id in
+            await self?.reveal(id, key: key, token: token, raw: raw)
+        }
+        guard !Task.isCancelled, loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
         walksFinished.insert(key)
         publishCounts()
         dialGeneration += 1
@@ -260,26 +283,37 @@ final class ReceiverStore {
         dialGeneration += 1
     }
 
-    /// Writes the verified totals once, after a walk finishes. It does not probe other regions.
+    /// Each medium is published only after a walk of that medium has finished.
+    /// A zero is withheld while another walk of that medium is still running, so the figure
+    /// never reads 0 from a walk that has not finished.
     private func publishCounts() {
-        var television = 0, radio = 0, cameras = 0
-        var any = false
+        var television = 0
+        var radio = 0
+        var cameras = 0
+        var sawBroadcast = false
+        var sawCameras = false
         for (key, rows) in offerings where walksFinished.contains(key) {
-            any = true
-            for row in rows where !withdrawn.contains(row.id) && lists(row) {
-                switch row.mediaType {
-                case "tv": television += 1
-                case "radio": radio += 1
-                case "camera": cameras += 1
-                default: break
-                }
+            let listed = rows.filter { !withdrawn.contains($0.id) && lists($0) }
+            if key.hasSuffix("-camera") {
+                sawCameras = true
+                cameras += listed.filter { $0.mediaType == "camera" }.count
+            } else {
+                sawBroadcast = true
+                television += listed.filter { $0.mediaType == "tv" }.count
+                radio += listed.filter { $0.mediaType == "radio" }.count
             }
         }
-        guard any else { return }
-        televisionNow = television
-        radioNow = radio
-        camerasNow = cameras
-        liveNow = television + radio + cameras
+        let broadcastPending = channelLoads.keys.contains { !$0.hasSuffix("-camera") && !walksFinished.contains($0) }
+        let camerasPending = channelLoads.keys.contains { $0.hasSuffix("-camera") && !walksFinished.contains($0) }
+        if sawBroadcast {
+            televisionNow = (television == 0 && broadcastPending) ? nil : television
+            radioNow = (radio == 0 && broadcastPending) ? nil : radio
+        }
+        if sawCameras {
+            camerasNow = (cameras == 0 && camerasPending) ? nil : cameras
+        }
+        let known = [televisionNow, radioNow, camerasNow].compactMap { $0 }
+        liveNow = known.isEmpty ? nil : known.reduce(0, +)
     }
 
     private func rawChannels(regionId: String, cameras: Bool, key: String, index: ReceiverIndex) async throws -> [Channel] {

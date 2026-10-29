@@ -97,6 +97,16 @@ struct ChannelsView: View {
         }
     }
 
+    /// The page loader stays up only while there is nothing to show. Television that has
+    /// already been verified is not held back for the camera walk.
+    private var waitingForShelves: Bool {
+        let main = model.receiver.shown(regionId: region.id, cameras: false)
+        let waitingForMain = !model.receiver.walkFinished(regionId: region.id, cameras: false) && main.isEmpty
+        let waitingForCameras = camerasFirst && hasCameras && !camerasLoaded && cameraError == nil
+            && model.receiver.shown(regionId: region.id, cameras: true).isEmpty && main.isEmpty
+        return waitingForMain || waitingForCameras
+    }
+
     // MARK: - Shelves
 
     @ViewBuilder
@@ -112,10 +122,7 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
-        } else if !model.receiver.walkFinished(regionId: region.id, cameras: false)
-                    && model.receiver.shown(regionId: region.id, cameras: false).isEmpty
-                    || (camerasFirst && hasCameras && !camerasLoaded && cameraError == nil
-                        && model.receiver.shown(regionId: region.id, cameras: true).isEmpty) {
+        } else if waitingForShelves {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
@@ -190,10 +197,11 @@ struct ChannelsView: View {
 
     // MARK: - Loading
 
-    /// Loads the television and radio shard, then the camera shard where the region has one.
+    /// Loads the television and radio shard and, where the region has one, the camera shard.
+    /// The two walks run together, so television can appear while the cameras are still being read.
     /// Safe to run again: each step skips what it already has.
     private func start() async {
-        if camerasFirst && hasCameras { await loadCameras() }
+        async let cameras: Void = loadCamerasIfNeeded()
         await loadMain()
         #if DEBUG
         // With `-kjautochange`, a region link opens straight onto its first channel (see
@@ -203,9 +211,12 @@ struct ChannelsView: View {
             if let first = tv.first ?? channels.first { playing = Playing(channel: first, list: tv.isEmpty ? channels : tv) }
         }
         #endif
-        if mainLoaded && hasCameras && !camerasLoaded && cameraError == nil {
-            await loadCameras()
-        }
+        await cameras
+    }
+
+    private func loadCamerasIfNeeded() async {
+        guard hasCameras else { return }
+        await loadCameras()
     }
 
     private func loadMain() async {

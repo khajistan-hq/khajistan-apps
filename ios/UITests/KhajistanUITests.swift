@@ -17,7 +17,7 @@ final class KhajistanUITests: XCTestCase {
         let app = XCUIApplication()
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO", "-kjnoprobe", "YES"] + extra
         app.launch()
         return app
     }
@@ -442,7 +442,7 @@ final class KhajistanUITests: XCTestCase {
     /// The skin control: a pick takes effect and Automatic hands back to the sky.
     func testSkinControl() {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjtab", "yours"]
+        app.launchArguments = ["-kjtab", "yours", "-kjnoprobe", "YES", "-kjnoautoplay", "YES"]
         app.launch()
         waitFor(app.buttons["skin-grove"], 10, "the skin control is on the account page")
         app.buttons["skin-grove"].tap()

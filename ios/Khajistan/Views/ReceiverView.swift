@@ -584,6 +584,12 @@ private struct CamerasSection: View {
                 TuningLoader("Loading the receiver\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
             }
         }
+        .onDisappear {
+            guard let index = model.receiver.index else { return }
+            for region in CameraRegions.ordered(index) {
+                model.receiver.cancelChannels(regionId: region.id, cameras: true)
+            }
+        }
     }
 
     private func load(_ region: String) async {

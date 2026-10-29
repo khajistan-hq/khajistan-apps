@@ -126,7 +126,8 @@ struct ReadingReaderScreen: View {
             SignInView(onSignedIn: { retryAfterSignIn() })
         }
         .sheet(isPresented: $showGrid) {
-            PagesGrid(issue: issue, pages: pages, map: map, current: position, marks: marks, rightToLeft: rightToLeft) { page in
+            PagesGrid(issue: issue, pages: pages, map: map, current: position, marks: marks, rightToLeft: rightToLeft,
+                      curtained: { isFlagged($0) }) { page in
                 showGrid = false
                 jump(to: page)
             }
@@ -320,7 +321,7 @@ struct ReadingReaderScreen: View {
     private var scrubPreview: some View {
         let target = Int(sliderPage)
         return VStack(spacing: 6) {
-            PageThumb(issue: issue, stored: RRPageMap.stored(target, map: map)).frame(height: 180)
+            PageThumb(issue: issue, stored: RRPageMap.stored(target, map: map), curtained: isFlagged(target)).frame(height: 180)
             Text("Page \(target)").kjSmall().monospacedDigit()
         }
         .padding(.bottom, 8)
@@ -622,6 +623,11 @@ struct ReadingReaderScreen: View {
             } else if companion == nil, phase == .page, position < pages {
                 // The facing page is still on its way; the turn waits for it so pairs stay aligned.
                 return settleBack(settle)
+            } else if companion == nil, phase != .page {
+                // This page is a refusal, a curtain or missing, so its facing page was never drawn:
+                // it comes next, on its own, rather than being skipped. The pairs line up again after.
+                next = position + 1
+                alone = true
             } else {
                 next = position + 2
             }

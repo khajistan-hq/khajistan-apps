@@ -456,7 +456,9 @@ final class ChatFeed {
 
     private func publish() {
         let now = Date()
-        lines = all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id }
+        let next = all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id }
+        // Every poll publishes; only a change is assigned, so a quiet room does not redraw its list.
+        if next != lines { lines = next }
     }
 
     private func fetch<T: Decodable>(_ request: URLRequest) async -> T? {

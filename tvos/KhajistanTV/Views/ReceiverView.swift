@@ -394,6 +394,7 @@ private struct AtlasPanel: View {
     let mapError: String?
     let failure: (String) -> AnyView
     let open: (MapRegion) -> Void
+    @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
 
     var body: some View {
@@ -402,7 +403,8 @@ private struct AtlasPanel: View {
                 failure(mapError)
             } else if let composed {
                 VStack(alignment: .leading, spacing: 24) {
-                    RegionMapView(map: composed, highlighted: focusedRegion)
+                    RegionMapView(map: composed, highlighted: focusedRegion,
+                                  liveCount: { model.receiver.regionLiveCount(regionId: $0) })
                         .frame(height: 600)
                     regionStrip(composed)
                 }
@@ -448,15 +450,15 @@ private struct AtlasPanel: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Text(region.label).kjKicker()
-                            if let live = region.live {
-                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
-                            }
+                            Text(ReceiverRules.regionLiveFigure(verified: model.receiver.regionLiveCount(regionId: region.id)))
+                                .kjSmall(faint: true).monospacedDigit()
                         }
                     }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
                     .focused($focusedRegion, equals: region.id)
                     .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                    .accessibilityLabel(ReceiverRules.regionChipAccessibility(label: region.label,
+                        verified: model.receiver.regionLiveCount(regionId: region.id)))
                     // A chip mostly scrolled under the sidebar is not drawn: its label went first
                     // and left its count ("44") standing alone at the edge. A quarter out is still
                     // drawn, so the first chip's pulled-back plate at rest is untouched. Resting

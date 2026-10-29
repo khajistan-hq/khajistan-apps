@@ -15,6 +15,9 @@ struct RegionMapView: View {
     /// reported as it changes (nil once lifted), with a tick at each border; lifting chooses the
     /// last region passed. A quick swipe still scrolls the page, and a tap still taps.
     var onScrub: ((String?) -> Void)? = nil
+    /// Verified rows for a region, nil until that region's walk has finished. The index live
+    /// total is not drawn.
+    var liveCount: (String) -> Int? = { _ in nil }
     @Environment(\.palette) private var palette
     @State private var passing: String?
 
@@ -25,7 +28,9 @@ struct RegionMapView: View {
         GeometryReader { proxy in
             let layout = RegionMapLayout(map: map, size: proxy.size)
             Canvas { context, _ in
-                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: passing ?? highlighted).paint(&context)
+                let focused = passing ?? highlighted
+                RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: focused,
+                                 plateLive: focused.flatMap { liveCount($0) }).paint(&context)
             }
             .contentShape(Rectangle())
             .onTapGesture(coordinateSpace: .local) { point in
@@ -252,6 +257,8 @@ private struct RegionMapPainter {
     let layout: RegionMapLayout
     let palette: Palette
     let focusedID: String?
+    /// Verified count for the focused region. Nil means its walk has not finished.
+    var plateLive: Int? = nil
 
     func paint(_ context: inout GraphicsContext) {
         guard layout.scale > 0 else { return }
@@ -385,10 +392,8 @@ private struct RegionMapPainter {
         if let native = region.native {
             rows.append((.plateNative, native, MapFace.plateNative.measure(native)))
         }
-        if let live = region.live {
-            let line = "\(live.formatted()) LIVE"
-            rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
-        }
+        let line = ReceiverRules.regionPlateLine(verified: plateLive)
+        rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
 
         let across: CGFloat = 8
         let down: CGFloat = 5

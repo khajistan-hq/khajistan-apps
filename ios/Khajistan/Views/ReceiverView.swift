@@ -172,9 +172,11 @@ private struct LiveSection: View {
     private var map: some View {
         ZStack {
             if let composed {
-                RegionMapView(map: composed, highlighted: selected, onTap: choose) { passing in
-                    hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
-                }
+                RegionMapView(map: composed, highlighted: selected, onTap: choose,
+                              onScrub: { passing in
+                                  hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
+                              },
+                              liveCount: { model.receiver.regionLiveCount(regionId: $0) })
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }
             } else {
@@ -205,14 +207,16 @@ private struct LiveSection: View {
                         } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(region.label)
-                                if let live = region.live { Text(live.formatted()).monospacedDigit().opacity(0.7) }
+                                Text(ReceiverRules.regionLiveFigure(verified: model.receiver.regionLiveCount(regionId: region.id)))
+                                    .monospacedDigit().opacity(0.7)
                             }
                         }
                         .buttonStyle(ChipStyle(on: region.id == selected))
                         .padding(.trailing, 8)
                         .id(region.id)
                         .accessibilityIdentifier("region-\(region.id)")
-                        .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
+                        .accessibilityLabel(ReceiverRules.regionChipAccessibility(label: region.label,
+                            verified: model.receiver.regionLiveCount(regionId: region.id)))
                     }
                 }
             }

@@ -202,12 +202,11 @@ final class ReceiverProbe: @unchecked Sendable {
             await group.waitForAll()
         }
         let again = skipped.take()
-        if !again.isEmpty, retriesLeft > 0, !Task.isCancelled {
-            let delay = ReceiverRules.HostBudget.backoff
-            _ = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(delay))
-                guard !Task.isCancelled, let self else { return }
-                _ = await self.verify(again, bypassCache: true, retriesLeft: retriesLeft - 1, found: found)
+        if ReceiverRules.awaitHostRetry(skipped: again.count, retriesLeft: retriesLeft, cancelled: Task.isCancelled) {
+            try? await Task.sleep(for: .seconds(ReceiverRules.HostBudget.backoff))
+            // A cancelled wait commits nothing. The walk that owns this retry is the one that was cancelled.
+            if !Task.isCancelled {
+                _ = await verify(again, bypassCache: true, retriesLeft: retriesLeft - 1, found: found)
             }
         }
         return Set(channels.map(\.id).filter { cached($0) == true })
@@ -309,13 +308,22 @@ final class ReceiverProbe: @unchecked Sendable {
             let playlist = hls || url.path.lowercased().contains(".m3u8")
                 || (type ?? "").lowercased().contains("mpegurl") || (type ?? "").lowercased().contains("m3u8")
             var data = Data()
-            let limit = playlist ? 8192 : 256
+            let limit = playlist ? ReceiverRules.playlistReadCap : 256
+            let endTag = Data("#EXT-X-ENDLIST".utf8)
+            var hitCap = false
             for try await byte in bytes {
                 if Task.isCancelled { break }
                 data.append(byte)
-                if data.count >= limit { break }
+                if playlist, data.count.isMultiple(of: 4096), data.range(of: endTag) != nil { break }
+                if data.count >= limit {
+                    hitCap = true
+                    break
+                }
             }
-            let live = ReceiverRules.responseIsLive(status: http.statusCode, contentType: type, body: data, hls: playlist)
+            let sawEnd = playlist && data.range(of: endTag) != nil
+            let truncated = playlist && hitCap && !sawEnd
+            let live = ReceiverRules.responseIsLive(status: http.statusCode, contentType: type, body: data, hls: playlist,
+                                                     playlistTruncated: truncated)
             return (http.statusCode, live)
         } catch {
             return (nil, false)

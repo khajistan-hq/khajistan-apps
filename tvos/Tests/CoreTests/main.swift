@@ -482,13 +482,11 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
                                now: now.addingTimeInterval(-(ReceiverRules.healthFutureSkew + 1)))
     try expect(!tooFarAhead.healthFresh)
     try expectEqual(ReceiverRules.eligible(channels, controls: tooFarAhead, verified: everyID).count, 0)
-    // No health file: nothing is shown until a probe verifies it. The shard grade still refuses
-    // unknown, intermittent, missing, offline, blocked, blocked_vantage, any other status, and a degraded camera.
+    // No health file: nothing is shown. The shard grade is not a fallback, even for a row this
+    // session has already verified.
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty).count, 0)
-    let bare = ReceiverRules.eligible(channels, controls: .empty, verified: Set(channels.map(\.id))).map(\.id)
-    try expectEqual(Set(bare), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
-                                "degraded", "degraded-tv", "denied", "off-air", "offline-by-feed", "blocked-by-feed",
-                                "slow-0-2", "slow-0-49"])
+    try expectEqual(ReceiverRules.eligible(channels, controls: .empty, verified: everyID).count, 0,
+                    "a missing health file shows nothing")
 }
 
 func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
@@ -496,7 +494,7 @@ func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
         try eligibilityChannel("dup", name: "Dup"),
         try eligibilityChannel("dup", name: "Dup"),
         // The first copy is ineligible, so the second is the one kept.
-        try eligibilityChannel("dup2", name: "Dup Two", health: "offline"),
+        try eligibilityChannel("dup2", name: "Dup Two", publication: "draft"),
         try eligibilityChannel("dup2", name: "Dup Two"),
         try eligibilityChannel("z", name: "zeta"),
         try eligibilityChannel("a", name: "Alpha"),
@@ -504,7 +502,13 @@ func eligibilityKeepsADuplicateOnceAndSortsByName() throws {
         try eligibilityChannel("r10", name: "Radio 10"),
         try eligibilityChannel("r2", name: "Radio 2"),
     ]
-    let result = ReceiverRules.eligible(channels, controls: .empty, verified: Set(channels.map(\.id)))
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let rows = ["dup", "dup2", "z", "a", "b", "r10", "r2"].map {
+        #"{"channelId":"\#($0)","status":"online","deliveryRatio":1}"#
+    }.joined(separator: ",")
+    let health = try decode(Health.self, #"{"generatedAt":"\#(stamp(now))","results":[\#(rows)]}"#)
+    let controls = Controls(denylist: nil, offAir: nil, health: health, now: now)
+    let result = ReceiverRules.eligible(channels, controls: controls, verified: Set(channels.map(\.id)))
     try expectEqual(result.map(\.id).filter { $0.hasPrefix("dup") }.sorted(), ["dup", "dup2"])
     try expectEqual(result.count, 7)
     try expectEqual(result.map(\.name), ["Alpha", "beta", "Dup", "Dup Two", "Radio 2", "Radio 10", "zeta"])
@@ -595,6 +599,66 @@ func probeLedgerDropsAnOvertakenWrite() throws {
     try expect(!ledger.commit("a", live: false, generation: second), "forget took the next generation")
     try expect(ledger.commit("a", live: nil, generation: forgotten))
     try expect(ledger.live("a") == nil)
+}
+
+func failedHealthFetchKeepsTheFileAndRetriesPromptly() throws {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    // Denylist and off-air arriving do not start the clock, and they do not replace a file.
+    try expectEqual(ReceiverRules.controlRefresh(now: now, clock: nil, retryAt: nil, healthArrived: false),
+                    .keep(retryAfter: ReceiverRules.healthRetry))
+    try expectEqual(ReceiverRules.controlRefresh(now: now, clock: nil, retryAt: nil, healthArrived: true), .replace)
+    let held = now.addingTimeInterval(-60)
+    try expectEqual(ReceiverRules.controlRefresh(now: now, clock: held, retryAt: nil, healthArrived: false), .skip,
+                    "a successful fetch is kept for ten minutes")
+    let retry = now.addingTimeInterval(ReceiverRules.healthRetry)
+    try expectEqual(ReceiverRules.controlRefresh(now: now, clock: nil, retryAt: retry, healthArrived: false), .skip)
+    let later = retry.addingTimeInterval(1)
+    try expectEqual(ReceiverRules.controlRefresh(now: later, clock: nil, retryAt: retry, healthArrived: false),
+                    .keep(retryAfter: ReceiverRules.healthRetry), "a miss is tried again once the short wait ends")
+}
+
+func staleFlipClearsVerifiedUntilANewProbe() throws {
+    try expect(ReceiverRules.clearSessionAfterFreshnessFlip(wasFresh: true, isFresh: false))
+    try expect(!ReceiverRules.clearSessionAfterFreshnessFlip(wasFresh: false, isFresh: true))
+    try expect(!ReceiverRules.clearSessionAfterFreshnessFlip(wasFresh: true, isFresh: true))
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let channel = try eligibilityChannel("good")
+    let health = try decode(Health.self, #"{"generatedAt":"\#(stamp(now))","results":[{"channelId":"good","status":"online","deliveryRatio":1}]}"#)
+    let fresh = Controls(denylist: nil, offAir: nil, health: health, now: now)
+    try expectEqual(ReceiverRules.eligible([channel], controls: fresh, verified: ["good"]).map(\.id), ["good"])
+    // The session was cleared on the way to stale. The same fresh file, with nothing verified, shows nothing.
+    try expect(ReceiverRules.eligible([channel], controls: fresh, verified: []).isEmpty,
+               "a later fresh file has to be probed before the row returns")
+}
+
+func hostRetryStaysInsideTheWalk() throws {
+    try expect(ReceiverRules.awaitHostRetry(skipped: 2, retriesLeft: 3, cancelled: false))
+    try expect(!ReceiverRules.awaitHostRetry(skipped: 2, retriesLeft: 3, cancelled: true),
+               "a cancelled walk does not commit a later verdict")
+    try expect(!ReceiverRules.awaitHostRetry(skipped: 0, retriesLeft: 3, cancelled: false))
+    try expect(!ReceiverRules.awaitHostRetry(skipped: 2, retriesLeft: 0, cancelled: false))
+}
+
+func playlistEndListPastTheFirstBlockIsNotLive() throws {
+    var body = "#EXTM3U\n"
+    body += String(repeating: "#EXTINF:6,\nsegment.ts\n", count: 700)
+    try expect(body.utf8.count > 8192)
+    try expect(ReceiverRules.playlistIsLive(Data(body.utf8)))
+    body += "#EXT-X-ENDLIST\n"
+    try expect(!ReceiverRules.playlistIsLive(Data(body.utf8)), "an end tag past the first 8192 bytes is still an end")
+    let head = Data(body.utf8.prefix(8192))
+    try expect(head.range(of: Data("#EXT-X-ENDLIST".utf8)) == nil)
+    try expect(!ReceiverRules.playlistIsLive(head, truncated: true), "a playlist cut off before its end is not live")
+}
+
+func regionChipUsesTheVerifiedCount() throws {
+    try expectEqual(ReceiverRules.regionLiveFigure(verified: nil), "\u{2026}")
+    try expectEqual(ReceiverRules.regionLiveFigure(verified: 2), "2")
+    try expect(ReceiverRules.regionLiveFigure(verified: 2) != "78", "the index live total is not the chip")
+    try expectEqual(ReceiverRules.regionChipAccessibility(label: "Indus", verified: nil), "Indus, \u{2026}")
+    try expectEqual(ReceiverRules.regionChipAccessibility(label: "Indus", verified: 2), "Indus, 2 live")
+    try expectEqual(ReceiverRules.regionPlateLine(verified: nil), "\u{2026}")
+    try expectEqual(ReceiverRules.regionPlateLine(verified: 2), "2 LIVE")
 }
 
 func playlistCheckAndHealthStamp() throws {
@@ -4229,6 +4293,11 @@ let tests: [(String, () throws -> Void)] = [
     ("A failed tune does not take the viewer's later channel", failureSkipStaysWithTheTuneThatFailed),
     ("A host backoff does not fail a sibling that is live", hostBackoffLeavesTheSiblingLive),
     ("A probe write lands only at its own generation", probeLedgerDropsAnOvertakenWrite),
+    ("A failed health fetch keeps the file and retries promptly", failedHealthFetchKeepsTheFileAndRetriesPromptly),
+    ("A stale flip clears verified rows until a new probe", staleFlipClearsVerifiedUntilANewProbe),
+    ("A host retry stays inside the walk", hostRetryStaysInsideTheWalk),
+    ("An end tag past the first block is not live", playlistEndListPastTheFirstBlockIsNotLive),
+    ("A region chip uses the verified count", regionChipUsesTheVerifiedCount),
     ("Playlist check and health stamp", playlistCheckAndHealthStamp),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

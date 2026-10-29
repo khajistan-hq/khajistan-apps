@@ -56,10 +56,14 @@ final class ReceiverStore {
     @ObservationIgnored private var loadToken: [String: Int] = [:]
     @ObservationIgnored private var probeChain: Task<Void, Never> = Task {}
     @ObservationIgnored private var clockTask: Task<Void, Never>?
+    /// Bumped when health goes from fresh to stale, so a walk that started earlier cannot reveal.
+    @ObservationIgnored private var probeEpoch = 0
+    /// When a failed health fetch may be tried again. It is not the ten-minute clock.
+    @ObservationIgnored private var healthRetryAt: Date?
     @ObservationIgnored private let probe = ReceiverProbe()
     private let urlSession: URLSession
 
-    /// How long a fetched index or set of feeds is trusted before the next look.
+    /// How long a fetched index is trusted before the next look. Health uses `ReceiverRules.controlHold`.
     private static let staleAfter: TimeInterval = 600
 
     init() {
@@ -221,6 +225,9 @@ final class ReceiverStore {
         var previous = controls().healthFresh
         while !Task.isCancelled {
             let fresh = controls().healthFresh
+            if ReceiverRules.clearSessionAfterFreshnessFlip(wasFresh: previous, isFresh: fresh) {
+                clearSession()
+            }
             if fresh != previous {
                 previous = fresh
                 publishCounts()
@@ -229,6 +236,30 @@ final class ReceiverStore {
             let wait = freshnessWait()
             try? await Task.sleep(for: .seconds(wait))
         }
+    }
+
+    /// Fresh health has aged out. Nothing verified under it may stay, and the next fresh file
+    /// has to be probed again before a row can show.
+    private func clearSession() {
+        probeEpoch += 1
+        verified = []
+        offerings = [:]
+        walksFinished = []
+        televisionNow = nil
+        radioNow = nil
+        camerasNow = nil
+        liveNow = nil
+    }
+
+    /// Verified rows for one region once its walks have finished. Nil until then, so the chip
+    /// shows the loading mark instead of the index total.
+    func regionLiveCount(regionId: String) -> Int? {
+        _ = dialGeneration
+        guard walkFinished(regionId: regionId, cameras: false) else { return nil }
+        let cameras = index?.cameraURL(regionId: regionId) != nil
+        if cameras && !walkFinished(regionId: regionId, cameras: true) { return nil }
+        return shown(regionId: regionId, cameras: false).count
+            + (cameras ? shown(regionId: regionId, cameras: true).count : 0)
     }
 
     private func freshnessWait() -> Double {
@@ -240,15 +271,18 @@ final class ReceiverStore {
 
     private func loadChannels(regionId: String, cameras: Bool, key: String, token: Int) async throws -> [Channel] {
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
+        let epoch = probeEpoch
         let raw = try await rawChannels(regionId: regionId, cameras: cameras, key: key, index: index)
         try Task.checkCancellation()
-        guard loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+        guard loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
         await refreshControlsIfStale()
+        guard probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
         offerings[key] = offerings[key] ?? []
         dialGeneration += 1
         let folded = controls()
         let candidates = ReceiverRules.probeCandidates(raw, controls: folded)
-        if folded.healthLoaded && !folded.healthFresh {
+        if !folded.healthLoaded || !folded.healthFresh {
+            guard probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
             walksFinished.insert(key)
             publishCounts()
             dialGeneration += 1
@@ -257,10 +291,9 @@ final class ReceiverStore {
         #if DEBUG
         if UserDefaults.standard.bool(forKey: "kjnoprobe") {
             for channel in candidates where !withdrawn.contains(channel.id) {
-                verified.insert(channel.id)
-                reveal(channel.id, key: key, token: token, raw: raw)
+                reveal(channel.id, key: key, token: token, raw: raw, epoch: epoch)
             }
-            guard !Task.isCancelled, loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+            guard !Task.isCancelled, loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
             walksFinished.insert(key)
             publishCounts()
             dialGeneration += 1
@@ -268,26 +301,30 @@ final class ReceiverStore {
         }
         #endif
         _ = await probe.verify(candidates) { [weak self] id in
-            await self?.reveal(id, key: key, token: token, raw: raw)
+            await self?.reveal(id, key: key, token: token, raw: raw, epoch: epoch)
         }
-        guard !Task.isCancelled, loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+        guard !Task.isCancelled, loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
         walksFinished.insert(key)
         publishCounts()
         dialGeneration += 1
         return shown(regionId: regionId, cameras: cameras)
     }
 
-    private func reveal(_ id: String, key: String, token: Int, raw: [Channel]) {
-        guard loadToken[key] == token, !withdrawn.contains(id) else { return }
+    private func reveal(_ id: String, key: String, token: Int, raw: [Channel], epoch: Int) {
+        guard probeEpoch == epoch, loadToken[key] == token, !withdrawn.contains(id) else { return }
         guard let channel = raw.first(where: { $0.id == id }) else { return }
-        verified.insert(id)
         guard lists(channel) else { return }
+        verified.insert(id)
         var rows = offerings[key] ?? []
-        guard !rows.contains(where: { $0.id == id }) else { return }
+        guard !rows.contains(where: { $0.id == id }) else {
+            publishCounts()
+            return
+        }
         rows.append(channel)
         rows.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         offerings[key] = rows
         dialGeneration += 1
+        publishCounts()
     }
 
     /// Each medium is published only after a walk of that medium has finished.
@@ -299,8 +336,10 @@ final class ReceiverStore {
         var cameras = 0
         var sawBroadcast = false
         var sawCameras = false
-        for (key, rows) in offerings where walksFinished.contains(key) {
+        for (key, rows) in offerings {
+            let finished = walksFinished.contains(key)
             let listed = rows.filter { !withdrawn.contains($0.id) && lists($0) }
+            if !finished && listed.isEmpty { continue }
             if key.hasSuffix("-camera") {
                 sawCameras = true
                 cameras += listed.filter { $0.mediaType == "camera" }.count
@@ -405,10 +444,14 @@ final class ReceiverStore {
         }
     }
 
-    /// Denylist, off-air list and health, fetched together. Any of the three may fail and
-    /// is then treated as absent; the clock only starts once at least one has answered.
+    /// Denylist, off-air list and health, fetched together. A failed health fetch keeps the
+    /// previous file, which then ages out on its own stamp. The ten-minute clock starts only
+    /// when health arrives. The other two files do not start it, and a miss is tried again shortly.
     private func refreshControlsIfStale() async {
-        if let at = controlsFetchedAt, Date().timeIntervalSince(at) < Self.staleAfter { return }
+        let now = Date()
+        if case .skip = ReceiverRules.controlRefresh(now: now, clock: controlsFetchedAt, retryAt: healthRetryAt, healthArrived: true) {
+            return
+        }
         let session = urlSession
         let denylistURL = Self.dataURL("denylist.json")
         let offAirURL = Self.dataURL("off-air-suspects.json")
@@ -419,8 +462,16 @@ final class ReceiverStore {
         let (denied, suspects, graded) = await (denylist, offAir, health)
         denylistFile = denied
         offAirFile = suspects
-        healthFile = graded
-        if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
+        switch ReceiverRules.controlRefresh(now: now, clock: nil, retryAt: nil, healthArrived: graded != nil) {
+        case .replace:
+            healthFile = graded
+            controlsFetchedAt = now
+            healthRetryAt = nil
+        case .keep(let retryAfter):
+            healthRetryAt = now.addingTimeInterval(retryAfter)
+        case .skip:
+            break
+        }
         dialGeneration += 1
     }
 

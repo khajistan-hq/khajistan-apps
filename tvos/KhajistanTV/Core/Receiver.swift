@@ -195,6 +195,12 @@ enum ReceiverRules {
     static let healthMaxAge: TimeInterval = 2 * 60 * 60
     /// A stamp this far ahead of the device is still accepted. Further ahead is not fresh.
     static let healthFutureSkew: TimeInterval = 5 * 60
+    /// How long a successful health fetch is kept before the next look.
+    static let controlHold: TimeInterval = 600
+    /// How soon to ask again after a health fetch fails. The other two files do not start this clock.
+    static let healthRetry: TimeInterval = 15
+    /// How much of an HLS playlist is read before an unfinished body is unverifiable.
+    static let playlistReadCap = 256 * 1024
 
     /// Fresh only when the stamp is not more than five minutes ahead and not more than two hours behind.
     static func healthIsFresh(generatedAt stamp: Date, now: Date) -> Bool {
@@ -268,6 +274,54 @@ enum ReceiverRules {
         func live(_ id: String) -> Bool? { value[id] }
     }
 
+    /// What a health refetch does. A failed fetch keeps the previous file and does not start
+    /// the ten-minute clock. The next look is `healthRetry` later. A file that arrived replaces
+    /// the previous one and starts the clock.
+    enum ControlRefresh: Equatable {
+        case skip
+        case keep(retryAfter: TimeInterval)
+        case replace
+    }
+
+    static func controlRefresh(now: Date, clock: Date?, retryAt: Date?, healthArrived: Bool) -> ControlRefresh {
+        if let clock, now.timeIntervalSince(clock) < controlHold { return .skip }
+        if let retryAt, now < retryAt { return .skip }
+        if healthArrived { return .replace }
+        return .keep(retryAfter: healthRetry)
+    }
+
+    /// Fresh to stale drops every row this session has verified. A later fresh file starts over.
+    static func clearSessionAfterFreshnessFlip(wasFresh: Bool, isFresh: Bool) -> Bool {
+        wasFresh && !isFresh
+    }
+
+    /// A 403 or 429 is retried inside the walk that asked, and a cancelled walk does not retry.
+    static func awaitHostRetry(skipped: Int, retriesLeft: Int, cancelled: Bool) -> Bool {
+        skipped > 0 && retriesLeft > 0 && !cancelled
+    }
+
+    /// The number on a region chip. Nil until that region's walk has finished. The index live
+    /// total is not a stand-in.
+    static func regionLiveFigure(verified: Int?) -> String {
+        verified.map { $0.formatted() } ?? "\u{2026}"
+    }
+
+    /// VoiceOver for that chip. The same mark until the walk finishes, then the verified count.
+    static func regionChipAccessibility(label: String, verified: Int?) -> String {
+        if let verified {
+            return "\(label), \(verified.formatted()) live"
+        }
+        return "\(label), \u{2026}"
+    }
+
+    /// The live line on the map plate.
+    static func regionPlateLine(verified: Int?) -> String {
+        if let verified {
+            return "\(verified.formatted()) LIVE"
+        }
+        return "\u{2026}"
+    }
+
     /// Channels the receiver may offer, sorted by name.
     ///
     /// A row is kept only when it is published, switched on, absent from the denylist and the
@@ -279,16 +333,16 @@ enum ReceiverRules {
     /// channel's own `healthStatus` once
     /// `health.json` has loaded. That grade counts only while `generatedAt` is no more than
     /// five minutes ahead and no more than two hours behind. A loaded file that is not fresh
-    /// withdraws every row. When the file did not load, a row is kept only if this session's
-    /// probe verified it and the shard grade is allowed. A fresh grade is not enough on its
+    /// withdraws every row. A file that has never loaded withdraws every row too: the shard's
+    /// own `healthStatus` is not a fallback. A fresh grade is not enough on its
     /// own: `verified` must contain the id. A repeated id is kept once, at its first
     /// eligible occurrence.
     static func eligible(_ channels: [Channel], controls: Controls, verified: Set<String> = []) -> [Channel] {
         var seen = Set<String>()
         var kept: [Channel] = []
         for channel in channels {
+            guard controls.healthLoaded, controls.healthFresh else { continue }
             guard held(channel, controls: controls) else { continue }
-            if controls.healthLoaded && !controls.healthFresh { continue }
             if !verified.contains(channel.id) { continue }
             if !seen.insert(channel.id).inserted { continue }
             kept.append(channel)
@@ -317,10 +371,14 @@ enum ReceiverRules {
     }
 
     /// An HLS playlist is live when it has a segment or a variant stream and has not ended.
-    /// A header alone is not enough. `#EXT-X-ENDLIST` is not live, with or without segments.
-    static func playlistIsLive(_ data: Data) -> Bool {
-        guard let text = String(data: data.prefix(8192), encoding: .utf8)
-                ?? String(data: data.prefix(8192), encoding: .isoLatin1) else { return false }
+    /// A header alone is not enough. `#EXT-X-ENDLIST` is not live, with or without segments,
+    /// wherever it sits in the body. `truncated` means the read stopped before the playlist
+    /// ended, so an end tag may still be coming: that body is not live.
+    static func playlistIsLive(_ data: Data, truncated: Bool = false) -> Bool {
+        if truncated { return false }
+        let slice = data.prefix(playlistReadCap)
+        guard let text = String(data: slice, encoding: .utf8)
+                ?? String(data: slice, encoding: .isoLatin1) else { return false }
         let cleaned = text.replacingOccurrences(of: "\u{FEFF}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard cleaned.hasPrefix("#EXTM3U") else { return false }
@@ -333,9 +391,9 @@ enum ReceiverRules {
 
     /// What a probe may treat as a live body. 403 is refused. HLS must be a real playlist.
     /// Anything else needs a media content type, and an HTML or JSON body is not a stream.
-    static func responseIsLive(status: Int, contentType: String?, body: Data, hls: Bool) -> Bool {
+    static func responseIsLive(status: Int, contentType: String?, body: Data, hls: Bool, playlistTruncated: Bool = false) -> Bool {
         if status == 403 || !(200..<300).contains(status) { return false }
-        if hls { return playlistIsLive(body) }
+        if hls { return playlistIsLive(body, truncated: playlistTruncated) }
         let type = (contentType ?? "").lowercased()
         if type.contains("text/html") || type.contains("application/json") || type.contains("text/json") { return false }
         if markupOrJSON(body) { return false }
@@ -384,8 +442,8 @@ enum ReceiverRules {
     /// 403 or geo-block), and any status string this build has not been taught. The refusal is
     /// an allow-list, so a future grade stays off the dial until a build names it.
     /// Once health has loaded, a row with no result is missing: the shard's own `healthStatus`
-    /// is not a substitute. When the file did not load, the shard status is all there is, and
-    /// it still has to be one of those two grades.
+    /// is not a substitute. A file that never loaded does not reach this function for a row
+    /// the dial might show.
     private static func gradeAllows(_ channel: Channel, controls: Controls) -> Bool {
         let status: String?
         if controls.healthLoaded {

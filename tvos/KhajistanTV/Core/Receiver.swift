@@ -156,13 +156,17 @@ struct Controls: Sendable {
     /// True when `generatedAt` is no older than two hours at `now`.
     let healthFresh: Bool
 
-    init(denylist: Denylist?, offAir: OffAir?, health: Health?, now: Date = Date()) {
+    /// `treatAsFresh` is for a debug launch that must not depend on the live file's age.
+    /// Production calls leave it false, so a stale file still withdraws every row.
+    init(denylist: Denylist?, offAir: OffAir?, health: Health?, now: Date = Date(), treatAsFresh: Bool = false) {
         denied = Set(denylist?.disabledChannelIds ?? []).union(offAir?.offAirChannelIds ?? [])
         // Last record wins, as it does on the iOS radio lane.
         self.health = Dictionary((health?.results ?? []).map { ($0.channelId, $0) },
                                  uniquingKeysWith: { _, latest in latest })
         healthLoaded = health != nil
-        if let stamp = health?.generatedAtDate {
+        if treatAsFresh && health != nil {
+            healthFresh = true
+        } else if let stamp = health?.generatedAtDate {
             healthFresh = ReceiverRules.healthIsFresh(generatedAt: stamp, now: now)
         } else {
             healthFresh = false

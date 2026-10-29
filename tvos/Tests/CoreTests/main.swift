@@ -522,6 +522,11 @@ func controlsFoldTheFeedsAndLastHealthRecordWins() throws {
     let controls = Controls(denylist: nil, offAir: nil, health: health)
     try expect(controls.healthLoaded)
     try expect(!controls.healthFresh, "a health file with no generatedAt is not fresh")
+    try expect(Controls(denylist: nil, offAir: nil, health: health, treatAsFresh: true).healthFresh,
+               "a debug launch may grade a file whose age would otherwise blank the dial")
+    let old = try decode(Health.self, #"{"generatedAt":"2020-01-01T00:00:00Z","results":[]}"#)
+    try expect(!Controls(denylist: nil, offAir: nil, health: old).healthFresh)
+    try expect(Controls(denylist: nil, offAir: nil, health: old, treatAsFresh: true).healthFresh)
     try expectEqual(controls.health["x"]?.status, "online")
     try expectEqual(controls.health["x"]?.deliveryRatio, 2.5)
     try expect(!Controls.empty.healthLoaded && !Controls.empty.healthFresh)

@@ -210,7 +210,14 @@ final class ReceiverStore {
     }
 
     private func controls(now: Date = Date()) -> Controls {
-        Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now)
+        #if DEBUG
+        // UI tests launch with `-kjnoprobe`. The live health file is often older than two hours,
+        // and a stale file would blank the dial before any row could be shown. The grades still apply.
+        let tests = UserDefaults.standard.bool(forKey: "kjnoprobe")
+        #else
+        let tests = false
+        #endif
+        return Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now, treatAsFresh: tests)
     }
 
     @discardableResult
@@ -274,7 +281,7 @@ final class ReceiverStore {
             return shown(regionId: regionId, cameras: cameras)
         }
         #endif
-        await probe.verify(candidates) { [weak self] id in
+        _ = await probe.verify(candidates) { [weak self] id in
             await self?.reveal(id, key: key, token: token, raw: raw)
         }
         guard !Task.isCancelled, loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }

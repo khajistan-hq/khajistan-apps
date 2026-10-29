@@ -9,15 +9,14 @@ import FoundationNetworking
 final class ReceiverProbe: @unchecked Sendable {
     /// How long one playlist or first-bytes read may take.
     static let timeout: TimeInterval = 6
-    /// How long a pass or a failure is remembered.
-    static let memory: TimeInterval = 600
+    /// How long a pass or a failure is remembered. The playback URL outlives this while the id stays verified.
+    static let memory: TimeInterval = ReceiverRules.verdictMemory
     /// How many checks run at once.
     static let cap = 8
 
     private struct Entry {
         var live: Bool
         var at: Date
-        var playback: URL?
     }
 
     /// One shared cap. A waiter takes the slot of the check that just finished.
@@ -114,6 +113,10 @@ final class ReceiverProbe: @unchecked Sendable {
     }
 
     private var cache: [String: Entry] = [:]
+    /// The carrier a live probe checked. Not cleared when the verdict ages out, so a tune
+    /// eleven minutes later still has it while the id is verified. `forget`, a dead verdict,
+    /// and `dropMemory` clear it.
+    private var playbacks: [String: URL] = [:]
     /// Each remember or forget takes the next number under the lock, so a later call wins.
     /// The map is not cleared when memory is dropped. `writeEpoch` moves instead, so a write
     /// that was already in flight cannot match a generation that would otherwise start again at 1.
@@ -131,7 +134,7 @@ final class ReceiverProbe: @unchecked Sendable {
             let config = URLSessionConfiguration.ephemeral
             let limit = ReceiverRules.probeOuterWait(timeout: Self.timeout)
             config.timeoutIntervalForRequest = limit
-            config.timeoutIntervalForResource = limit + 2
+            config.timeoutIntervalForResource = limit
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
             config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
             self.session = URLSession(configuration: config)
@@ -160,9 +163,14 @@ final class ReceiverProbe: @unchecked Sendable {
         defer { lock.unlock() }
         guard ticket.epoch == writeEpoch, ticket.generation == generation[id] else { return false }
         if let live {
-            cache[id] = Entry(live: live, at: now, playback: live ? playback : nil)
+            cache[id] = Entry(live: live, at: now)
+            if live, let playback {
+                playbacks[id] = playback
+            }
+            if !live { playbacks[id] = nil }
         } else {
             cache[id] = nil
+            playbacks[id] = nil
         }
         return true
     }
@@ -177,16 +185,12 @@ final class ReceiverProbe: @unchecked Sendable {
         commit(id, live: nil, ticket: ticket, now: Date())
     }
 
-    /// The carrier whose renditions passed, while that verdict is still remembered.
-    func playback(for id: String, now: Date = Date()) -> URL? {
+    /// The carrier whose renditions passed. Kept until the id is forgotten, marked dead, or the
+    /// session drops its memory. The ten-minute verdict clock does not clear it.
+    func playback(for id: String) -> URL? {
         lock.lock()
         defer { lock.unlock() }
-        guard let entry = cache[id], entry.live else { return nil }
-        if now.timeIntervalSince(entry.at) >= Self.memory {
-            cache[id] = nil
-            return nil
-        }
-        return entry.playback
+        return playbacks[id]
     }
 
     /// Drops every remembered verdict and moves the epoch. Generation numbers are not reused,
@@ -194,24 +198,32 @@ final class ReceiverProbe: @unchecked Sendable {
     func dropMemory() {
         lock.lock()
         cache.removeAll()
+        playbacks.removeAll()
         writeEpoch += 1
         lock.unlock()
     }
 
     /// Probes `channels`. `found` runs as soon as one row passes, not after the whole list.
     /// `bypassCache` reads the network even when a recent verdict is remembered.
+    /// `live` is who passed. `unprobed` is who never started, including after the in-walk retry.
+    /// A slot that does not free in time does not drop the rest of the list on the floor.
     func verify(_ channels: [Channel], bypassCache: Bool = false,
                 retriesLeft: Int = ReceiverRules.HostBudget.retryLimit,
-                found: @escaping @Sendable (String) async -> Void = { _ in }) async -> Set<String> {
+                found: @escaping @Sendable (String) async -> Void = { _ in }) async -> (live: Set<String>, unprobed: Set<String>) {
         let pending = bypassCache ? channels : channels.filter { cached($0.id) == nil }
         let session = self.session
         let skipped = SkipBox()
+        var neverStarted: [Channel] = []
         await withTaskGroup(of: Void.self) { group in
-            for channel in pending {
-                if Task.isCancelled { break }
-                let acquired = await slots.acquire(within: Self.timeout + 2)
+            for (index, channel) in pending.enumerated() {
+                if Task.isCancelled {
+                    neverStarted = ReceiverRules.unstarted(pending, from: index)
+                    break
+                }
+                let acquired = await slots.acquire(within: ReceiverRules.slotWait(timeout: Self.timeout))
                 if !acquired || Task.isCancelled {
                     if acquired { slots.release() }
+                    neverStarted = ReceiverRules.unstarted(pending, from: index)
                     break
                 }
                 group.addTask { [slots] in
@@ -233,15 +245,18 @@ final class ReceiverProbe: @unchecked Sendable {
             }
             await group.waitForAll()
         }
+        for channel in neverStarted { skipped.insert(channel) }
         let again = skipped.take()
         if ReceiverRules.awaitHostRetry(skipped: again.count, retriesLeft: retriesLeft, cancelled: Task.isCancelled) {
             try? await Task.sleep(for: .seconds(ReceiverRules.HostBudget.backoff))
             // A cancelled wait commits nothing. The walk that owns this retry is the one that was cancelled.
             if !Task.isCancelled {
-                _ = await verify(again, bypassCache: true, retriesLeft: retriesLeft - 1, found: found)
+                let nested = await verify(again, bypassCache: true, retriesLeft: retriesLeft - 1, found: found)
+                return (Set(channels.map(\.id).filter { cached($0) == true }), nested.unprobed)
             }
         }
-        return Set(channels.map(\.id).filter { cached($0) == true })
+        let unprobed = Set(neverStarted.map(\.id))
+        return (Set(channels.map(\.id).filter { cached($0) == true }), unprobed)
     }
 
     private func admit(_ host: String, now: Date = Date()) -> ReceiverRules.HostBudget.Admit {
@@ -262,6 +277,7 @@ final class ReceiverProbe: @unchecked Sendable {
         guard let entry = cache[id] else { return nil }
         if now.timeIntervalSince(entry.at) >= Self.memory {
             cache[id] = nil
+            // The playback URL stays. A tune while this id is still verified must not see a miss.
             return nil
         }
         return entry.live
@@ -442,8 +458,12 @@ final class ReceiverProbe: @unchecked Sendable {
             } catch is CancellationError {
                 cancelled = true
             } catch {
-                if Task.isCancelled { cancelled = true }
-                else { return emptyRead(url, playlist: playlist, cancelled: false) }
+                let timedOut = (error as? URLError)?.code == .timedOut
+                if ReceiverRules.failedReadIsCancelled(timedOut: timedOut, taskCancelled: Task.isCancelled) {
+                    cancelled = true
+                } else {
+                    return emptyRead(url, playlist: playlist, cancelled: false)
+                }
             }
             if Task.isCancelled { cancelled = true }
             let sawEnd = playlist && data.range(of: endTag) != nil
@@ -462,7 +482,8 @@ final class ReceiverProbe: @unchecked Sendable {
         } catch is CancellationError {
             return emptyRead(url, playlist: hls, cancelled: true)
         } catch {
-            return emptyRead(url, playlist: hls, cancelled: Task.isCancelled)
+            let timedOut = (error as? URLError)?.code == .timedOut
+            return emptyRead(url, playlist: hls, cancelled: ReceiverRules.failedReadIsCancelled(timedOut: timedOut, taskCancelled: Task.isCancelled))
         }
     }
 }

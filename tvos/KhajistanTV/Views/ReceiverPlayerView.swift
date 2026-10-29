@@ -218,8 +218,13 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
-        .onChange(of: model.receiver.playbackEpoch) { _, _ in
+        .onChange(of: model.receiver.playbackEpoch) { previous, epoch in
+            // Same value, including the one this cover opened on. Stopping here
+            // cancels the tune while the cover is still coming up: Menu then
+            // lands on the front, and the player stays.
+            guard epoch != previous else { return }
             stopEverything()
+            dismiss()
         }
         .onDisappear { stopEverything() }
     }

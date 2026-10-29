@@ -270,10 +270,76 @@ enum ReceiverRules {
         return bodyLive ? .live : .dead
     }
 
-    /// The outer race has to outlast the non-HLS sample. A read that is still open at `timeout`
-    /// would otherwise be replaced with a dead verdict.
+    /// One deadline for the sample and the silence after it. At least the preroll plus
+    /// LiveRadio's stall. A mount that sends nothing in that time is skipped, not cached dead.
+    /// The 6 s request timeout must not be a second, shorter deadline.
     static func probeOuterWait(timeout: TimeInterval) -> TimeInterval {
-        timeout + streamMinDuration
+        max(timeout, streamMinDuration + streamStall)
+    }
+
+    /// How long a walk waits for a free slot. A holder may read a carrier and a chain of
+    /// masters, each up to `probeOuterWait`, before it gives the slot back.
+    static func slotWait(timeout: TimeInterval) -> TimeInterval {
+        probeOuterWait(timeout: timeout) * Double(masterDepth + 1)
+    }
+
+    /// Channels a slot timeout never started. They stay retryable. The walk is not finished
+    /// while any of them are still unprobed.
+    static func unstarted<T>(_ pending: [T], from index: Int) -> [T] {
+        guard index >= 0, index < pending.count else { return [] }
+        return Array(pending.dropFirst(index))
+    }
+
+    static func mayMarkWalkFinished(unprobed: Int) -> Bool { unprobed == 0 }
+
+    /// A timed-out or cancelled read is skipped. Any other failure can be dead.
+    static func failedReadIsCancelled(timedOut: Bool, taskCancelled: Bool) -> Bool {
+        timedOut || taskCancelled
+    }
+
+    /// How long a pass or a failure is remembered. The playback URL is not dropped on this clock
+    /// while the id is still verified.
+    static let verdictMemory: TimeInterval = 600
+
+    /// What a tune may do with a remembered carrier. Age does not drop a URL the id still holds
+    /// as verified. A verified id with no URL left is probed again, and that miss is not a withdrawal.
+    enum TuneMemory: Equatable {
+        case play
+        case reprobe
+        case refuse
+    }
+
+    struct CarrierMemory: Equatable {
+        var verified = false
+        var playback: URL?
+        var verdictAt: Date?
+
+        mutating func pass(url: URL, at: Date) {
+            verified = true
+            playback = url
+            verdictAt = at
+        }
+
+        /// Drops the verdict once it is older than `memory`. The playback URL stays while verified.
+        mutating func age(to now: Date, memory: TimeInterval = ReceiverRules.verdictMemory) {
+            if let at = verdictAt, now.timeIntervalSince(at) >= memory {
+                verdictAt = nil
+            }
+            if !verified { playback = nil }
+        }
+
+        func tune(_ fresh: URL) -> TuneMemory {
+            if let playback {
+                return playback.absoluteString == fresh.absoluteString ? .play : .refuse
+            }
+            // Still verified, but the remembered URL is gone. Probe again. Do not withdraw.
+            if verified { return .reprobe }
+            return .refuse
+        }
+    }
+
+    static func withdrawsOnResolveMiss(_ decision: TuneMemory) -> Bool {
+        decision == .refuse
     }
 
     /// A confirm may insert only in the probe epoch it captured before the probe.

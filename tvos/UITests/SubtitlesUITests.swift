@@ -148,10 +148,6 @@ final class SubtitlesUITests: XCTestCase {
         kjLaunch(app, autoplay: true)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 90), "opening Receiver presents a tuning player without Select")
-        // The identifier is in the tree as the cover starts. Menu before the cover has focus
-        // lands on the front underneath, and the player stays up.
-        XCTAssertTrue(waitFor(20) { !state.label.isEmpty }, "the cover has drawn its state")
-        kjPause(1)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(app.buttons["shuffle"].waitForExistence(timeout: 10))
         // Menu dismisses the cover on the main actor. Three seconds covers the animation.

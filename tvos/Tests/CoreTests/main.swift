@@ -791,7 +791,12 @@ func finiteMediaIsNotALiveMount() throws {
     try expect(ReceiverRules.nonHLSIsLive(flowing(icy: true)))
     try expect(ReceiverRules.nonHLSIsLive(flowing(chunked: true)))
     try expect(ReceiverRules.nonHLSIsLive(flowing(openEnded: true)))
-    try expectEqual(ReceiverRules.probeOuterWait(timeout: 6), 6 + elapsed)
+    try expectEqual(ReceiverRules.probeOuterWait(timeout: 6), elapsed + ReceiverRules.streamStall)
+    try expect(ReceiverRules.probeOuterWait(timeout: 6) > 6)
+    try expect(ReceiverRules.failedReadIsCancelled(timedOut: true, taskCancelled: false),
+               "a silent mount that hits the deadline is skipped, not cached dead")
+    try expect(!ReceiverRules.failedReadIsCancelled(timedOut: false, taskCancelled: false))
+    try expect(ReceiverRules.slotWait(timeout: 6) > ReceiverRules.probeOuterWait(timeout: 6))
     let errorPage = Data(repeating: 0xff, count: 256)
     try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: errorPage, hls: false,
                                              signal: .init(openEnded: true, bodyEnded: true, bytes: errorPage.count)),
@@ -816,6 +821,43 @@ func staleFlipDropsProbeMemoryAndReopensTheWalks() throws {
     try expect(!memory.blocks("a"), "a remembered failure must not block the probe after a stale flip")
     let open: Set<String> = ["indus", "indus-camera"]
     try expectEqual(ReceiverRules.regionsToReprobe(open), open)
+}
+
+func aTuneElevenMinutesLaterKeepsTheVerifiedCarrier() throws {
+    var memory = ReceiverRules.CarrierMemory()
+    let url = try require(URL(string: "https://cdn.example/live.m3u8"))
+    let other = try require(URL(string: "https://cdn.example/other.m3u8"))
+    let at = Date(timeIntervalSince1970: 0)
+    memory.pass(url: url, at: at)
+    let later = at.addingTimeInterval(11 * 60)
+    try expect(later.timeIntervalSince(at) > ReceiverRules.verdictMemory)
+    memory.age(to: later)
+    try expect(memory.verdictAt == nil, "the ten-minute verdict has expired")
+    try expectEqual(memory.tune(url), .play, "a verified id still holds its carrier at eleven minutes")
+    try expect(!ReceiverRules.withdrawsOnResolveMiss(memory.tune(url)))
+    memory.playback = nil
+    try expectEqual(memory.tune(url), .reprobe, "a missing URL on a verified id is probed again")
+    try expect(!ReceiverRules.withdrawsOnResolveMiss(.reprobe))
+    try expect(ReceiverRules.withdrawsOnResolveMiss(.refuse))
+    memory.playback = other
+    try expectEqual(memory.tune(url), .refuse, "a different remembered carrier is not played")
+    memory.verified = false
+    memory.playback = nil
+    memory.age(to: later)
+    try expectEqual(memory.tune(url), .refuse)
+}
+
+func aSlowProbeDoesNotFinishTheUnstartedTail() throws {
+    let pending = ["a", "b", "c"]
+    let tail = ReceiverRules.unstarted(pending, from: 1)
+    try expectEqual(tail, ["b", "c"])
+    try expect(ReceiverRules.unstarted(pending, from: pending.count).isEmpty)
+    try expect(!ReceiverRules.mayMarkWalkFinished(unprobed: tail.count),
+               "a walk is not finished for channels that never started")
+    try expect(ReceiverRules.mayMarkWalkFinished(unprobed: 0))
+    let read = ReceiverRules.probeOuterWait(timeout: 6)
+    try expect(read > 8, "one rendition read outlasts the old 8 s slot wait")
+    try expect(ReceiverRules.slotWait(timeout: 6) >= read * Double(ReceiverRules.masterDepth))
 }
 
 func aFailedFeedKeepsThePreviousCopy() throws {
@@ -4492,6 +4534,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Every rendition has to pass", everyRenditionHasToPass),
     ("A finite media file is not a live mount", finiteMediaIsNotALiveMount),
     ("A stale flip drops probe memory and reopens the walks", staleFlipDropsProbeMemoryAndReopensTheWalks),
+    ("A tune eleven minutes later keeps the verified carrier", aTuneElevenMinutesLaterKeepsTheVerifiedCarrier),
+    ("A slow probe does not finish the unstarted tail", aSlowProbeDoesNotFinishTheUnstartedTail),
     ("A failed feed keeps the previous copy", aFailedFeedKeepsThePreviousCopy),
     ("Figures publish only after the walk finishes", figuresPublishOnlyAfterTheWalkFinishes),
     ("Playlist check and health stamp", playlistCheckAndHealthStamp),

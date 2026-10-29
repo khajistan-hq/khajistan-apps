@@ -201,7 +201,7 @@ final class ReceiverStore {
         await restore(channel.id)
         guard ReceiverRules.probeCandidates([channel], controls: controls()).first != nil else { return false }
         let epoch = probeEpoch
-        let live = await probe.verify([channel], bypassCache: true)
+        let live = await probe.verify([channel], bypassCache: true).live
         guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else { return false }
         guard !Task.isCancelled, live.contains(channel.id), !withdrawn.contains(channel.id) else { return false }
         guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch) else { return false }
@@ -328,12 +328,14 @@ final class ReceiverStore {
             return shown(regionId: regionId, cameras: cameras)
         }
         #endif
-        _ = await probe.verify(candidates, bypassCache: bypassProbeCache) { [weak self] id in
+        let report = await probe.verify(candidates, bypassCache: bypassProbeCache) { [weak self] id in
             await self?.reveal(id, key: key, token: token, raw: raw, epoch: epoch)
         }
         guard !Task.isCancelled, loadToken[key] == token, probeEpoch == epoch else { return shown(regionId: regionId, cameras: cameras) }
-        walksFinished.insert(key)
-        publishCounts()
+        if ReceiverRules.mayMarkWalkFinished(unprobed: report.unprobed.count) {
+            walksFinished.insert(key)
+            publishCounts()
+        }
         dialGeneration += 1
         return shown(regionId: regionId, cameras: cameras)
     }
@@ -471,10 +473,30 @@ final class ReceiverStore {
         }
         // Debug launches do not probe. A release play opens only the carrier whose renditions passed.
         if probesOff { return fresh }
-        guard ReceiverRules.playbackMatches(probed: probe.playback(for: channel.id), fresh: fresh) else {
+        return try await playbackURL(for: channel, fresh: fresh)
+    }
+
+    /// The remembered carrier when it still matches. A verified id whose URL has aged out of
+    /// the ten-minute verdict is probed again. That miss does not withdraw the row: the caller
+    /// withdraws on throw, and an expired entry alone does not throw.
+    private func playbackURL(for channel: Channel, fresh: URL) async throws -> URL {
+        let remembered = probe.playback(for: channel.id)
+        switch ReceiverRules.CarrierMemory(verified: verified.contains(channel.id), playback: remembered).tune(fresh) {
+        case .play:
+            return fresh
+        case .refuse:
             throw ReceiverStoreError.notOnDial
+        case .reprobe:
+            let epoch = probeEpoch
+            let live = await probe.verify([channel], bypassCache: true).live
+            guard ReceiverRules.confirmStillCurrent(capturedEpoch: epoch, epochNow: probeEpoch),
+                  live.contains(channel.id),
+                  let probed = probe.playback(for: channel.id),
+                  ReceiverRules.playbackMatches(probed: probed, fresh: fresh) else {
+                throw ReceiverStoreError.notOnDial
+            }
+            return fresh
         }
-        return fresh
     }
 
     /// Denylist, off-air list and health, fetched together. A failed health fetch keeps the

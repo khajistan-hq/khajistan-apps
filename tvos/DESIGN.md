@@ -77,11 +77,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (channels, the two Transmission channels) sit on a `CardPlate`: the lift
-  plate at rest, the band plate with onBand text under focus. Square, no border. Channel
-  cards are 420x190, so a shelf is the same height from its first card to its last. A channel
-  card leads with its medium's mark (an ink square, the glyph in the ground's colour), as a live
-  guide's row does.
+- **Text cards** (the front's camera regions, the two Transmission channels) sit on a `CardPlate`:
+  the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
+  front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
+  Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.
 - **Picture cards** (films, Pics/Vids): the picture lifts and casts the shadow; the title and
   lines under it keep the ground's ink. A film poster is 420pt high at its own width, never
   cropped; its text box has a fixed height and takes the poster's width, so a long title wraps
@@ -119,12 +118,31 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   scrolls to the Screening Room's full-width shelf under it, as the TV app lays its rows, peeking
   at the bottom of the first screen. The Khajistan Radio mixes are not on the TV (owner,
   2026-10-06): they play as programmes on Transmission's channel 2, the website's sound channel.
-- **Region**: crumb kicker RECEIVER → INDUS, the name (display) and native name (headline,
-  faint), then one shelf for each medium the region carries: Television 39, Radio 40, Cameras 19
-  and On Demand (the films filed to it), in that order. Each card is the place as a kicker, the
-  name, the broadcaster in small type when it differs. Up and down in the player surf the shelf
-  the channel came from. The cameras are fetched on their own and the shelf holds its place with
-  the index's count until they land.
+- **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero
+  across the top that stays while the shelves scroll under it. At left the crumb kicker RECEIVER →
+  INDUS, the name (headline) and native name, then the channel focus rests on: ● LIVE · TELEVISION
+  once its picture moves, the name (56pt), the place, the broadcaster. At right its picture, 640x360,
+  the stream itself playing muted on black (on a lift plate with *Tuning…* until it plays, or the
+  card's still). Radio shows its name in the column and a large sound line in place of a picture.
+  The hero starts 0.7 s after focus rests, so walking a shelf does not start a decode per press, and
+  stops while focus is off the channel cards and while a player covers the page. Under it one shelf
+  for each medium the region carries: Television 39, Radio 40, Cameras 19 and On Demand, in that
+  order. Television and camera cards are **picture cards** (420x236, 16:9): a still the viewer's own
+  device took from the channel's stream, the place as a kicker and the name over a scrim of the
+  plate's own colour (the ground at rest, the focus plate under focus); before a still exists, the
+  name large (40pt) on the lift plate, no mark. Radio cards are the same size: the name over the
+  station's sound line, which moves slowly (one drawing slid sideways, still under Reduce Motion).
+  VoiceOver reads a card's name, place and "live picture" while a still is shown. Up and down in
+  the player surf the shelf the channel came from. The cameras are fetched on their own and the
+  shelf holds its place with the index's count until they land.
+- **Stills** (Services/LiveStillsStore.swift, shared with the phone): taken on the device from the
+  carrier the player tunes (the receiver's resolver, the player's User-Agent, no Referer, no proxy),
+  one at a time on a muted player of its own at the stream's lowest picture (at most 480x270), at
+  least 1.5 s apart and twelve a page visit, for the cards nearest focus; the hero's own frame
+  becomes its card's still. Never while the hero is starting up, never on an expensive or
+  constrained connection. Kept in memory only, about 12 MB at most, oldest out first, retaken after
+  ten minutes, dropped on a memory warning; never written to disk and never sent anywhere, so the
+  Receiver keeps no copy.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
   (state kicker, the name as headline, the place, the attribution line in small type). The

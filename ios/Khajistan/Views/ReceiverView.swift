@@ -83,17 +83,16 @@ struct ReceiverView: View {
         .task {
             await model.receiver.loadIndex()
             // The count walks every region. Surf must not wait for that walk.
-            Task { await model.receiver.loadLiveNow() }
+            model.receiver.watchHealthClock()
             await model.playIfOpening()
         }
     }
 
     /// The four figures of the receiver index, laid out before they arrive so nothing moves.
     private var figures: some View {
-        let totals = model.receiver.index?.totals
-        func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2014}" }
-        let items = [("Live now", value(model.receiver.liveNow)), ("Television", value(totals?.byMedium["tv"])),
-                     ("Radio", value(totals?.byMedium["radio"])), ("Cameras", value(totals?.byMedium["camera"]))]
+        func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2026}" }
+        let items = [("Live now", value(model.receiver.liveNow)), ("Television", value(model.receiver.televisionNow)),
+                     ("Radio", value(model.receiver.radioNow)), ("Cameras", value(model.receiver.camerasNow))]
         // One row while the four fit; two rows of two at large type.
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 12) {
@@ -152,6 +151,10 @@ private struct LiveSection: View {
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
+        .onDisappear {
+            model.receiver.cancelChannels(regionId: selected, cameras: false)
+            model.receiver.cancelChannels(regionId: selected, cameras: true)
+        }
     }
 
     // MARK: Map and strip
@@ -255,9 +258,9 @@ private struct LiveSection: View {
 
     private var hasCameras: Bool { index?.cameraURL(regionId: selected) != nil }
 
-    /// Liked and saved rows use the same gate as the rest of the dial.
-    private var liveChannels: [Channel] { channels.filter { model.receiver.lists($0) } }
-    private var liveCameras: [Channel] { cameraChannels.filter { model.receiver.lists($0) } }
+    /// Liked and saved rows use the same gate as the rest of the dial. Rows appear as each probe succeeds.
+    private var liveChannels: [Channel] { model.receiver.shown(regionId: selected, cameras: false) }
+    private var liveCameras: [Channel] { model.receiver.shown(regionId: selected, cameras: true) }
 
     private var media: [String] {
         var found: [String] = []
@@ -286,7 +289,16 @@ private struct LiveSection: View {
                         Text(native).font(.system(KJType.title, weight: .bold)).foregroundStyle(palette.faint).lineLimit(1)
                     }
                 }
-                if let line = index?.mediumLine(regionId: selected), !line.isEmpty { Text(line).kjSmall(faint: true) }
+                if model.receiver.walkFinished(regionId: selected, cameras: false) {
+                    let line = ReceiverRules.verifiedMediumLine(
+                        tv: model.receiver.verifiedChannels(regionId: selected, medium: "tv").count,
+                        radio: model.receiver.verifiedChannels(regionId: selected, medium: "radio").count,
+                        camera: model.receiver.walkFinished(regionId: selected, cameras: true)
+                            ? model.receiver.shown(regionId: selected, cameras: true).count : nil)
+                    if !line.isEmpty { Text(line).kjSmall(faint: true) }
+                } else {
+                    Text("\u{2026}").kjSmall(faint: true)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("regionTitle")
@@ -319,17 +331,18 @@ private struct LiveSection: View {
 
     private func switchTitle(_ kind: String) -> String {
         let title = ReceiverRules.mediumLabel(kind)
-        let count = kind == "camera"
-            ? (camerasLoaded ? liveCameras.count : index?.regionCounts[selected]?.byMedium["camera"])
-            : liveChannels.filter { $0.mediaType == kind }.count
-        return count.map { "\(title) \($0)" } ?? title
+        let count: Int? = kind == "camera"
+            ? (model.receiver.walkFinished(regionId: selected, cameras: true) ? liveCameras.count : nil)
+            : (model.receiver.walkFinished(regionId: selected, cameras: false)
+                ? liveChannels.filter { $0.mediaType == kind }.count : nil)
+        return count.map { "\(title) \($0)" } ?? "\(title) \u{2026}"
     }
 
     @ViewBuilder
     private var list: some View {
         if let listError {
             problem(listError) { Task { await loadRegion(force: true) } }
-        } else if loading || loadedRegion != selected {
+        } else if (loading || loadedRegion != selected) && shown.isEmpty {
             TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity, minHeight: 120)
         } else if shown.isEmpty {
             Text(filter.isEmpty ? "No \(ReceiverRules.mediumLabel(medium).lowercased()) here right now." : "Nothing here matches.")
@@ -534,17 +547,22 @@ private struct CamerasSection: View {
         VStack(alignment: .leading, spacing: 20) {
             if let index = model.receiver.index {
                 let regions = CameraRegions.ordered(index)
-                Text("\(CameraRegions.total(index).formatted()) cameras in \(regions.count) regions").kjSmall(faint: true)
+                Text(model.receiver.camerasNow.map { "\($0.formatted()) cameras in \(regions.count) regions" } ?? "\u{2026}")
+                    .kjSmall(faint: true)
                     .accessibilityIdentifier("camerasTotal")
                 ForEach(regions) { region in
                     VStack(alignment: .leading, spacing: 8) {
                         HouseRule()
                         Text(region.label).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
                             .accessibilityAddTraits(.isHeader)
-                        if let list = lists[region.id], list.isEmpty {
+                        let live = model.receiver.shown(regionId: region.id, cameras: true)
+                        if model.receiver.walkFinished(regionId: region.id, cameras: true) && live.isEmpty {
                             Text("No cameras here right now.").kjSmall(faint: true)
-                        } else if let list = lists[region.id] {
-                            let live = list.filter { model.receiver.lists($0) }
+                        } else if live.isEmpty && !failed.contains(region.id) {
+                            Text("\u{2026}").kjSmall(faint: true)
+                        } else if failed.contains(region.id) && live.isEmpty {
+                            Text("These cameras did not load.").kjSmall(faint: true)
+                        } else if !live.isEmpty {
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(live) { channel in
                                     Button { model.tuner.play(channel, in: live) } label: {
@@ -573,6 +591,7 @@ private struct CamerasSection: View {
         do {
             lists[region] = try await model.receiver.channels(regionId: region, cameras: true)
         } catch {
+            if Task.isCancelled { return }
             failed.insert(region)
         }
     }

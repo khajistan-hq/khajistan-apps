@@ -364,8 +364,8 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     let health = try decode(Health.self, """
     {"generatedAt":"\(stamp(now))","results":[
      {"channelId":"good","status":"online","deliveryRatio":1},
-     {"channelId":"publication-absent","status":"online"},
-     {"channelId":"disabled-absent","status":"online"},
+     {"channelId":"publication-absent","status":"online","deliveryRatio":1},
+     {"channelId":"disabled-absent","status":"online","deliveryRatio":1},
      {"channelId":"degraded","status":"degraded","deliveryRatio":0.9},
      {"channelId":"degraded-tv","status":"degraded","deliveryRatio":0.9},
      {"channelId":"degraded-camera","status":"degraded","deliveryRatio":0.9},
@@ -389,8 +389,10 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     let controls = Controls(denylist: denylist, offAir: offAir, health: health, now: now)
     try expect(controls.healthLoaded && controls.healthFresh)
     try expectEqual(controls.denied, ["denied", "off-air"])
-    let kept = ReceiverRules.eligible(channels, controls: controls).map(\.id)
-    try expectEqual(Set(kept), ["good", "publication-absent", "disabled-absent", "ratio-at-bar", "ratio-null",
+    let everyID = Set(channels.map(\.id))
+    try expectEqual(ReceiverRules.eligible(channels, controls: controls).count, 0, "a fresh grade is not enough")
+    let kept = ReceiverRules.eligible(channels, controls: controls, verified: everyID).map(\.id)
+    try expectEqual(Set(kept), ["good", "publication-absent", "disabled-absent", "ratio-at-bar",
                                 "health-feed-outranks-channel", "degraded", "degraded-tv"])
     // A missing health row is not filled in from the shard, and a degraded camera stays off.
     try expect(!kept.contains("missing-grade") && !kept.contains("degraded-camera"))
@@ -401,16 +403,20 @@ func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     let onTheHour = Controls(denylist: denylist, offAir: offAir, health: health,
                              now: now.addingTimeInterval(ReceiverRules.healthMaxAge))
     try expect(onTheHour.healthFresh)
-    try expectEqual(ReceiverRules.eligible(channels, controls: onTheHour).count, kept.count)
+    try expectEqual(ReceiverRules.eligible(channels, controls: onTheHour, verified: everyID).count, kept.count)
     let stale = Controls(denylist: denylist, offAir: offAir, health: health,
                          now: now.addingTimeInterval(ReceiverRules.healthMaxAge + 1))
     try expect(!stale.healthFresh)
-    try expectEqual(ReceiverRules.eligible(channels, controls: stale).count, 0)
-    // A stale grade shows a row only after this session has verified it, and still never a bad grade.
-    let probed = ReceiverRules.eligible(channels, controls: stale,
-                                        verified: ["good", "degraded", "degraded-camera", "intermittent", "offline-by-feed",
-                                                   "missing-grade", "blocked-vantage", "vantage-case", "future-status"])
-    try expectEqual(Set(probed.map(\.id)), ["good", "degraded"])
+    try expectEqual(ReceiverRules.eligible(channels, controls: stale, verified: everyID).count, 0,
+                    "a loaded file that has aged out withdraws every row")
+    // Five minutes ahead of the device is still fresh. One second further is not.
+    let fiveAhead = Controls(denylist: denylist, offAir: offAir, health: health,
+                             now: now.addingTimeInterval(-ReceiverRules.healthFutureSkew))
+    try expect(fiveAhead.healthFresh)
+    let tooFarAhead = Controls(denylist: denylist, offAir: offAir, health: health,
+                               now: now.addingTimeInterval(-(ReceiverRules.healthFutureSkew + 1)))
+    try expect(!tooFarAhead.healthFresh)
+    try expectEqual(ReceiverRules.eligible(channels, controls: tooFarAhead, verified: everyID).count, 0)
     // No health file: nothing is shown until a probe verifies it. The shard grade still refuses
     // unknown, intermittent, missing, offline, blocked, blocked_vantage, any other status, and a degraded camera.
     try expectEqual(ReceiverRules.eligible(channels, controls: .empty).count, 0)
@@ -469,12 +475,31 @@ func nextLiveStopsWhenTheScopeIsExhausted() throws {
     try expectEqual(ReceiverRules.nextLive(after: "a", in: [a], excluding: []), nil)
 }
 
+func failureSkipStaysWithTheTuneThatFailed() throws {
+    try expect(ReceiverRules.mayActOnFailure(failedID: "a", tuneRevision: 3, currentRevision: 3, showingID: "a"))
+    try expect(!ReceiverRules.mayActOnFailure(failedID: "a", tuneRevision: 3, currentRevision: 4, showingID: "a"),
+               "the viewer moved on")
+    try expect(!ReceiverRules.mayActOnFailure(failedID: "a", tuneRevision: 3, currentRevision: 3, showingID: "b"),
+               "a different row is showing")
+}
+
 func playlistCheckAndHealthStamp() throws {
-    try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\n".utf8)))
-    try expect(ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n".utf8)))
-    try expect(ReceiverRules.playlistIsLive(Data("\u{FEFF}#EXTM3U".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("\n  #EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nprog.m3u8\n".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("\u{FEFF}#EXTM3U\n#EXTINF:2,\n".utf8)))
+    try expect(ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXTINF:1,\nseg.ts\n#EXT-X-ENDLIST\n".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n".utf8)))
+    try expect(!ReceiverRules.playlistIsLive(Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8)))
     try expect(!ReceiverRules.playlistIsLive(Data("not a playlist".utf8)))
     try expect(!ReceiverRules.playlistIsLive(Data()))
+    try expect(!ReceiverRules.responseIsLive(status: 403, contentType: "audio/mpeg", body: Data("x".utf8), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "text/html", body: Data("<html>".utf8), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/json", body: Data("{}".utf8), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data("<!DOCTYPE html>".utf8), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: nil, body: Data("abc".utf8), hls: false))
+    try expect(ReceiverRules.responseIsLive(status: 200, contentType: "audio/mpeg", body: Data([0xff, 0xfb]), hls: false))
+    try expect(!ReceiverRules.responseIsLive(status: 200, contentType: "application/vnd.apple.mpegurl",
+                                             body: Data("#EXTM3U\n#EXT-X-ENDLIST\n".utf8), hls: true))
     let plain = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49Z"))
     let fraction = try require(ReceiverRules.parseStamp("2026-10-23T21:28:49.120Z"))
     try expect(fraction.timeIntervalSince(plain) > 0 && fraction.timeIntervalSince(plain) < 1)
@@ -1307,7 +1332,9 @@ func realShardsAndWithdrawalFeedsDecode() throws {
     try expect(controls.health.count > 1000, "only \(controls.health.count) health results")
 
     for shard in [indus, cameras] {
-        let eligible = ReceiverRules.eligible(shard.channels, controls: controls)
+        let everyID = Set(shard.channels.map(\.id))
+        try expectEqual(ReceiverRules.eligible(shard.channels, controls: controls).count, 0, "\(shard.region): grade alone")
+        let eligible = ReceiverRules.eligible(shard.channels, controls: controls, verified: everyID)
         try expect(!eligible.isEmpty, "\(shard.region): nothing eligible on a fresh grade")
         try expect(eligible.count <= shard.channels.count)
         try expectEqual(Set(eligible.map(\.id)).count, eligible.count)
@@ -1321,21 +1348,18 @@ func realShardsAndWithdrawalFeedsDecode() throws {
         })
         let stale = Controls(denylist: denylist, offAir: offAir, health: health,
                              now: stamp.addingTimeInterval(ReceiverRules.healthMaxAge + 1))
-        try expectEqual(ReceiverRules.eligible(shard.channels, controls: stale).count, 0, shard.region)
-        if let sample = eligible.first {
-            let back = ReceiverRules.eligible(shard.channels, controls: stale, verified: [sample.id])
-            try expectEqual(back.map(\.id), [sample.id], shard.region)
-        }
+        try expectEqual(ReceiverRules.eligible(shard.channels, controls: stale, verified: everyID).count, 0, shard.region)
         // The withdrawn are exactly the channels a rule names: recount them by a separate route.
         let dropped = Set(shard.channels.map(\.id)).subtracting(eligible.map(\.id))
         for channel in shard.channels where dropped.contains(channel.id) {
             let check = controls.health[channel.id]
-            let status = check?.status?.lowercased()
+            let status = check?.status.lowercased()
             let medium = channel.mediaType.lowercased()
             let gradeOK = status == "online" || (status == "degraded" && (medium == "tv" || medium == "radio"))
+            let ratioFails = check != nil && (check?.deliveryRatio ?? -1) < 0.5
             let reason = controls.denied.contains(channel.id) || channel.manualDisabled == true
                 || (channel.publicationStatus ?? "published") != "published"
-                || !gradeOK || (check?.deliveryRatio ?? 1) < 0.5
+                || !gradeOK || ratioFails
                 || channel.activeStream == nil
             try expect(reason, "\(channel.id) was dropped for no reason")
         }
@@ -2334,6 +2358,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Next live signal stops when the scope is exhausted", nextLiveStopsWhenTheScopeIsExhausted),
+    ("A failed tune does not take the viewer's later channel", failureSkipStaysWithTheTuneThatFailed),
     ("Playlist check and health stamp", playlistCheckAndHealthStamp),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

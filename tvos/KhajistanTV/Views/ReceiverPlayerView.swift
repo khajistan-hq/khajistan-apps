@@ -41,6 +41,8 @@ struct ReceiverPlayerView: View {
     @State private var guideRow: Int?
     /// Rows in this visit that failed to play. The skip does not return to them, and the guide hides them.
     @State private var failedIDs: Set<String> = []
+    /// The tune in flight, so a failure withdraws that id only while its ticket is still current.
+    @State private var tuneStamp: (id: String, ticket: Int)?
     private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
@@ -178,7 +180,7 @@ struct ReceiverPlayerView: View {
         }
         .onChange(of: controller.state) { _, new in
             wake()
-            if case .failed = new { skipFailed() }
+            if case .failed = new, let tune = tuneStamp { skipFailed(id: tune.id, ticket: tune.ticket) }
         }
         .task {
             await open()
@@ -412,6 +414,7 @@ struct ReceiverPlayerView: View {
     private func tune(_ target: Channel, behind: Bool = false) {
         tuneTask?.cancel()
         let ticket = tuneIntent.begin()
+        tuneStamp = (id: target.id, ticket: ticket)
         let player = behind ? incoming : controller
         player.stop()
         player.holdsSound = behind
@@ -439,20 +442,22 @@ struct ReceiverPlayerView: View {
                 if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
                 player.state = .failed(PlayerController.unreachable)
-                if !behind { skipFailed() }
+                skipFailed(id: target.id, ticket: ticket)
             }
         }
     }
 
-    /// Any failed play moves to the next signal in this shelf. It stops when one plays or the
-    /// shelf has no row left that has not already failed.
-    private func skipFailed() {
-        guard case .failed = controller.state else { return }
-        let failed = destination ?? current
-        guard !failedIDs.contains(failed.id) else { return }
-        failedIDs.insert(failed.id)
-        model.receiver.withdraw(failed.id)
-        guard let next = ReceiverRules.nextLive(after: failed.id, in: list, excluding: failedIDs) else { return }
+    /// Moves on only for the tune that failed. A newer tune means the viewer has moved on:
+    /// that row is not withdrawn and the new tune is not cancelled.
+    private func skipFailed(id: String, ticket: Int) {
+        guard tuneIntent.admits(ticket) else { return }
+        let showing = destination?.id ?? current.id
+        guard showing == id else { return }
+        guard !failedIDs.contains(id) else { return }
+        failedIDs.insert(id)
+        model.receiver.withdraw(id)
+        guard let next = ReceiverRules.nextLive(after: id, in: list, excluding: failedIDs) else { return }
+        guard tuneIntent.admits(ticket) else { return }
         destination = next
         changeTask?.cancel()
         changeTask = Task { await change(to: next) }
@@ -525,7 +530,9 @@ struct ReceiverPlayerView: View {
                 let failed = next.state.isFailed
                 cut(to: target, from: outgoing, into: next, tookSince: started)
                 await quiet
-                if failed { skipFailed() }
+                if failed, let tune = tuneStamp, tune.id == target.id {
+                    skipFailed(id: tune.id, ticket: tune.ticket)
+                }
                 return
             default:
                 // Still tuning and the bird has gone: cut now. One press is one flight, never a

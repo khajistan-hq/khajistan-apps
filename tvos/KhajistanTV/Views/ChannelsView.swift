@@ -43,8 +43,9 @@ struct ChannelsView: View {
     /// The media this region carries, in shelf order. A medium with nothing in it has no shelf.
     private var media: [String] {
         var found: [String] = []
-        if channels.contains(where: { $0.mediaType == "tv" && model.receiver.lists($0) }) { found.append("tv") }
-        if channels.contains(where: { $0.mediaType == "radio" && model.receiver.lists($0) }) { found.append("radio") }
+        let live = model.receiver.shown(regionId: region.id, cameras: false)
+        if live.contains(where: { $0.mediaType == "tv" }) { found.append("tv") }
+        if live.contains(where: { $0.mediaType == "radio" }) { found.append("radio") }
         if hasCameras && !(camerasLoaded && cameraError == nil && !cameraChannels.contains(where: { model.receiver.lists($0) })) {
             found.append("camera")
         }
@@ -68,6 +69,10 @@ struct ChannelsView: View {
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
+        .onDisappear {
+            model.receiver.cancelChannels(regionId: region.id, cameras: false)
+            model.receiver.cancelChannels(regionId: region.id, cameras: true)
+        }
         .task { await model.saves.load() }
         .task { await model.films.load() }
         .fullScreenCover(item: $playing) { choice in
@@ -107,7 +112,10 @@ struct ChannelsView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
             }
-        } else if !mainLoaded || (camerasFirst && hasCameras && !camerasLoaded && cameraError == nil) {
+        } else if !model.receiver.walkFinished(regionId: region.id, cameras: false)
+                    && model.receiver.shown(regionId: region.id, cameras: false).isEmpty
+                    || (camerasFirst && hasCameras && !camerasLoaded && cameraError == nil
+                        && model.receiver.shown(regionId: region.id, cameras: true).isEmpty) {
             TuningLoader("Loading\u{2026}")
                 .frame(maxWidth: .infinity)
                 .padding(.top, 40)
@@ -131,7 +139,7 @@ struct ChannelsView: View {
         case "camera":
             cameraShelf
         default:
-            let list = channels.filter { $0.mediaType == kind && model.receiver.lists($0) }
+            let list = model.receiver.shown(regionId: region.id, cameras: false).filter { $0.mediaType == kind }
             channelShelf(kind, list)
         }
     }
@@ -156,11 +164,10 @@ struct ChannelsView: View {
     /// place with the index's own count.
     @ViewBuilder
     private var cameraShelf: some View {
-        if camerasLoaded {
-            channelShelf("camera", cameraChannels.filter { model.receiver.lists($0) })
+        if camerasLoaded || model.receiver.walkFinished(regionId: region.id, cameras: true) {
+            channelShelf("camera", model.receiver.shown(regionId: region.id, cameras: true))
         } else {
-            let count = model.receiver.index?.regionCounts[region.id]?.byMedium["camera"]
-            Shelf(ReceiverRules.mediumLabel("camera"), count: count.map { "\($0)" }) {
+            Shelf(ReceiverRules.mediumLabel("camera"), count: "\u{2026}") {
                 if let cameraError {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(cameraError).kjBody().lineLimit(2)

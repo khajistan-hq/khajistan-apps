@@ -56,6 +56,8 @@ final class ReceiverProbe: @unchecked Sendable {
     }
 
     private var cache: [String: Entry] = [:]
+    /// Each remember or forget takes the next number under the lock, so a later call wins.
+    private var generation: [String: Int] = [:]
     private let lock = NSLock()
     private let slots = Slots(cap: ReceiverProbe.cap)
     private let session: URLSession
@@ -73,29 +75,46 @@ final class ReceiverProbe: @unchecked Sendable {
         }
     }
 
+    /// Applied immediately, in the order callers await them. The generation ignores a write
+    /// that was overtaken: the store awaits these one after another.
     func remember(_ id: String, live: Bool, now: Date = Date()) {
-        lock.lock()
-        cache[id] = Entry(live: live, at: now)
-        lock.unlock()
+        write(id, live: live, now: now)
     }
 
     func forget(_ id: String) {
+        write(id, live: nil, now: Date())
+    }
+
+    private func write(_ id: String, live: Bool?, now: Date) {
         lock.lock()
-        cache[id] = nil
+        let next = (generation[id] ?? 0) + 1
+        generation[id] = next
+        if let live {
+            cache[id] = Entry(live: live, at: now)
+        } else {
+            cache[id] = nil
+        }
         lock.unlock()
     }
 
-    /// Probes `channels` and returns the ids that are live, including ones still inside the memory.
-    func verify(_ channels: [Channel]) async -> Set<String> {
+    /// Probes `channels`. `found` runs as soon as one row passes, not after the whole list.
+    func verify(_ channels: [Channel], found: @escaping @Sendable (String) -> Void = { _ in }) async -> Set<String> {
         let pending = channels.filter { cached($0.id) == nil }
         let session = self.session
         await withTaskGroup(of: Void.self) { group in
             for channel in pending {
+                if Task.isCancelled { break }
                 await slots.acquire()
+                if Task.isCancelled {
+                    slots.release()
+                    break
+                }
                 group.addTask { [slots] in
                     defer { slots.release() }
+                    if Task.isCancelled { return }
                     let live = await ReceiverProbe.sample(channel, session: session)
                     self.remember(channel.id, live: live)
+                    if live { found(channel.id) }
                 }
             }
             await group.waitForAll()
@@ -137,22 +156,18 @@ final class ReceiverProbe: @unchecked Sendable {
         do {
             let (bytes, response) = try await session.bytes(for: request)
             defer { bytes.task.cancel() }
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return false }
-            let type = (http.mimeType ?? http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+            guard let http = response as? HTTPURLResponse else { return false }
+            if http.statusCode == 403 { return false }
+            let type = http.mimeType ?? http.value(forHTTPHeaderField: "Content-Type")
             let playlist = hls || url.path.lowercased().contains(".m3u8")
-                || type.contains("mpegurl") || type.contains("m3u8")
+                || (type ?? "").lowercased().contains("mpegurl") || (type ?? "").lowercased().contains("m3u8")
             var data = Data()
-            let limit = playlist ? 512 : 64
+            let limit = playlist ? 8192 : 256
             for try await byte in bytes {
                 data.append(byte)
-                if playlist {
-                    if data.count >= 7 && ReceiverRules.playlistIsLive(data) { return true }
-                    if data.count >= limit { return ReceiverRules.playlistIsLive(data) }
-                } else if !data.isEmpty {
-                    return true
-                }
+                if data.count >= limit { break }
             }
-            return playlist ? ReceiverRules.playlistIsLive(data) : !data.isEmpty
+            return ReceiverRules.responseIsLive(status: http.statusCode, contentType: type, body: data, hls: playlist)
         } catch {
             return false
         }

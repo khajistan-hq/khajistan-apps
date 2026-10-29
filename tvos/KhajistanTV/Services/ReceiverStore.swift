@@ -31,21 +31,31 @@ final class ReceiverStore {
     private(set) var coreShapes: RegionShapes?
     var isLoading = false
 
-    /// How many channels the dial is actually offering. Nil until that count has been made.
-    /// The index's own live total is not this number.
+    /// Verified counts, written once when a region's probe walk finishes. Nil until then.
     private(set) var liveNow: Int?
+    private(set) var televisionNow: Int?
+    private(set) var radioNow: Int?
+    private(set) var camerasNow: Int?
+    /// Bumped when rows appear, when one is withdrawn, or when the health clock moves.
+    private(set) var dialGeneration = 0
 
     @ObservationIgnored private var extendedShapes: RegionShapes?
-    @ObservationIgnored private var controls = Controls.empty
+    @ObservationIgnored private var denylistFile: Denylist?
+    @ObservationIgnored private var offAirFile: OffAir?
+    @ObservationIgnored private var healthFile: Health?
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
     @ObservationIgnored private var channelLoads: [String: Task<[Channel], Error>] = [:]
-    @ObservationIgnored private var liveNowTask: Task<Void, Never>?
     /// Ids the probe has verified and that have not since failed.
     @ObservationIgnored private var verified: Set<String> = []
     /// Ids that failed in this session. A liked or saved row with one of these ids is not shown.
     private(set) var withdrawn: Set<String> = []
+    @ObservationIgnored private var offerings: [String: [Channel]] = [:]
+    @ObservationIgnored private var walksFinished: Set<String> = []
+    @ObservationIgnored private var loadToken: [String: Int] = [:]
+    @ObservationIgnored private var probeChain: Task<Void, Never> = Task {}
+    @ObservationIgnored private var clockTask: Task<Void, Never>?
     @ObservationIgnored private let probe = ReceiverProbe()
     private let urlSession: URLSession
 
@@ -93,105 +103,203 @@ final class ReceiverStore {
         }
     }
 
-    /// The channels of one region that the receiver may offer. `cameras` picks the camera
-    /// shard instead of the television and radio one. A liked or saved channel is included
-    /// only when it passes the same rule as every other row.
+    /// Rows of one region revealed so far. Each successful probe adds a row; nothing is shown before that.
+    func shown(regionId: String, cameras: Bool) -> [Channel] {
+        _ = dialGeneration
+        let key = cameras ? regionId + "-camera" : regionId
+        return (offerings[key] ?? []).filter { lists($0) }
+    }
+
+    /// True once that shard's probe walk has finished, including a walk that found nothing.
+    func walkFinished(regionId: String, cameras: Bool) -> Bool {
+        _ = dialGeneration
+        return walksFinished.contains(cameras ? regionId + "-camera" : regionId)
+    }
+
+    /// The channels of one region the receiver may offer, after probing them. `cameras` picks the
+    /// camera shard. Rows appear on `shown` as each probe succeeds. Cancelling the caller stops the walk.
     func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
         let key = cameras ? regionId + "-camera" : regionId
         if let existing = channelLoads[key] { return try await existing.value }
-        let task = Task { try await self.loadChannels(regionId: regionId, cameras: cameras, key: key) }
+        let token = (loadToken[key] ?? 0) + 1
+        loadToken[key] = token
+        let task = Task { try await self.loadChannels(regionId: regionId, cameras: cameras, key: key, token: token) }
         channelLoads[key] = task
-        defer { channelLoads[key] = nil }
-        return try await task.value
+        defer { if channelLoads[key] == task { channelLoads[key] = nil } }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
-    /// True when this channel may be shown, including a liked or saved one. A withdrawn id is not shown.
+    /// Stops a walk the view no longer needs. Rows already verified stay verified.
+    func cancelChannels(regionId: String, cameras: Bool) {
+        let key = cameras ? regionId + "-camera" : regionId
+        loadToken[key] = (loadToken[key] ?? 0) + 1
+        channelLoads[key]?.cancel()
+        channelLoads[key] = nil
+    }
+
+    /// Re-reads freshness on a timer so a grade that ages out leaves the screen without a refetch.
+    func watchHealthClock() {
+        guard clockTask == nil else { return }
+        clockTask = Task { await self.healthClock() }
+    }
+
+    /// True when this channel may be shown, including a liked or saved one.
     func lists(_ channel: Channel) -> Bool {
+        _ = dialGeneration
         guard !withdrawn.contains(channel.id) else { return false }
-        return ReceiverRules.eligible([channel], controls: controls, verified: verified).first != nil
+        return ReceiverRules.eligible([channel], controls: controls(), verified: verified).first != nil
     }
 
-    /// The channel failed to play. It leaves the dial for this session, saved or liked or not.
+    /// The channel failed to play. It leaves the dial until a later probe succeeds.
     func withdraw(_ id: String) {
         withdrawn.insert(id)
         verified.remove(id)
-        Task { await probe.remember(id, live: false) }
+        offerings = offerings.mapValues { $0.filter { $0.id != id } }
+        dialGeneration += 1
+        enqueueProbe { await self.probe.remember(id, live: false) }
     }
 
-    /// A person asked for this channel again after it failed. The next check starts clean.
+    /// Clears the failure so a new probe may run. Does not mark the row verified.
     func restore(_ id: String) {
         withdrawn.remove(id)
-        // The person asked again. The grade still has to allow it; this only clears the failure.
-        verified.insert(id)
-        Task { await probe.forget(id) }
+        verified.remove(id)
+        enqueueProbe { await self.probe.forget(id) }
     }
 
-    /// Counts the dial from the filtered lists, not from the index total. While health is stale
-    /// the count rises as probes finish. It shares the probe's cap with any list on screen.
-    func loadLiveNow() async {
-        await loadIndex()
-        if let liveNowTask {
-            await liveNowTask.value
-            return
-        }
-        let task = Task { await self.countLive() }
-        liveNowTask = task
-        await task.value
-        liveNowTask = nil
-    }
-
-    private func countLive() async {
-        guard let index else { return }
-        var total = 0
-        var any = false
-        for region in index.listedRegions {
-            if Task.isCancelled { return }
-            if let list = try? await channels(regionId: region.id, cameras: false) {
-                any = true
-                total += list.count
-            }
-            if index.cameraURL(regionId: region.id) != nil,
-               let cameras = try? await channels(regionId: region.id, cameras: true) {
-                any = true
-                total += cameras.count
-            }
-            if any { liveNow = total }
-        }
-    }
-
-    private func loadChannels(regionId: String, cameras: Bool, key: String) async throws -> [Channel] {
-        guard let index else { throw ReceiverStoreError.indexNotLoaded }
-        let raw: [Channel]
-        if let cached = shards[key] {
-            raw = cached
-        } else {
-            guard let url = cameras ? index.cameraURL(regionId: regionId) : index.shardURL(regionId: regionId) else {
-                return []
-            }
-            let (data, response) = try await urlSession.data(from: url)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard code == 200 else { throw ReceiverStoreError.http(code) }
-            let shard: RegionShard
-            do {
-                shard = try await Task.detached(priority: .userInitiated) {
-                    try JSONDecoder().decode(RegionShard.self, from: data)
-                }.value
-            } catch {
-                throw ReceiverStoreError.unreadable
-            }
-            raw = shard.channels
-            shards[key] = raw
-        }
+    /// Probes one channel the viewer asked for again. True only when that probe says it is live.
+    func confirm(_ channel: Channel) async -> Bool {
         await refreshControlsIfStale()
-        if !controls.healthFresh {
-            let candidates = ReceiverRules.probeCandidates(raw, controls: controls)
-            let live = await probe.verify(candidates)
-            let ids = Set(candidates.map(\.id))
-            verified.subtract(ids)
-            verified.formUnion(live)
+        restore(channel.id)
+        guard ReceiverRules.probeCandidates([channel], controls: controls()).first != nil else { return false }
+        let live = await probe.verify([channel])
+        guard !Task.isCancelled, live.contains(channel.id), !withdrawn.contains(channel.id) else { return false }
+        verified.insert(channel.id)
+        dialGeneration += 1
+        return lists(channel)
+    }
+
+    /// Verified rows of `medium` already on the dial for this region. Does not start a probe.
+    func verifiedChannels(regionId: String, medium: String) -> [Channel] {
+        shown(regionId: regionId, cameras: medium == "camera").filter { $0.mediaType == medium }
+    }
+
+    private func controls(now: Date = Date()) -> Controls {
+        Controls(denylist: denylistFile, offAir: offAirFile, health: healthFile, now: now)
+    }
+
+    private func enqueueProbe(_ work: @escaping @Sendable () async -> Void) {
+        let previous = probeChain
+        probeChain = Task {
+            await previous.value
+            await work()
         }
-        return ReceiverRules.eligible(raw, controls: controls, verified: verified)
-            .filter { !withdrawn.contains($0.id) }
+    }
+
+    private func healthClock() async {
+        var previous = controls().healthFresh
+        while !Task.isCancelled {
+            let fresh = controls().healthFresh
+            if fresh != previous {
+                previous = fresh
+                dialGeneration += 1
+            }
+            let wait = freshnessWait()
+            try? await Task.sleep(for: .seconds(wait))
+        }
+    }
+
+    private func freshnessWait() -> Double {
+        guard let stamp = healthFile?.generatedAtDate else { return 30 }
+        let remain = stamp.addingTimeInterval(ReceiverRules.healthMaxAge).timeIntervalSinceNow
+        if remain <= 0 { return 30 }
+        return min(max(remain + 0.5, 1), 30)
+    }
+
+    private func loadChannels(regionId: String, cameras: Bool, key: String, token: Int) async throws -> [Channel] {
+        guard let index else { throw ReceiverStoreError.indexNotLoaded }
+        let raw = try await rawChannels(regionId: regionId, cameras: cameras, key: key, index: index)
+        try Task.checkCancellation()
+        guard loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+        await refreshControlsIfStale()
+        offerings[key] = offerings[key] ?? []
+        dialGeneration += 1
+        let folded = controls()
+        let candidates = ReceiverRules.probeCandidates(raw, controls: folded)
+        if folded.healthLoaded && !folded.healthFresh {
+            walksFinished.insert(key)
+            publishCounts()
+            dialGeneration += 1
+            return []
+        }
+        await probe.verify(candidates) { [weak self] id in
+            Task { @MainActor in
+                self?.reveal(id, key: key, token: token, raw: raw)
+            }
+        }
+        guard loadToken[key] == token else { return shown(regionId: regionId, cameras: cameras) }
+        walksFinished.insert(key)
+        publishCounts()
+        dialGeneration += 1
+        return shown(regionId: regionId, cameras: cameras)
+    }
+
+    private func reveal(_ id: String, key: String, token: Int, raw: [Channel]) {
+        guard loadToken[key] == token, !withdrawn.contains(id) else { return }
+        guard let channel = raw.first(where: { $0.id == id }) else { return }
+        verified.insert(id)
+        guard lists(channel) else { return }
+        var rows = offerings[key] ?? []
+        guard !rows.contains(where: { $0.id == id }) else { return }
+        rows.append(channel)
+        rows.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        offerings[key] = rows
+        dialGeneration += 1
+    }
+
+    /// Writes the verified totals once, after a walk finishes. It does not probe other regions.
+    private func publishCounts() {
+        var television = 0, radio = 0, cameras = 0
+        var any = false
+        for (key, rows) in offerings where walksFinished.contains(key) {
+            any = true
+            for row in rows where !withdrawn.contains(row.id) && lists(row) {
+                switch row.mediaType {
+                case "tv": television += 1
+                case "radio": radio += 1
+                case "camera": cameras += 1
+                default: break
+                }
+            }
+        }
+        guard any else { return }
+        televisionNow = television
+        radioNow = radio
+        camerasNow = cameras
+        liveNow = television + radio + cameras
+    }
+
+    private func rawChannels(regionId: String, cameras: Bool, key: String, index: ReceiverIndex) async throws -> [Channel] {
+        if let cached = shards[key] { return cached }
+        guard let url = cameras ? index.cameraURL(regionId: regionId) : index.shardURL(regionId: regionId) else {
+            return []
+        }
+        let (data, response) = try await urlSession.data(from: url)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else { throw ReceiverStoreError.http(code) }
+        let shard: RegionShard
+        do {
+            shard = try await Task.detached(priority: .userInitiated) {
+                try JSONDecoder().decode(RegionShard.self, from: data)
+            }.value
+        } catch {
+            throw ReceiverStoreError.unreadable
+        }
+        shards[key] = shard.channels
+        return shard.channels
     }
 
     /// The shape files the map is drawn from. The extended file comes only when asked for. Both are
@@ -268,8 +376,11 @@ final class ReceiverStore {
         async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
         let (denied, suspects, graded) = await (denylist, offAir, health)
-        controls = Controls(denylist: denied, offAir: suspects, health: graded)
+        denylistFile = denied
+        offAirFile = suspects
+        healthFile = graded
         if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
+        dialGeneration += 1
     }
 
     private nonisolated static func fetchOptional<T: Decodable & Sendable>(

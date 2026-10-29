@@ -163,7 +163,7 @@ struct Controls: Sendable {
                                  uniquingKeysWith: { _, latest in latest })
         healthLoaded = health != nil
         if let stamp = health?.generatedAtDate {
-            healthFresh = now.timeIntervalSince(stamp) <= ReceiverRules.healthMaxAge
+            healthFresh = ReceiverRules.healthIsFresh(generatedAt: stamp, now: now)
         } else {
             healthFresh = false
         }
@@ -187,8 +187,21 @@ enum ReceiverRules {
     /// MIN_DELIVERY_RATIO).
     private static let minimumDeliveryRatio = 0.5
 
-    /// A grade older than this is not a reason to show a row. The probe has to verify it.
+    /// A grade older than this is not fresh. The clock is read again while the dial is up.
     static let healthMaxAge: TimeInterval = 2 * 60 * 60
+    /// A stamp this far ahead of the device is still accepted. Further ahead is not fresh.
+    static let healthFutureSkew: TimeInterval = 5 * 60
+
+    /// Fresh only when the stamp is not more than five minutes ahead and not more than two hours behind.
+    static func healthIsFresh(generatedAt stamp: Date, now: Date) -> Bool {
+        stamp.timeIntervalSince(now) <= healthFutureSkew && now.timeIntervalSince(stamp) <= healthMaxAge
+    }
+
+    /// A failed play may withdraw and skip only while that tune is still the one on screen.
+    /// A newer tune means the viewer has moved on: do neither.
+    static func mayActOnFailure(failedID: String, tuneRevision: Int, currentRevision: Int, showingID: String) -> Bool {
+        tuneRevision == currentRevision && showingID == failedID
+    }
 
     /// Channels the receiver may offer, sorted by name.
     ///
@@ -199,16 +212,19 @@ enum ReceiverRules {
     /// a degraded camera is not either. Any other status string is not playable either: a grade
     /// this build does not know stays off the dial. The health feed's grade outranks the
     /// channel's own `healthStatus` once
-    /// `health.json` has loaded. That grade is used only while `generatedAt` is no older than
-    /// two hours. When the file is stale or did not load, a row is kept only if `verified`
-    /// contains its id (a probe in this session). A repeated id is kept once, at its first
+    /// `health.json` has loaded. That grade counts only while `generatedAt` is no more than
+    /// five minutes ahead and no more than two hours behind. A loaded file that is not fresh
+    /// withdraws every row. When the file did not load, a row is kept only if this session's
+    /// probe verified it and the shard grade is allowed. A fresh grade is not enough on its
+    /// own: `verified` must contain the id. A repeated id is kept once, at its first
     /// eligible occurrence.
     static func eligible(_ channels: [Channel], controls: Controls, verified: Set<String> = []) -> [Channel] {
         var seen = Set<String>()
         var kept: [Channel] = []
         for channel in channels {
             guard held(channel, controls: controls) else { continue }
-            if !controls.healthFresh && !verified.contains(channel.id) { continue }
+            if controls.healthLoaded && !controls.healthFresh { continue }
+            if !verified.contains(channel.id) { continue }
             if !seen.insert(channel.id).inserted { continue }
             kept.append(channel)
         }
@@ -235,13 +251,43 @@ enum ReceiverRules {
         return nil
     }
 
-    /// An HLS playlist is live only when it announces itself. Leading space and a BOM are ignored.
+    /// An HLS playlist is live when it has a segment or a variant stream.
+    /// A header alone is not enough. `#EXT-X-ENDLIST` with neither is a finished empty file.
     static func playlistIsLive(_ data: Data) -> Bool {
-        guard let text = String(data: data.prefix(512), encoding: .utf8)
-                ?? String(data: data.prefix(512), encoding: .isoLatin1) else { return false }
+        guard let text = String(data: data.prefix(8192), encoding: .utf8)
+                ?? String(data: data.prefix(8192), encoding: .isoLatin1) else { return false }
         let cleaned = text.replacingOccurrences(of: "\u{FEFF}", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.hasPrefix("#EXTM3U")
+        guard cleaned.hasPrefix("#EXTM3U") else { return false }
+        let segment = cleaned.contains("#EXTINF") || cleaned.contains("#EXT-X-BYTERANGE") || cleaned.contains("#EXT-X-MAP")
+        let variant = cleaned.contains("#EXT-X-STREAM-INF")
+        if cleaned.contains("#EXT-X-ENDLIST"), !segment, !variant { return false }
+        return segment || variant
+    }
+
+    /// What a probe may treat as a live body. 403 is refused. HLS must be a real playlist.
+    /// Anything else needs a media content type, and an HTML or JSON body is not a stream.
+    static func responseIsLive(status: Int, contentType: String?, body: Data, hls: Bool) -> Bool {
+        if status == 403 || !(200..<300).contains(status) { return false }
+        if hls { return playlistIsLive(body) }
+        let type = (contentType ?? "").lowercased()
+        if type.contains("text/html") || type.contains("application/json") || type.contains("text/json") { return false }
+        if markupOrJSON(body) { return false }
+        guard mediaContentType(type), !body.isEmpty else { return false }
+        return true
+    }
+
+    private static func mediaContentType(_ type: String) -> Bool {
+        if type.hasPrefix("audio/") || type.hasPrefix("video/") { return true }
+        return type.contains("application/ogg") || type.contains("application/octet-stream")
+            || type.contains("application/flac")
+    }
+
+    private static func markupOrJSON(_ data: Data) -> Bool {
+        guard let text = String(data: data.prefix(64), encoding: .utf8)
+                ?? String(data: data.prefix(64), encoding: .isoLatin1) else { return false }
+        let start = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return start.hasPrefix("<") || start.hasPrefix("{") || start.hasPrefix("[")
     }
 
     /// `health.json`'s `generatedAt`, internet date time, with or without fractional seconds.
@@ -259,7 +305,10 @@ enum ReceiverRules {
         if channel.manualDisabled == true { return false }
         if controls.denied.contains(channel.id) { return false }
         let check = controls.health[channel.id]
-        if (check?.deliveryRatio ?? 1) < minimumDeliveryRatio { return false }
+        if let check {
+            // Once a health row exists, a missing delivery ratio is not a pass.
+            guard let ratio = check.deliveryRatio, ratio >= minimumDeliveryRatio else { return false }
+        }
         if channel.activeStream == nil { return false }
         return gradeAllows(channel, controls: controls)
     }
@@ -319,6 +368,20 @@ enum ReceiverRules {
 
     /// Tiers shown before the viewer switches on the extensions.
     static let tiersOnByDefault: Set<String> = ["heartbeat", "core"]
+
+    /// "12 television · 4 radio · 3 cameras", zeros left out. A nil camera count means that
+    /// shard has not finished, so cameras are left out of this line.
+    static func verifiedMediumLine(tv: Int, radio: Int, camera: Int?) -> String {
+        let media: [(count: Int?, one: String, many: String)] = [
+            (tv, "television", "television"),
+            (radio, "radio", "radio"),
+            (camera, "camera", "cameras"),
+        ]
+        return media.compactMap { item -> String? in
+            guard let count = item.count, count > 0 else { return nil }
+            return "\(count) \(count == 1 ? item.one : item.many)"
+        }.joined(separator: " · ")
+    }
 
     static func mediumLabel(_ mediaType: String) -> String {
         switch mediaType.lowercased() {

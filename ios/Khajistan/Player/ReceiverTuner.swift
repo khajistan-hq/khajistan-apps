@@ -38,6 +38,8 @@ final class ReceiverTuner {
     @ObservationIgnored private var skipTask: Task<Void, Never>?
     /// Channels in the current scope that have already failed. The skip does not return to them.
     @ObservationIgnored private var failedInScope: Set<String> = []
+    /// The tune now in flight: its channel and the intent revision it started with.
+    @ObservationIgnored private var tuned: (id: String, revision: Int)?
     /// True while a channel opens or changes: those flows cover and uncover the picture themselves.
     @ObservationIgnored private var changing = false
     /// When the last change settled. A stream often stalls once just after it starts; covering
@@ -175,7 +177,12 @@ final class ReceiverTuner {
                 // Play on a failed signal tries that signal once more, then the skip moves on if it fails again.
                 if case .failed = controller.state {
                     failedInScope.remove(channel.id)
-                    receiver.restore(channel.id)
+                    let asked = intentRevision
+                    Task {
+                        guard await self.receiver.confirm(channel), asked == self.intentRevision else { return }
+                        self.tune(channel)
+                    }
+                    return
                 }
                 tune(channel)
             }
@@ -231,6 +238,16 @@ final class ReceiverTuner {
                 return
             }
         }
+        // The three draws were empty. A region in the same scope that already has a verified
+        // signal can still be surfed. This does not probe any further region.
+        guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
+        for region in index.listedRegions where scope.includes(tier: region.tier) {
+            let pool = receiver.verifiedChannels(regionId: region.id, medium: medium.rawValue)
+            if let channel = pool.randomElement() {
+                play(channel, in: pool)
+                return
+            }
+        }
         surfNote = "Nothing to surf there right now."
     }
 
@@ -256,8 +273,10 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
-        if case .failed = new, case .live(let channel) = source {
-            scheduleSkip(from: channel, ticket: intentRevision)
+        if case .failed = new, let tuned, case .live(let showing) = source,
+           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                         currentRevision: intentRevision, showingID: showing.id) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
         guard !changing, source != nil else { return }
         if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
@@ -309,40 +328,48 @@ final class ReceiverTuner {
         source = .live(target)
         captions.attach(target, player: controller)
         let ticket = intentRevision
+        tuned = (id: target.id, revision: ticket)
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
                 try Task.checkCancellation()
-                guard ticket == self.intentRevision else { return }
+                guard ReceiverRules.mayActOnFailure(failedID: target.id, tuneRevision: ticket,
+                                                    currentRevision: self.intentRevision, showingID: target.id) else { return }
                 controller.attach(url: url, seekTo: nil, title: target.name, subtitle: target.place.isEmpty ? nil : target.place)
             } catch {
-                if Task.isCancelled || ticket != self.intentRevision { return }
+                if Task.isCancelled { return }
+                guard case .live(let showing) = self.source,
+                      ReceiverRules.mayActOnFailure(failedID: target.id, tuneRevision: ticket,
+                                                    currentRevision: self.intentRevision, showingID: showing.id) else { return }
                 controller.state = .failed(error.localizedDescription)
-                self.scheduleSkip(from: target, ticket: ticket)
+                self.scheduleSkip(failedID: target.id, ticket: ticket)
             }
         }
     }
 
-    /// A failed play, deliberate or during surf, moves to the next verified signal in this list.
-    /// It stops when one plays or every other row in the list has failed.
-    private func scheduleSkip(from failed: Channel, ticket: Int) {
-        guard ticket == intentRevision else { return }
-        guard case .live(let current) = source, current.id == failed.id else { return }
+    /// A failed play moves to the next verified signal in this list, and only if this tune is
+    /// still the one showing. The viewer having moved on withdraws nothing and skips nothing.
+    private func scheduleSkip(failedID: String, ticket: Int) {
+        guard case .live(let current) = source else { return }
+        guard ReceiverRules.mayActOnFailure(failedID: failedID, tuneRevision: ticket,
+                                            currentRevision: intentRevision, showingID: current.id) else { return }
         guard case .failed = controller.state else { return }
-        guard !failedInScope.contains(failed.id) else { return }
-        failedInScope.insert(failed.id)
-        receiver.withdraw(failed.id)
-        guard let next = ReceiverRules.nextLive(after: failed.id, in: list, excluding: failedInScope) else {
+        guard !failedInScope.contains(failedID) else { return }
+        failedInScope.insert(failedID)
+        receiver.withdraw(failedID)
+        guard let next = ReceiverRules.nextLive(after: failedID, in: list, excluding: failedInScope) else {
             list.removeAll { failedInScope.contains($0.id) }
             return
         }
         list.removeAll { failedInScope.contains($0.id) }
         skipTask?.cancel()
-        skipTask = Task { await self.retune(next, ticket: ticket) }
+        skipTask = Task { await self.retune(next, failedID: failedID, ticket: ticket) }
     }
 
-    private func retune(_ channel: Channel, ticket: Int) async {
-        guard ticket == intentRevision, !Task.isCancelled else { return }
+    private func retune(_ channel: Channel, failedID: String, ticket: Int) async {
+        // The viewer stepped away while this skip was waiting. Leave their tune alone.
+        guard !Task.isCancelled, ticket == intentRevision else { return }
+        _ = failedID
         list.removeAll { failedInScope.contains($0.id) }
         guard list.contains(where: { $0.id == channel.id }) else {
             list.append(channel)
@@ -367,8 +394,10 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
-        if case .failed = controller.state, case .live(let on) = source, on.id == channel.id {
-            scheduleSkip(from: channel, ticket: intentRevision)
+        if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == channel.id,
+           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                         currentRevision: intentRevision, showingID: on.id) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
     }
 
@@ -388,8 +417,10 @@ final class ReceiverTuner {
         guard !Task.isCancelled else { return }
         clips.uncover()
         settledAt = Date()
-        if case .failed = controller.state, case .live(let on) = source, on.id == target.id {
-            scheduleSkip(from: target, ticket: intentRevision)
+        if case .failed = controller.state, let tuned, case .live(let on) = source, on.id == target.id,
+           ReceiverRules.mayActOnFailure(failedID: tuned.id, tuneRevision: tuned.revision,
+                                         currentRevision: intentRevision, showingID: on.id) {
+            scheduleSkip(failedID: tuned.id, ticket: tuned.revision)
         }
     }
 

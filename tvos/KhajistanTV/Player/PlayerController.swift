@@ -334,11 +334,15 @@ final class PlayerController {
     #endif
 
     /// Holds the picture further back, so a caption lands with the speech (the site's resync).
-    func seekBack(by seconds: Double) {
+    func cancelCaptionSeek() { player.currentItem?.cancelPendingSeeks() }
+
+    func seekBack(by seconds: Double, completion: @escaping @MainActor () -> Void) {
         let target = player.currentTime().seconds - seconds
-        guard target.isFinite, seconds > 0 else { return }
+        guard target.isFinite, seconds > 0 else { completion(); return }
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero,
-                    toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600))
+                    toleranceAfter: CMTime(seconds: 1, preferredTimescale: 600)) { _ in
+            Task { @MainActor in completion() }
+        }
     }
 
     /// Whether anything can be heard: the site's `!paused && !muted && volume > 0`.

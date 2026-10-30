@@ -594,6 +594,8 @@ struct CaptionTimeline {
     private var entries: [Entry] = []
     private(set) var dropped = 0
     var cues: [SubtitleCue] { entries.map(\.cue) }
+    /// Last plate start before queue padding; includes within-phrase reading allocation.
+    var latestUnshiftedPlateStart: Double? { entries.flatMap(\.pieces).map(\.start).max() }
 
     mutating func advance(to now: Double) {
         guard now.isFinite else { return }

@@ -30,12 +30,13 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
     var behind = 24.0
     var window: ClosedRange<Double>? = nil
     var program = true
+    var programmeBase = 900.0
     var seeks: [Double] = []
     var pendingSeek: (@MainActor () -> Void)?
     var lateSeekCompletion: (@MainActor () -> Void)?
     var cancelledSeeks = 0
     var captionClock: CaptionClock? {
-        CaptionClock(now: now, behindLive: behind, programDate: program ? Date(timeIntervalSince1970: 900 + now) : nil, window: window)
+        CaptionClock(now: now, behindLive: behind, programDate: program ? Date(timeIntervalSince1970: programmeBase + now) : nil, window: window)
     }
     func seekBack(by seconds: Double, completion: @escaping @MainActor () -> Void) {
         seeks.append(seconds)
@@ -149,10 +150,12 @@ struct TestFailure: Error, CustomStringConvertible { let description: String }
 func subscribed(_ id: String = "caption-test") -> String {
     "{\"topic\":\"realtime:captions:\(id)\",\"event\":\"phx_reply\",\"payload\":{\"status\":\"ok\"}}"
 }
-func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channel: String = "caption-test", event: String = "INSERT", native: String = "خبر", uncertain: Bool = false) -> String {
-    let record: [String: Any] = ["id": id, "channel_id": channel, "text": native, "english": english ? text : "", "uncertain": uncertain,
+func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channel: String = "caption-test", event: String = "INSERT", native: String = "خبر", uncertain: Bool = false, programmeStamp: Bool = true, atEpoch: Double? = nil, createdAge: Double? = nil) -> String {
+    var record: [String: Any] = ["id": id, "channel_id": channel, "text": native, "english": english ? text : "", "uncertain": uncertain,
                                "lang": "ur", "final": true, "program_epoch": 900 + at,
-                               "at_epoch": Date().timeIntervalSince1970, "spoken_seconds": 2]
+                               "at_epoch": atEpoch ?? Date().timeIntervalSince1970, "spoken_seconds": 2]
+    if !programmeStamp { record.removeValue(forKey: "program_epoch") }
+    if let createdAge { record["created_at"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-createdAge)) }
     let object: [String: Any] = ["topic": "realtime:captions:\(channel)", "event": "postgres_changes",
                                "payload": ["data": ["type": event, "record": record]]]
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
@@ -201,6 +204,13 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
     @MainActor static func main() async {
         var failed = 0
         var allTests: [(String, @MainActor () async throws -> Void)] = [
+            ("unstamped nonseekable signal uses arrival without configured hold", unstampedArrival),
+            ("programme long phrase bounds missing-stamp delay", longProgramme),
+            ("programme calibration expires and stale unstamped rows stay excluded", expiredProgramme),
+            ("mixed programme stamps preserve established lead without rewinding", mixedProgramme),
+            ("missing programme stamp without calibration remains bounded", uncalibratedProgramme),
+            ("programme clock avoids blind startup hold", programmeStartup),
+            ("missing or invalid programme clock retains startup hold", fallbackStartup),
             ("websocket reconnects while REST stalls", reconnect),
             ("translation absolute deadline and late result", translationDeadline),
             ("seek completion preserves source anchor", seekPlacement),
@@ -262,6 +272,138 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
         try check(!f.service.isOn, "idle must stop caption session")
     }
     #endif
+
+    @MainActor static func unstampedArrival() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.player.program = false
+        f.player.window = nil
+        f.player.behind = 42
+        try await f.start()
+        f.network.sockets[0].push(row(173, text: "Dunya arrives now.", programmeStamp: false, atEpoch: Date().timeIntervalSince1970 - 13.15))
+        try await eventually("no trustworthy clock must not add observed twenty-nine-second configured hold") { f.service.text == "Dunya arrives now." }
+        try check(f.player.seeks.isEmpty && f.service.note.contains("approximate"), "arrival fallback is explicit and cannot seek")
+        f.player.now += 3
+        try await eventually("first plate clears") { f.service.text == nil }
+        f.network.sockets[0].push(row(174, text: "Ancient source must not replay.", programmeStamp: false, atEpoch: Date().timeIntervalSince1970 - 181))
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.service.text == nil, "arrival fallback retains old-source rejection")
+        f.player.program = true
+        f.network.sockets[0].push(row(175, text: "Trusted future still waits.", at: f.player.now + 5))
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.service.text == nil, "nonseekable does not discard trustworthy future programme timing")
+        f.player.now += 5
+        try await eventually("trusted future cue paints at its source") { f.service.text == "Trusted future still waits." }
+    }
+
+    @MainActor static func longProgramme() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        let longText = String(repeating: "A lengthy trusted sentence retains its words. ", count: 8)
+        f.network.sockets[0].push(row(170, text: longText, at: 104))
+        try await Task.sleep(for: .milliseconds(150))
+        f.network.sockets[0].push(row(171, text: "Uncertain timing must not add a long wait.", programmeStamp: false))
+        try await eventually("long queued phrase bounds uncertain placement") { f.service.note.contains("timing is uncertain") }
+        try check(f.player.seeks.isEmpty, "bounded approximation cannot rewind a long phrase")
+        f.player.now = 140
+        f.network.sockets[0].push(row(172, text: "Trusted speech resumes.", at: 140))
+        try await eventually("next trusted cue remains available") { f.service.text == "Trusted speech resumes." }
+    }
+
+    @MainActor static func expiredProgramme() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        f.network.sockets[0].push(row(165, text: "Old calibrated source.", at: 110))
+        try await Task.sleep(for: .milliseconds(150))
+        f.player.now = 120 // source plates have elapsed; calibration alone remains.
+        try await Task.sleep(for: .seconds(15.1))
+        f.network.sockets[0].push(row(166, text: "Expired calibration uses arrival.", programmeStamp: false))
+        try await eventually("old programme lead cannot add delay") { f.service.text == "Expired calibration uses arrival." }
+        f.player.now = 125
+        try await eventually("current cue clears") { f.service.text == nil }
+        f.network.sockets[0].push(row(167, text: "Stale realtime must not replay.", programmeStamp: false, createdAge: 40))
+        try await Task.sleep(for: .milliseconds(200))
+        try check(f.service.text == nil, "known old realtime source cannot become fresh approximate speech")
+        var old = recoveryRecord(168, text: "Stale recovery must not replay.", createdAge: 40)
+        old.removeValue(forKey: "program_epoch")
+        f.network.recoveryRows = [old]
+        try await Task.sleep(for: .seconds(2.2))
+        try check(f.service.text == nil, "stale unstamped recovery stays excluded")
+    }
+
+    @MainActor static func mixedProgramme() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        // MBC row115960 → unstamped115961: actual programme lag46.84s,
+        // configured/window lag12.47s, established source lead11.52s.
+        f.player.now = 107.351
+        f.player.behind = 12.467
+        f.player.window = 72.96...122.4
+        f.player.programmeBase = Date().timeIntervalSince1970 - 46.84 - 109.932
+        let firstEpoch = f.player.programmeBase + f.player.now + 11.516
+        try await f.start()
+        f.network.sockets[0].push(row(160, text: "First trusted phrase.", at: firstEpoch - 900))
+        try await Task.sleep(for: .milliseconds(150))
+        f.player.now = 109.932
+        f.network.sockets[0].push(row(161, text: "Approximate middle phrase.", programmeStamp: false, atEpoch: Date().timeIntervalSince1970 - 33.83))
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.player.seeks.isEmpty, "missing programme row must not cause observed twenty-five-second rewind")
+        try check(f.service.text == nil, "unstamped phrase must not jump ahead of established source lead")
+        try check(f.service.note.contains("approximate"), "missing source stamp must disclose approximate timing")
+        f.player.now = 118.9
+        try await eventually("first trusted phrase keeps source order") { f.service.text == "First trusted phrase." }
+        f.player.now = 121.5
+        try await eventually("unstamped phrase follows trusted source at preserved lead") { f.service.text == "Approximate middle phrase." }
+        let nextEpoch = f.player.programmeBase + 125
+        f.network.sockets[0].push(row(162, text: "Next trusted phrase.", at: nextEpoch - 900))
+        f.player.now = 125
+        try await eventually("next stamped source resumes exact clock") { f.service.text == "Next trusted phrase." }
+        try check(f.player.seeks.isEmpty && !f.service.note.contains("caught up"), "mixed source stamps do not rewind or shed trusted speech")
+    }
+
+    @MainActor static func uncalibratedProgramme() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.player.behind = 12
+        f.player.window = 0...200
+        try await f.start()
+        f.network.sockets[0].push(row(163, text: "Unstamped first phrase.", programmeStamp: false, atEpoch: Date().timeIntervalSince1970 - 35))
+        try await eventually("no calibration uses bounded arrival fallback") { f.service.text == "Unstamped first phrase." }
+        try check(f.player.seeks.isEmpty && f.service.note.contains("approximate"), "unknown source stamp never claims exact timing or rewinds")
+        f.network.sockets.last!.push(row(169, text: "Calibration before retune.", at: 140))
+        try await Task.sleep(for: .milliseconds(150))
+        let oldSocketCount = f.network.sockets.count
+        f.service.detach()
+        f.service.attach(try channel(), player: f.player)
+        try await f.start()
+        try await eventually("retuned socket connects") { f.network.sockets.count > oldSocketCount }
+        f.network.sockets.last!.push(row(164, text: "New session phrase.", programmeStamp: false, atEpoch: Date().timeIntervalSince1970 - 35))
+        try await eventually("retune cannot inherit source lead") { f.service.text == "New session phrase." }
+    }
+
+    @MainActor static func programmeStartup() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.player.behind = 12
+        f.player.window = 0...200
+        f.player.programmeBase = Date().timeIntervalSince1970 - 35 - f.player.now
+        try await f.start()
+        try check(f.player.seeks.isEmpty, "35-second source-clock lag must not add a blind hold because configured lag says twelve")
+        let sourceEpoch = f.player.programmeBase + f.player.now
+        f.network.sockets[0].push(row(150, text: "Already aligned speech.", at: sourceEpoch - 900))
+        try await eventually("aligned first cue displays without extra startup hold") { f.service.text == "Already aligned speech." }
+        f.network.sockets[0].push(row(151, text: "Measured late speech.", at: sourceEpoch - 906))
+        try await eventually("late programme cue may adapt immediately") { f.player.pendingSeek != nil }
+        try check(f.player.seeks == [10], "first measured correction must not be suppressed by a blind startup seek cooldown")
+    }
+
+    @MainActor static func fallbackStartup() async throws {
+        for malformed in [false, true] {
+            let f = try Fixture(); defer { f.finish() }
+            f.player.behind = 12
+            f.player.window = 0...200
+            f.player.program = malformed
+            if malformed { f.player.programmeBase = .nan }
+            try await f.start()
+            try check(f.player.seeks == [12], "absent or non-finite programme date keeps fallback buffering")
+        }
+    }
 
     @MainActor static func updateUnblocks() async throws {
         let f = try Fixture(); defer { f.finish() }

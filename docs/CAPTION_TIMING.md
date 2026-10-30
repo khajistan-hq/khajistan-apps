@@ -15,7 +15,7 @@ Applies to Apple TV and the iOS/Mac Catalyst Receiver. Website code and recognit
 
 `KJ_ARCHIVE=/path/to/filmart/archive tvos/scripts/test-core.sh` exercises real local catalogue parity and shared caption timing. `ios/scripts/test-core.sh` verifies the phone/Mac shared sources.
 
-`tvos/scripts/test-caption-session.sh` compiles each actual production caption service and shared core against in-memory network and player boundaries. It never contacts a caption provider or starts paid demand. All 33 service scenarios pass (17 tvOS, 16 iOS/Mac), including the MBC dropout and terminal playback lifecycle checks. Both CI workflows run their platform's service tests. `KJ_CAPTION_TEST_PLATFORMS` selects a platform; `KJ_CAPTION_SERVICE_SOURCE` supports mutation checks.
+`tvos/scripts/test-caption-session.sh` compiles each actual production caption service and shared core against in-memory network and player boundaries. It never contacts a caption provider or starts paid demand. All 47 service scenarios pass (24 tvOS, 23 iOS/Mac), including the MBC dropout and terminal playback lifecycle checks. Both CI workflows run their platform's service tests. `KJ_CAPTION_TEST_PLATFORMS` selects a platform; `KJ_CAPTION_SERVICE_SOURCE` supports mutation checks.
 
 Reconnect, source-clock placement and fresh REST adaptation were also run with deliberately broken implementations. All three checks failed, proving they detect those defects.
 
@@ -23,7 +23,7 @@ Builds checked: tvOS Simulator, Mac Catalyst, and signed physical tvOS Release. 
 
 ## Limits
 
-These tests establish app scheduling and recovery behavior, not speech-recognition accuracy or a measured latency distribution on a live channel. Source segment availability, recognition finalization and translation still add latency. The existing 24-second startup hold is retained; lowering it without measurements can put captions behind the speech. Exact synchronization requires reliable programme timestamps and a seekable carrier. The Mac code is built but its installed application has not been replaced.
+These tests establish app scheduling and recovery behavior, not speech-recognition accuracy or a measured latency distribution on a live channel. Source segment availability, recognition finalization and translation still add latency. Unstamped players retain the 24-second startup hold. A player with a finite programme clock now waits for a real caption before deciding whether an extra seek is needed. Exact synchronization requires reliable programme timestamps and a seekable carrier. The Mac code is built but its installed application has not been replaced.
 
 ## MBC dropout follow-up
 
@@ -43,3 +43,18 @@ Real-stream worker probes exposed a script-label mismatch: the worker emits `lat
 On Apple TV, terminal playback failure, explicit pause, or idle now suspends captions and releases demand; returning to playing requires an explicit CC press. Temporary tuning/buffering remains active so source-clock seeking does not disable captions. The weak player callback is cleared on detach/retune and fenced against an old player. Starting CC while playback is unavailable is refused. A production-service harness reproduced the prior terminal-failure leak and verifies release, retuning, buffering, and explicit restart.
 
 These changes are separately reviewed and tested. Their live app behavior and recognition fidelity still require authenticated viewing; local real-stream worker results do not prove deployed-worker parity or device-level audio synchronization.
+
+## Authenticated live audit: programme clock transitions
+
+A signed-in MBC1 tvOS simulator run exposed two timing defects that synthetic playback clocks had not covered:
+
+- At CC startup, the player was already 34.50 seconds behind its programme clock, while its configured live offset reported 12 seconds. An unconditional startup resync sought another 12 seconds. The first row then waited 11.49 seconds between receipt and display. Stamped players now defer startup resync until an actual cue demonstrates lateness; missing/invalid programme clocks keep the existing fallback.
+- One unstamped row among programme-stamped MBC rows triggered a further 24.975-second rewind through the fallback clock. `at_epoch` without `program_epoch` is not authoritative programme provenance. A missing stamp must not trigger that fallback seek when the player has a valid programme clock. Short-lived placement calibration may approximate a missing stamp; the app explicitly identifies approximate timing and discards stale calibration on lifecycle/seek changes.
+
+These observations used the authenticated app, server wire metadata and numeric-only DEBUG logs. They measure clock handling, not acoustic transcription accuracy. Numeric logs contain no caption text, account details or tokens and compile out of Release logging.
+
+The initial signed-in simulator build had signing disabled; it lost sign-in after replacement. Future authenticated simulator tests must use signing-enabled builds with simulated keychain entitlements. The interruption is not evidence that physical-device signing or production account persistence is broken.
+
+Dunya News exposed another clock limitation: the first server row appeared49.394 seconds after CC, arrived at the app49.710 seconds after CC, then waited another28.85 seconds because a nonseekable, unstamped player reported a configured42-second offset. When neither programme time nor a seek window exists, captions now use explicitly approximate arrival-time display instead of preserving that unverifiable future estimate. Ancient/invalid source epochs remain rejected and genuine future programme-stamped cues retain their clock placement. The upstream49-second cold-start is unresolved; this client fix does not remove it.
+
+Final automated gate for these measured clock regressions:47/47 actual-service scenarios; independent reviewer16 focused scenarios and both tvOS Simulator/Mac Catalyst builds. The baseline live run preceded these last three corrections. Live post-correction acoustic alignment remains to be checked.

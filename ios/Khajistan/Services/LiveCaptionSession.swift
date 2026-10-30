@@ -40,6 +40,7 @@ final class LiveCaptionSession {
     @ObservationIgnored private var leaseTask: Task<Void, Never>?
     @ObservationIgnored private var socket: URLSessionWebSocketTask?
     @ObservationIgnored private var timeline = CaptionTimeline()
+    @ObservationIgnored private var programmeLead: (seconds: Double, sampled: ContinuousClock.Instant)?
     @ObservationIgnored private var socketSubscribed = false
     @ObservationIgnored private var needsRecovery = true
     @ObservationIgnored private var resyncing = false
@@ -159,11 +160,16 @@ final class LiveCaptionSession {
         note = ""
         timeline = CaptionTimeline(); seen = []; seenOrder = []; received = 0; lastReceivedAt = .distantPast; lags = []; waiting = []
         lastResync = .distantPast
+        programmeLead = nil
         label = CaptionRules.label(on: true, balance: balance)
         firstAt = nil
         counted = false
         estimateAt = Date().addingTimeInterval(CaptionRules.firstLineSeconds)
-        resync()
+        // A stamped player can already trail its source far more than the configured
+        // live offset reports. Wait for the first cue to measure any needed correction.
+        if player.captionClock?.programDate?.timeIntervalSince1970.isFinite != true {
+            resync()
+        }
 
         tasks.append(Task { await self.start(channel, generation: gen) })
         tasks.append(Task { await self.openSocket(channel.id, generation: gen) })
@@ -249,6 +255,7 @@ final class LiveCaptionSession {
 
     /// Every teardown releases the demand, so the paid worker stops for nobody watching.
     private func stop(_ why: String) {
+        programmeLead = nil
         let wasOn = isOn || billingSession != nil
         generation += 1
         if resyncing { player?.cancelCaptionSeek() }
@@ -470,7 +477,9 @@ final class LiveCaptionSession {
         guard isOn, let clock = player?.captionClock else { return true }
         guard let body = english, !body.isEmpty else { note = CaptionRules.untranslatedLine; return true }
         var at: Double?
-        if let epoch = row.program_epoch, epoch.isFinite, let date = clock.programDate {
+        var missingProgrammeApproximation = false
+        let programmeDate = clock.programDate.flatMap { $0.timeIntervalSince1970.isFinite ? $0 : nil }
+        if let epoch = row.program_epoch, epoch.isFinite, let date = programmeDate {
             let mt = clock.now + epoch - date.timeIntervalSince1970
             // Stale recovery rows never rewind the picture. Modest live lateness can be
             // corrected once, then the SAME source anchor is recomputed on the new clock.
@@ -478,6 +487,29 @@ final class LiveCaptionSession {
             if canAdjust, late > 0.5, late <= CaptionRules.holdMax,
                holdBack(late.rounded(.up) + CaptionRules.holdMargin, clock: clock) { return false }
             at = mt
+            let lead = mt - clock.now
+            if canAdjust, lead >= -CaptionRules.maxQueueAhead, lead <= CaptionRules.holdMax {
+                programmeLead = (lead, .now)
+            }
+        } else if programmeDate != nil {
+            // A missing source stamp must not mix a playlist-edge estimate with the
+            // player's programme clock or rewind all subsequent stamped speech.
+            guard canAdjust else { return true }
+            if let created = row.created_at.flatMap(CaptionRules.isoDate) {
+                let age = Date().timeIntervalSince(created)
+                guard age >= -2, age <= CaptionRules.translationWait + 5 else { return true }
+            }
+            let recentLead = programmeLead.flatMap { sample in
+                ContinuousClock.now - sample.sampled <= .seconds(15) ? sample.seconds : nil
+            } ?? 0
+            let estimated = clock.now + max(0, recentLead)
+            let queuedAnchor = timeline.latestUnshiftedPlateStart ?? clock.now
+            guard queuedAnchor <= estimated + CaptionRules.maxQueueAhead else {
+                note = "Caption timing is uncertain; some speech could not be displayed."
+                return true
+            }
+            at = max(estimated, queuedAnchor)
+            missingProgrammeApproximation = true
         } else if let atEpoch = row.at_epoch {
             let lag = Date().timeIntervalSince1970 - atEpoch
             if canAdjust, lag.isFinite, lag >= 0, lag <= CaptionRules.holdMax {
@@ -494,10 +526,11 @@ final class LiveCaptionSession {
         // approximate, while still bounding display backlog.
         let lateness = clock.now - sourceTime
         let freshButLate = canAdjust && lateness > CaptionRules.maxQueueAhead && lateness <= CaptionRules.holdMax
+        let arrivalApproximation = clock.window == nil && programmeDate == nil
         let approximate = clock.window == nil || freshButLate
-        let displayAt = approximate ? max(sourceTime, clock.now) : sourceTime
+        let displayAt = arrivalApproximation ? clock.now : (approximate ? max(sourceTime, clock.now) : sourceTime)
         let timingNote = "Captions are delayed; timing is approximate on this signal."
-        if freshButLate { note = timingNote }
+        if freshButLate || missingProgrammeApproximation || arrivalApproximation { note = timingNote }
         else if note == timingNote { note = "" }
         let before = timeline.dropped
         timeline.append(body, at: displayAt, spoken: row.spoken_seconds, now: clock.now)
@@ -539,6 +572,7 @@ final class LiveCaptionSession {
     }
 
     private func seekBack(by seconds: Double, player: PlayerController) {
+        programmeLead = nil
         resyncing = true
         seekSerial += 1
         let serial = seekSerial

@@ -677,14 +677,16 @@ enum CaptionRealtime {
 
     static func topic(_ channelId: String) -> String { "realtime:captions:\(channelId)" }
 
-    /// sb.channel("captions:<id>").on("postgres_changes", INSERT on live_caption_wire for the channel).
+    /// Subscribe to new source rows and the worker's late-English patches for this channel.
     static func join(channelId: String, accessToken: String, ref: String) -> String {
         let message: [String: Any] = [
             "topic": topic(channelId), "event": "phx_join", "ref": ref, "join_ref": ref,
             "payload": [
                 "config": [
                     "broadcast": ["ack": false, "self": false], "presence": ["key": ""], "private": false,
-                    "postgres_changes": [["event": "INSERT", "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]]
+                    "postgres_changes": ["INSERT", "UPDATE"].map { event in
+                        ["event": event, "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]
+                    }
                 ] as [String: Any],
                 "access_token": accessToken
             ] as [String: Any]
@@ -714,7 +716,7 @@ enum CaptionRealtime {
         case "phx_error", "phx_close":
             return .closed
         case "postgres_changes":
-            guard let data = payload?["data"] as? [String: Any], data["type"] as? String == "INSERT",
+            guard let data = payload?["data"] as? [String: Any], let change = data["type"] as? String, ["INSERT", "UPDATE"].contains(change),
                   let record = data["record"],
                   let bytes = try? JSONSerialization.data(withJSONObject: record),
                   let row = try? JSONDecoder().decode(CaptionWireRow.self, from: bytes) else { return .other }

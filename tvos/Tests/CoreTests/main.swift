@@ -3210,12 +3210,18 @@ func liveCaptionRealtime() throws {
     try expectEqual(changes["table"] as? String, "live_caption_wire")
     try expectEqual(changes["filter"] as? String, "channel_id=eq.indus-x")
     try expectEqual(changes["event"] as? String, "INSERT")
+    let subscriptions = try require((payload["config"] as? [String: Any])?["postgres_changes"] as? [[String: Any]])
+    try expectEqual(subscriptions.compactMap { $0["event"] as? String }, ["INSERT", "UPDATE"])
+    try expect(subscriptions.allSatisfy { ($0["filter"] as? String) == "channel_id=eq.indus-x" }, "both event types stay scoped to the channel")
 
     let insert = #"{"event":"postgres_changes","payload":{"data":{"type":"INSERT","schema":"public","table":"live_caption_wire","record":{"id":42,"channel_id":"indus-x","text":"خبر","english":"News","lang":"ur","at_epoch":1759666000.5,"spoken_seconds":1.8,"final":true,"sn":12,"program_epoch":null}},"ids":[1]},"ref":null,"topic":"realtime:captions:indus-x"}"#
     guard case .row(let row) = CaptionRealtime.event(insert, channelId: "indus-x") else { throw Failure(description: "an insert must be a row") }
     try expectEqual(row.id, 42)
     try expectEqual(row.english, "News")
     try expectEqual(row.at_epoch, 1759666000.5)
+    let update = insert.replacingOccurrences(of: "\"type\":\"INSERT\"", with: "\"type\":\"UPDATE\"")
+    guard case .row(let updatedRow) = CaptionRealtime.event(update, channelId: "indus-x") else { throw Failure(description: "late-English UPDATE must decode") }
+    try expectEqual(updatedRow.id, row.id)
     try expectEqual(CaptionRealtime.event(insert, channelId: "other"), .other, "another channel's topic")
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"ok","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .subscribed)
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"error","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .closed)

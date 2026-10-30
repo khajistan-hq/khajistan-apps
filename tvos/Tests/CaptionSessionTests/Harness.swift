@@ -75,6 +75,7 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
     var recoveryWaiters: [CheckedContinuation<Void, Never>] = []
     var translationWaiters: [CheckedContinuation<Void, Never>] = []
     var translations = 0
+    var translationReturnsNil = false
     var recoveryRequests = 0
     var recoveryRows: [[String: Any]] = []
     func releaseRecovery() { let held = recoveryWaiters; recoveryWaiters = []; held.forEach { $0.resume() } }
@@ -91,9 +92,13 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
                     "heartbeat_seconds": 60]
         } else if url.path.contains("translate-caption") {
             translations += 1
-            // Deliberately ignores cancellation, like an uncooperative response/auth boundary.
-            await withCheckedContinuation { translationWaiters.append($0) }
-            body = ["english": "EXPIRED TRANSLATION MUST NEVER APPEAR"]
+            if translationReturnsNil {
+                body = ["english": NSNull()]
+            } else {
+                // Deliberately ignores cancellation, like an uncooperative response/auth boundary.
+                await withCheckedContinuation { translationWaiters.append($0) }
+                body = ["english": "EXPIRED TRANSLATION MUST NEVER APPEAR"]
+            }
         } else if url.path.contains("live_caption_wire") {
             recoveryRequests += 1
             if stallRecovery { await withCheckedContinuation { recoveryWaiters.append($0) } }
@@ -134,12 +139,29 @@ struct TestFailure: Error, CustomStringConvertible { let description: String }
 func subscribed(_ id: String = "caption-test") -> String {
     "{\"topic\":\"realtime:captions:\(id)\",\"event\":\"phx_reply\",\"payload\":{\"status\":\"ok\"}}"
 }
-func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channel: String = "caption-test") -> String {
-    let record: [String: Any] = ["id": id, "channel_id": channel, "text": "خبر", "english": english ? text : "",
+func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channel: String = "caption-test", event: String = "INSERT", native: String = "خبر", uncertain: Bool = false) -> String {
+    let record: [String: Any] = ["id": id, "channel_id": channel, "text": native, "english": english ? text : "", "uncertain": uncertain,
                                "lang": "ur", "final": true, "program_epoch": 900 + at,
                                "at_epoch": Date().timeIntervalSince1970, "spoken_seconds": 2]
     let object: [String: Any] = ["topic": "realtime:captions:\(channel)", "event": "postgres_changes",
-                               "payload": ["data": ["type": "INSERT", "record": record]]]
+                               "payload": ["data": ["type": event, "record": record]]]
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+}
+
+/// UPDATE is a changed copy of the original wire frame, retaining its exact source timestamps.
+func update(_ original: String, text: String, native: String? = nil, uncertain: Bool? = nil, at: Double? = nil) -> String {
+    var object = try! JSONSerialization.jsonObject(with: Data(original.utf8)) as! [String: Any]
+    var payload = object["payload"] as! [String: Any]
+    var data = payload["data"] as! [String: Any]
+    var record = data["record"] as! [String: Any]
+    record["english"] = text
+    if let native { record["text"] = native }
+    if let uncertain { record["uncertain"] = uncertain }
+    if let at { record["program_epoch"] = 900 + at }
+    data["record"] = record
+    data["type"] = "UPDATE"
+    payload["data"] = data
+    object["payload"] = payload
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
 
@@ -178,7 +200,13 @@ func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channe
             ("non-seekable programme-clock captions remain available", nonSeekable),
             ("fresh REST fallback adapts hold", freshRecovery),
             ("stale REST fallback cannot rewind", staleRecovery),
-            ("REST delivers while socket is offline", offlineRecovery)
+            ("REST delivers while socket is offline", offlineRecovery),
+            ("English UPDATE unblocks ordered captions once", updateUnblocks),
+            ("English UPDATE fallback nil waits until deadline", nilFallbackDeadline),
+            ("English UPDATE rejects changed or uncertain source", unsafeUpdates),
+            ("English UPDATE cannot cross a retune", updateRetune),
+            ("short HLS window keeps fresh speech readable", shortWindow),
+            ("fresh REST receipt survives translation wait", receiptFreshness)
         ]
         let filter = ProcessInfo.processInfo.environment["KJ_CAPTION_TEST_FILTER"]
         let tests = allTests.filter { entry in filter.map { entry.0.contains($0) } ?? true }
@@ -189,6 +217,139 @@ func row(_ id: Int, text: String, at: Double = 100, english: Bool = true, channe
         }
         print("Caption session: \(tests.count - failed)/\(tests.count) passed; no external network")
         exit(failed == 0 ? 0 : 1)
+    }
+
+    @MainActor static func updateUnblocks() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        let socket = f.network.sockets[0]
+        let original = row(80, text: "", english: false)
+        socket.push(original)
+        try await eventually("missing English starts translation") { f.network.translations == 1 }
+        socket.push(row(81, text: "Second sentence.", at: 104))
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.service.text == nil, "later ready sentence waits for the first")
+        socket.push(update(original, text: "First updated sentence."))
+        try await eventually("same-id English UPDATE must unblock its pending source") { f.service.text == "First updated sentence." }
+        socket.push(update(original, text: "DUPLICATE MUST NOT REPLAY"))
+        f.network.releaseTranslations()
+        try await Task.sleep(for: .milliseconds(150))
+        f.player.now = 102.5
+        try await eventually("rendered update must not replay after its readable interval") { f.service.text == nil }
+        f.player.now = 104
+        try await eventually("second sentence retains source order and time") { f.service.text == "Second sentence." }
+        try check(f.network.translations == 1, "an English update does not start another translation")
+    }
+
+    @MainActor static func nilFallbackDeadline() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.network.translationReturnsNil = true
+        try await f.start()
+        let socket = f.network.sockets[0]
+        let original = row(82, text: "", english: false)
+        socket.push(original)
+        try await eventually("fallback request answered nil") { f.network.translations == 1 }
+        socket.push(row(83, text: "After deadline sentence.", at: 104))
+        f.player.now = 104
+        try await Task.sleep(for: .milliseconds(250))
+        try check(f.service.text == nil, "nil fallback cannot discard pending source before wire update deadline")
+        try await eventually("nil fallback still expires at the absolute eight-second deadline", timeout: 8.2) {
+            f.service.text == "After deadline sentence."
+        }
+        socket.push(update(original, text: "EXPIRED UPDATE MUST NOT REPLAY"))
+        try await Task.sleep(for: .milliseconds(150))
+        f.player.now = 107
+        try await eventually("expired English update cannot replay after newer speech") { f.service.text == nil }
+    }
+
+    @MainActor static func unsafeUpdates() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        let socket = f.network.sockets[0]
+        let original = row(84, text: "", english: false)
+        socket.push(original)
+        try await eventually("pending source exists") { f.network.translations == 1 }
+        for unsafe in [update(original, text: "UNCERTAIN UPDATE", uncertain: true),
+                       update(original, text: "CHANGED SOURCE", native: "دوسری خبر"),
+                       update(original, text: "CHANGED TIME", at: 101)] {
+            socket.push(unsafe)
+            try await Task.sleep(for: .milliseconds(150))
+            try check(f.service.text == nil, "uncertain or source-changing update cannot supply pending English")
+        }
+        socket.push(update(original, text: "Verified source identity."))
+        try await eventually("rejected changes must leave the original pending source recoverable") {
+            f.service.text == "Verified source identity."
+        }
+    }
+
+    @MainActor static func updateRetune() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        let old = f.network.sockets[0]
+        let original = row(85, text: "", english: false)
+        old.push(original)
+        try await eventually("old pending translation exists") { f.network.translations == 1 }
+        f.service.attach(try channel("update-new-channel"), player: f.player)
+        f.service.toggle()
+        try await eventually("retune opens replacement") { f.network.sockets.count == 2 }
+        let current = f.network.sockets[1]
+        current.push(subscribed("update-new-channel"))
+        // Feed old-topic data through the current transport as well as the canceled transport.
+        current.push(update(original, text: "OLD UPDATE"))
+        old.push(update(original, text: "OLD UPDATE"))
+        f.network.releaseTranslations()
+        current.push(row(86, text: "Current channel only.", channel: "update-new-channel"))
+        try await eventually("only current source renders") { f.service.text == "Current channel only." }
+        f.player.now = 103
+        try await eventually("old update has not queued behind current caption") { f.service.text == nil }
+    }
+
+    @MainActor static func receiptFreshness() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.player.window = 88...108
+        f.player.behind = 8
+        f.network.stallRecovery = true
+        try await f.start()
+        try await eventually("fresh source awaits REST delivery") { !f.network.recoveryWaiters.isEmpty }
+        var record = recoveryRecord(89, text: "", createdAge: 0)
+        record["program_epoch"] = 992.0
+        f.network.recoveryRows = [record]
+        f.network.releaseRecovery()
+        try await eventually("fresh recovered source waits for English") { f.network.translations == 1 }
+        let object: [String: Any] = ["topic": "realtime:captions:caption-test", "event": "postgres_changes",
+                                   "payload": ["data": ["type": "INSERT", "record": record]]]
+        let original = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        try await Task.sleep(for: .seconds(6))
+        try check(f.service.text == nil, "untranslated source does not paint before the update")
+        f.network.sockets[0].push(update(original, text: "English after six seconds."))
+        try await eventually("receipt freshness must survive six-second translation wait before eight-second deadline", timeout: 1) {
+            f.service.text == "English after six seconds."
+        }
+        try check(f.service.note.localizedCaseInsensitiveContains("approximate"), "short-window timing remains honestly approximate")
+        try check(f.player.seeks.isEmpty, "translation wait cannot force an unsafe short-window seek")
+    }
+
+    @MainActor static func shortWindow() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.player.window = 88...108
+        f.player.behind = 8
+        f.network.stallRecovery = true
+        try await f.start()
+        f.network.sockets[0].push(row(87, text: "Fresh short-window speech.", at: 92))
+        try await eventually("8s-late fresh source must remain readable in a 20s HLS window") {
+            f.service.text == "Fresh short-window speech."
+        }
+        try check(f.player.seeks.isEmpty, "cannot rewind beyond the stream's safe window")
+        try check(f.service.note.localizedCaseInsensitiveContains("approximate"), "must disclose approximate timing")
+        f.player.now = 103
+        try await eventually("fresh line clears after its reading interval") { f.service.text == nil }
+        try await eventually("backfill request is suspended") { !f.network.recoveryWaiters.isEmpty }
+        var old = recoveryRecord(88, text: "OLD SHORT-WINDOW BACKFILL", createdAge: 20)
+        old["program_epoch"] = 992.0
+        f.network.recoveryRows = [old]
+        f.network.releaseRecovery()
+        try await Task.sleep(for: .milliseconds(200))
+        try check(f.service.text == nil && f.player.seeks.isEmpty, "stale short-window recovery must still drop")
     }
 
     @MainActor static func reconnect() async throws {

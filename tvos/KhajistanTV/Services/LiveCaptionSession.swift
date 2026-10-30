@@ -55,7 +55,7 @@ final class LiveCaptionSession {
     @ObservationIgnored private var lags: [Double] = []
     @ObservationIgnored private var lastResync = Date.distantPast
     /// Rows waiting for their English, in arrival order, so a late translation never overtakes.
-    @ObservationIgnored private var waiting: [(seq: Int, row: CaptionWireRow, english: String?, ready: Bool, recovered: Bool, deadline: ContinuousClock.Instant)] = []
+    @ObservationIgnored private var waiting: [(seq: Int, row: CaptionWireRow, english: String?, ready: Bool, canAdjust: Bool, deadline: ContinuousClock.Instant)] = []
     @ObservationIgnored private var sequence = 0
     @ObservationIgnored private var firstAt: Double?
     /// The count has reached the first line and stops there.
@@ -369,7 +369,22 @@ final class LiveCaptionSession {
     private func receive(_ row: CaptionWireRow, recovered: Bool = false) {
         guard isOn, let channel, CaptionRules.admits(row, channelId: channel.id) else { return }
         if let id = row.id {
-            guard seen.insert(id).inserted else { return }
+            if seen.contains(id) {
+                // The worker PATCHes English when its inline translation finishes late.
+                // Complete only this still-pending source row; never replay a displayed cue.
+                if row.uncertain != true,
+                   let index = waiting.firstIndex(where: { $0.row.id == id && !$0.ready && ContinuousClock.now < $0.deadline }),
+                   row.text == waiting[index].row.text, row.lang == waiting[index].row.lang,
+                   row.program_epoch == waiting[index].row.program_epoch, row.at_epoch == waiting[index].row.at_epoch,
+                   let english = CaptionRules.english(for: row) {
+                    waiting[index].english = english
+                    waiting[index].ready = true
+                    translationTasks.removeValue(forKey: waiting[index].seq)?.cancel()
+                    flush()
+                }
+                return
+            }
+            seen.insert(id)
             seenOrder.append(id)
             if seenOrder.count > 500 { seen.remove(seenOrder.removeFirst()) }
         }
@@ -378,11 +393,18 @@ final class LiveCaptionSession {
         // The worker withholds English when it could not hear reliably; never invent it.
         if row.uncertain == true { note = CaptionRules.uncertainLine; return }
         let english = CaptionRules.english(for: row)
+        // Capture freshness on arrival: waiting for a valid translation must not turn a
+        // newly delivered REST row into stale backfill halfway through its deadline.
+        let freshRecovery = row.created_at.flatMap(CaptionRules.isoDate).map {
+            let age = Date().timeIntervalSince($0)
+            return age >= -2 && age <= 5
+        } ?? false
+        let canAdjust = !recovered || freshRecovery
         guard waiting.count < 200 else { note = "Caption translation is catching up."; return }
         sequence += 1
         let seq = sequence
         let needsTranslation = english == nil && !(row.text ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-        waiting.append((seq, row, english, !needsTranslation, recovered, ContinuousClock.now.advanced(by: .seconds(CaptionRules.translationWait))))
+        waiting.append((seq, row, english, !needsTranslation, canAdjust, ContinuousClock.now.advanced(by: .seconds(CaptionRules.translationWait))))
         if needsTranslation {
             let gen = generation
             translationTasks[seq] = Task { await self.translate(row, seq: seq, generation: gen) }
@@ -411,6 +433,9 @@ final class LiveCaptionSession {
                                   sessionID: billingSession, on: isOn, cancelled: Task.isCancelled),
               let index = waiting.firstIndex(where: { $0.seq == seq && ContinuousClock.now < $0.deadline }) else { return }
         translationTasks.removeValue(forKey: seq)
+        // A failed fallback is not the server's final word: its original translation
+        // can still arrive as an UPDATE/REST refresh inside this same absolute deadline.
+        guard let english else { return }
         waiting[index].english = english
         waiting[index].ready = true
         flush()
@@ -426,7 +451,7 @@ final class LiveCaptionSession {
                 note = CaptionRules.untranslatedLine
                 continue
             }
-            guard emit(head.row, english: head.english, recovered: head.recovered) else { return }
+            guard emit(head.row, english: head.english, canAdjust: head.canAdjust) else { return }
             waiting.removeFirst()
         }
     }
@@ -437,16 +462,9 @@ final class LiveCaptionSession {
     /// else the row's wall-clock time under the hold. ponytail: hls.js exposes fragment sequence
     /// numbers for the site's `sn` placement and AVPlayer does not; those rows go by the clock.
     /// False means a seek is in flight: retain the row and remap it after completion.
-    private func emit(_ row: CaptionWireRow, english: String?, recovered: Bool) -> Bool {
+    private func emit(_ row: CaptionWireRow, english: String?, canAdjust: Bool) -> Bool {
         guard isOn, let clock = player?.captionClock else { return true }
         guard let body = english, !body.isEmpty else { note = CaptionRules.untranslatedLine; return true }
-        // Server creation time distinguishes a fresh REST delivery from old backfill.
-        // Without it, recovered rows may display but cannot move the video clock.
-        let freshRecovery = row.created_at.flatMap(CaptionRules.isoDate).map {
-            let age = Date().timeIntervalSince($0)
-            return age >= -2 && age <= 5
-        } ?? false
-        let canAdjust = !recovered || freshRecovery
         var at: Double?
         if let epoch = row.program_epoch, epoch.isFinite, let date = clock.programDate {
             let mt = clock.now + epoch - date.timeIntervalSince1970
@@ -470,7 +488,13 @@ final class LiveCaptionSession {
         guard let sourceTime = at else { return true }
         // A non-seekable radio cannot replay the source clock; keep its timing explicitly
         // approximate, while still bounding display backlog.
-        let displayAt = clock.window == nil ? max(sourceTime, clock.now) : sourceTime
+        let lateness = clock.now - sourceTime
+        let freshButLate = canAdjust && lateness > CaptionRules.maxQueueAhead && lateness <= CaptionRules.holdMax
+        let approximate = clock.window == nil || freshButLate
+        let displayAt = approximate ? max(sourceTime, clock.now) : sourceTime
+        let timingNote = "Captions are delayed; timing is approximate on this signal."
+        if freshButLate { note = timingNote }
+        else if note == timingNote { note = "" }
         let before = timeline.dropped
         timeline.append(body, at: displayAt, spoken: row.spoken_seconds, now: clock.now)
         if timeline.dropped > before { note = "Captions caught up; some delayed speech could not be displayed." }

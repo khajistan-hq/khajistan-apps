@@ -318,7 +318,7 @@ final class ReceiverTuner {
     // MARK: - Live channels
 
     private func tune(_ target: Channel) {
-        captions.detach()
+        captions.detach(keepingCarry: true)
         tuneTask?.cancel()
         controller.stop()
         controller.state = .tuning

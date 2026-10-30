@@ -76,6 +76,11 @@ final class LiveCaptionSession {
 
     /// A channel was tuned on `player`. A live carrier in a language the recogniser takes offers
     /// the control; anything else says why in one line, or nothing.
+    /// Captions were turned on in this sitting, so a channel change keeps them on (owner,
+    /// 2026-10-30: "once it should stick even if they change the channel"). CC off, a pause and
+    /// leaving the player clear it, so opening the Receiver later never starts captions alone.
+    private var carry = false
+
     func attach(_ target: Channel, player: PlayerController) {
         stop("")
         channelGeneration += 1
@@ -89,18 +94,23 @@ final class LiveCaptionSession {
         Task { await self.loadAccuracy(target, generation: gen) }
         guard offered else { return }
         askBalance()
-        // Playback never starts metered transcription. Each channel needs an explicit CC tap.
-
+        // Opening the Receiver never starts captions. A channel change carries them over only
+        // when the viewer turned them on earlier in this sitting (`carry`).
+        if carry { turnOn() }
     }
 
     /// A system Pause, another player, Stop or failure releases demand without losing the channel.
     /// Playback resuming alone never restarts metered captions; CC remains an explicit action.
     func suspendForPlaybackInterruption() {
         guard isOn || billingSession != nil else { return }
+        carry = false
         stop("Captions stopped. Turn CC on again after playback resumes.")
     }
 
-    func detach() {
+    /// `keepingCarry` is for a channel change, which detaches the old channel before it attaches
+    /// the new one; every other caller lets the carry go.
+    func detach(keepingCarry: Bool = false) {
+        if !keepingCarry { carry = false }
         channelGeneration += 1
         stop("")
         channel = nil
@@ -116,6 +126,7 @@ final class LiveCaptionSession {
 
     func toggle() {
         if isOn {
+            carry = false
             UserDefaults.standard.set("off", forKey: CaptionRules.modeKey)
             stop("Captions off.")
         } else {
@@ -145,6 +156,7 @@ final class LiveCaptionSession {
             return
         }
         UserDefaults.standard.set("english", forKey: CaptionRules.modeKey)
+        carry = true
         generation += 1
         let gen = generation
         if billingSession == nil { billingSession = UUID().uuidString.lowercased() }
@@ -514,7 +526,11 @@ final class LiveCaptionSession {
             offered = false
             return
         }
-        if !isOn { decide() }
+        if !isOn {
+            decide()
+            // The language came in after the channel did: carry captions over now that it is known.
+            if carry && offered { turnOn() }
+        }
     }
 
     private func loadAccuracy(_ target: Channel, generation gen: Int) async {

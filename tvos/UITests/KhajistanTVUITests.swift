@@ -112,4 +112,28 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Sign in"].waitForExistence(timeout: 30), "A signed-out account offers Sign in")
         screenshot("05-account", app: app)
     }
+
+    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids and Chat out:
+    /// neither is in the top bar, and a stored `-kjtab` of either opens the Receiver instead
+    /// (App/StoreBuild.swift, App/AppModel.swift). Builds for our own devices keep both. The
+    /// same test runs in both builds and asserts the opposite in each, as the phone's twin
+    /// testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly does (ios/UITests/KhajistanUITests.swift).
+    func testPicsVidsAndChatAreLeftOutOfStoreBuildsOnly() {
+        for tab in ["picsvids", "chat"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjtab", tab]
+            kjLaunch(app)
+            XCTAssertTrue(app.buttons["nav-receiver"].waitForExistence(timeout: 30), "the app must launch before checking absent controls")
+#if KJ_APP_STORE
+            XCTAssertFalse(app.buttons["nav-picsvids"].exists, "a store build has no Pics/Vids in the bar")
+            XCTAssertFalse(app.buttons["nav-chat"].exists, "a store build has no Chat in the bar")
+            XCTAssertTrue(regionButtons(app).firstMatch.waitForExistence(timeout: 60), "a stored \(tab) tab opens the Receiver in a store build")
+#else
+            XCTAssertTrue(app.buttons["nav-picsvids"].exists, "builds for our own devices keep Pics/Vids")
+            XCTAssertTrue(app.buttons["nav-chat"].exists, "builds for our own devices keep Chat")
+#endif
+            screenshot("store-build-bar-\(tab)", app: app)
+            app.terminate()
+        }
+    }
 }

@@ -5,7 +5,11 @@ import XCTest
 /// elements and loose about what the network answers on the day.
 final class PicsVidsUITests: XCTestCase {
     override func setUpWithError() throws {
+#if KJ_APP_STORE
+        throw XCTSkip("App Store builds leave Pics/Vids out (StoreBuild)")
+#else
         continueAfterFailure = false
+#endif
     }
 
     private func launch() -> XCUIApplication {

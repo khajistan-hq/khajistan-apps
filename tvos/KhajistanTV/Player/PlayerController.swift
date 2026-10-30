@@ -15,7 +15,15 @@ final class PlayerController {
     }
 
     let player = AVPlayer()
-    var state: State = .idle
+    var state: State = .idle {
+        didSet {
+            switch state {
+            case .idle, .paused, .failed: onPlaybackUnavailable?()
+            case .playing, .tuning: break
+            }
+        }
+    }
+    @ObservationIgnored var onPlaybackUnavailable: (() -> Void)?
     /// The samples of the signal now playing, when it was asked to listen and its carrier can be
     /// read (a progressive file or stream; never HLS). The dancer reads this; nil means no dancer.
     private(set) var signal: SignalTap?

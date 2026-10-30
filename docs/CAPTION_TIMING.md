@@ -15,7 +15,7 @@ Applies to Apple TV and the iOS/Mac Catalyst Receiver. Website code and recognit
 
 `KJ_ARCHIVE=/path/to/filmart/archive tvos/scripts/test-core.sh` exercises real local catalogue parity and shared caption timing. `ios/scripts/test-core.sh` verifies the phone/Mac shared sources.
 
-`tvos/scripts/test-caption-session.sh` compiles each actual production caption service and shared core against in-memory network and player boundaries. It never contacts a caption provider or starts paid demand. All 32 service scenarios pass (16 per platform), including the MBC dropout follow-up. Both CI workflows run their platform's service tests. `KJ_CAPTION_TEST_PLATFORMS` selects a platform; `KJ_CAPTION_SERVICE_SOURCE` supports mutation checks.
+`tvos/scripts/test-caption-session.sh` compiles each actual production caption service and shared core against in-memory network and player boundaries. It never contacts a caption provider or starts paid demand. All 33 service scenarios pass (17 tvOS, 16 iOS/Mac), including the MBC dropout and terminal playback lifecycle checks. Both CI workflows run their platform's service tests. `KJ_CAPTION_TEST_PLATFORMS` selects a platform; `KJ_CAPTION_SERVICE_SOURCE` supports mutation checks.
 
 Reconnect, source-clock placement and fresh REST adaptation were also run with deliberately broken implementations. All three checks failed, proving they detect those defects.
 
@@ -35,3 +35,11 @@ Two additional client dropout paths are fixed:
 - Fresh speech that cannot be synchronized safely is displayed with an approximate-timing notice instead of being discarded solely for being more than six seconds late. That six-second limit still bounds unseen display backlog. Stale recovery history remains excluded. Freshness is captured on receipt, so waiting for English does not invalidate an otherwise timely REST row.
 
 A failed on-demand translation now waits for the server's original translation until the existing deadline; it does not permanently discard the pending row immediately. This is not a claim of improved recognition accuracy or measured MBC end-to-end performance.
+
+## Live audit contract and lifecycle follow-up
+
+Real-stream worker probes exposed a script-label mismatch: the worker emits `latin`, while native immediate English-source display previously recognized only `Latn` or an absent tag. The shared core now accepts both labels case-insensitively, still requiring `lang=en` and Latin-only source text. A decoded-wire regression covers canonical and legacy labels, mixed-script rejection, and non-English rejection.
+
+On Apple TV, terminal playback failure, explicit pause, or idle now suspends captions and releases demand; returning to playing requires an explicit CC press. Temporary tuning/buffering remains active so source-clock seeking does not disable captions. The weak player callback is cleared on detach/retune and fenced against an old player. Starting CC while playback is unavailable is refused. A production-service harness reproduced the prior terminal-failure leak and verifies release, retuning, buffering, and explicit restart.
+
+These changes are separately reviewed and tested. Their live app behavior and recognition fidelity still require authenticated viewing; local real-stream worker results do not prove deployed-worker parity or device-level audio synchronization.

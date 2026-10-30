@@ -3088,6 +3088,15 @@ func liveCaptionEnglishGate() throws {
     }
     try expectEqual(CaptionRules.english(for: row("آج کی خبریں", english: "Today's news")), "Today's news")
     try expectEqual(CaptionRules.english(for: row("Hello there", english: nil, lang: "en")), "Hello there", "English speech paints as itself")
+    // The production detector emits "latin"; older rows used ISO "Latn".
+    for script in ["latin", "LATIN", "Latn", "latn"] {
+        let wire = Data(#"{"id":7,"channel_id":"c","text":"Live from London.","english":null,"lang":"en","script":"SCRIPT","final":true}"#.replacingOccurrences(of: "SCRIPT", with: script).utf8)
+        let decoded = try JSONDecoder().decode(CaptionWireRow.self, from: wire)
+        try expect(CaptionRules.isEnglishSource(decoded), "worker script tag \(script) admits English source immediately")
+        try expectEqual(CaptionRules.english(for: decoded), "Live from London.", "English source needs no translation request")
+        try expect(!CaptionRules.isEnglishSource(row("Live أخبار", english: nil, lang: "en", script: script)), "script metadata cannot override actual non-Latin letters")
+        try expect(!CaptionRules.isEnglishSource(row("Bonjour", english: nil, lang: "fr", script: script)), "Latin script alone does not imply English")
+    }
     try expect(CaptionRules.english(for: row("آج کی خبریں", english: nil)) == nil, "no English, nothing to paint")
     try expect(CaptionRules.english(for: row("Hello", english: nil, lang: "en", script: "Arab")) == nil, "a contradictory script tag is not English")
     for bad in ["آج کی news", "As an AI language model, I cannot", "Translation note: unclear", "```json", #"{"english":"x"}"#,

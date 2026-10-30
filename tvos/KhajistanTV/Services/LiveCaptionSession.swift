@@ -85,10 +85,15 @@ final class LiveCaptionSession {
     /// A channel was tuned on `player`. A live carrier in a language the recogniser takes offers
     /// the control; anything else says why in one line, or nothing.
     func attach(_ target: Channel, player: PlayerController) {
+        self.player?.onPlaybackUnavailable = nil
         stop("")
         attachment += 1
         channel = target
         self.player = player
+        player.onPlaybackUnavailable = { [weak self, weak player] in
+            guard let self, let player, self.player === player else { return }
+            self.suspendForPlaybackInterruption()
+        }
         detected = nil
         decide()
         label = CaptionRules.label(on: false, balance: balance)
@@ -101,7 +106,14 @@ final class LiveCaptionSession {
         // Starting live captions requires a deliberate press on CC for this channel.
     }
 
+    /// Keep the channel attached, but require a deliberate CC press after playback returns.
+    func suspendForPlaybackInterruption() {
+        guard isOn || billingSession != nil else { return }
+        stop("Captions stopped. Turn CC on again after playback resumes.")
+    }
+
     func detach() {
+        player?.onPlaybackUnavailable = nil
         stop("")
         attachment += 1
         channel = nil
@@ -132,6 +144,10 @@ final class LiveCaptionSession {
 
     private func turnOn() {
         guard let channel, let player else { return }
+        guard player.state == .playing else {
+            note = "Wait for the signal to connect before turning captions on."
+            return
+        }
         guard offered else {
             note = CaptionRules.parkedReason(channel, detected: detected, accuracy: Self.accuracy)
             return

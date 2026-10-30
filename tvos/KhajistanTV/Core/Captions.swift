@@ -457,7 +457,8 @@ enum CaptionRules {
     /// isEnglishSource(): said in English and written only in Latin letters.
     static func isEnglishSource(_ row: CaptionWireRow) -> Bool {
         let source = row.text ?? ""
-        return row.lang == "en" && (row.script == nil || row.script == "Latn") && !hasNonLatinLetter(source)
+        let script = row.script?.lowercased()
+        return row.lang == "en" && (script == nil || script == "latin" || script == "latn") && !hasNonLatinLetter(source)
     }
 
     /// checkedEnglish(): provider output that is untranslated script, a code fence or JSON, or

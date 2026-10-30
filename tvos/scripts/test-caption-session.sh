@@ -9,10 +9,11 @@ trap 'rm -rf "$output_dir"' EXIT HUP INT TERM
 printf 'import Foundation\n' > "$output_dir/UIKit.swift"
 swiftc -emit-module -module-name UIKit "$output_dir/UIKit.swift" -emit-module-path "$output_dir/UIKit.swiftmodule"
 for platform in ${KJ_CAPTION_TEST_PLATFORMS:-tvos ios}; do
-    if [ "$platform" = tvos ]; then service=tvos/KhajistanTV/Services/LiveCaptionSession.swift
+    flags=""
+    if [ "$platform" = tvos ]; then flags="-D CAPTION_TVOS"; service=tvos/KhajistanTV/Services/LiveCaptionSession.swift
     else service=ios/Khajistan/Services/LiveCaptionSession.swift; fi
     service=${KJ_CAPTION_SERVICE_SOURCE:-$service}
-    swiftc -swift-version 5 -parse-as-library -I "$output_dir" \
+    swiftc $flags -swift-version 5 -parse-as-library -I "$output_dir" \
         tvos/KhajistanTV/Core/Config.swift tvos/KhajistanTV/Core/Sky.swift \
         tvos/KhajistanTV/Core/Receiver.swift tvos/KhajistanTV/Core/Captions.swift \
         "$service" tvos/Tests/CaptionSessionTests/Harness.swift \

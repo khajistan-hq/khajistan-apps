@@ -10,8 +10,16 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
 }
 
 @MainActor final class PlayerController {
-    enum State { case playing, paused }
-    var state = State.playing
+    enum State: Equatable { case idle, tuning, playing, paused, failed(String) }
+    var onPlaybackUnavailable: (() -> Void)?
+    var state = State.playing {
+        didSet {
+            switch state {
+            case .idle, .paused, .failed: onPlaybackUnavailable?()
+            case .playing, .tuning: break
+            }
+        }
+    }
     struct CaptionClock {
         let now: Double
         let behindLive: Double
@@ -71,6 +79,7 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
     static var current = Network()
     var sockets: [URLSessionWebSocketTask] = []
     var requests: [String] = []
+    var demandActions: [String] = []
     var stallRecovery = false
     var recoveryWaiters: [CheckedContinuation<Void, Never>] = []
     var translationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -86,6 +95,7 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
         var body: Any = []
         if url.path.contains("request-captions") {
             let sent = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any] ?? [:]
+            if let action = sent["action"] as? String { demandActions.append(action) }
             body = ["allowed": true, "billing_mode": "enforced", "unlimited": true,
                     "session_id": sent["session_id"] ?? NSNull(),
                     "lease_expires_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(120)),
@@ -190,7 +200,7 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
 @main struct CaptionSessionHarness {
     @MainActor static func main() async {
         var failed = 0
-        let allTests: [(String, @MainActor () async throws -> Void)] = [
+        var allTests: [(String, @MainActor () async throws -> Void)] = [
             ("websocket reconnects while REST stalls", reconnect),
             ("translation absolute deadline and late result", translationDeadline),
             ("seek completion preserves source anchor", seekPlacement),
@@ -208,6 +218,9 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
             ("short HLS window keeps fresh speech readable", shortWindow),
             ("fresh REST receipt survives translation wait", receiptFreshness)
         ]
+        #if CAPTION_TVOS
+        allTests.append(("playback interruption releases captions without automatic restart", playbackInterruption))
+        #endif
         let filter = ProcessInfo.processInfo.environment["KJ_CAPTION_TEST_FILTER"]
         let tests = allTests.filter { entry in filter.map { entry.0.contains($0) } ?? true }
         guard !tests.isEmpty else { print("FAIL no tests matched filter"); exit(1) }
@@ -218,6 +231,37 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
         print("Caption session: \(tests.count - failed)/\(tests.count) passed; no external network")
         exit(failed == 0 ? 0 : 1)
     }
+
+    #if CAPTION_TVOS
+    @MainActor static func playbackInterruption() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        try await f.start()
+        f.player.state = .tuning
+        try check(f.service.isOn, "transient buffering must retain captions")
+        f.player.state = .playing
+        f.player.state = .failed("test stream lost")
+        try check(!f.service.isOn && f.service.text == nil, "terminal playback failure must stop caption session")
+        try await eventually("failure releases paid worker demand") { f.network.demandActions.contains("stop") }
+        f.player.state = .playing
+        try check(!f.service.isOn, "playback recovery must not restart captions")
+        try await f.start()
+        f.player.state = .paused
+        try check(!f.service.isOn, "system pause must stop caption session")
+        f.player.state = .tuning
+        f.service.toggle()
+        try check(!f.service.isOn, "CC cannot start while signal is unavailable")
+        f.player.state = .playing
+        try await f.start()
+        let replacement = PlayerController()
+        f.service.attach(try channel(), player: replacement)
+        f.service.toggle()
+        try await eventually("replacement starts") { f.service.isOn }
+        f.player.state = .failed("old player")
+        try check(f.service.isOn, "old player must not stop replacement captions")
+        replacement.state = .idle
+        try check(!f.service.isOn, "idle must stop caption session")
+    }
+    #endif
 
     @MainActor static func updateUnblocks() async throws {
         let f = try Fixture(); defer { f.finish() }

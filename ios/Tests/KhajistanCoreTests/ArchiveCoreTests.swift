@@ -225,6 +225,30 @@ func storeBuildLeavesOutTheSitesOwnRoutes() throws {
     }
 }
 
+/// These listed URLs keep their store-exclusion verdict through deep-link parsing and
+/// storefront tagging. This checks the URL helpers, not AppModel or WKWebView execution.
+/// Reading Room titles and the other listed allowed routes must remain accessible.
+func storeExclusionSurvivesTheOpenChain() throws {
+    func openLink(_ path: String) throws -> URL {
+        let url = try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)
+        var parts = URLComponents()
+        parts.scheme = "khajistan"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
+        return try require(parts.url)
+    }
+    for path in ["/chat", "/chat.html", "/wall/", "/wall/zine/7", "/zines.html", "/canvas?kind=video",
+                 "/board/00000000-0000-0000-0000-000000000002?k=x", "/pics-n-vids", "/browse-archive.html"] {
+        let opened = try require(ArchiveURL.deepLink(try openLink(path)))
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(opened))
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(JoinOffer.tagged(opened)))
+    }
+    for path in ["/reading-room.html", "/reading-room.html?m=filmart", "/screening-room.html", "/open-frequencies"] {
+        let opened = try require(ArchiveURL.deepLink(try openLink(path)))
+        try expect(!ArchiveURL.isLeftOutOfStoreBuild(opened) && !ArchiveURL.isLeftOutOfStoreBuild(JoinOffer.tagged(opened)))
+    }
+}
+
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
     guard try condition() else { throw AssertionFailure(description: "\(file):\(line) assertion failed") }
 }
@@ -270,7 +294,8 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
             ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
-            ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
+            ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes),
+            ("The open chain preserves the store exclusion at every step", storeExclusionSurvivesTheOpenChain)
         ]
         for (name, run) in tests { try run(); print("PASS \(name)") }
         print("\(tests.count) tests passed")

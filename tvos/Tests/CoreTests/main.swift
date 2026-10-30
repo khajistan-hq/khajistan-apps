@@ -231,6 +231,14 @@ func deepLinksRefuse() throws {
         "https://receiver/indus",                 // another scheme
         "khajistan://",                           // no host
         "khajistan://library",                    // a screen the app does not have
+        // The rooms an App Store build leaves out (App/StoreBuild.swift, owner 2026-10-06) are
+        // Section names here, so a link must never be able to name one: the top bar and the
+        // launch argument both refuse them, and so must the only outside entry, this parse.
+        // The TV takes no open?url= links of the phone's kind either.
+        "khajistan://picsvids",
+        "khajistan://chat",
+        "khajistan://wall",
+        "khajistan://open?url=https://khajistan-archive.pages.dev/chat",
         "khajistan://receiver/indus/extra",       // too deep
         "khajistan://receiver//indus",
         "khajistan://receiver/Indus",             // ids are lower case

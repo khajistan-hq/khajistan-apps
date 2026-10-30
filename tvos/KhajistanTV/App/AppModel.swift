@@ -141,7 +141,7 @@ final class AppModel {
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
-        case "reading": self.section = .reading
+        case "reading" where StoreBuild.includes(.reading): self.section = .reading
         case "picsvids" where StoreBuild.includes(.picsvids): self.section = .picsvids
         case "chat" where StoreBuild.includes(.chat): self.section = .chat
         case "rooms": self.section = .rooms

@@ -6,7 +6,7 @@ It is drawn in the house style measured from the website, recorded in [`DESIGN.m
 
 ## What v1 carries
 
-**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, READING ROOM, PICS/VIDS and ACCOUNT beside them. There is no system tab bar. The App Store build (`KJ_APP_STORE`, set only when archiving for the store) leaves PICS/VIDS out: part of its feed has never been screened for adult material.
+**The chrome.** The animated pigeon and KHAJISTAN head every screen, with RECEIVER, TRANSMISSION, READING ROOM, PICS/VIDS and ACCOUNT beside them. There is no system tab bar. The App Store build (`KJ_APP_STORE`, set only when archiving for the store) carries RECEIVER, TRANSMISSION, SCREENING ROOM and ACCOUNT (owner, 2026-10-29). PICS/VIDS stays out because part of its feed has never been screened for adult material; CHAT until a server word filter exists; the READING ROOM, and the Bazaar, Madrassa and databases, by the same ruling. The ROOMS door is then the Screening Room itself.
 
 **The skin.** Account offers Automatic, Day, Grove and Smut. Day, Grove and Smut are the names on the website's switch; Automatic follows the sun, as the website does (Day above +6°, Smut between ±6°, Grove below, from the Apple TV's time zone), and is the default. The choice is kept on the Apple TV and applies at once.
 

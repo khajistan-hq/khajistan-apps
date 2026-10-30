@@ -743,7 +743,7 @@ enum Section: String, CaseIterable, Identifiable {
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
         // The Screening Room, the Bazaar, the Madrassa and the databases, under one door.
-        case .rooms: return "Rooms"
+        case .rooms: return StoreBuild.roomsAreScreeningOnly ? "Screening Room" : "Rooms"
         case .chat: return "Chat"
         case .account: return "Account"
         }

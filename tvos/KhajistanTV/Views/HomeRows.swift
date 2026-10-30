@@ -19,12 +19,14 @@ struct HomeRows: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             transmissionRow
-            readingRow
-            // A section this build leaves out (StoreBuild: Pics/Vids and Chat in the App Store
-            // build) has no shelf on Home either.
+            // A section this build leaves out (StoreBuild: Pics/Vids, Chat, the Reading Room and
+            // every room but the Screening Room in the App Store build) has no shelf on Home either.
+            if StoreBuild.includes(.reading) { readingRow }
             if StoreBuild.includes(.picsvids) { picsVidsRow }
-            madrassaRow
-            bazaarRow
+            if !StoreBuild.roomsAreScreeningOnly {
+                madrassaRow
+                bazaarRow
+            }
             if StoreBuild.includes(.chat) { chatRow }
         }
         // The channel the app opens on comes first: the shelves load a moment after the front.
@@ -37,10 +39,11 @@ struct HomeRows: View {
                     await model.pnv.loadMore(region: region)
                 }
             }
-            await model.reading.start()
+            if StoreBuild.includes(.reading) { await model.reading.start() }
             if StoreBuild.includes(.chat) { await model.chat.start() }
         }
         .task(id: model.auth.previewPassword) {
+            guard !StoreBuild.roomsAreScreeningOnly else { return }
             try? await Task.sleep(for: .seconds(2))
             await model.bazaar.load()
             await model.bazaarSwap.load()
@@ -251,12 +254,19 @@ struct HomeSections: View {
             switch door {
             case .picsvids: return StoreBuild.includes(.picsvids)
             case .chat: return StoreBuild.includes(.chat)
-            default: return true
+            case .reading: return StoreBuild.includes(.reading)
+            case .bazaar, .madrassa, .databases: return !StoreBuild.roomsAreScreeningOnly
+            case .screening: return true
             }
         }
     }
 
     var body: some View {
+        // One door left (the App Store build) is the top bar's own Screening Room: no shelf.
+        if doors.count > 1 { shelf }
+    }
+
+    private var shelf: some View {
         Shelf("Khajistan", count: "Every part") {
             ForEach(doors) { door in
                 Button { open(door) } label: {

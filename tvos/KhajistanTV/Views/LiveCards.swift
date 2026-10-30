@@ -235,7 +235,7 @@ struct PictureCard: View {
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
         .kjCardArt()
-        .animation(.easeOut(duration: 0.15), value: isFocused)
+        // No fade on focus: halfway between the plates the lettering reads on neither.
         .animation(.easeOut(duration: 0.35), value: still != nil)
     }
 }

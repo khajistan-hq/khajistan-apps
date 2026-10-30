@@ -68,7 +68,7 @@ struct HomeRows: View {
                 Button {
                     model.open(DeepLink.channel(number).url)
                 } label: {
-                    CardPlate(width: 560, height: ChannelCard.height) {
+                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
                         VStack(alignment: .leading, spacing: 10) {
                             Kicker(onAir == nil ? "Channel \(number)" : "Channel \(number) \u{00B7} On air")
                             if store.programming != nil {

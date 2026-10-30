@@ -4103,7 +4103,7 @@ func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
         now += 0.5
     }
     try expectEqual(taken.count, StillPlan.perVisit)
-    try expectEqual(StillPlan.perVisit, 12)
+    try expectEqual(StillPlan.perVisit, 24)
     try expect(plan3.exhausted)
     try expectEqual(Set(taken).count, taken.count, "no channel twice")
 }

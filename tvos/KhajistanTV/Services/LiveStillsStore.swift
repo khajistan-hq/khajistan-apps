@@ -16,8 +16,8 @@ import UIKit
 @MainActor @Observable
 final class LiveStills {
     nonisolated static let maxSize = CGSize(width: 480, height: 270)
-    /// About 24 stills at 480x270, 12 MB of pixels.
-    private static let costLimit = 480 * 270 * 4 * 24
+    /// About 36 stills at 480x270, 19 MB of pixels: a still for every region and camera card.
+    private static let costLimit = 480 * 270 * 4 * 36
     /// A still older than this is taken again when its card is next wanted.
     private static let maxAge: TimeInterval = 600
     /// How long a still may take to arrive before the channel is given up for this visit.
@@ -28,6 +28,8 @@ final class LiveStills {
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private var plan = StillPlan()
     @ObservationIgnored private var wanted: [Channel] = []
+    /// A second list, wanted after the first: the Receiver's camera cards, beside its regions.
+    @ObservationIgnored private var wantedToo: [Channel] = []
     @ObservationIgnored private var onScreen: [Channel] = []
     @ObservationIgnored private var visit = 0
     @ObservationIgnored private var driver: Task<Void, Never>?
@@ -73,6 +75,7 @@ final class LiveStills {
         driver?.cancel()
         driver = nil
         wanted = []
+        wantedToo = []
         onScreen = []
         visit += 1
         plan.finished()
@@ -82,6 +85,12 @@ final class LiveStills {
     /// skipped here, so a page may pass its whole list.
     func want(_ channels: [Channel]) {
         wanted = channels.filter { $0.mediaType != "radio" }
+        drive()
+    }
+
+    /// Wanted after `want`'s list, and kept when that list changes.
+    func wantToo(_ channels: [Channel]) {
+        wantedToo = channels.filter { $0.mediaType != "radio" }
         drive()
     }
 
@@ -123,13 +132,14 @@ final class LiveStills {
                     continue
                 }
                 let now = Date().timeIntervalSince1970
-                guard let id = self.plan.next(wanted: self.wanted.map(\.id), has: { self.image(for: $0) != nil }, now: now) else {
+                let all = self.wanted + self.wantedToo
+                guard let id = self.plan.next(wanted: all.map(\.id), has: { self.image(for: $0) != nil }, now: now) else {
                     let wait = self.plan.wait(now: now)
                     if wait == 0 { break }
                     try? await Task.sleep(for: .seconds(wait))
                     continue
                 }
-                if let channel = self.wanted.first(where: { $0.id == id }), let image = await self.grab(channel),
+                if let channel = all.first(where: { $0.id == id }), let image = await self.grab(channel),
                    !Task.isCancelled, current == self.visit {
                     self.store(image, for: id)
                 }

@@ -214,6 +214,7 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
     let final: Bool?
     let uncertain: Bool?
     let program_epoch: Double?
+    var created_at: String? = nil
 }
 
 enum CaptionRules {
@@ -230,7 +231,7 @@ enum CaptionRules {
     static let minOnScreen: Double = 2
     static let maxOnScreen: Double = 7
     static let readingCPS: Double = 20
-    static let maxQueueAhead: Double = 30
+    static let maxQueueAhead: Double = 6
     static let lineChars = 42
     static let translationWait: Double = 8
     static let firstLineSeconds: Double = 10
@@ -423,7 +424,7 @@ enum CaptionRules {
     /// recoverWire(): the last thirty seconds of the channel's wire, newest first, fifty rows.
     static func wireRequest(channelId: String, now: Date, accessToken: String) -> URLRequest {
         let since = ISO8601DateFormatter().string(from: now.addingTimeInterval(-30))
-        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch"
+        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch,created_at"
         let query = "select=\(columns)&channel_id=eq.\(KJURL.encodeQueryValue(channelId))&created_at=gte.\(KJURL.encodeQueryValue(since))&order=id.desc&limit=50"
         var request = URLRequest(url: URL(string: KJConfig.supabase.absoluteString + "/rest/v1/live_caption_wire?" + query)!)
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
@@ -456,7 +457,8 @@ enum CaptionRules {
     /// isEnglishSource(): said in English and written only in Latin letters.
     static func isEnglishSource(_ row: CaptionWireRow) -> Bool {
         let source = row.text ?? ""
-        return row.lang == "en" && (row.script == nil || row.script == "Latn") && !hasNonLatinLetter(source)
+        let script = row.script?.lowercased()
+        return row.lang == "en" && (script == nil || script == "latin" || script == "latn") && !hasNonLatinLetter(source)
     }
 
     /// checkedEnglish(): provider output that is untranslated script, a code fence or JSON, or
@@ -566,7 +568,8 @@ enum CaptionRules {
     static func mediaTime(atEpoch: Double, now: Double, mediaNow: Double, behindLive: Double) -> Double? {
         let lag = now - atEpoch
         if lag > 180 || lag < -30 { return nil }
-        return mediaNow + max(0, atEpoch + behindLive - now)
+        guard [atEpoch, now, mediaNow, behindLive].allSatisfy(\.isFinite) else { return nil }
+        return mediaNow + atEpoch + behindLive - now
     }
 
     /// The hold the picture wants: the site's resync() target, the 90th percentile of the measured
@@ -576,6 +579,92 @@ enum CaptionRules {
         let p90 = sorted.isEmpty ? holdStart - holdMargin : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.9))]
         return min(ceiling, max(holdStart, (p90 + holdMargin).rounded(.up)))
     }
+}
+
+/// A bounded live display queue. Source anchors remain independent of reading-time padding.
+/// Only unseen text can be combined or shed; the caption being read is never cut short.
+struct CaptionTimeline {
+    private struct Entry {
+        let anchor: Double
+        let duration: Double
+        let text: String
+        let pieces: [SubtitleCue]
+        var cue: SubtitleCue
+    }
+    private var entries: [Entry] = []
+    private(set) var dropped = 0
+    var cues: [SubtitleCue] { entries.map(\.cue) }
+    /// Last plate start before queue padding; includes within-phrase reading allocation.
+    var latestUnshiftedPlateStart: Double? { entries.flatMap(\.pieces).map(\.start).max() }
+
+    mutating func advance(to now: Double) {
+        guard now.isFinite else { return }
+        entries.removeAll { $0.cue.end <= now }
+    }
+
+    mutating func append(_ text: String, at anchor: Double, spoken: Double?, now: Double) {
+        guard anchor.isFinite, now.isFinite, anchor - now <= CaptionRules.holdMax + 15 else { return }
+        advance(to: now)
+        // Recovery is not a transcript replay. An old row must not rewind the picture or
+        // displace present speech, even when a reconnect returns thirty seconds at once.
+        guard now - anchor <= CaptionRules.maxQueueAhead else { dropped += 1; return }
+        let spoken = spoken.flatMap { $0.isFinite ? $0 : nil }
+        let locked = entries.first { $0.cue.start <= now && now < $0.cue.end }
+        for cue in CaptionRules.timed(text, at: anchor, spokenSeconds: spoken) {
+            entries.append(Entry(anchor: cue.start, duration: cue.end - cue.start, text: cue.text, pieces: [cue], cue: cue))
+        }
+        var future = entries.filter { entry in
+            guard let locked else { return true }
+            return entry.cue != locked.cue
+        }.flatMap { $0.pieces }.enumerated().sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }.map {
+            Entry(anchor: $0.element.start, duration: $0.element.end - $0.element.start,
+                  text: $0.element.text, pieces: [$0.element], cue: $0.element)
+        }
+        if let locked {
+            let before = future.count
+            future.removeAll { $0.anchor < locked.anchor }
+            dropped += before - future.count
+        }
+        // Short finalized fragments arriving together share a readable plate, instead of
+        // each acquiring two more seconds of delay. Never rewrite an active plate.
+        var compact: [Entry] = []
+        for entry in future {
+            if let previous = compact.last, entry.anchor <= previous.anchor + previous.duration,
+               let joined = CaptionRules.blocks(previous.text.replacingOccurrences(of: "\n", with: " ") + " " + entry.text.replacingOccurrences(of: "\n", with: " ")).onlyCaptionBlock {
+                let duration = max(previous.duration, CaptionRules.minOnScreen, Double(joined.replacingOccurrences(of: "\n", with: "").count) / CaptionRules.readingCPS,
+                                   entry.anchor + entry.duration - previous.anchor)
+                if duration <= CaptionRules.maxOnScreen {
+                    compact.removeLast()
+                    compact.append(Entry(anchor: previous.anchor, duration: duration, text: joined, pieces: previous.pieces + entry.pieces,
+                                         cue: SubtitleCue(start: previous.anchor, end: previous.anchor + duration, text: joined)))
+                    continue
+                }
+            }
+            compact.append(entry)
+        }
+        // Prefer current speech over stale unseen backlog. Rebuild from the same source
+        // anchors after each eviction; no shortening and no accumulating lastEnd debt.
+        while true {
+            var cursor = max(now, locked?.cue.end ?? now)
+            var delayed = false
+            for index in compact.indices {
+                let entry = compact[index]
+                let start = max(cursor, entry.anchor)
+                if start - max(now, entry.anchor) > CaptionRules.maxQueueAhead { delayed = true }
+                compact[index].cue = SubtitleCue(start: start, end: start + entry.duration, text: entry.text)
+                cursor = start + entry.duration
+            }
+            if !delayed || compact.count <= 1 { break }
+            compact.removeFirst()
+            dropped += 1
+        }
+        if compact.count > 200 { dropped += compact.count - 200; compact = Array(compact.suffix(200)) }
+        entries = (locked.map { [$0] } ?? []) + compact
+    }
+}
+
+private extension Array where Element == String {
+    var onlyCaptionBlock: String? { count == 1 ? first : nil }
 }
 
 // MARK: - Supabase Realtime (the receiver's postgres_changes subscription)
@@ -591,14 +680,16 @@ enum CaptionRealtime {
 
     static func topic(_ channelId: String) -> String { "realtime:captions:\(channelId)" }
 
-    /// sb.channel("captions:<id>").on("postgres_changes", INSERT on live_caption_wire for the channel).
+    /// Subscribe to new source rows and the worker's late-English patches for this channel.
     static func join(channelId: String, accessToken: String, ref: String) -> String {
         let message: [String: Any] = [
             "topic": topic(channelId), "event": "phx_join", "ref": ref, "join_ref": ref,
             "payload": [
                 "config": [
                     "broadcast": ["ack": false, "self": false], "presence": ["key": ""], "private": false,
-                    "postgres_changes": [["event": "INSERT", "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]]
+                    "postgres_changes": ["INSERT", "UPDATE"].map { event in
+                        ["event": event, "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]
+                    }
                 ] as [String: Any],
                 "access_token": accessToken
             ] as [String: Any]
@@ -628,7 +719,7 @@ enum CaptionRealtime {
         case "phx_error", "phx_close":
             return .closed
         case "postgres_changes":
-            guard let data = payload?["data"] as? [String: Any], data["type"] as? String == "INSERT",
+            guard let data = payload?["data"] as? [String: Any], let change = data["type"] as? String, ["INSERT", "UPDATE"].contains(change),
                   let record = data["record"],
                   let bytes = try? JSONSerialization.data(withJSONObject: record),
                   let row = try? JSONDecoder().decode(CaptionWireRow.self, from: bytes) else { return .other }

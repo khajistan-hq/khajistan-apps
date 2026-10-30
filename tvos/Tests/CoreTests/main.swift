@@ -3088,6 +3088,15 @@ func liveCaptionEnglishGate() throws {
     }
     try expectEqual(CaptionRules.english(for: row("آج کی خبریں", english: "Today's news")), "Today's news")
     try expectEqual(CaptionRules.english(for: row("Hello there", english: nil, lang: "en")), "Hello there", "English speech paints as itself")
+    // The production detector emits "latin"; older rows used ISO "Latn".
+    for script in ["latin", "LATIN", "Latn", "latn"] {
+        let wire = Data(#"{"id":7,"channel_id":"c","text":"Live from London.","english":null,"lang":"en","script":"SCRIPT","final":true}"#.replacingOccurrences(of: "SCRIPT", with: script).utf8)
+        let decoded = try JSONDecoder().decode(CaptionWireRow.self, from: wire)
+        try expect(CaptionRules.isEnglishSource(decoded), "worker script tag \(script) admits English source immediately")
+        try expectEqual(CaptionRules.english(for: decoded), "Live from London.", "English source needs no translation request")
+        try expect(!CaptionRules.isEnglishSource(row("Live أخبار", english: nil, lang: "en", script: script)), "script metadata cannot override actual non-Latin letters")
+        try expect(!CaptionRules.isEnglishSource(row("Bonjour", english: nil, lang: "fr", script: script)), "Latin script alone does not imply English")
+    }
     try expect(CaptionRules.english(for: row("آج کی خبریں", english: nil)) == nil, "no English, nothing to paint")
     try expect(CaptionRules.english(for: row("Hello", english: nil, lang: "en", script: "Arab")) == nil, "a contradictory script tag is not English")
     for bad in ["آج کی news", "As an AI language model, I cannot", "Translation note: unclear", "```json", #"{"english":"x"}"#,
@@ -3135,13 +3144,67 @@ func liveCaptionBlocks() throws {
 
 func liveCaptionClock() throws {
     try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 24), 62, "12 s of lag under a 24 s hold lands 12 s ahead")
-    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1030, mediaNow: 50, behindLive: 24), 50, "a late row shows now")
-    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 0), 50, "radio, no hold: now")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1030, mediaNow: 50, behindLive: 24), 44, "preserve late source time for the scheduler")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 0), 38, "source time remains visible to the placement policy")
     try expect(CaptionRules.mediaTime(atEpoch: 1000, now: 1181, mediaNow: 0, behindLive: 0) == nil, "skewed by over three minutes")
     try expect(CaptionRules.mediaTime(atEpoch: 1031, now: 1000, mediaNow: 0, behindLive: 0) == nil, "from the future")
     try expectEqual(CaptionRules.holdTarget(lags: [], ceiling: 60), 24)
     try expectEqual(CaptionRules.holdTarget(lags: [10, 12, 30, 31, 33, 35, 36, 37, 38, 40], ceiling: 60), 44)
     try expectEqual(CaptionRules.holdTarget(lags: [50, 55], ceiling: 30), 30, "never past the live window")
+}
+
+func liveCaptionBoundedTimeline() throws {
+    var timeline = CaptionTimeline()
+    timeline.append("Already reading this.", at: 100, spoken: 3, now: 100)
+    let active = try require(timeline.cues.first)
+    for i in 0..<40 {
+        timeline.append("New sentence number \(i) has enough words for a whole plate.", at: 100 + Double(i) * 0.1, spoken: 2, now: 100)
+    }
+    try expectEqual(timeline.cues.first, active, "a reconnect burst cannot cut the active line")
+    try expect(timeline.dropped > 0, "an overload must be accounted for")
+    try expect(timeline.cues.contains { $0.text.contains("number 39") }, "fresh speech wins over stale unseen backlog")
+    for (a, b) in zip(timeline.cues, timeline.cues.dropFirst()) {
+        try expect(a.end <= b.start, "one plate at a time")
+    }
+    try expect((timeline.cues.last?.start ?? 100) <= 110, "40-row burst cannot build 30 seconds of backlog")
+    for cue in timeline.cues { try expect(cue.end - cue.start >= 2, "never flash to catch up") }
+
+    var compact = CaptionTimeline()
+    for i in 0..<5 { compact.append("Word\(i).", at: 110 + Double(i) * 0.2, spoken: 0.2, now: 100) }
+    try expectEqual(compact.cues.count, 1, "short unseen fragments share a two-line plate")
+    try expectEqual(compact.dropped, 0, "compaction preserves every word")
+    try expect(compact.cues[0].text.contains("Word0.") && compact.cues[0].text.contains("Word4."))
+    try expect(compact.cues[0].end <= 113, "five short phrases do not add ten seconds")
+
+    var ordered = CaptionTimeline()
+    ordered.append("Later source sentence.", at: 120, spoken: 2, now: 100)
+    ordered.append("Earlier source sentence.", at: 110, spoken: 2, now: 100)
+    try expectEqual(ordered.cues.map(\.start), [110, 120], "recoveries sort by source time")
+    ordered.advance(to: 121)
+    let current = ordered.cues
+    ordered.append("obsolete recovery", at: 90, spoken: 2, now: 121)
+    try expectEqual(ordered.cues, current, "old rows cannot displace current speech")
+    ordered.append("bad clock", at: .infinity, spoken: 2, now: 121)
+    try expectEqual(ordered.cues, current)
+    ordered.advance(to: 123)
+    try expect(ordered.cues.isEmpty)
+
+    var reordered = CaptionTimeline()
+    reordered.append("First.", at: 110, spoken: 2, now: 100)
+    reordered.append("Third.", at: 112, spoken: 2, now: 100)
+    reordered.append("Second.", at: 111, spoken: 2, now: 100)
+    try expectEqual(reordered.cues.map(\.text).joined(separator: " ").replacingOccurrences(of: "\n", with: " "), "First. Second. Third.", "compaction retains every source anchor for reordering")
+
+    var contained = CaptionTimeline()
+    contained.append("Long thought.", at: 110, spoken: 7, now: 100)
+    contained.append("Yes.", at: 111, spoken: 2, now: 100)
+    try expectEqual(contained.cues.last?.end, 117, "compaction cannot shorten the earlier source span")
+
+    var rewind = CaptionTimeline()
+    rewind.append("At the source moment.", at: 94, spoken: 2, now: 90)
+    try expectEqual(rewind.cues.first?.start, 94, "after 100→90 seek the cue is at 94, never pre-seek 100")
+    try expectEqual(WebVTT.text(at: 93.9, in: rewind.cues), nil)
+    try expectEqual(WebVTT.text(at: 94, in: rewind.cues), "At the source moment.")
 }
 
 func liveCaptionRealtime() throws {
@@ -3156,12 +3219,18 @@ func liveCaptionRealtime() throws {
     try expectEqual(changes["table"] as? String, "live_caption_wire")
     try expectEqual(changes["filter"] as? String, "channel_id=eq.indus-x")
     try expectEqual(changes["event"] as? String, "INSERT")
+    let subscriptions = try require((payload["config"] as? [String: Any])?["postgres_changes"] as? [[String: Any]])
+    try expectEqual(subscriptions.compactMap { $0["event"] as? String }, ["INSERT", "UPDATE"])
+    try expect(subscriptions.allSatisfy { ($0["filter"] as? String) == "channel_id=eq.indus-x" }, "both event types stay scoped to the channel")
 
     let insert = #"{"event":"postgres_changes","payload":{"data":{"type":"INSERT","schema":"public","table":"live_caption_wire","record":{"id":42,"channel_id":"indus-x","text":"خبر","english":"News","lang":"ur","at_epoch":1759666000.5,"spoken_seconds":1.8,"final":true,"sn":12,"program_epoch":null}},"ids":[1]},"ref":null,"topic":"realtime:captions:indus-x"}"#
     guard case .row(let row) = CaptionRealtime.event(insert, channelId: "indus-x") else { throw Failure(description: "an insert must be a row") }
     try expectEqual(row.id, 42)
     try expectEqual(row.english, "News")
     try expectEqual(row.at_epoch, 1759666000.5)
+    let update = insert.replacingOccurrences(of: "\"type\":\"INSERT\"", with: "\"type\":\"UPDATE\"")
+    guard case .row(let updatedRow) = CaptionRealtime.event(update, channelId: "indus-x") else { throw Failure(description: "late-English UPDATE must decode") }
+    try expectEqual(updatedRow.id, row.id)
     try expectEqual(CaptionRealtime.event(insert, channelId: "other"), .other, "another channel's topic")
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"ok","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .subscribed)
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"error","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .closed)
@@ -4158,6 +4227,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: blocks of two 42-character lines", liveCaptionBlocks),
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: realtime messages", liveCaptionRealtime),
+    ("Live captions: bounded readable timeline", liveCaptionBoundedTimeline),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Shuffle: regions drawn by what they have live", shuffleDrawsRegionsByLiveCount),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),

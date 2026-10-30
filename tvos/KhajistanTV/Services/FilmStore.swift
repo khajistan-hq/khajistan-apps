@@ -3,8 +3,10 @@ import Observation
 
 /// The Screening Room's catalogue and the full-film question. vod.json is LAUNCH_RESTRICTED in
 /// archive/_worker.js, before launch and after it, so it opens only with the preview password.
-/// Without it the films are not offered at all, which is what the site's receiver does on a
-/// non-200 (it falls back to an empty list and hides the medium).
+/// When it refuses, the public list is asked instead: vod-public.json, the same films reduced
+/// to the shelf and the sixty-second preview, which the gate opens when the site launches (owner,
+/// 2026-10-29). Before launch both refuse and the room says it is locked. A full film is asked of
+/// vod-token by handle either way.
 @MainActor @Observable
 final class FilmStore {
     enum State: Equatable {
@@ -66,8 +68,16 @@ final class FilmStore {
         var request = URLRequest(url: Films.catalogueURL(origin: origin))
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            var (data, response) = try await urlSession.data(for: request)
+            var code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // 401 behind the password; 404 if a launched site answers the restricted path so.
+            if code == 401 || code == 404 {
+                var open = URLRequest(url: Films.publicCatalogueURL(origin: origin))
+                if let authorization { open.setValue(authorization, forHTTPHeaderField: "Authorization") }
+                (data, response) = try await urlSession.data(for: open)
+                code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if code != 200 { code = 401 }
+            }
             loadedWith = .some(password)
             if code == 401 {
                 films = []

@@ -63,6 +63,14 @@ enum Films {
         origin.appendingPathComponent(String(cataloguePath.dropFirst()))
     }
 
+    /// The public film list (vod-public.json): open once the site launches, with no stream uid,
+    /// price or rights note in it.
+    static let publicCataloguePath = "/data/khajistan-tv/vod-public.json"
+
+    static func publicCatalogueURL(origin: URL) -> URL {
+        origin.appendingPathComponent(String(publicCataloguePath.dropFirst()))
+    }
+
     /// filmChannels(): a film with no handle or no title is not offered.
     static func offered(_ films: [Film]) -> [Film] {
         films.filter { !$0.handle.trimmingCharacters(in: .whitespaces).isEmpty && !($0.title ?? "").isEmpty }

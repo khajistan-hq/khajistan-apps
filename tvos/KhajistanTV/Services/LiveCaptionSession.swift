@@ -1,6 +1,9 @@
 import Foundation
 import UIKit
 import Observation
+#if DEBUG && canImport(os)
+import os
+#endif
 
 /// Live captions on a receiver channel: archive/scripts/kj-captions-live.js on the television.
 ///
@@ -78,6 +81,21 @@ final class LiveCaptionSession {
         let fresh = "v" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(20)
         UserDefaults.standard.set(fresh, forKey: CaptionRules.viewerKey)
         return fresh
+    }
+
+    // Numeric-only DEBUG telemetry: 1 receive, 2 English update, 3 placement,
+    // 4 display change, 5 seek start, 6 seek completion, 7 seek timeout,
+    // 8 translation expiry, 9 stop. Never log text, channel/account IDs or tokens.
+    #if DEBUG && canImport(os)
+    private static let diagnosticLog = Logger(subsystem: "org.khajistan.receiver", category: "CaptionTiming")
+    #endif
+    private func trace(_ event: Int, row: CaptionWireRow? = nil, source: Double = .nan,
+                       display: Double = .nan, cue: SubtitleCue? = nil, value: Double = 0) {
+        #if DEBUG && canImport(os)
+        let clock = player?.captionClock
+        let created = row?.created_at.flatMap(CaptionRules.isoDate)?.timeIntervalSince1970 ?? .nan
+        Self.diagnosticLog.notice("event=\(event) gen=\(self.generation) row=\(row?.id ?? -1) wall=\(Date().timeIntervalSince1970) created=\(created) epoch=\(row?.at_epoch ?? .nan) programme=\(row?.program_epoch ?? .nan) media=\(clock?.now ?? .nan) playerProgramme=\(clock?.programDate?.timeIntervalSince1970 ?? .nan) hold=\(clock?.behindLive ?? .nan) low=\(clock?.window?.lowerBound ?? .nan) high=\(clock?.window?.upperBound ?? .nan) source=\(source) display=\(display) start=\(cue?.start ?? .nan) end=\(cue?.end ?? .nan) chars=\(cue?.text.count ?? 0) waiting=\(self.waiting.count) dropped=\(self.timeline.dropped) value=\(value)")
+        #endif
     }
 
     // MARK: - Attach and detach (the receiver's attach() / detach())
@@ -262,6 +280,7 @@ final class LiveCaptionSession {
 
     /// Every teardown releases the demand, so the paid worker stops for nobody watching.
     private func stop(_ why: String) {
+        trace(9)
         let wasOn = isOn || billingSession != nil
         generation += 1
         if resyncing { player?.cancelCaptionSeek() }
@@ -393,6 +412,7 @@ final class LiveCaptionSession {
                    row.text == waiting[index].row.text, row.lang == waiting[index].row.lang,
                    row.program_epoch == waiting[index].row.program_epoch, row.at_epoch == waiting[index].row.at_epoch,
                    let english = CaptionRules.english(for: row) {
+                    trace(2, row: row)
                     waiting[index].english = english
                     waiting[index].ready = true
                     translationTasks.removeValue(forKey: waiting[index].seq)?.cancel()
@@ -404,6 +424,7 @@ final class LiveCaptionSession {
             seenOrder.append(id)
             if seenOrder.count > 500 { seen.remove(seenOrder.removeFirst()) }
         }
+        trace(1, row: row, value: recovered ? 1 : 0)
         lastReceivedAt = Date()
         received += 1
         // The worker withholds English when it could not hear reliably; never invent it.
@@ -462,6 +483,7 @@ final class LiveCaptionSession {
         while let head = waiting.first {
             if !head.ready {
                 guard ContinuousClock.now >= head.deadline else { return }
+                trace(8, row: head.row)
                 waiting.removeFirst()
                 translationTasks.removeValue(forKey: head.seq)?.cancel()
                 note = CaptionRules.untranslatedLine
@@ -513,6 +535,7 @@ final class LiveCaptionSession {
         else if note == timingNote { note = "" }
         let before = timeline.dropped
         timeline.append(body, at: displayAt, spoken: row.spoken_seconds, now: clock.now)
+        trace(3, row: row, source: sourceTime, display: displayAt, value: freshButLate ? 1 : 0)
         if timeline.dropped > before { note = "Captions caught up; some delayed speech could not be displayed." }
         if !counted { firstAt = timeline.cues.first?.start }
         return true
@@ -551,6 +574,7 @@ final class LiveCaptionSession {
     }
 
     private func seekBack(by seconds: Double, player: PlayerController) {
+        trace(5, value: seconds)
         resyncing = true
         seekSerial += 1
         let serial = seekSerial
@@ -559,6 +583,7 @@ final class LiveCaptionSession {
         let gen = generation
         player.seekBack(by: seconds) { [weak self] in
             guard let self, gen == self.generation, serial == self.seekSerial, self.isOn else { return }
+            self.trace(6)
             self.seekDeadline = nil
             self.resyncing = false
             self.clearSayLater()
@@ -585,6 +610,7 @@ final class LiveCaptionSession {
     private func tick(_ player: PlayerController, generation gen: Int) async {
         while !Task.isCancelled, gen == generation {
             if resyncing, let deadline = seekDeadline, ContinuousClock.now >= deadline {
+                trace(7)
                 seekSerial += 1 // a late completion cannot settle another seek
                 seekDeadline = nil
                 resyncing = false
@@ -594,8 +620,9 @@ final class LiveCaptionSession {
             flush() // absolute translation deadlines include authentication and slow downloads
             if !resyncing, let clock = player.captionClock {
                 timeline.advance(to: clock.now)
-                let showing = timeline.cues.first { $0.start <= clock.now && clock.now < $0.end }?.text
-                if text != showing { text = showing }
+                let cue = timeline.cues.first { $0.start <= clock.now && clock.now < $0.end }
+                let showing = cue?.text
+                if text != showing { trace(4, cue: cue); text = showing }
                 countdown(clock)
             }
             try? await Task.sleep(for: .milliseconds(100))

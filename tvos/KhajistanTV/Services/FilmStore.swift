@@ -76,7 +76,9 @@ final class FilmStore {
                 if let authorization { open.setValue(authorization, forHTTPHeaderField: "Authorization") }
                 (data, response) = try await urlSession.data(for: open)
                 code = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if code != 200 { code = 401 }
+                // Refused (before launch) is locked; anything else that is not 200 is an outage,
+                // which fails and is tried again, never read as a wrong password.
+                if code == 404 { code = 401 }
             }
             loadedWith = .some(password)
             if code == 401 {

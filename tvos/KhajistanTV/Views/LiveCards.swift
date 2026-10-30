@@ -181,9 +181,29 @@ struct PictureCard: View {
     static let width: CGFloat = 420
     static let height: CGFloat = 236
 
-    let channel: Channel
+    /// The channel whose place and heart head the card; nil for a card that names a region.
+    let channel: Channel?
+    let title: String
     let still: UIImage?
     var liked = false
+    var width: CGFloat = Self.width
+    var height: CGFloat = Self.height
+
+    init(channel: Channel, still: UIImage?, liked: Bool = false) {
+        self.channel = channel
+        self.title = channel.name
+        self.still = still
+        self.liked = liked
+    }
+
+    /// A region's card on the Receiver's front: its name over a still of one of its channels.
+    init(title: String, still: UIImage?, width: CGFloat, height: CGFloat) {
+        self.channel = nil
+        self.title = title
+        self.still = still
+        self.width = width
+        self.height = height
+    }
     @Environment(\.isFocused) private var isFocused
     @Environment(\.palette) private var palette
 
@@ -194,7 +214,7 @@ struct PictureCard: View {
             if let still {
                 Color.black
                 Image(uiImage: still).resizable().scaledToFit()
-                    .frame(width: Self.width, height: Self.height)
+                    .frame(width: width, height: height)
                 LinearGradient(stops: [
                     .init(color: plate.opacity(0), location: 0.3),
                     .init(color: plate.opacity(0.88), location: 0.72),
@@ -204,14 +224,14 @@ struct PictureCard: View {
                 plate
             }
             VStack(alignment: .leading, spacing: 6) {
-                CardKicker(channel: channel, liked: liked)
-                Text(channel.name)
+                if let channel { CardKicker(channel: channel, liked: liked) }
+                Text(title)
                     .kjName(still == nil ? 40 : KJType.name)
                     .lineLimit(2)
             }
             .padding(24)
         }
-        .frame(width: Self.width, height: Self.height)
+        .frame(width: width, height: height)
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
         .kjCardArt()

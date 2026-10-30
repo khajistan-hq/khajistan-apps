@@ -174,14 +174,30 @@ final class LiveStills {
 
     nonisolated private static let context = CIContext(options: [.cacheIntermediates: false])
 
-    /// A frame scaled to fit `maxSize`, keeping its shape.
+    /// Below this mean brightness (0–1) a frame is a black or fade-out frame, not a picture.
+    nonisolated static let darkFrame: CGFloat = 0.06
+
+    /// A frame scaled to fit `maxSize`, keeping its shape, or nil for a frame that is nearly black:
+    /// a card keeps its name plate rather than show a black box (2026-10-29, the Receiver's front).
     nonisolated static func image(from buffer: CVPixelBuffer) -> UIImage? {
         let frame = CIImage(cvPixelBuffer: buffer)
         let extent = frame.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
+        if brightness(frame) < darkFrame { return nil }
         let scale = min(1, maxSize.width / extent.width, maxSize.height / extent.height)
         let scaled = frame.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cg = context.createCGImage(scaled, from: scaled.extent.integral) else { return nil }
         return UIImage(cgImage: cg)
+    }
+
+    /// The frame's mean brightness, 0–1, from CIAreaAverage over the whole frame.
+    nonisolated static func brightness(_ frame: CIImage) -> CGFloat {
+        guard let filter = CIFilter(name: "CIAreaAverage", parameters: [
+            kCIInputImageKey: frame, kCIInputExtentKey: CIVector(cgRect: frame.extent),
+        ]), let average = filter.outputImage else { return 1 }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        context.render(average, toBitmap: &pixel, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                       format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        return (0.2126 * CGFloat(pixel[0]) + 0.7152 * CGFloat(pixel[1]) + 0.0722 * CGFloat(pixel[2])) / 255
     }
 }

@@ -11,7 +11,6 @@ struct ReceiverView: View {
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
-    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
@@ -108,22 +107,13 @@ struct ReceiverView: View {
 
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
+            // Less to read (owner, 2026-10-29: "simplified its too much text"): the name, Surf,
+            // one count and the switch. The pictures are under the map.
             Text("Receiver")
                 .kjDisplay()
-            Text("Live television, live radio and public cameras from the Middle World.")
-                .kjBody()
             surf
-            Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
-                GridRow {
-                    Figure(label: "Live now", value: figure(index.totals.live))
-                    Figure(label: "Television", value: figure(index.totals.byMedium["tv"]))
-                }
-                GridRow {
-                    Figure(label: "Radio", value: figure(index.totals.byMedium["radio"]))
-                    Figure(label: "Cameras", value: figure(index.totals.byMedium["camera"]))
-                }
-            }
-            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: extendedBinding)
+            Figure(label: "Live now", value: figure(index.totals.live))
+            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
                 .accessibilityIdentifier("beyondTheAtlas")
                 // The plate's padding is pulled back so the switch sits on the page margin.
                 .padding(.leading, -26)
@@ -167,10 +157,7 @@ struct ReceiverView: View {
             Button {
                 Task { await shuffle() }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
-                    Text(surfLine).kjSmall(faint: true)
-                }
+                Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
@@ -186,19 +173,15 @@ struct ReceiverView: View {
             // The plate's padding is pulled back so the label sits on the page margin.
             .padding(.leading, -26)
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            // "Main atlas · Extended atlas · Everywhere" is wider than the sidebar; the line above
-            // says "atlas", so the chips can drop it.
-            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label.replacingOccurrences(of: " atlas", with: "")) },
-                  current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
             if let surfNote { Text(surfNote).kjSmall(faint: true) }
         }
     }
 
     private var medium: ShuffleMedium { .stored(mediumRaw) }
 
-    /// One line that fits the sidebar; the chips under it say which medium and which atlas.
-    private let surfLine = "A live channel at random from the atlas"
-    private var scope: ShuffleScope { .stored(scopeRaw) }
+    /// Surf follows the Beyond the atlas switch: the atlas when it is off, everywhere when it is on.
+    /// One control for both (owner, 2026-10-29), where the front had a switch and a row of chips.
+    private var scope: ShuffleScope { model.extendedAtlas ? .everywhere : .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
         HStack(spacing: 4) {
@@ -349,7 +332,13 @@ private struct AtlasPanel: View {
     let mapError: String?
     let failure: (String) -> AnyView
     let open: (MapRegion) -> Void
+    @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
+    /// Up to three television channels per region, by region id: the card shows the first whose
+    /// still has come.
+    @State private var picks: [String: [Channel]] = [:]
+    /// The picks west to east: what the front asks stills for.
+    @State private var wanted: [Channel] = []
 
     var body: some View {
         Group {
@@ -358,7 +347,7 @@ private struct AtlasPanel: View {
             } else if let composed {
                 VStack(alignment: .leading, spacing: 24) {
                     RegionMapView(map: composed, highlighted: focusedRegion)
-                        .frame(height: 600)
+                        .frame(height: 520)
                     regionStrip(composed)
                 }
                 // Room for a focused plate's lift at the top edge.
@@ -371,6 +360,9 @@ private struct AtlasPanel: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .focusSection()
         .defaultFocus($focusedRegion, "indus")
+        // Back from a region page starts a fresh share and asks again for what was wanted.
+        .onAppear { model.stills.beginVisit(); model.stills.want(wanted) }
+        .onDisappear { model.stills.endVisit() }
         #if DEBUG
         // `-kjautowalk YES` steps focus along the region strip, for measuring on a device with
         // no one at the remote (FrameMeter prints how many frames come late meanwhile).
@@ -391,51 +383,63 @@ private struct AtlasPanel: View {
 
     /// Every region that opens channels, west to east by where it sits on the map, so a press
     /// right on the remote moves east across the map. Focus here is what the map highlights.
+    /// Each is a picture card (owner, 2026-10-29: "visual hook like the posters of screening room"):
+    /// the region's name over a still of one of its television channels, taken on this device as
+    /// the region page takes them. A region with no still yet, or no television, shows its name.
     private func regionStrip(_ map: ComposedMap) -> some View {
         let regions = map.regions
             .filter(\.opensChannels)
             .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
         return ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 4) {
+            LazyHStack(spacing: 40) {
                 ForEach(regions) { region in
                     Button {
                         open(region)
                     } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(region.label).kjKicker()
-                            if let live = region.live {
-                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
-                            }
-                        }
+                        PictureCard(title: region.label,
+                                    still: (picks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
+                                    width: Self.cardWidth, height: Self.cardHeight)
                     }
-                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+                    .buttonStyle(HouseCardStyle())
                     .focused($focusedRegion, equals: region.id)
                     .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
-                    // A chip mostly scrolled under the sidebar is not drawn: its label went first
-                    // and left its count ("44") standing alone at the edge. A quarter out is still
-                    // drawn, so the first chip's pulled-back plate at rest is untouched. Resting
-                    // on whole chips (.viewAligned) broke focus walking the strip on tvOS.
-                    .scrollTransition(axis: .horizontal) { chip, phase in
-                        chip.opacity(phase.value < -0.25 ? 0 : 1)
-                    }
+                    .accessibilityLabel(region.label)
                 }
             }
-            // The plates' padding is pulled back so the first label sits on the map's margin.
-            .padding(.horizontal, -22)
-            .padding(.vertical, 12)
+            .padding(.vertical, 30)
         }
         .scrollClipDisabled()
-        // Clipped on the left, so a strip scrolled east does not run over the sidebar.
+        // Clipped on the left, so a row scrolled east does not run over the sidebar.
         .mask {
-            // Faded over the plates' pull-back rather than cut, so a chip scrolled under the
-            // sidebar does not leave an orphan "44" at the edge.
-            HStack(spacing: 0) {
-                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 22)
-                Rectangle()
-            }
-            .padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
+            Rectangle().padding(.trailing, -200).padding(.vertical, -60)
         }
-        .frame(height: 96)
+        .frame(height: Self.cardHeight + 60)
+        .task(id: regions.map(\.id)) { await pick(regions) }
+    }
+
+    static let cardWidth: CGFloat = 320
+    static let cardHeight: CGFloat = 180
+
+    /// One television channel per region, west to east, and the stills for them. The lists are the
+    /// region shards the region page reads, so opening a region afterwards reads nothing new.
+    private func pick(_ regions: [MapRegion]) async {
+        for region in regions where picks[region.id] == nil {
+            guard !Task.isCancelled else { return }
+            let channels = (try? await model.receiver.channels(regionId: region.id, cameras: false)) ?? []
+            picks[region.id] = Array(channels.filter { $0.mediaType == "tv" }.prefix(3))
+        }
+        // First choices, then a spare only for a region whose card is still a plate (a black frame
+        // or a dead stream), so no still is spent on a region that already has a picture.
+        for rank in 0..<3 {
+            guard !Task.isCancelled else { return }
+            let lacking = regions.filter { region in
+                !(picks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
+            }
+            wanted = lacking.compactMap { picks[$0.id]?.dropFirst(rank).first }
+            if wanted.isEmpty { return }
+            model.stills.want(wanted)
+            // The plan takes one still every 1.5 s at most and gives each up to 10 s.
+            try? await Task.sleep(for: .seconds(Double(wanted.count) * 4))
+        }
     }
 }

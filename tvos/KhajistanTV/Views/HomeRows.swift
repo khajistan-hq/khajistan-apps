@@ -62,7 +62,7 @@ struct HomeRows: View {
     private var transmissionRow: some View {
         let store = model.transmission
         let now = TransmissionStore.now()
-        return Shelf("Khajistan Transmission", count: "Two channels") {
+        return Shelf("Khajistan Transmission") {
             ForEach([1, 2], id: \.self) { number in
                 let onAir = store.nowOn(channel: number, at: now)
                 Button {
@@ -71,10 +71,7 @@ struct HomeRows: View {
                     CardPlate(width: 560, height: ChannelCard.height) {
                         VStack(alignment: .leading, spacing: 10) {
                             Kicker(onAir == nil ? "Channel \(number)" : "Channel \(number) \u{00B7} On air")
-                            if store.programming == nil {
-                                // Without the schedule the channel has no name to give but its number.
-                                Text("The schedule opens with the preview password.").kjSmall(faint: true).lineLimit(2)
-                            } else {
+                            if store.programming != nil {
                                 Text(onAir?.show?.name ?? store.channelName(number))
                                     .kjName()
                                     .lineLimit(2)

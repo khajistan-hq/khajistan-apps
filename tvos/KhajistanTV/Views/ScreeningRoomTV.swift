@@ -50,7 +50,7 @@ struct TVScreeningRoom: View {
                ? "\(model.films.films.count.formatted()) films Khajistan holds and distributes" : nil) {
             switch model.films.state {
             case .idle, .loading: TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity)
-            case .locked: Text("The Screening Room's catalogue is behind the site password while the archive is in preview. Set it under Account.").kjBody()
+            case .locked: Text("Set the site password under Account.").kjBody()
             case .failed(let message): Text(message).kjBody()
             case .ready: shelves
             }

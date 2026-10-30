@@ -221,7 +221,7 @@ struct ReceiverView: View {
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("Cameras", count: "\(CameraRegions.total(index).formatted()) in \(regions.count) regions") {
+            Shelf("Cameras") {
                 ForEach(regions) { region in
                     Button {
                         model.camerasFirst = region.id

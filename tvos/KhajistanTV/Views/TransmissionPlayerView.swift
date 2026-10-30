@@ -102,7 +102,6 @@ struct TransmissionPlayerView: View {
                 Text("Off air").kjDisplay()
                 Text(returns.map { "\(name) returns at \($0) \(StationClock.tzLabel)." } ?? "\(name) is off air.")
                     .kjBody()
-                Text("Up or down switches channel.").kjSmall(faint: true)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(.horizontal, KJLayout.inset)

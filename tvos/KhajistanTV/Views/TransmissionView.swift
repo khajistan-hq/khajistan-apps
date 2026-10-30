@@ -78,9 +78,6 @@ struct TransmissionView: View {
             Text(metaText)
                 .kjBody()
                 .transmissionState("Ready")
-        } else {
-            Text(metaText)
-                .kjBody()
         }
     }
 
@@ -101,13 +98,15 @@ struct TransmissionView: View {
                 .transmissionState("Loading")
         case .needsPreviewPassword(let message):
             VStack(alignment: .leading, spacing: 28) {
-                Text("The schedule is behind the preview password until launch.")
-                    .kjBody()
+                // The page's state for the UI tests; nothing on screen.
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityAddTraits(.isStaticText)
                     .transmissionState("Preview password")
                 if let message {
                     Text(message).kjBody()
                 }
-                HouseInputField("Password", text: password, secure: true) {
+                HouseInputField("Preview password", text: password, secure: true) {
                     SecureField("", text: $password)
                 }
                 Button("Continue") {

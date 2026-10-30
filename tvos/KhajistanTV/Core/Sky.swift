@@ -208,3 +208,14 @@ enum SkinChoice: String, CaseIterable, Sendable {
         }
     }
 }
+
+extension Skin {
+    /// The website's switch order: Day, Grove, Smut, then Day again.
+    var next: SkinChoice {
+        switch self {
+        case .day: return .grove
+        case .grove: return .smut
+        case .smut: return .day
+        }
+    }
+}

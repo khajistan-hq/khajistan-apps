@@ -51,7 +51,6 @@ struct AccountView: View {
                 .buttonStyle(HouseButtonStyle())
                 .padding(.leading, -26)
             } else {
-                Text("Khajistan Transmission plays under your website account.").kjBody()
                 Button(kicker: "Sign in") {
                     showSignIn = true
                 }
@@ -61,38 +60,23 @@ struct AccountView: View {
         }
     }
 
-    /// The website's three skins, by their names on its switch, and Automatic, which follows
-    /// the sun, as the website does. The choice is kept on this Apple TV.
+    /// One button, as on the website: it shows the skin on now and moves to the next,
+    /// Day, Grove, Smut. Until it is pressed the skin follows the sun.
     private var skinBlock: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        HStack(spacing: 20) {
             Kicker("Skin")
                 .accessibilityIdentifier("skinState")
                 .accessibilityValue(model.skin.rawValue)
-            HStack(spacing: 12) {
-                ForEach(SkinChoice.allCases, id: \.self) { choice in
-                    Button {
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
-                            model.skinChoice = choice
-                        }
-                    } label: {
-                        Text(choice.label).kjKicker()
-                    }
-                    .buttonStyle(HouseTabStyle(isCurrent: model.skinChoice == choice))
-                    .accessibilityIdentifier("skin-\(choice.rawValue)")
+            Button {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
+                    model.skinChoice = model.skin.next
                 }
+            } label: {
+                SkinGlyph(skin: model.skin).frame(width: 44, height: 44)
             }
-            // The tab's plate padding is pulled back so its text sits on the page margin.
-            .padding(.leading, -22)
-            Text(skinLine).kjSmall(faint: true)
-        }
-    }
-
-    private var skinLine: String {
-        switch model.skinChoice {
-        case .automatic:
-            return "Following the sun where you are: \(model.skin.label) now. Day in daylight, Smut at dawn and dusk, Grove at night."
-        case .day, .grove, .smut:
-            return "\(model.skinChoice.label), whatever the sun is doing."
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14)))
+            .accessibilityIdentifier("skin-toggle")
+            .accessibilityLabel("\(model.skin.label) skin. Switch to \(model.skin.next.label).")
         }
     }
 
@@ -100,8 +84,6 @@ struct AccountView: View {
         let isSet = model.auth.previewPassword != nil
         return VStack(alignment: .leading, spacing: 20) {
             Kicker("Preview password")
-            Text(isSet ? "Set on this device, for the Transmission schedule until launch." : "Not set. Khajistan Transmission asks for it until launch.")
-                .kjSmall(faint: true)
             if editingPassword {
                 HouseInputField("Password", text: draft, secure: true) {
                     SecureField("", text: $draft)
@@ -141,8 +123,44 @@ struct AccountView: View {
             if let version, !version.isEmpty {
                 Text("Khajistan for Apple TV \(version)").kjSmall(faint: true)
             }
-            Text("Khajistan carries each broadcaster's own signal and keeps no copy of it.")
-                .kjSmall(faint: true)
         }
+    }
+}
+/// The website's skin icons (kj-theme.js ICONS), drawn on the same 24-point grid: the sun with
+/// rays for Day, the bare disc for Grove, the sun on the horizon for Smut.
+struct SkinGlyph: View {
+    let skin: Skin
+
+    var body: some View {
+        GlyphShape(skin: skin)
+            .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .aspectRatio(1, contentMode: .fit)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct GlyphShape: Shape {
+    let skin: Skin
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        func line(_ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat) {
+            p.move(to: CGPoint(x: x1, y: y1)); p.addLine(to: CGPoint(x: x2, y: y2))
+        }
+        switch skin {
+        case .day:
+            p.addEllipse(in: CGRect(x: 12 - 4.6, y: 12 - 4.6, width: 9.2, height: 9.2))
+            line(12, 1.6, 12, 4.6); line(12, 19.4, 12, 22.4); line(22.4, 12, 19.4, 12); line(4.6, 12, 1.6, 12)
+            line(19.35, 4.65, 17.23, 6.77); line(6.77, 17.23, 4.65, 19.35)
+            line(19.35, 19.35, 17.23, 17.23); line(6.77, 6.77, 4.65, 4.65)
+        case .grove:
+            p.addEllipse(in: CGRect(x: 12 - 7.2, y: 12 - 7.2, width: 14.4, height: 14.4))
+        case .smut:
+            p.addArc(center: CGPoint(x: 12, y: 18), radius: 5, startAngle: .degrees(0), endAngle: .degrees(180), clockwise: true)
+            line(2, 18, 22, 18)
+            line(12, 3, 12, 6); line(4.9, 9.9, 6.4, 11.4); line(19.1, 9.9, 17.6, 11.4)
+        }
+        let k = min(rect.width, rect.height) / 24
+        return p.applying(CGAffineTransform(scaleX: k, y: k).translatedBy(x: rect.minX / k, y: rect.minY / k))
     }
 }

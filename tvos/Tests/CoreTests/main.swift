@@ -177,6 +177,8 @@ func skinColours() throws {
 
 func skinChoiceResolvesAutomaticAndFixed() throws {
     try expectEqual(SkinChoice.allCases.map(\.label), ["Automatic", "Day", "Grove", "Smut"])
+    // The skin button walks the website's order and comes back round.
+    try expectEqual([Skin.day, .grove, .smut].map(\.next), [.grove, .smut, .day])
     // Stored values: absent, empty, the retired skins and a wrong case all read as Automatic.
     for stored in [nil, "", "night", "dawn", "Grove", "auto", "DAY"] as [String?] {
         try expectEqual(SkinChoice(stored: stored), .automatic, String(describing: stored))

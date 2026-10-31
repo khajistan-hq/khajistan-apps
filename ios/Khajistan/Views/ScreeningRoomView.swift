@@ -245,6 +245,7 @@ struct FilmScreen: View {
     @State private var refusal: Int?
     @State private var showSignIn = false
     @State private var watchNote: String?
+    @State private var playbackRequest: UUID?
 
     private var film: Film? { model.films.films.first { $0.handle == handle } }
 
@@ -272,6 +273,7 @@ struct FilmScreen: View {
                 .environment(model)
         }
         .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .onDisappear { playbackRequest = nil; checking = false }
     }
 
     /// The Apple TV app's film page: the poster, the title and its line, one Play, the smaller
@@ -391,17 +393,22 @@ struct FilmScreen: View {
     }
 
     private func watchFull(_ film: Film) async {
+        let generation = model.auth.accessGeneration, request = UUID()
+        playbackRequest = request
         checking = true
         refusal = nil
         let answer = await model.films.requestFullFilm(film)
+        guard !Task.isCancelled, playbackRequest == request else { return }
         checking = false
+        guard generation == model.auth.accessGeneration else { refusal = 401; return }
         switch answer {
         case .granted(let token, let kind, let expiresAt):
             guard let url = Films.fullFilmURL(token: token) else { refusal = 0; return }
             model.tuner.stop()
             let resume = model.library.place(.film, film.handle)?.position ?? 0
             playing = FilmPlayback(film: film, url: url, isFull: true,
-                                   line: Films.accessLine(kind: kind, expiresAt: expiresAt), startAt: resume)
+                                   line: Films.accessLine(kind: kind, expiresAt: expiresAt), startAt: resume,
+                                   accessGeneration: generation)
         case .refused(let status):
             refusal = status
             if status == 401 { showSignIn = true }
@@ -417,6 +424,7 @@ struct FilmPlayback: Identifiable {
     let isFull: Bool
     let line: String
     let startAt: Double
+    var accessGeneration: UUID? = nil
     var id: String { film.handle + (isFull ? "|full" : "|preview") }
 
     static func clock(_ seconds: Double) -> String {
@@ -455,10 +463,16 @@ struct FilmPlayerScreen: View {
             }
         }
         .task { start() }
+        .onChange(of: model.auth.accessGeneration) { _, _ in
+            if playback.isFull { close() }
+        }
         .onDisappear { stop() }
     }
 
     private func start() {
+        guard !playback.isFull || playback.accessGeneration == model.auth.accessGeneration else {
+            dismiss(); return
+        }
         let asset = AVURLAsset(url: playback.url, options: ["AVURLAssetHTTPHeaderFieldsKey": ["User-Agent": KJConfig.userAgent]])
         let item = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: item)

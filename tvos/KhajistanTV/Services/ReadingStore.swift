@@ -56,12 +56,31 @@ final class ReadingStore {
     @ObservationIgnored private var warned: [String: [String: [String]]] = [:]
     @ObservationIgnored private let pages = NSCache<NSString, UIImage>()
     /// The server's answer per page and viewer, until it is asked again.
-    @ObservationIgnored private var answers: [String: (answer: RRPageAnswer, until: Date)] = [:]
+    @ObservationIgnored private var answers: [String: (answer: RRPageAnswer, permission: RRPagePermission)] = [:]
     /// A page on its way, so a turn that lands on a page being prefetched waits for it instead of fetching it twice.
     @ObservationIgnored private var inflight: [String: Task<RRPageResult, Never>] = [:]
     /// The catalogue load, owned here rather than by the screen that asked: a screen rebuilt or
     /// closed while the room loads must not cancel the load every other screen is waiting on.
     @ObservationIgnored private var loading: Task<Void, Never>?
+
+    @ObservationIgnored private var accessGeneration: UUID?
+
+    /// Invalidates only viewer-specific state. Public covers and the shelf remain usable.
+    private func synchronizeAccess() -> UUID {
+        let current = auth.accessGeneration
+        if accessGeneration != current {
+            accessGeneration = current
+            inflight.values.forEach { $0.cancel() }
+            inflight.removeAll()
+            answers.removeAll(); thumbAnswers.removeAll()
+            pages.removeAllObjects(); thumbs.removeAllObjects()
+        }
+        return current
+    }
+
+    private func isCurrent(_ generation: UUID) -> Bool {
+        generation == auth.accessGeneration && !Task.isCancelled
+    }
 
     private unowned let auth: AuthStore
     private let urlSession: URLSession
@@ -85,6 +104,7 @@ final class ReadingStore {
         urlSession = URLSession(configuration: config)
         // Decoded pages, by their size in memory: about eight 2,000-pixel pages.
         pages.totalCostLimit = 200 * 1024 * 1024
+        thumbs.totalCostLimit = 16 * 1024 * 1024
         Task.detached(priority: .background) { RRPageDisk.trim() }
     }
 
@@ -535,61 +555,73 @@ final class ReadingStore {
     /// is held for eight minutes (the website's own reuse window), and only a page it allowed is
     /// shown. The image bytes come from the device's cache where they are already held.
     func page(_ issue: RRIssue, stored: Int, priority: TaskPriority = .userInitiated) async -> RRPageResult {
+        let generation = synchronizeAccess()
         let token = try? await auth.validAccessToken()
+        guard isCurrent(generation) else { return .outcome(.unavailable) }
         let path = endpoint(issue, page: stored)
-        let key = Self.pageKey(path, token: token)
-        if let running = inflight[key] { return await running.value }
-        let task = Task { await self.load(path: path, key: key, token: token, priority: priority) }
+        let key = Self.pageKey(path, generation: generation)
+        if let running = inflight[key] {
+            let result = await running.value
+            return isCurrent(generation) ? result : .outcome(.unavailable)
+        }
+        let task = Task { await self.load(path: path, key: key, token: token, generation: generation, priority: priority) }
         inflight[key] = task
         let result = await task.value
         inflight[key] = nil
+        guard isCurrent(generation) else { return .outcome(.unavailable) }
         return result
     }
 
     /// The page at once, when it was allowed to this viewer within the answer's lifetime and its
     /// picture is in memory. Nothing is fetched.
     func heldPage(_ issue: RRIssue, stored: Int) -> UIImage? {
-        let key = Self.pageKey(endpoint(issue, page: stored), token: auth.session?.accessToken)
-        guard let held = answers[key], held.until > Date(), case .page = RRPageOutcome.decide(held.answer) else { return nil }
+        let key = Self.pageKey(endpoint(issue, page: stored), generation: synchronizeAccess())
+        guard let held = answers[key], held.permission.permits(generation: auth.accessGeneration), case .page = RRPageOutcome.decide(held.answer) else { return nil }
         return pages.object(forKey: key as NSString)
     }
 
     /// Asks the server about a stretch of pages in one call, so the turns that follow need no
     /// round trip for their answer. Pages already answered are skipped.
     func signAhead(_ issue: RRIssue, stored: [Int]) async {
+        let generation = synchronizeAccess()
         let token = try? await auth.validAccessToken()
+        guard isCurrent(generation) else { return }
         let now = Date()
         let wanted = stored.map { endpoint(issue, page: $0) }
-            .filter { answers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
+            .filter { answers[Self.pageKey($0, generation: generation)].map { !$0.permission.permits(generation: generation, now: now) } ?? true }
         guard !wanted.isEmpty else { return }
         guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.batchRequest(paths: wanted, size: "full", accessToken: token), session: urlSession),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+        guard isCurrent(generation) else { return }
         let answered = Date()
         for (path, answer) in RRPageAnswer.parseBatch(data) {
             guard let life = answer.reuseFor else { continue }
-            answers[Self.pageKey(path, token: token)] = (answer, answered.addingTimeInterval(life))
+            answers[Self.pageKey(path, generation: generation)] = (answer, RRPagePermission(generation: generation, until: answered.addingTimeInterval(life)))
         }
     }
 
     // MARK: - Thumbnails (the reader's page rail on a wide screen)
 
-    @ObservationIgnored private var thumbAnswers: [String: (answer: RRPageAnswer, until: Date)] = [:]
+    @ObservationIgnored private var thumbAnswers: [String: (answer: RRPageAnswer, permission: RRPagePermission)] = [:]
     @ObservationIgnored private let thumbs = NSCache<NSString, UIImage>()
 
     /// Asks the page server about a run of pages at the small size, in one call. Only what it
     /// answers is used; nothing is fetched for a page it refuses.
     func signThumbnails(_ issue: RRIssue, stored: [Int]) async {
+        let generation = synchronizeAccess()
         let token = try? await auth.validAccessToken()
+        guard isCurrent(generation) else { return }
         let now = Date()
         let wanted = stored.map { endpoint(issue, page: $0) }
-            .filter { thumbAnswers[Self.pageKey($0, token: token)].map { $0.until <= now } ?? true }
+            .filter { thumbAnswers[Self.pageKey($0, generation: generation)].map { !$0.permission.permits(generation: generation, now: now) } ?? true }
         for chunk in stride(from: 0, to: wanted.count, by: RRAPI.batchLimit).map({ Array(wanted[$0..<min($0 + RRAPI.batchLimit, wanted.count)]) }) {
             guard let (data, response) = try? await SupabaseRoute.data(for: RRAPI.batchRequest(paths: chunk, size: "sm", accessToken: token), session: urlSession),
                   (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+            guard isCurrent(generation) else { return }
             let answered = Date()
             for (path, answer) in RRPageAnswer.parseBatch(data) {
                 guard let life = answer.reuseFor else { continue }
-                thumbAnswers[Self.pageKey(path, token: token)] = (answer, answered.addingTimeInterval(life))
+                thumbAnswers[Self.pageKey(path, generation: generation)] = (answer, RRPagePermission(generation: generation, until: answered.addingTimeInterval(life)))
             }
         }
     }
@@ -597,13 +629,16 @@ final class ReadingStore {
     /// A page at the small size, if the server allowed it to this viewer; nil otherwise. A missing
     /// or expired answer is asked for once, for this page alone.
     func thumbnail(_ issue: RRIssue, stored: Int) async -> UIImage? {
-        let token = try? await auth.validAccessToken()
-        let key = Self.pageKey(endpoint(issue, page: stored), token: token)
-        if let held = thumbs.object(forKey: key as NSString) { return held }
-        if thumbAnswers[key].map({ $0.until <= Date() }) ?? true {
+        let generation = synchronizeAccess()
+        _ = try? await auth.validAccessToken()
+        guard isCurrent(generation) else { return nil }
+        let key = Self.pageKey(endpoint(issue, page: stored), generation: generation)
+        if thumbAnswers[key].map({ !$0.permission.permits(generation: generation) }) ?? true {
             await signThumbnails(issue, stored: [stored])
         }
-        guard let answer = thumbAnswers[key], answer.until > Date(), case .page(let url) = RRPageOutcome.decide(answer.answer) else { return nil }
+        guard isCurrent(generation), let answer = thumbAnswers[key], answer.permission.permits(generation: generation),
+              case .page(let url) = RRPageOutcome.decide(answer.answer) else { return nil }
+        if let held = thumbs.object(forKey: key as NSString) { return held }
         let session = urlSession
         let image: UIImage? = await Task.detached(priority: .utility) {
             let path = url.path
@@ -614,7 +649,10 @@ final class ReadingStore {
             RRPageDisk.write(data, path)
             return image
         }.value
-        if let image { thumbs.setObject(image, forKey: key as NSString) }
+        guard isCurrent(generation), answer.permission.permits(generation: generation) else { return nil }
+        if let image {
+            thumbs.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
+        }
         return image
     }
 
@@ -624,33 +662,43 @@ final class ReadingStore {
     }
 
 
-    private static func pageKey(_ path: String, token: String?) -> String {
-        // The token's tail tells two viewers apart without keeping the whole token as a key.
-        path + "|" + (token.map { String($0.suffix(24)) } ?? "anon")
+    private static func pageKey(_ path: String, generation: UUID) -> String {
+        path + "|" + generation.uuidString
     }
 
-    private func load(path: String, key: String, token: String?, priority: TaskPriority) async -> RRPageResult {
+    func pagePermission(_ issue: RRIssue, stored: Int, thumbnail: Bool = false) -> RRPagePermission? {
+        let generation = synchronizeAccess()
+        let key = Self.pageKey(endpoint(issue, page: stored), generation: generation)
+        guard let held = (thumbnail ? thumbAnswers : answers)[key],
+              held.permission.permits(generation: generation), case .page = RRPageOutcome.decide(held.answer) else { return nil }
+        return held.permission
+    }
+
+    private func load(path: String, key: String, token: String?, generation: UUID, priority: TaskPriority) async -> RRPageResult {
         var answer: RRPageAnswer?
-        if let held = answers[key], held.until > Date() { answer = held.answer }
+        if let held = answers[key], held.permission.permits(generation: auth.accessGeneration) { answer = held.answer }
         if answer == nil {
             answer = await sign(path, token: token)
             if answer?.status == 404, let twin = RRPath.fourDigitTwin(of: path), let retry = await sign(twin.path, token: token), retry.status == 200 {
                 pad4.insert(twin.slug)
                 answer = retry
             }
+            guard isCurrent(generation) else { return .outcome(.unavailable) }
             if let answer, let life = answer.reuseFor {
-                answers[key] = (answer, Date().addingTimeInterval(life))
+                answers[key] = (answer, RRPagePermission(generation: generation, until: Date().addingTimeInterval(life)))
             }
         }
-        guard let answer else { return .outcome(.unavailable) }
+        guard isCurrent(generation), let answer else { return .outcome(.unavailable) }
         switch RRPageOutcome.decide(answer) {
         case .page(let url):
+            guard let permission = answers[key]?.permission, permission.permits(generation: generation) else { return .outcome(.unavailable) }
             if let held = pages.object(forKey: key as NSString) { return .image(held) }
             guard let image = await picture(url: url, priority: priority) else {
                 // A URL that would not download is not offered again: the next turn asks afresh.
                 answers[key] = nil
                 return .outcome(.unavailable)
             }
+            guard isCurrent(generation), permission.permits(generation: generation) else { return .outcome(.unavailable) }
             pages.setObject(image, forKey: key as NSString, cost: Int(image.size.width * image.size.height * image.scale * image.scale * 4))
             return .image(image)
         case let other:
@@ -737,47 +785,41 @@ enum RRShelfDisk {
     }
 }
 
+/// Encrypted bytes shared between authorized requests to avoid paying to fetch them again.
+/// This does not grant access offline. ReadingStore checks the current viewer before decoding.
 enum RRPageDisk {
-    static let folder: URL = {
-        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let folder = base.appendingPathComponent("ReadingRoomPages", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
-    }()
-    static let life: TimeInterval = 3 * 24 * 3600
-    static let budget = 400 * 1024 * 1024
+    private static let lock = NSLock()
+    private static var held: RRProtectedPageCache?
 
-    static func file(_ path: String) -> URL {
-        let digest = SHA256.hash(data: Data(path.utf8)).map { String(format: "%02x", $0) }.joined()
-        return folder.appendingPathComponent(digest + ".jpg")
-    }
-
-    static func remove(_ path: String) { try? FileManager.default.removeItem(at: file(path)) }
-
-    static func read(_ path: String) -> Data? {
-        let url = file(path)
-        guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
-              Date().timeIntervalSince(date) < life else { return nil }
-        return try? Data(contentsOf: url)
-    }
-
-    static func write(_ data: Data, _ path: String) {
-        try? data.write(to: file(path), options: .atomic)
-    }
-
-    /// Drops what is past its days, then the oldest until the folder fits the budget.
-    static func trim() {
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
-        let files = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? [])
-            .compactMap { url -> (URL, Date, Int)? in
-                guard let v = try? url.resourceValues(forKeys: Set(keys)), let d = v.contentModificationDate else { return nil }
-                return (url, d, v.fileSize ?? 0)
-            }
-            .sorted { $0.1 > $1.1 }
-        var total = 0
-        for (url, date, size) in files {
-            total += size
-            if Date().timeIntervalSince(date) >= life || total > budget { try? FileManager.default.removeItem(at: url) }
+    private static func cache() -> RRProtectedPageCache? {
+        lock.lock(); defer { lock.unlock() }
+        if let held { return held }
+        let account = "reading-room-page-cache-v2"
+        let bytes: Data
+        if let existing = Keychain.read(account) {
+            guard existing.count == 32 else { return nil }
+            bytes = existing
+        } else {
+            let key = SymmetricKey(size: .bits256)
+            bytes = key.withUnsafeBytes { Data($0) }
+            do { try Keychain.write(bytes, account: account) } catch { return nil }
         }
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        // Only discard the old app-owned, hashed JPEG performance cache. Never original scans.
+        let old = base.appendingPathComponent("ReadingRoomPages", isDirectory: true)
+        if let files = try? FileManager.default.contentsOfDirectory(at: old, includingPropertiesForKeys: nil) {
+            for file in files where file.lastPathComponent.range(of: "^[0-9a-f]{64}\\.jpg$", options: .regularExpression) != nil {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+        let made = RRProtectedPageCache(folder: base.appendingPathComponent("ReadingRoomPages-v2", isDirectory: true),
+                                        key: SymmetricKey(data: bytes))
+        held = made
+        return made
     }
+
+    static func read(_ path: String) -> Data? { cache()?.read(path) }
+    static func write(_ data: Data, _ path: String) { _ = cache()?.write(data, path) }
+    static func remove(_ path: String) { cache()?.remove(path) }
+    static func trim() { cache()?.trim() }
 }

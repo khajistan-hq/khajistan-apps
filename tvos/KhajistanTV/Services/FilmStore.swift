@@ -102,15 +102,18 @@ final class FilmStore {
     /// Asks vod-token for the full film, as the site's requestFilmToken does: no session is a 401
     /// without a request, and a network failure is status 0, which reads as a fault.
     func requestFullFilm(_ film: Film) async -> FilmAccess {
+        let generation = auth.accessGeneration
         let token: String
         do {
             token = try await auth.validAccessToken()
         } catch {
             return .refused(status: error is AuthError ? 401 : 0)
         }
+        guard generation == auth.accessGeneration else { return .refused(status: 401) }
         do {
             let (data, response) = try await urlSession.data(for: Films.tokenRequest(handle: film.handle, accessToken: token),
                                                              delegate: RefuseRedirects())
+            guard generation == auth.accessGeneration else { return .refused(status: 401) }
             return Films.access(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
         } catch {
             return .refused(status: 0)

@@ -69,7 +69,7 @@ struct BrowserView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("browserTitle")
-                if let url = browser.url, ArchiveURL.isSaveable(url) {
+                if let url = browser.url, ArchiveURL.isSaveable(url), !MediaFilePolicy.isMediaURL(url) {
                     ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up").font(.system(.body, weight: .semibold)).frame(width: 40, height: 44)
                     }

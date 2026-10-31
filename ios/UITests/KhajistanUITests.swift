@@ -700,17 +700,31 @@ final class KhajistanUITests: XCTestCase {
     @discardableResult
     private func openFreeIssue(_ app: XCUIApplication, severalIssues: Bool = false) -> String {
         let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-' AND label CONTAINS[c] 'read in full'"))
-        waitFor(titles.firstMatch, 60, "a free title is on the shelf")
-        let ids = titles.allElementsBoundByIndex.map(\.identifier)
-        for id in ids.prefix(severalIssues ? 8 : 1) {
-            let card = app.buttons[id]
-            for _ in 0..<6 where !card.isHittable { app.swipeUp() }
+        waitFor(app.textFields["rrSearch"], 60, "the Reading Room shelf loads")
+        // Continue can fill the first screen after a relaunch, especially in Smut. The lazy
+        // shelf does not expose the title cards below it until the reader scrolls to them.
+        for _ in 0..<6 where !titles.firstMatch.exists { app.swipeUp(); usleep(300_000) }
+        waitFor(titles.firstMatch, 10, "a free title is on the shelf after scrolling past Continue")
+        let candidates = titles.allElementsBoundByIndex.map {
+            (id: $0.identifier, name: $0.label.components(separatedBy: ", ").first ?? $0.label)
+        }
+        for candidate in candidates.prefix(severalIssues ? 8 : 1) {
+            // A horizontal shelf also exposes cards outside its viewport. Search the chosen
+            // title into the vertical results instead of swiping past that whole shelf.
+            let search = app.textFields["rrSearch"]
+            for _ in 0..<6 where !search.isHittable { app.swipeDown() }
+            if app.buttons["Clear"].exists { app.buttons["Clear"].tap() }
+            search.tap()
+            search.typeText(candidate.name)
+            waitFor(app.staticTexts["rrSearchCount"], 10, "search locates the selected free title")
+            let card = app.buttons[candidate.id]
+            waitFor(card, 10, "the selected free title appears in search")
             card.tap()
             waitFor(app.buttons["rr-issue-0"], 20, "the title lists its issues")
             if !severalIssues || app.buttons["rr-issue-1"].exists {
                 app.buttons["rr-issue-0"].tap()
                 waitFor(app.descendants(matching: .any)["rrReaderPage"], 45, "page 1 is on screen")
-                return id
+                return candidate.id
             }
             app.buttons["stackBack"].tap()
         }

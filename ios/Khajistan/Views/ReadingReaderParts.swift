@@ -175,13 +175,25 @@ struct PageThumb: View {
     var curtained = false
     @Environment(AppModel.self) private var model
     @State private var image: UIImage?
+    @State private var permission: RRPagePermission?
 
     var body: some View {
         Color.clear
-            .overlay { if let image, !curtained { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
+            .overlay { if let image, !curtained, permission?.permits(generation: model.auth.accessGeneration) == true { Image(uiImage: image).resizable().aspectRatio(contentMode: .fit) } }
             .accessibilityHidden(true)
-            .task(id: "\(stored)|\(curtained)") {
-                image = curtained ? nil : await model.reading.thumbnail(issue, stored: stored)
+            .task(id: "\(issue.key)|\(stored)|\(curtained)|\(model.auth.accessGeneration)") {
+                image = nil; permission = nil
+                guard !curtained else { return }
+                let generation = model.auth.accessGeneration
+                while !Task.isCancelled, generation == model.auth.accessGeneration {
+                    guard let found = await model.reading.thumbnail(issue, stored: stored),
+                          !Task.isCancelled, generation == model.auth.accessGeneration,
+                          let allowed = model.reading.pagePermission(issue, stored: stored, thumbnail: true) else { return }
+                    permission = allowed; image = found
+                    do { try await Task.sleep(until: allowed.clockUntil, clock: .continuous) } catch { return }
+                    guard !Task.isCancelled else { return }
+                    image = nil; permission = nil
+                }
             }
     }
 }
@@ -281,9 +293,9 @@ struct PagesGrid: View {
         }
         .foregroundStyle(palette.ink)
         .background(palette.ground.ignoresSafeArea())
-        .task(id: issue.key) {
+        .task(id: "\(issue.key)|\(model.auth.accessGeneration)") {
             // Nearest the page being read first, so the grid fills where you are.
-            let order = (1...pages).sorted { abs($0 - current) < abs($1 - current) }
+            let order = (1...pages).sorted { abs($0 - current) < abs($1 - current) }.prefix(60)
             await model.reading.signThumbnails(issue, stored: order.map { RRPageMap.stored($0, map: map) })
         }
     }

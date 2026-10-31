@@ -257,7 +257,10 @@ final class KhajistanUITests: XCTestCase {
         usleep(900_000)
         shot("player-channel-change", app)
         // The next channel in the list is tuned behind the wing, then plays or says why it cannot.
-        let changed = NSPredicate(format: "value != %@ AND (label == 'Playing' OR label CONTAINS[c] 'could not' OR label CONTAINS[c] 'HTTP' OR label CONTAINS[c] 'not on the dial')", before)
+        // Settled is anything but tuning: a broadcaster's own refusal arrives in its own words
+        // ("You do not have permission to access the requested resource", CI 2026-10-31), so a
+        // list of expected wordings missed a channel that had said exactly why it would not play.
+        let changed = NSPredicate(format: "value != %@ AND label != '' AND label != ' ' AND label != 'Standing by' AND NOT (label CONTAINS[c] 'Connecting') AND NOT (label CONTAINS[c] 'Surfing')", before)
         expectation(for: changed, evaluatedWith: state)
         waitForExpectations(timeout: 60)
         usleep(700_000)

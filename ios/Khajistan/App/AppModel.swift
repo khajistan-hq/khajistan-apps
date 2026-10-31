@@ -60,6 +60,8 @@ final class AppModel {
     var isShowingBrowser = false
     /// Chat opens over the tabs, as the browser does.
     var isShowingChat = false
+    /// A finger is turning the Receiver map's dial: the page under it holds still meanwhile.
+    var mapScrubbing = false
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions
@@ -267,15 +269,20 @@ final class AppModel {
             open(.reading, at: [route])
             return
         }
-        // A room the app draws itself, addressed with no particulars (a page kept from the
-        // website, "/open-frequencies"), opens the room here rather than its web page.
+        openWebsite(url)
+    }
+
+    /// A page kept on this device (saved or recently opened). One that is a room the app draws
+    /// itself, addressed with no particulars ("/open-frequencies"), opens the room here rather
+    /// than its web page; any other opens as `open(_:)` does.
+    func openKept(_ url: URL) {
         if url.query == nil, url.fragment == nil,
            let room = ArchiveDestination.all.first(where: { $0.path == url.path && $0.nativeRoom != nil }),
            StoreBuild.includes(room) {
             open(room)
-            return
+        } else {
+            open(url)
         }
-        openWebsite(url)
     }
 
     /// A website page in the house browser, even where the app has a native room for it: for the

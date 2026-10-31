@@ -233,7 +233,7 @@ struct ReceiverView: View {
                         // device as the region cards' are (owner, 2026-10-29: pictures on them).
                         PictureCard(title: region.label,
                                     still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
-                                    width: ChannelCard.width, height: ChannelCard.height)
+                                    width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
                     }
                     .buttonStyle(HouseCardStyle())
                     .accessibilityIdentifier("cameras-\(region.id)")
@@ -378,6 +378,9 @@ private struct AtlasPanel: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: Self.mapHeight)
                     }
+                    // Clear space under the map, so when the rows below take focus and the page
+                    // scrolls, what shows above the cards is ground, not the map's foot.
+                    .padding(.bottom, 56)
                     regionStrip(composed).id(Self.stripAnchor)
                 }
                 // Room for a focused plate's lift at the top edge.

@@ -120,6 +120,9 @@ struct ReceiverView: View {
                 .padding(.vertical, 16)
             }
             .accessibilityIdentifier("receiverCatalogue")
+            // The map's dial runs alongside the page's scroll (RegionMapView), so a swipe that
+            // starts on the map scrolls; while the dial turns, the page holds still.
+            .scrollDisabled(model.mapScrubbing)
             // A visit's share of channel stills: twelve while the Receiver is on screen.
             .onAppear { model.stills.beginVisit() }
             .onDisappear { model.stills.endVisit() }
@@ -240,6 +243,7 @@ private struct LiveSection: View {
             if let composed {
                 RegionMapView(map: composed, highlighted: selected, onTap: choose) { passing in
                     hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
+                    model.mapScrubbing = passing != nil
                 }
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }

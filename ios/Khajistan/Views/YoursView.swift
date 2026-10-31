@@ -246,7 +246,7 @@ struct YoursView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(list) { page in
                     HStack(alignment: .firstTextBaseline) {
-                        Button { model.open(page.url) } label: {
+                        Button { model.openKept(page.url) } label: {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(page.shownTitle).kjName().lineLimit(2)
                                 Text(ArchiveDestination.all.first { $0.path == page.url.path }?.title ?? "On the website").kjSmall(faint: true).lineLimit(1)

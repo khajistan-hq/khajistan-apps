@@ -208,6 +208,9 @@ final class KhajistanUITests: XCTestCase {
         // are still sliding when the next tap is placed, and it lands where Anatolia was (CI,
         // 2026-10-27). Tap once the chip has stopped moving.
         let anatolia = app.buttons["region-anatolia"]
+        // A region chosen brings its name and channels up under the set, so the strip is above
+        // the screen now: scroll back to it.
+        for _ in 0..<6 where !anatolia.isHittable { app.swipeDown(); usleep(500_000) }
         for _ in 0..<20 {
             let before = anatolia.frame
             usleep(250_000)

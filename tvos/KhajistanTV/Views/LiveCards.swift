@@ -212,6 +212,8 @@ struct PictureCard: View {
     var liked = false
     var width: CGFloat = Self.width
     var height: CGFloat = Self.height
+    /// Drawn on the plate while no still has come, so the card says what it holds at a glance.
+    var symbol: String?
 
     init(channel: Channel, still: UIImage?, liked: Bool = false) {
         self.channel = channel
@@ -221,12 +223,13 @@ struct PictureCard: View {
     }
 
     /// A region's card on the Receiver's front: its name over a still of one of its channels.
-    init(title: String, still: UIImage?, width: CGFloat, height: CGFloat) {
+    init(title: String, still: UIImage?, width: CGFloat, height: CGFloat, symbol: String? = nil) {
         self.channel = nil
         self.title = title
         self.still = still
         self.width = width
         self.height = height
+        self.symbol = symbol
     }
     @Environment(\.isFocused) private var isFocused
     @Environment(\.palette) private var palette
@@ -246,6 +249,13 @@ struct PictureCard: View {
                 ], startPoint: .top, endPoint: .bottom)
             } else {
                 plate
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 44, weight: .semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(24)
+                        .accessibilityHidden(true)
+                }
             }
             VStack(alignment: .leading, spacing: 6) {
                 if let channel { CardKicker(channel: channel, liked: liked) }

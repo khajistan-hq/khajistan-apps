@@ -132,7 +132,7 @@ struct HomeView: View {
         .accessibilityLabel("Khajistan, Media of the Middle World")
     }
 
-    /// Whether `model.open(url)` keeps this page in the app (a room it draws) or opens the website.
+    /// Whether `model.openKept(url)` keeps this page in the app (a room it draws) or opens the website.
     static func opensInApp(_ url: URL) -> Bool {
         url.query == nil && ArchiveDestination.all.contains { $0.path == url.path && $0.nativeRoom != nil }
     }
@@ -141,7 +141,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 0) {
             ShelfHeader(title: "Opened lately")
             ForEach(recent) { page in
-                Button { model.open(page.url) } label: {
+                Button { model.openKept(page.url) } label: {
                     HStack(alignment: .firstTextBaseline) {
                         Text(page.shownTitle).font(.system(.body, weight: .semibold)).lineLimit(2)
                         Spacer(minLength: 0)

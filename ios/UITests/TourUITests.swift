@@ -28,6 +28,20 @@ final class TourUITests: XCTestCase {
             app.swipeUp(); sleep(2)
             shot("tour-\(index + 1)-\(id)-d", app)
         }
+        // The taps a child makes on the Receiver: a region, then the set's other two tabs.
+        app.buttons["tab-receiver"].tap(); sleep(3)
+        let region = app.buttons["region-maghreb"]
+        for _ in 0..<6 where !(region.exists && region.isHittable) { app.swipeUp(); sleep(1) }
+        if region.exists && region.isHittable { region.tap(); sleep(6); shot("tour-6-receiver-tap-region", app) }
+        for part in ["part-cameras", "part-transmission"] where app.buttons[part].exists {
+            app.buttons[part].tap(); sleep(6); shot("tour-6-receiver-\(part)", app)
+        }
+        app.buttons["part-live"].tap(); sleep(1)
+        // A room that opens the website, and the way back.
+        app.buttons["tab-rooms"].tap(); sleep(2)
+        let web = app.buttons["destination-about"]
+        for _ in 0..<6 where !(web.exists && web.isHittable) { app.swipeUp(); sleep(1) }
+        if web.exists && web.isHittable { web.tap(); sleep(8); shot("tour-7-rooms-website", app) }
         // One step in: the first thing a child would tap on Home.
         app.buttons[tabs[0]].tap(); sleep(2)
         app.swipeDown(); app.swipeDown(); sleep(2)

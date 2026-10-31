@@ -148,11 +148,12 @@ final class SkinWalkUITests: XCTestCase {
             app = launch(["-kjskin", skin, "-kjtab", "receiver"])
             let toggle = app.buttons["beyondTheAtlas"]
             XCTAssertTrue(toggle.waitForExistence(timeout: 60))
-            // Down into the region strip, then left along it and off its west end to the switch.
+            // Down into the region strip, then Up to the switch, which sits at the foot of the
+            // sidebar right above it since the front became two bands.
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
             XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-            for _ in 0..<40 where !toggle.hasFocus { XCUIRemote.shared.press(.left) }
+            for _ in 0..<6 where !toggle.hasFocus { XCUIRemote.shared.press(.up); kjPause(0.35) }
             XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
             shot("\(skin)-9-atlas-switch-focused", app)
             app.terminate()

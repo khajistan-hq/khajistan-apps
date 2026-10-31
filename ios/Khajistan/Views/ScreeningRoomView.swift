@@ -177,18 +177,20 @@ struct LockedNote: View {
     let subject: String
     @Environment(AppModel.self) private var model
     @State private var password = ""
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("\(subject) opens to everyone when Khajistan launches.").kjBody()
             Text("Testers: type the preview password.").kjBody()
             HouseInputField("Preview password") {
-                SecureField("", text: $password).onSubmit(open)
+                SecureField("", text: $password).focused($fieldFocused).onSubmit(open)
             }
             Button(kicker: "Open", action: open)
                 .buttonStyle(HouseButtonStyle(solid: true))
-                .disabled(password.isEmpty)
                 .accessibilityIdentifier("lockedOpen")
+                // Whether a password has been typed, for VoiceOver and the UI test.
+                .accessibilityValue(password.isEmpty ? "Nothing typed" : "Password typed")
         }
         // A container, so the controls inside stay their own elements for VoiceOver.
         .accessibilityElement(children: .contain)
@@ -196,7 +198,8 @@ struct LockedNote: View {
     }
 
     private func open() {
-        guard !password.isEmpty else { return }
+        // Open pressed before anything was typed: the field is where to start.
+        guard !password.isEmpty else { fieldFocused = true; return }
         model.auth.setPreviewPassword(password)
         password = ""
     }

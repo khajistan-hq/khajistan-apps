@@ -8,6 +8,7 @@ struct TransmissionSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var password = ""
+    @FocusState private var passwordFocused: Bool
     @State private var showSignIn = false
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
@@ -53,11 +54,10 @@ struct TransmissionSection: View {
                     .accessibilityIdentifier("transmissionPreview")
                 if let message { Text(message).kjBody() }
                 HouseInputField("Preview password") {
-                    SecureField("", text: $password).onSubmit(submitPassword)
+                    SecureField("", text: $password).focused($passwordFocused).onSubmit(submitPassword)
                 }
                 Button(kicker: "Open", action: submitPassword)
                     .buttonStyle(HouseButtonStyle(solid: true))
-                    .disabled(password.isEmpty)
             }
         case .noSchedule:
             problem("The schedule for this month has not been published.")
@@ -120,6 +120,8 @@ struct TransmissionSection: View {
     }
 
     private func submitPassword() {
+        // Open pressed before anything was typed: the field is where to start.
+        guard !password.isEmpty else { passwordFocused = true; return }
         let entered = password
         password = ""
         Task {

@@ -912,7 +912,7 @@ final class KhajistanUITests: XCTestCase {
             let app = launch(skin: "day", extra: ["-kjroom", "madrassa"])
             waitFor(app.descendants(matching: .any)["roomLocked"], 30, "a gated room says it is behind the password")
             XCTAssertTrue(app.secureTextFields.firstMatch.exists, "the note holds the preview password field")
-            XCTAssertFalse(app.buttons["lockedOpen"].isEnabled, "Open waits for a password")
+            XCTAssertEqual(app.buttons["lockedOpen"].value as? String, "Nothing typed", "Open knows nothing is typed yet")
             return
         }
         let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site, "-kjtestsignedout", "YES"])

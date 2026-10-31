@@ -485,14 +485,14 @@ private struct RegionMapPainter {
                 return cut.isNull ? total : total + cut.width * cut.height
             }
         }
-        // Below the region is the last resort: the map is often the last thing on a phone's first
-        // screen, and a plate under it is cut by the fold, a name with no number.
-        let belowPenalty = width * height * 0.6
+        // Hiding a neighbour's name is the one thing the plate must not do. Between places that
+        // hide nothing, below the region comes last: on a phone the map is often the last thing on
+        // the first screen, and a plate under it sits on the fold.
         let placed = candidates.map(fitted)
-        func cost(_ index: Int) -> CGFloat {
-            hidden(placed[index]) + (placed[index].minY > centred.maxY ? belowPenalty : 0)
+        func cost(_ index: Int) -> (CGFloat, Int, Int) {
+            (hidden(placed[index]), placed[index].minY > centred.maxY ? 1 : 0, index)
         }
-        let plate = placed.indices.min { (cost($0), $0) < (cost($1), $1) }.map { placed[$0] } ?? fitted(centred)
+        let plate = placed.indices.min { cost($0) < cost($1) }.map { placed[$0] } ?? fitted(centred)
         // On day a yellow plate sat on the yellow page at 1.0:1; there it is the band, yellow on green.
         let onDay = palette.skin == .day
         context.fill(Path(plate), with: .color(onDay ? palette.band : palette.onBand))

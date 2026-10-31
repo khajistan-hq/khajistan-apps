@@ -75,13 +75,18 @@ struct ReceiverView: View {
             // the shelves, full width, as the TV app lays its rows. A press down from the strip
             // scrolls to them (owner, 2026-10-06: they "should expand into their contents on
             // home page", and "behave like apple tv native films/tv app").
+            ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
                     // Two bands, owner 2026-10-29 ("symmetrically ... make the map bigger"): the
                     // sidebar beside the map, then the region cards across the full width, on
                     // the same grid as the shelves under them.
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
-                               leading: AnyView(sidebar(index)))
+                               leading: AnyView(sidebar(index)),
+                               // Focus on the strip: the strip at the foot of the screen and the
+                               // map above it, so the region it lights is in view, never a sliver
+                               // of the map under the top bar.
+                               stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
                         .padding(.bottom, 12)
                     HomeSections()
                     camerasRow(index)
@@ -95,6 +100,7 @@ struct ReceiverView: View {
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
+            }
             .kjTopFade()
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the strip) goes to Surf first; Back from
@@ -217,7 +223,7 @@ struct ReceiverView: View {
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("Cameras") {
+            Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
                 ForEach(regions) { region in
                     Button {
                         model.camerasFirst = region.id
@@ -349,6 +355,9 @@ private struct AtlasPanel: View {
     let open: (MapRegion) -> Void
     /// The sidebar, beside the map.
     let leading: AnyView
+    /// Called as focus comes onto the region strip from elsewhere.
+    var stripFocused: () -> Void = {}
+    static let stripAnchor = "atlasStrip"
     @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
     /// Up to three television channels per region, by region id: the card shows the first whose
@@ -369,7 +378,7 @@ private struct AtlasPanel: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: Self.mapHeight)
                     }
-                    regionStrip(composed)
+                    regionStrip(composed).id(Self.stripAnchor)
                 }
                 // Room for a focused plate's lift at the top edge.
                 .padding(.top, 8)
@@ -384,6 +393,7 @@ private struct AtlasPanel: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .focusSection()
         .defaultFocus($focusedRegion, "indus")
+        .onChange(of: focusedRegion == nil) { _, left in if !left { stripFocused() } }
         // Back from a region page starts a fresh share and asks again for what was wanted.
         .onAppear { model.stills.beginVisit(); model.stills.want(wanted) }
         .onDisappear { model.stills.endVisit() }

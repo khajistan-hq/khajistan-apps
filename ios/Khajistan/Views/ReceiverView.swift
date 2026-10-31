@@ -186,24 +186,41 @@ private struct LiveSection: View {
     private var index: ReceiverIndex? { model.receiver.index }
 
     var body: some View {
-        Group {
-            if sizeClass == .regular {
-                // iPad: the map beside the region's channels, so the list starts at the top of the
-                // page instead of under a full-width map (design review, 2026-10-07).
-                HStack(alignment: .top, spacing: 40) {
-                    atlas.frame(maxWidth: .infinity, alignment: .leading)
-                    regionBlock.frame(width: 400, alignment: .leading)
+        ScrollViewReader { proxy in
+            Group {
+                if sizeClass == .regular {
+                    // iPad: the map beside the region's channels, so the list starts at the top of the
+                    // page instead of under a full-width map (design review, 2026-10-07).
+                    HStack(alignment: .top, spacing: 40) {
+                        atlas.frame(maxWidth: .infinity, alignment: .leading)
+                        regionBlock.frame(width: 400, alignment: .leading)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        atlas
+                        regionBlock.id(Self.regionAnchor)
+                    }
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    atlas
-                    regionBlock
-                }
+            }
+            // A region tapped on a phone: its name and its channels come up whole under the set.
+            .onChange(of: taps) {
+                guard sizeClass != .regular else { return }
+                withAnimation(.kj) { proxy.scrollTo(Self.regionAnchor, anchor: .top) }
             }
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
+        // The map marks the region of what is playing, so the green place is what you hear.
+        .onChange(of: model.tuner.channel?.id, initial: true) {
+            guard let ids = model.tuner.channel?.regionIds, !ids.contains(selected) else { return }
+            let known = Set(regions.map(\.id))
+            if let region = ids.first(where: known.contains) ?? (known.isEmpty ? ids.first : nil) { selected = region }
+        }
     }
+
+    private static let regionAnchor = "liveRegionBlock"
+    /// Counts taps on the map and the strip, so a tap scrolls and a channel following does not.
+    @State private var taps = 0
 
     // MARK: Map and strip
 
@@ -278,6 +295,7 @@ private struct LiveSection: View {
     /// lesson). The region on the set moves to its next channel; another region starts on one of
     /// its channels of the Surf medium, drawn at random as Surf draws.
     private func choose(_ id: String) {
+        taps += 1
         tune(region: id)
         guard id != selected else { return }
         selected = id

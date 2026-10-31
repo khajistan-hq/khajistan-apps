@@ -110,7 +110,14 @@ struct HomeView: View {
     }
 
     /// The last pages opened here, newest first: the device's own history, never a pick.
-    private var recent: [SavedPage] { Array(model.library.history.prefix(3)) }
+    /// A page that is one of the bar's own doors (the Receiver) is left out: the bar already opens it.
+    private var recent: [SavedPage] {
+        Array(model.library.history.filter { page in
+            !(page.url.query == nil && ArchiveDestination.all.contains {
+                $0.path == page.url.path && $0.nativeRoom.flatMap(AppTab.init) != nil
+            })
+        }.prefix(3))
+    }
 
     private var masthead: some View {
         HStack(alignment: .center, spacing: 12) {

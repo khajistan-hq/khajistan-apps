@@ -207,6 +207,7 @@ struct YoursView: View {
     private var libraryBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
             ShelfHeader(title: "Pages and files")
+            Text("Website pages you saved or opened, and files you downloaded.").kjSmall(faint: true)
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {

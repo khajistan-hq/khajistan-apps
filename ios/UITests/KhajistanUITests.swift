@@ -308,7 +308,10 @@ final class KhajistanUITests: XCTestCase {
         let cameras = app.staticTexts["camerasTotal"]
         waitFor(cameras, 20, "Cameras lists its cameras")
         expectation(for: NSPredicate { _, _ in onScreen(cameras) }, evaluatedWith: cameras)
-        waitForExpectations(timeout: 3)
+        // One tap, no second: the time only covers the iOS 26 runner reporting the frame late.
+        // CI run 41241274308's recording shows the count under the set within a second of the
+        // tap while the 3 s wait on its reported frame ran out.
+        waitForExpectations(timeout: 10)
         shot("receiver-part-cameras", app)
 
         app.buttons["part-transmission"].tap()

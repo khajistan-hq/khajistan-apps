@@ -126,10 +126,6 @@ private struct MapFace {
     /// The website's main label, scaled for a television; `crowded` is the size it falls back to.
     static let label = MapFace(size: 9, weight: .black, uiWeight: .black, em: 0.01)
     static let crowded = MapFace(size: 7.5, weight: .black, uiWeight: .black, em: 0.01)
-    /// The three lines of the plate under the chosen region.
-    static let plateName = MapFace(size: 12, weight: .black, uiWeight: .black, em: 0.01)
-    static let plateNative = MapFace(size: 11, weight: .semibold, uiWeight: .semibold, em: 0)
-    static let plateLive = MapFace(size: 9, weight: .black, uiWeight: .black, em: 0.05)
 
     func text(_ string: String) -> Text {
         Text(string).font(.system(size: size, weight: weight)).tracking(size * em)
@@ -268,18 +264,6 @@ private struct RegionMapLayout {
             return (region.id, hypot(c.x - point.x, c.y - point.y))
         }.min { $0.1 < $1.1 }
         return nearest.flatMap { $0.1 <= reach ? $0.0 : nil }
-    }
-
-    /// The region's own extent on screen. Null when it has no points.
-    func extent(of region: MapRegion) -> CGRect {
-        var extent = CGRect.null
-        for polygon in region.polygons {
-            for p in polygon {
-                let q = point(p)
-                extent = extent.union(CGRect(x: q.x, y: q.y, width: 0, height: 0))
-            }
-        }
-        return extent
     }
 
     /// What a label keeps clear: its capitals, the black halo round them and a little air. The
@@ -433,66 +417,22 @@ private struct RegionMapPainter {
         context.draw(face, at: label.center, anchor: .center)
     }
 
-    /// The website's callout: the name, the native name and the live count in black on yellow.
+    /// The lit region's name on a plate of the band's colour, standing where its label stands and
+    /// no bigger than it. The website's callout adds the native name and the live count; on a
+    /// phone that plate had to go somewhere, and wherever it went it covered a neighbour's name or
+    /// fell under the fold. The count is on the region's chip under the map.
     private func paintPlate(for label: RegionMapLabel, in context: GraphicsContext) {
-        let region = label.region
-        var rows: [(face: MapFace, string: String, size: CGSize)] = []
-        rows.append((.plateName, label.text, MapFace.plateName.measure(label.text)))
-        if let native = region.native {
-            rows.append((.plateNative, native, MapFace.plateNative.measure(native)))
-        }
-        if let live = region.live {
-            let line = "\(live.formatted()) LIVE"
-            rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
-        }
-
-        let across: CGFloat = 8
-        let down: CGFloat = 5
-        let gap: CGFloat = 1
+        let rows: [(face: MapFace, string: String, size: CGSize)] = [
+            // The label's own face, so the plate covers no more than the label it replaces.
+            (label.face, label.text, label.face.measure(label.text)),
+        ]
+        let across: CGFloat = 5
+        let down: CGFloat = 2
         let width = (rows.map { $0.size.width }.max() ?? 0) + 2 * across
-        let height = rows.reduce(2 * down) { $0 + $1.size.height } + gap * CGFloat(rows.count - 1)
-        // Centred on the label. A region smaller than its plate would be buried under it, outline
-        // and all, so there the plate stands just above the region, or below when the map has no
-        // room above. Either way it is moved in if it would run off the map.
-        let centred = CGRect(x: label.center.x - width / 2, y: label.center.y - height / 2, width: width, height: height)
-        var candidates = [centred]
-        let extent = layout.extent(of: region)
-        if !extent.isNull {
-            candidates += [
-                centred.offsetBy(dx: 0, dy: extent.minY - 6 - centred.maxY),   // above the region
-                centred.offsetBy(dx: 0, dy: extent.maxY + 6 - centred.minY),   // below it
-                centred.offsetBy(dx: extent.minX - 6 - centred.maxX, dy: 0),   // to its left
-                centred.offsetBy(dx: extent.maxX + 6 - centred.minX, dy: 0),   // to its right
-            ]
-            // A region smaller than its plate would be buried under it, outline and all.
-            if width > 0.6 * extent.width || height > 0.6 * extent.height { candidates.removeFirst() }
-        }
-        // Each place moved in if it would run off the map; then the one that hides the least of
-        // the other names wins, so the lit region never covers its neighbours' labels. The
-        // order above breaks a tie: on the region, then above, below, left, right.
-        let others = layout.labels.filter { $0.isDrawn && $0.region.id != region.id }
-            .map { CGRect(x: $0.center.x - $0.box.width / 2, y: $0.center.y - $0.box.height / 2,
-                          width: $0.box.width, height: $0.box.height) }
-        func fitted(_ rect: CGRect) -> CGRect {
-            var rect = rect
-            rect.origin.x = min(max(rect.minX, 0), max(layout.size.width - width, 0))
-            rect.origin.y = min(max(rect.minY, 0), max(layout.size.height - height, 0))
-            return rect
-        }
-        func hidden(_ rect: CGRect) -> CGFloat {
-            others.reduce(0) { total, other in
-                let cut = rect.intersection(other)
-                return cut.isNull ? total : total + cut.width * cut.height
-            }
-        }
-        // Hiding a neighbour's name is the one thing the plate must not do. Between places that
-        // hide nothing, below the region comes last: on a phone the map is often the last thing on
-        // the first screen, and a plate under it sits on the fold.
-        let placed = candidates.map(fitted)
-        func cost(_ index: Int) -> (CGFloat, Int, Int) {
-            (hidden(placed[index]), placed[index].minY > centred.maxY ? 1 : 0, index)
-        }
-        let plate = placed.indices.min { cost($0) < cost($1) }.map { placed[$0] } ?? fitted(centred)
+        let height = rows.reduce(2 * down) { $0 + $1.size.height }
+        var plate = CGRect(x: label.center.x - width / 2, y: label.center.y - height / 2, width: width, height: height)
+        plate.origin.x = min(max(plate.minX, 0), max(layout.size.width - width, 0))
+        plate.origin.y = min(max(plate.minY, 0), max(layout.size.height - height, 0))
         // On day a yellow plate sat on the yellow page at 1.0:1; there it is the band, yellow on green.
         let onDay = palette.skin == .day
         context.fill(Path(plate), with: .color(onDay ? palette.band : palette.onBand))
@@ -502,7 +442,7 @@ private struct RegionMapPainter {
             var text = context.resolve(row.face.text(row.string))
             text.shading = .color(onDay ? palette.onBand : .black)
             context.draw(text, at: CGPoint(x: plate.midX, y: top), anchor: .top)
-            top += row.size.height + gap
+            top += row.size.height
         }
     }
 }

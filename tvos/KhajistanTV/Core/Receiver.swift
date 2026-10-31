@@ -114,6 +114,9 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
         [country, primaryLanguage]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0 != "Not yet verified" }
+            // The registry's filing word for a channel made abroad for the region reads as
+            // jargon on screen; a viewer is told it is a diaspora channel.
+            .map { $0 == "Borderland / diaspora" ? "Diaspora" : $0 }
             .joined(separator: " · ")
     }
 }

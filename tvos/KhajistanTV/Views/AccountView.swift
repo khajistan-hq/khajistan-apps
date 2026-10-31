@@ -42,6 +42,9 @@ struct AccountView: View {
     private var signInBlock: some View {
         VStack(alignment: .leading, spacing: 20) {
             Kicker("Your account")
+            Text(model.auth.isSignedIn ? "Khajistan Transmission plays under this account."
+                 : "Sign in with your Khajistan website account to watch Khajistan Transmission.")
+                .kjBody()
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName()
@@ -63,20 +66,25 @@ struct AccountView: View {
     /// One button, as on the website: it shows the skin on now and moves to the next,
     /// Day, Grove, Smut. Until it is pressed the skin follows the sun.
     private var skinBlock: some View {
-        HStack(spacing: 20) {
-            Kicker("Skin")
+        VStack(alignment: .leading, spacing: 20) {
+            Kicker("Colours")
                 .accessibilityIdentifier("skinState")
                 .accessibilityValue(model.skin.rawValue)
+            Text("Yellow by day, green by night and pink at dawn and dusk. Press to choose one yourself.").kjBody()
             Button {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
                     model.skinChoice = model.skin.next
                 }
             } label: {
-                SkinGlyph(skin: model.skin).frame(width: 44, height: 44)
+                HStack(spacing: 18) {
+                    SkinGlyph(skin: model.skin).frame(width: 44, height: 44)
+                    Text("Now: \(model.skin.label)").kjKicker()
+                }
             }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 14)))
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 14, bottom: 14, trailing: 20)))
+            .padding(.leading, -14)
             .accessibilityIdentifier("skin-toggle")
-            .accessibilityLabel("\(model.skin.label) skin. Switch to \(model.skin.next.label).")
+            .accessibilityLabel("\(model.skin.label) colours. Switch to \(model.skin.next.label).")
         }
     }
 
@@ -84,6 +92,9 @@ struct AccountView: View {
         let isSet = model.auth.previewPassword != nil
         return VStack(alignment: .leading, spacing: 20) {
             Kicker("Preview password")
+            Text(isSet ? "Set on this Apple TV. Transmission and the Screening Room are open."
+                 : "For testers, until Khajistan launches. It opens Transmission and the Screening Room.")
+                .kjBody()
             if editingPassword {
                 HouseInputField("Password", text: draft, secure: true) {
                     SecureField("", text: $draft)

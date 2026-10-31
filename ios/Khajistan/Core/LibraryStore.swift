@@ -8,6 +8,13 @@ struct SavedPage: Codable, Identifiable, Hashable, Sendable {
     init(url: URL, title: String, date: Date = .now) {
         id = UUID(); self.url = url; self.title = title; self.date = date
     }
+
+    /// The page's title without the website's " — KHAJISTAN" tail, or its path where it has none.
+    var shownTitle: String {
+        let short = title.replacingOccurrences(of: " \u{2014} KHAJISTAN", with: "", options: [.caseInsensitive, .anchored, .backwards])
+            .trimmingCharacters(in: .whitespaces)
+        return short.isEmpty ? url.path : short
+    }
 }
 
 /// Where reading or watching stopped, on this device. It names the object by its stable identity

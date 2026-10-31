@@ -314,8 +314,9 @@ final class KhajistanUITests: XCTestCase {
         shot("receiver-part-transmission", app)
 
         app.buttons["part-live"].tap()
-        let surf = app.buttons["shuffle-medium-tv"]
-        expectation(for: NSPredicate { _, _ in onScreen(surf) }, evaluatedWith: surf)
+        // Live opens on its map, the first thing in the part since the Surf settings moved to the foot.
+        let map = app.descendants(matching: .any)["receiverMap"]
+        expectation(for: NSPredicate { _, _ in onScreen(map) }, evaluatedWith: map)
         waitForExpectations(timeout: 5)
     }
 
@@ -457,12 +458,12 @@ final class KhajistanUITests: XCTestCase {
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under You to use live captions.")
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")
         app.buttons["receiverCC"].tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "Fullscreen CC also responds to one tap")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under You to use live captions.")
         app.buttons["closePlayer"].tap()
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
@@ -523,7 +524,7 @@ final class KhajistanUITests: XCTestCase {
         let shown = NSPredicate { _, _ in line.exists || none.exists }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 20), .completed,
                        "the room shows its lines or says it has none")
-        XCTAssertTrue(app.staticTexts["Sign in under Library to write in a room."].exists, "a signed-out reader is told how to write")
+        XCTAssertTrue(app.staticTexts["Sign in under You to write in a room."].exists, "a signed-out reader is told how to write")
         shot("chat-room", app)
         app.buttons["chatBack"].tap()
         waitFor(room, 10, "back returns to the rooms")
@@ -593,11 +594,11 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["skin-grove"], 10, "the skin control is on the account page")
         app.buttons["skin-grove"].tap()
         let line = app.staticTexts["skinLine"]
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'Grove, until'"), evaluatedWith: line)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Grove for now'"), evaluatedWith: line)
         waitForExpectations(timeout: 5)
         shot("skin-picked-grove", app)
         app.buttons["skin-auto"].tap()
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'Following the sun'"), evaluatedWith: line)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Changes with the time of day'"), evaluatedWith: line)
         waitForExpectations(timeout: 5)
     }
 
@@ -631,7 +632,7 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "grove", tab: "library", extra: ["-kjtvapprovefixture", "YES"])
         let open = app.buttons["accountSignInTV"]
         for _ in 0..<6 where !open.isHittable { app.swipeUp() }
-        waitFor(open, 10, "Library offers Sign in on a TV")
+        waitFor(open, 10, "You offers Sign in on a TV")
         open.tap()
         let field = app.textFields["tvApproveCode"]
         waitFor(field, 10, "the screen asks for the code")
@@ -899,7 +900,7 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// Madrassa, the databases and the Bazaar read the site's own files. The live site holds them
-    /// behind its password until launch, so without one the rooms say so and point to Library.
+    /// behind its password until launch, so without one the rooms say so and hold the password field.
     /// With `TEST_RUNNER_KJ_SITE` set to a local checkout (scripts/dev_server.py), the test walks the
     /// real records: an entry, an essay, the dictionary, the censor certificates, and a product into
     /// the bag. It stops before checkout: nothing is sent to the shop's checkout.
@@ -907,8 +908,8 @@ final class KhajistanUITests: XCTestCase {
         guard let site = ProcessInfo.processInfo.environment["KJ_SITE"] else {
             let app = launch(skin: "day", extra: ["-kjroom", "madrassa"])
             waitFor(app.descendants(matching: .any)["roomLocked"], 30, "a gated room says it is behind the password")
-            app.buttons["lockedToLibrary"].tap()
-            waitFor(app.buttons["skin-day"], 10, "the note leads to Library")
+            XCTAssertTrue(app.secureTextFields.firstMatch.exists, "the note holds the preview password field")
+            XCTAssertFalse(app.buttons["lockedOpen"].isEnabled, "Open waits for a password")
             return
         }
         let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site, "-kjtestsignedout", "YES"])
@@ -993,9 +994,9 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(shop.descendants(matching: .any)["searchRoom-Reading Room"].exists, "the Reading Room is searched")
         shot("search-rooms", shop)
 
-        shop.buttons["tab-library"].tap()
-        let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'place-reading|'")).firstMatch
-        waitFor(place, 10, "a reading place kept on this device is listed in Library")
+        shop.buttons["tab-home"].tap()
+        let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-continue-' OR identifier BEGINSWITH 'continue-'")).firstMatch
+        waitFor(place, 10, "a reading place kept on this device is under Continue on Home")
         shot("library-places", shop)
     }
 

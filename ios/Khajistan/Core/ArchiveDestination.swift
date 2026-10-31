@@ -1,8 +1,8 @@
 import Foundation
 
 /// The website's own menu (SITEMAP and DOORS in archive/scripts/kj-chrome.js, read 2026-10-05):
-/// the doors in the bar's order, each door's rooms, the site's labels and one-line descriptions
-/// verbatim. Staff consoles are not in the menu and are not here.
+/// the doors in the bar's order, each door's rooms, the site's labels, each with one
+/// plain line of what is in it. Staff consoles are not in the menu and are not here.
 struct ArchiveDestination: Identifiable, Hashable, Sendable {
     let id: String
     /// The door it sits under, as the bar names it.
@@ -17,24 +17,24 @@ struct ArchiveDestination: Identifiable, Hashable, Sendable {
 
     static let all: [Self] = [
         .init(id: "home", door: "HOME", title: "Home", subtitle: "Explore by region", path: "/"),
-        .init(id: "publications", door: "PUBLICATIONS", title: "Publications", subtitle: "Khajistan Press — books, catalogues and printed editions", path: "/publications.html"),
-        .init(id: "reading", door: "READING ROOM", title: "Reading Room", subtitle: "Digitized periodicals, posters and books · deep-zoom reader", path: "/reading-room.html"),
-        .init(id: "madrassa", door: "READING ROOM", title: "Madrassa", subtitle: "The reference wing — street dictionary, indices and writings", path: "/madrassa.html"),
-        .init(id: "cinema", door: "RECEIVER", title: "Screening Room", subtitle: "The 32 films — on demand, and institutional licensing", path: "/screening-room.html"),
-        .init(id: "receiver", door: "RECEIVER", title: "Khajistan Receiver", subtitle: "Live regional television and radio, and the Khajistan Radio mixes", path: "/open-frequencies"),
-        .init(id: "listening-desk", door: "RECEIVER", title: "Listening Desk", subtitle: "Share what you heard — audio & video speech evidence", path: "/listening-desk.html"),
-        .init(id: "picsnvids", door: "PICS/VIDS", title: "Pics/Vids", subtitle: "Born Digital Media", path: "/browse-archive.html"),
+        .init(id: "publications", door: "PUBLICATIONS", title: "Publications", subtitle: "Books and catalogues Khajistan prints", path: "/publications.html"),
+        .init(id: "reading", door: "READING ROOM", title: "Reading Room", subtitle: "Old magazines, posters and books to read", path: "/reading-room.html"),
+        .init(id: "madrassa", door: "READING ROOM", title: "Madrassa", subtitle: "Look up words, names and places", path: "/madrassa.html"),
+        .init(id: "cinema", door: "RECEIVER", title: "Screening Room", subtitle: "32 films to watch", path: "/screening-room.html"),
+        .init(id: "receiver", door: "RECEIVER", title: "Khajistan Receiver", subtitle: "Live TV and radio from the region", path: "/open-frequencies"),
+        .init(id: "listening-desk", door: "RECEIVER", title: "Listening Desk", subtitle: "Tell us what you heard in a recording", path: "/listening-desk.html"),
+        .init(id: "picsnvids", door: "PICS/VIDS", title: "Pics/Vids", subtitle: "Photos and videos made for the internet", path: "/browse-archive.html"),
         .init(id: "chat", door: "CHAT", title: "Chat", subtitle: "Chat rooms by region", path: "/chat"),
-        .init(id: "wall", door: "WALL", title: "Wall", subtitle: "A shared pile and a printable zine", path: "/wall/"),
-        .init(id: "toshakhana", door: "BAZAAR", title: "Rare Books & Ephemera", subtitle: "Originals the archive holds — rare books, sets and loose paper", path: "/toshakhana.html"),
-        .init(id: "bazaar", door: "BAZAAR", title: "Bazaar", subtitle: "Prints, objects, apparel and stickers", path: "/bazaar.html"),
-        .init(id: "downloads", door: "BAZAAR", title: "Downloads", subtitle: "Digital editions and files, delivered to your account", path: "/digital/"),
-        .init(id: "about", door: "ABOUT", title: "About Khajistan", subtitle: "What this is, who makes it, and why", path: "/about.html"),
-        .init(id: "passport", door: "ABOUT", title: "Your Khajistan", subtitle: "Account, membership, downloads and saved work", path: "/dashboard.html"),
-        .init(id: "desk", door: "ABOUT", title: "Human Desk", subtitle: "Hear, see and read what the machines could not finish", path: "/human-desk.html"),
-        .init(id: "submit", door: "ABOUT", title: "Send Us Your Records", subtitle: "Tapes, print and recordings you hold, for the archive", path: "/submit.html"),
-        .init(id: "map", door: "MAP", title: "Map", subtitle: "Region chapters of the archive", path: "/region.html"),
-        .init(id: "country", door: "MAP", title: "By country", subtitle: "One country across the archive", path: "/country.html"),
+        .init(id: "wall", door: "WALL", title: "Wall", subtitle: "A shared pile of pictures, and a zine to print", path: "/wall/"),
+        .init(id: "toshakhana", door: "BAZAAR", title: "Rare Books & Ephemera", subtitle: "Old books and loose paper the archive holds", path: "/toshakhana.html"),
+        .init(id: "bazaar", door: "BAZAAR", title: "Bazaar", subtitle: "Prints, stickers, clothes and things to buy", path: "/bazaar.html"),
+        .init(id: "downloads", door: "BAZAAR", title: "Downloads", subtitle: "Digital books and files you bought", path: "/digital/"),
+        .init(id: "about", door: "ABOUT", title: "About Khajistan", subtitle: "What Khajistan is and who makes it", path: "/about.html"),
+        .init(id: "passport", door: "ABOUT", title: "Your Khajistan", subtitle: "Your account and what you saved", path: "/dashboard.html"),
+        .init(id: "desk", door: "ABOUT", title: "Human Desk", subtitle: "Help check what the machines could not read", path: "/human-desk.html"),
+        .init(id: "submit", door: "ABOUT", title: "Send Us Your Records", subtitle: "Send us tapes, print or recordings you have", path: "/submit.html"),
+        .init(id: "map", door: "MAP", title: "Map", subtitle: "The archive, region by region", path: "/region.html"),
+        .init(id: "country", door: "MAP", title: "By country", subtitle: "The archive, country by country", path: "/country.html"),
     ]
 
     /// The doors in menu order, each with its rooms.

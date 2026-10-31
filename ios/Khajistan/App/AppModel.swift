@@ -16,7 +16,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "house"
         case .rooms: return "square.grid.2x2"
         case .receiver: return "dot.radiowaves.left.and.right"
-        case .library: return "books.vertical"
+        case .library: return "person.crop.circle"
         case .search: return "magnifyingglass"
         }
     }
@@ -26,7 +26,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "Home"
         case .rooms: return "Rooms"
         case .receiver: return "Receiver"
-        case .library: return "Library"
+        case .library: return "You"
         case .search: return "Search"
         }
     }
@@ -265,6 +265,14 @@ final class AppModel {
         // A Reading Room address (?m=title&issue=&p=) opens the native reader, as the site's does.
         if let route = ReadingLinks.route(url), StoreBuild.includes(.reading) {
             open(.reading, at: [route])
+            return
+        }
+        // A room the app draws itself, addressed with no particulars (a page kept from the
+        // website, "/open-frequencies"), opens the room here rather than its web page.
+        if url.query == nil, url.fragment == nil,
+           let room = ArchiveDestination.all.first(where: { $0.path == url.path && $0.nativeRoom != nil }),
+           StoreBuild.includes(room) {
+            open(room)
             return
         }
         openWebsite(url)

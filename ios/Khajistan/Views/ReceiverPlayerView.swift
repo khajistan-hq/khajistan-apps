@@ -345,7 +345,8 @@ struct ReceiverDevice: View {
             if let shown = visibleState { Kicker(shown).lineLimit(2) }
             if tuner.source == nil {
                 Text(part == .transmission ? "Choose a channel below." : "Choose a channel, or press Surf.").kjName().lineLimit(2)
-            } else if hasPicture {
+            } else if hasPicture || player.state == .tuning {
+                // While it tunes the screen holds the pigeon, so the name is written here.
                 Text(title).kjName().lineLimit(2)
             }
             if let place, !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }

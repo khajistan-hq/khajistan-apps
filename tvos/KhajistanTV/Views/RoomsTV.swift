@@ -374,7 +374,7 @@ struct TVFeedNote<Value: Sendable>: View {
         switch feed.state {
         case .idle, .loading: TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity)
         case .locked:
-            Text("\(subject) is behind the site password while the archive is in preview. Set it under Account.").kjBody()
+            Text("\(subject) opens to everyone when Khajistan launches. Testers: set the preview password under Account.").kjBody()
         case .failed(let message):
             VStack(alignment: .leading, spacing: 20) {
                 Text(message).kjBody()

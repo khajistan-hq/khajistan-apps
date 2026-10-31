@@ -89,8 +89,21 @@ struct ReceiverView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
+                    LargeTitle(title: "Receiver", line: "Live TV, radio and street cameras from the Middle World. Pick a place on the map, then a channel.")
                     figures
+                    if model.tuner.source == nil { device }
+                    // A fixed mark above the section: an id on the section itself moved with the
+                    // swap, and the scroll overshot the new section's first line.
+                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
+                    switch part {
+                    case .live: LiveSection()
+                    case .cameras: CamerasSection()
+                    case .transmission: TransmissionSection()
+                    }
+                    // The settings come after the channels, so the first thing under the set is
+                    // always something to play.
+                    HouseRule()
+                    SurfSettings()
                     HouseSwitch(title: "Keep playing on other pages",
                                 detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
                                                      : "The channel turns off when you leave the Receiver",
@@ -101,15 +114,6 @@ struct ReceiverView: View {
                                                           : "Pauses when you leave the app",
                                 isOn: $playsInBackground)
                         .accessibilityIdentifier("receiverPlaysInBackground")
-                    if model.tuner.source == nil { device }
-                    // A fixed mark above the section: an id on the section itself moved with the
-                    // swap, and the scroll overshot the new section's first line.
-                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
-                    switch part {
-                    case .live: LiveSection()
-                    case .cameras: CamerasSection()
-                    case .transmission: TransmissionSection()
-                    }
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .kjColumn(KJLayout.wideWidth)
@@ -205,10 +209,11 @@ private struct LiveSection: View {
 
     private var atlas: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SurfSettings()
-            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
-                .accessibilityIdentifier("beyondTheAtlas")
+            // The map first: the page says "pick a place on the map". The switch under it changes
+            // what the map holds.
             map
+            HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: $extended)
+                .accessibilityIdentifier("beyondTheAtlas")
             strip
         }
     }
@@ -329,7 +334,11 @@ private struct LiveSection: View {
                         Text(native).font(.system(KJType.title, weight: .bold)).foregroundStyle(palette.faint).lineLimit(1)
                     }
                 }
-                if let line = index?.mediumLine(regionId: selected), !line.isEmpty { Text(line).kjSmall(faint: true) }
+                // Until the region's channels arrive, the index's count; then the switch below
+                // counts what can actually be played, and the two never stand side by side.
+                if loadedRegion != selected, let line = index?.mediumLine(regionId: selected), !line.isEmpty {
+                    Text(line).kjSmall(faint: true)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("regionTitle")
@@ -556,12 +565,10 @@ struct ChannelRow: View {
 
 // MARK: - Shuffle
 
-/// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
-/// of the atlas. Kept on the device (owner, 2026-10-07).
+/// What the receiver's Surf key finds: a live channel at random, of this medium, kept on the device
+/// (owner, 2026-10-07). Where it looks follows the Beyond the atlas switch under it.
 private struct SurfSettings: View {
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
-    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
-
     private var medium: ShuffleMedium { .stored(mediumRaw) }
 
     var body: some View {
@@ -571,7 +578,6 @@ private struct SurfSettings: View {
                 Text("A live \(medium == .tv ? "television " : medium == .radio ? "radio " : "")channel at random").kjSmall(faint: true)
             }
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
         }
     }
 

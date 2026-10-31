@@ -5,7 +5,6 @@ import SwiftUI
 /// no list of programmes to choose from and no scrub bar.
 struct TransmissionView: View {
     @Environment(AppModel.self) private var model
-    @State private var password = ""
     @State private var showSignIn = false
     /// The channel the viewer chose while signed out, and the one to open once the sign-in screen
     /// has closed. A cover cannot open over one that is still on its way down.
@@ -103,19 +102,9 @@ struct TransmissionView: View {
                     .accessibilityElement()
                     .accessibilityAddTraits(.isStaticText)
                     .transmissionState("Preview password")
-                if let message {
-                    Text(message).kjBody()
+                PreviewLock(about: "Khajistan's own two TV channels, on the air all day.", message: message) {
+                    await store.loadSchedule()
                 }
-                HouseInputField("Preview password", text: password, secure: true) {
-                    SecureField("", text: $password)
-                }
-                Button("Continue") {
-                    submitPassword()
-                }
-                .buttonStyle(HouseButtonStyle())
-                .padding(.leading, -26)
-                .disabled(password.isEmpty)
-                .opacity(password.isEmpty ? 0.5 : 1)
             }
         case .noSchedule:
             VStack(alignment: .leading, spacing: 28) {
@@ -203,14 +192,6 @@ struct TransmissionView: View {
         chosen = nil
     }
 
-    private func submitPassword() {
-        let entered = password
-        password = ""
-        Task {
-            model.auth.setPreviewPassword(entered)
-            await store.loadSchedule()
-        }
-    }
 }
 
 /// One channel's card, as the website's channel card reads: the channel, whether it is on air,

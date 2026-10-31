@@ -49,13 +49,13 @@ struct TransmissionSection: View {
                 .accessibilityIdentifier("transmissionLoading")
         case .needsPreviewPassword(let message):
             VStack(alignment: .leading, spacing: 14) {
-                Text("The schedule is behind the preview password until launch.").kjBody()
+                Text("Khajistan's own two TV channels open to everyone when Khajistan launches. Testers: type the preview password.").kjBody()
                     .accessibilityIdentifier("transmissionPreview")
                 if let message { Text(message).kjBody() }
                 HouseInputField("Preview password") {
                     SecureField("", text: $password).onSubmit(submitPassword)
                 }
-                Button(kicker: "Continue", action: submitPassword)
+                Button(kicker: "Open", action: submitPassword)
                     .buttonStyle(HouseButtonStyle(solid: true))
                     .disabled(password.isEmpty)
             }

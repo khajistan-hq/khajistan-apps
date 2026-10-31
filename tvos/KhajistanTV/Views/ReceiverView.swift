@@ -117,7 +117,7 @@ struct ReceiverView: View {
                 .kjDisplay()
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
-            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
+            HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: extendedBinding)
                 .accessibilityIdentifier("beyondTheAtlas")
                 // The plate's padding is pulled back so the switch sits on the page margin.
                 .padding(.leading, -26)
@@ -152,7 +152,8 @@ struct ReceiverView: View {
             Button {
                 Task { await shuffle() }
             } label: {
-                Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
+                // The shuffle mark says what Surf does before the word has been learnt.
+                Label(shuffling ? "Surfing\u{2026}" : "Surf", systemImage: "shuffle").kjKicker()
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)

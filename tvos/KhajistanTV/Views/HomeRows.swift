@@ -18,7 +18,9 @@ struct HomeRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            transmissionRow
+            // Until launch the schedule is locked and its door in the top bar says so; a shelf of
+            // two closed cards here would be a second door to the same closed room.
+            if model.transmission.programming != nil { transmissionRow }
             // A section this build leaves out (StoreBuild: Pics/Vids, Chat, the Reading Room and
             // every room but the Screening Room in the App Store build) has no shelf on Home either.
             if StoreBuild.includes(.reading) { readingRow }

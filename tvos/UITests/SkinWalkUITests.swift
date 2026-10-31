@@ -122,16 +122,16 @@ final class SkinWalkUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
             shot("\(skin)-7-transmission-\((page.value as? String) ?? "unknown")", app)
             // The field is drawn by the app over a near-invisible system field; typing into it
-            // must still reach the binding, which is what enables Continue.
-            let proceed = app.buttons["Continue"]
+            // must still reach the binding, which the Open button reports as its value.
+            let proceed = app.buttons["Open"]
             if skin == "day", (page.value as? String) == "Preview password", proceed.exists {
-                XCTAssertFalse(proceed.isEnabled, "Continue waits for a password")
+                XCTAssertEqual(proceed.value as? String, "Nothing typed", "nothing typed yet")
                 XCUIRemote.shared.press(.select)
                 Thread.sleep(forTimeInterval: 1.5)
                 app.typeText("abc")
                 XCUIRemote.shared.press(.menu)   // closes the keyboard
                 Thread.sleep(forTimeInterval: 1.5)
-                XCTAssertTrue(proceed.isEnabled, "typing reaches the field")
+                XCTAssertEqual(proceed.value as? String, "Password typed", "typing reaches the field")
                 shot("day-7b-transmission-typed", app)
             }
             app.terminate()

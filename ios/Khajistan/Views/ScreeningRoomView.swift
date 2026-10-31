@@ -170,20 +170,35 @@ struct FilmCard: View {
     }
 }
 
-/// A note for a room whose data is behind the site password while the archive is in preview.
+/// A room that is closed until launch, said plainly where the room would be, with the preview
+/// password field right there so the page is never a dead end. Rooms read their data again when
+/// the password changes, so keeping it is all this has to do.
 struct LockedNote: View {
     let subject: String
     @Environment(AppModel.self) private var model
+    @State private var password = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("\(subject) is behind the site password while the archive is in preview.").kjBody()
-            Button(kicker: "Set it under Library \u{2192}") { model.tab = .library }
-                .accessibilityIdentifier("lockedToLibrary")
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(subject) opens to everyone when Khajistan launches.").kjBody()
+            Text("Testers: type the preview password.").kjBody()
+            HouseInputField("Preview password") {
+                SecureField("", text: $password).onSubmit(open)
+            }
+            Button(kicker: "Open", action: open)
+                .buttonStyle(HouseButtonStyle(solid: true))
+                .disabled(password.isEmpty)
+                .accessibilityIdentifier("lockedOpen")
         }
-        // A container, so the button inside stays its own element for VoiceOver.
+        // A container, so the controls inside stay their own elements for VoiceOver.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("roomLocked")
+    }
+
+    private func open() {
+        guard !password.isEmpty else { return }
+        model.auth.setPreviewPassword(password)
+        password = ""
     }
 }
 

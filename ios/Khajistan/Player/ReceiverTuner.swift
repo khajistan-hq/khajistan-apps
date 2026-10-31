@@ -234,7 +234,9 @@ final class ReceiverTuner {
         }
         let defaults = UserDefaults.standard
         let pool = await ShufflePick.surf(index, medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
-                                          scope: .stored(defaults.string(forKey: ShuffleScope.key))) { region in
+                                          // Surf follows the Beyond the atlas switch, as on the Apple TV
+                                          // (owner, 2026-10-29: one control for both).
+                                          scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main) { region in
             try? await self.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }

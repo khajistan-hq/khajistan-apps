@@ -211,7 +211,7 @@ extension ArchiveBrowser: WKDownloadDelegate {
             try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: target.path)
             var values = URLResourceValues(); values.isExcludedFromBackup = true
             try target.setResourceValues(values)
-            downloadMessage = "Saved \(target.lastPathComponent) to Library → Files."
+            downloadMessage = "Saved \(target.lastPathComponent) to You → Files."
         } catch { downloadMessage = "Could not save download: \(error.localizedDescription)" }
         try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
     }

@@ -378,9 +378,7 @@ private struct AtlasPanel: View {
                             .frame(maxWidth: .infinity)
                             .frame(height: Self.mapHeight)
                     }
-                    // Clear space under the map, so when the rows below take focus and the page
-                    // scrolls, what shows above the cards is ground, not the map's foot.
-                    .padding(.bottom, 56)
+
                     regionStrip(composed).id(Self.stripAnchor)
                 }
                 // Room for a focused plate's lift at the top edge.

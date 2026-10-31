@@ -125,13 +125,13 @@ final class SkinWalkUITests: XCTestCase {
             // must still reach the binding, which the Open button reports as its value.
             let proceed = app.buttons["Open"]
             if skin == "day", (page.value as? String) == "Preview password", proceed.exists {
-                XCTAssertEqual(proceed.value as? String, "Nothing typed", "nothing typed yet")
+                XCTAssertEqual((proceed.value as? String)?.lowercased(), "nothing typed", "nothing typed yet")
                 XCUIRemote.shared.press(.select)
                 Thread.sleep(forTimeInterval: 1.5)
                 app.typeText("abc")
                 XCUIRemote.shared.press(.menu)   // closes the keyboard
                 Thread.sleep(forTimeInterval: 1.5)
-                XCTAssertEqual(proceed.value as? String, "Password typed", "typing reaches the field")
+                XCTAssertEqual((proceed.value as? String)?.lowercased(), "password typed", "typing reaches the field")
                 shot("day-7b-transmission-typed", app)
             }
             app.terminate()

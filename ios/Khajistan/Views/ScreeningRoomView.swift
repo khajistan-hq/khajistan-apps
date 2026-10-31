@@ -246,6 +246,8 @@ struct FilmScreen: View {
     @State private var showSignIn = false
     @State private var watchNote: String?
     @State private var playbackRequest: UUID?
+    @State private var savingOffline = false
+    @State private var offlineNote: String?
 
     private var film: Film? { model.films.films.first { $0.handle == handle } }
 
@@ -340,6 +342,25 @@ struct FilmScreen: View {
                 Text("This film cannot be kept on a watchlist yet.").kjSmall(faint: true).multilineTextAlignment(.center)
             }
             if let watchNote { Text(watchNote).kjSmall(faint: true) }
+            if let offline = model.offlineFilms, offline.active {
+                Button {
+                    savingOffline = true; offlineNote = nil
+                    Task {
+                        defer { savingOffline = false }
+                        do {
+                            _ = try await offline.library.download(film: film.handle)
+                            offlineNote = "Open Offline films in You to see this download."
+                        } catch {
+                            offlineNote = (error as? OfflineFilmError)?.errorDescription ?? "This film could not be saved. Try again."
+                        }
+                    }
+                } label: {
+                    Label(savingOffline ? "Preparing download…" : "Save in app", systemImage: "arrow.down.circle")
+                }
+                .buttonStyle(HouseButtonStyle()).disabled(savingOffline)
+                .accessibilityIdentifier("saveFilmOffline")
+                if let offlineNote { Text(offlineNote).kjSmall(faint: true) }
+            }
         }
     }
 

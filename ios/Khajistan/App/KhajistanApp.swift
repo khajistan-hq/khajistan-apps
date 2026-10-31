@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct KhajistanApp: App {
+    @UIApplicationDelegateAdaptor(OfflineFilmBackgroundDelegate.self) private var offlineBackgroundDelegate
     @State private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -18,6 +19,7 @@ struct KhajistanApp: App {
                 // Back from the lock screen or another app: the sky may have moved.
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { withAnimation(.easeInOut(duration: 0.4)) { model.refreshSkin() } }
+                    if phase == .active { model.offlineFilms?.checkAccessAfterReconnection() }
                     if phase == .background { model.tuner.appLeftTheScreen() }
                 }
         }

@@ -16,6 +16,7 @@ struct YoursView: View {
     @State private var approvingTV = false
     @State private var editingPassword = false
     @State private var draft = ""
+    @State private var showOfflineFilms = false
 
     var body: some View {
         ScrollView {
@@ -25,6 +26,13 @@ struct YoursView: View {
                 accountBlock
                 skinBlock
                 libraryBlock
+                if let offline = model.offlineFilms, offline.active {
+                    Button { showOfflineFilms = true } label: {
+                        Label("Offline films", systemImage: "arrow.down.circle")
+                    }
+                    .buttonStyle(HouseButtonStyle())
+                    .accessibilityIdentifier("offlineFilmsLibrary")
+                }
                 previewBlock
                 footer
             }
@@ -41,6 +49,9 @@ struct YoursView: View {
             }
         }
         .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showOfflineFilms) {
+            if let offline = model.offlineFilms { OfflineFilmLibraryView(runtime: offline) }
+        }
         .quickLookPreview($preview)
         .onAppear(perform: readFiles)
         .onChange(of: model.isShowingBrowser) { if !model.isShowingBrowser { readFiles() } }

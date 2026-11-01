@@ -336,6 +336,7 @@ final class KhajistanUITests: XCTestCase {
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
 #if KJ_APP_STORE
+        XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch.waitForExistence(timeout: 5),
                        "a stored Pics/Vids launch does not open the stream in a store build")
         app.buttons["tab-rooms"].tap()
@@ -349,6 +350,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "a Pics/Vids launch opens the stream in ROOMS")
         if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
+        XCTAssertTrue(marker.exists, "ROOMS scrolled past the Chat and Wall doors")
         XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")

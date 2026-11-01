@@ -22,6 +22,7 @@ struct FilmPlayerView: View {
     @State private var full: (kind: String?, expiresAt: String?)?
     @State private var refusal: Int?
     @State private var checking = false
+    @State private var playbackRequest: UUID?
     @State private var showSignIn = false
     @State private var overlayVisible = true
     @State private var hideTask: Task<Void, Never>?
@@ -84,6 +85,9 @@ struct FilmPlayerView: View {
                 .environment(\.palette, palette)
         }
         .task { await open() }
+        .onChange(of: model.auth.accessGeneration) { _, _ in
+            if full != nil { stopEverything(); dismiss() }
+        }
         .task { await trackPosition() }
         .onDisappear { stopEverything() }
     }
@@ -233,12 +237,16 @@ struct FilmPlayerView: View {
     }
 
     private func watchFull() async {
+        let generation = model.auth.accessGeneration, request = UUID()
+        playbackRequest = request
         // The answer is something to read: the panel stays until the viewer moves on.
         hideTask?.cancel()
         checking = true
         refusal = nil
         let answer = await model.films.requestFullFilm(film)
+        guard !Task.isCancelled, playbackRequest == request else { return }
         checking = false
+        guard generation == model.auth.accessGeneration else { refusal = 401; return }
         switch answer {
         case .granted(let token, let kind, let expiresAt):
             guard let url = Films.fullFilmURL(token: token) else {
@@ -256,6 +264,8 @@ struct FilmPlayerView: View {
             controller.attach(url: url, seekTo: resume,
                               title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
             await controller.settled()
+            guard !Task.isCancelled, playbackRequest == request,
+                  generation == model.auth.accessGeneration else { return }
             model.clips.uncover()
         case .refused(let status):
             refusal = status
@@ -294,6 +304,8 @@ struct FilmPlayerView: View {
     }
 
     private func stopEverything() {
+        playbackRequest = nil
+        checking = false
         // Only the full film's place is kept, as on the phone; a preview has none.
         // The player's own clock, not the half-second poll, which can still hold the preview's.
         if full != nil, controller.state == .playing || controller.state == .paused {

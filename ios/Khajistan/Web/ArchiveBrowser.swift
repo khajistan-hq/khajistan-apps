@@ -113,7 +113,14 @@ extension ArchiveBrowser: WKNavigationDelegate {
             return
         }
         let scheme = url.scheme?.lowercased() ?? ""
-        if action.shouldPerformDownload, ["https", "blob"].contains(scheme) { decisionHandler(.download); return }
+        if action.shouldPerformDownload {
+            guard MediaFilePolicy.allowsBrowserDownload(url: url, page: webView.url, mime: nil,
+                                                        filename: url.lastPathComponent) else {
+                downloadMessage = MediaFilePolicy.message
+                decisionHandler(.cancel); return
+            }
+            decisionHandler(.download); return
+        }
         // Subframes belong to the site's CSP. Top-level custom schemes never execute in WebKit.
         if action.targetFrame?.isMainFrame == false, ["https", "http", "about", "blob"].contains(scheme) {
             decisionHandler(.allow); return
@@ -122,7 +129,8 @@ extension ArchiveBrowser: WKNavigationDelegate {
             decisionHandler(.allow); return
         }
         decisionHandler(.cancel)
-        if ["https", "http", "mailto", "tel"].contains(scheme) { external(url) }
+        if MediaFilePolicy.isMediaURL(url) { downloadMessage = MediaFilePolicy.message }
+        else if ["https", "http", "mailto", "tel"].contains(scheme) { external(url) }
         else { error = "This type of link cannot be opened here." }
     }
 
@@ -131,7 +139,13 @@ extension ArchiveBrowser: WKNavigationDelegate {
             error = "The archive returned an error (\(http.statusCode)). Try reloading this page."
         }
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        decisionHandler(!response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment") ? .download : .allow)
+        let isDownload = !response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")
+        if isDownload && !MediaFilePolicy.allowsBrowserDownload(url: response.response.url, page: webView.url,
+            mime: response.response.mimeType, filename: response.response.suggestedFilename ?? "") {
+            downloadMessage = MediaFilePolicy.message
+            decisionHandler(.cancel); return
+        }
+        decisionHandler(isDownload ? .download : .allow)
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
@@ -188,6 +202,13 @@ extension ArchiveBrowser: WKDownloadDelegate {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Downloads", isDirectory: true)
     }
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        // Validate the FINAL response too: redirects and Content-Disposition can change a link.
+        guard MediaFilePolicy.allowsBrowserDownload(url: response.url, page: webView.url,
+            mime: response.mimeType, filename: suggestedFilename) else {
+            downloadMessage = MediaFilePolicy.message
+            completionHandler(nil)
+            return
+        }
         do {
             // Keep a partial file outside the visible library until WebKit reports completion.
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("KhajistanDownloads/\(UUID().uuidString)")
@@ -202,6 +223,12 @@ extension ArchiveBrowser: WKDownloadDelegate {
         guard let temporary = downloads.removeValue(forKey: ObjectIdentifier(download)) else { return }
         activeDownloads = downloads.count
         do {
+            // A server can mislabel a response. Detect common renamed media containers too.
+            guard MediaFilePolicy.canPreviewOrExport(temporary) else {
+                downloadMessage = MediaFilePolicy.message
+                try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
+                return
+            }
             try FileManager.default.createDirectory(at: Self.downloadDirectory, withIntermediateDirectories: true)
             var target = Self.downloadDirectory.appendingPathComponent(temporary.lastPathComponent)
             if FileManager.default.fileExists(atPath: target.path) {

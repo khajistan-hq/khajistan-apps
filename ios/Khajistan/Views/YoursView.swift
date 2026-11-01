@@ -269,18 +269,24 @@ struct YoursView: View {
     @ViewBuilder
     private var fileList: some View {
         if files.isEmpty {
-            Text("Files you download from the archive appear here. Reading Room pages are not saved for offline reading.")
+            Text("Documents you download from the archive appear here. Films play inside Khajistan; Reading Room pages are not saved for offline reading.")
                 .kjSmall(faint: true).padding(.vertical, 8)
         } else {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(files, id: \.self) { file in
                     HStack {
-                        Button { preview = file } label: {
+                        let exportable = MediaFilePolicy.canPreviewOrExport(file)
+                        Button { if MediaFilePolicy.canPreviewOrExport(file) { preview = file } } label: {
                             Text(file.lastPathComponent).kjName().lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                        .disabled(!exportable)
+                        if exportable {
                         ShareLink(item: file) { Image(systemName: "square.and.arrow.up").frame(width: 40, height: 40) }
                             .accessibilityLabel("Share \(file.lastPathComponent)")
+                        } else {
+                            Text("Not available for export").kjSmall(faint: true)
+                        }
                         Button { remove(file) } label: { Text("Delete").kjKicker() }
                             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 6, bottom: 10, trailing: 0)))
                     }

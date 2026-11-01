@@ -15,6 +15,10 @@ enum AuthStoreError: LocalizedError {
 final class AuthStore {
     private(set) var session: Session?
     private(set) var previewPassword: String?
+    /// Changes on sign-in/sign-out, including returning to the same account.
+    private(set) var accessGeneration = UUID()
+    @ObservationIgnored private var operation = UUID()
+    @ObservationIgnored private var refresh: (id: UUID, task: Task<Session, Error>)?
 
     private let urlSession: URLSession
 
@@ -26,17 +30,17 @@ final class AuthStore {
         static let preview = "preview"
     }
 
-    init() {
+    init(urlSession: URLSession? = nil, loadStoredSession: Bool = true) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 25
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        self.urlSession = urlSession ?? URLSession(configuration: config)
 
-        if let data = Keychain.read(Account.session),
+        if loadStoredSession, let data = Keychain.read(Account.session),
            let stored = try? JSONDecoder().decode(Session.self, from: data) {
             session = stored
         }
-        if let data = Keychain.read(Account.preview),
+        if loadStoredSession, let data = Keychain.read(Account.preview),
            let text = String(data: data, encoding: .utf8), !text.isEmpty {
             previewPassword = text
             // Stored before the Top Shelf could read it: moved into the shared group.
@@ -45,26 +49,30 @@ final class AuthStore {
     }
 
     func signIn(email: String, password: String) async throws {
+        let attempt = beginOperation()
         let (data, response) = try await urlSession.data(for: AuthAPI.passwordRequest(email: email, password: password))
+        guard attempt == operation else { throw CancellationError() }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 {
             throw AuthError.server(AuthAPI.errorMessage(from: data) ?? "Sign-in failed (HTTP \(code)).")
         }
         let fresh = try AuthAPI.session(from: data, now: Date())
-        session = fresh
+        replaceSession(fresh)
         persist(fresh)
     }
 
     /// Signs in with the one-time token hash a phone approved for this TV (TVSignIn): the server
     /// answers as it does a password sign-in, and the session is kept the same way.
     func signIn(tokenHash: String) async throws {
+        let attempt = beginOperation()
         let (data, response) = try await urlSession.data(for: TVSignIn.verifyRequest(tokenHash: tokenHash))
+        guard attempt == operation else { throw CancellationError() }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 {
             throw AuthError.server(AuthAPI.errorMessage(from: data) ?? "Sign-in failed (HTTP \(code)).")
         }
         let fresh = try AuthAPI.session(from: data, now: Date())
-        session = fresh
+        replaceSession(fresh)
         persist(fresh)
     }
 
@@ -77,25 +85,33 @@ final class AuthStore {
     }
 
     /// A token that is good now: the stored one, or a refreshed one. When the refresh fails
-    /// the session is dropped, because a refresh token is not worth keeping once refused.
+    /// only an explicit refresh refusal drops the session; transient failures preserve it.
     func validAccessToken() async throws -> String {
         guard let current = session else {
             throw AuthError.server("Sign in to watch Khajistan TV.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
-        // A network failure or a server fault leaves the session in place for the next try;
-        // only a refusal of the refresh token ends it.
-        let (data, response) = try await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken))
-        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // A server fault, a rate limit or a timeout is not a refusal: the session stays.
-        if code >= 500 || code == 429 || code == 408 { throw AuthStoreError.unavailable }
-        guard code < 400, let fresh = try? AuthAPI.session(from: data, now: Date()) else {
-            clearSession()
-            throw AuthError.server("Sign in again.")
+        if let refresh { return try await refresh.task.value.accessToken }
+        let attempt = operation, id = UUID()
+        let task = Task<Session, Error> { [self] in
+            defer { if refresh?.id == id { refresh = nil } }
+            let (data, response) = try await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken))
+            // Neither an old success nor an old refusal can overwrite a newer login/logout.
+            guard attempt == operation, session?.userId == current.userId else { throw CancellationError() }
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if code >= 500 || code == 429 || code == 408 { throw AuthStoreError.unavailable }
+            if code == 400 || code == 401 || code == 403 {
+                clearSession()
+                throw AuthError.server("Sign in again.")
+            }
+            guard (200..<300).contains(code), let fresh = try? AuthAPI.session(from: data, now: Date()),
+                  fresh.userId == current.userId else { throw AuthStoreError.unavailable }
+            session = fresh
+            persist(fresh)
+            return fresh
         }
-        session = fresh
-        persist(fresh)
-        return fresh.accessToken
+        refresh = (id, task)
+        return try await task.value.accessToken
     }
 
     /// An empty password clears it.
@@ -127,7 +143,22 @@ final class AuthStore {
         _ = try? Keychain.write(data, account: Account.session)
     }
 
+    @discardableResult
+    private func beginOperation() -> UUID {
+        operation = UUID()
+        refresh?.task.cancel()
+        refresh = nil
+        return operation
+    }
+
+    private func replaceSession(_ fresh: Session) {
+        accessGeneration = UUID()
+        session = fresh
+    }
+
     private func clearSession() {
+        beginOperation()
+        accessGeneration = UUID()
         session = nil
         Keychain.delete(Account.session)
     }

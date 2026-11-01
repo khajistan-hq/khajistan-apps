@@ -25,6 +25,7 @@ struct ReadingReaderScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var issue: RRIssue
     @State private var pages: Int
@@ -32,6 +33,8 @@ struct ReadingReaderScreen: View {
     /// The page being read; on a spread, the first of the two in reading order.
     @State private var position = 1
     @State private var shown: UIImage?
+    @State private var shownPermission: RRPagePermission?
+    @State private var companionPermission: RRPagePermission?
     /// The facing page on a spread, once the server has allowed it.
     @State private var companion: UIImage?
     /// The facing page could not join the spread (refused, curtained): the next turn goes to it.
@@ -118,6 +121,22 @@ struct ReadingReaderScreen: View {
         .statusBarHidden(!chromeShown)
         .persistentSystemOverlays(chromeShown ? .automatic : .hidden)
         .task { await open(at: startPage) }
+        .onChange(of: model.auth.accessGeneration) { _, _ in
+            loadTask?.cancel(); companionTask?.cancel()
+            shown = nil; companion = nil; shownPermission = nil; companionPermission = nil
+            blockedFrom = nil
+            show(position)
+        }
+        .task(id: permissionDeadline) {
+            guard let deadline = permissionDeadline else { return }
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard !Task.isCancelled else { return }
+            show(position)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, [shownPermission, companionPermission].compactMap({ $0 })
+                .contains(where: { !$0.permits(generation: model.auth.accessGeneration) }) { show(position) }
+        }
         .onDisappear {
             loadTask?.cancel()
             companionTask?.cancel()
@@ -141,8 +160,10 @@ struct ReadingReaderScreen: View {
 
     @ViewBuilder
     private var pageView: some View {
-        if let shown, phase == .page || phase == .loading {
-            let pair = companion.map { rightToLeft ? [$0, shown] : [shown, $0] } ?? [shown]
+        if let shown, shownPermission?.permits(generation: model.auth.accessGeneration) == true,
+           phase == .page || phase == .loading {
+            let visibleCompanion = companionPermission?.permits(generation: model.auth.accessGeneration) == true ? companion : nil
+            let pair = visibleCompanion.map { rightToLeft ? [$0, shown] : [shown, $0] } ?? [shown]
             ZoomablePage(images: pair, zoomed: $zoomed, tapped: tapped, dragged: { dragX = $0 }, released: released)
                 .offset(x: dragX)
                 .id(issue.key + "#\(position)")
@@ -168,8 +189,13 @@ struct ReadingReaderScreen: View {
         }
     }
 
+    private var permissionDeadline: ContinuousClock.Instant? {
+        [shownPermission?.clockUntil, companionPermission?.clockUntil].compactMap { $0 }.min()
+    }
+
     /// The new page slides in from the side the issue turns towards, like a book's leaf.
     private var pageTurn: AnyTransition {
+        guard !UIAccessibility.isReduceMotionEnabled else { return .identity }
         let fromRight = turnedForward != rightToLeft
         return .asymmetric(insertion: .move(edge: fromRight ? .trailing : .leading),
                            removal: .move(edge: fromRight ? .leading : .trailing))
@@ -520,6 +546,8 @@ struct ReadingReaderScreen: View {
         sliderPage = Double(position)
         zoomed = false
         companion = nil
+        companionPermission = nil
+        shownPermission = nil
         companionRefused = false
         let at = position
         let stored = RRPageMap.stored(at, map: map)
@@ -532,6 +560,7 @@ struct ReadingReaderScreen: View {
         // old page, so a number is never shown over the page before it.
         if let held = store.heldPage(issue, stored: stored) {
             shown = held
+            shownPermission = store.pagePermission(issue, stored: stored)
             phase = .page
             remember(at)
             prefetchAround(at)
@@ -540,12 +569,14 @@ struct ReadingReaderScreen: View {
         }
         shown = nil
         phase = .loading
+        let generation = model.auth.accessGeneration
         loadTask = Task {
             let result = await store.page(issue, stored: stored)
-            guard !Task.isCancelled, position == at else { return }
+            guard !Task.isCancelled, position == at, generation == model.auth.accessGeneration else { return }
             switch result {
             case .image(let image):
                 shown = image
+                shownPermission = store.pagePermission(issue, stored: stored)
                 phase = .page
                 if let blocked = blockedFrom, at >= blocked { blockedFrom = nil }
                 remember(at)
@@ -573,14 +604,17 @@ struct ReadingReaderScreen: View {
         let stored = RRPageMap.stored(facing, map: map)
         if let held = store.heldPage(issue, stored: stored) {
             companion = held
+            companionPermission = store.pagePermission(issue, stored: stored)
             return
         }
+        let generation = model.auth.accessGeneration
         companionTask = Task {
             let result = await store.page(issue, stored: stored)
-            guard !Task.isCancelled, position == at else { return }
+            guard !Task.isCancelled, position == at, generation == model.auth.accessGeneration else { return }
             switch result {
             case .image(let image):
                 companion = image
+                companionPermission = store.pagePermission(issue, stored: stored)
             case .outcome(let outcome):
                 companionRefused = true
                 if outcome == .members || outcome == .signIn || outcome == .closed {

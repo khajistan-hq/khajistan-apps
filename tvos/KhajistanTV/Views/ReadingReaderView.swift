@@ -21,11 +21,13 @@ struct ReadingReaderView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var pages: Int
     @State private var map: [Int]?
     @State private var position = 1
     @State private var shown: UIImage?
+    @State private var shownPermission: RRPagePermission?
     @State private var phase: Phase = .loading
     @State private var zoom: CGFloat = 1
     /// Set by the first zoom; the band stops saying "Select to zoom" after it.
@@ -79,7 +81,8 @@ struct ReadingReaderView: View {
             GeometryReader { geometry in
                 ZStack {
                     palette.ground
-                    if let shown, phase == .page || phase == .loading {
+                    if let shown, shownPermission?.permits(generation: model.auth.accessGeneration) == true,
+                       phase == .page || phase == .loading {
                         Image(uiImage: shown)
                             .resizable()
                             .interpolation(.high)
@@ -159,6 +162,21 @@ struct ReadingReaderView: View {
             else if now == .page && !bandShown { bandShown = true; wake() }
         }
         .task { await open() }
+        .onChange(of: model.auth.accessGeneration) { _, _ in
+            loadTask?.cancel()
+            shown = nil; shownPermission = nil; blockedFrom = nil
+            show(position)
+        }
+        .task(id: shownPermission?.clockUntil) {
+            guard let deadline = shownPermission?.clockUntil else { return }
+            do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+            guard !Task.isCancelled else { return }
+            show(position)
+        }
+        .onChange(of: scenePhase) { _, now in
+            if now == .active, shownPermission != nil,
+               shownPermission?.permits(generation: model.auth.accessGeneration) != true { show(position) }
+        }
         .onDisappear {
             loadTask?.cancel()
             hideTask?.cancel()
@@ -464,6 +482,7 @@ struct ReadingReaderView: View {
 
     private func show(_ target: Int) {
         loadTask?.cancel()
+        shownPermission = nil
         position = min(max(1, target), pages)
         var instant = Transaction()
         instant.disablesAnimations = true
@@ -482,18 +501,21 @@ struct ReadingReaderView: View {
         // clears the old page, so a number is never shown over the page before it.
         if let held = store.heldPage(issue, stored: stored) {
             shown = held
+            shownPermission = store.pagePermission(issue, stored: stored)
             phase = .page
             prefetchAround(at)
             return
         }
         shown = nil
         phase = .loading
+        let generation = model.auth.accessGeneration
         loadTask = Task {
             let result = await store.page(issue, stored: stored)
-            guard !Task.isCancelled, position == at else { return }
+            guard !Task.isCancelled, position == at, generation == model.auth.accessGeneration else { return }
             switch result {
             case .image(let image):
                 shown = image
+                shownPermission = store.pagePermission(issue, stored: stored)
                 phase = .page
                 if let blocked = blockedFrom, at >= blocked { blockedFrom = nil }
                 prefetchAround(at)
@@ -616,18 +638,30 @@ private struct StripThumb: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
+    @State private var permission: RRPagePermission?
 
     var body: some View {
         ZStack {
-            if let image, !curtained {
+            if let image, !curtained, permission?.permits(generation: model.auth.accessGeneration) == true {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
                 palette.lift
             }
         }
         .accessibilityHidden(true)
-        .task(id: "\(stored)|\(curtained)") {
-            image = curtained ? nil : await model.reading.thumbnail(issue, stored: stored)
+        .task(id: "\(issue.key)|\(stored)|\(curtained)|\(model.auth.accessGeneration)") {
+            image = nil; permission = nil
+            guard !curtained else { return }
+            let generation = model.auth.accessGeneration
+            while !Task.isCancelled, generation == model.auth.accessGeneration {
+                guard let found = await model.reading.thumbnail(issue, stored: stored),
+                      !Task.isCancelled, generation == model.auth.accessGeneration,
+                      let allowed = model.reading.pagePermission(issue, stored: stored, thumbnail: true) else { return }
+                permission = allowed; image = found
+                do { try await Task.sleep(until: allowed.clockUntil, clock: .continuous) } catch { return }
+                guard !Task.isCancelled else { return }
+                image = nil; permission = nil
+            }
         }
     }
 }

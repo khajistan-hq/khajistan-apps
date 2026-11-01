@@ -6,7 +6,20 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
 
 @MainActor final class AuthStore {
     var isSignedIn = true
-    func validAccessToken() async throws -> String { "synthetic-test-token" }
+    var accessGeneration = 0
+    var observers: [UUID: @MainActor () -> Void] = [:]
+    var stallTokens = false
+    var tokenWaiters: [CheckedContinuation<Void, Never>] = []
+    func observeAccess(_ observer: @escaping @MainActor () -> Void) -> UUID {
+        let id = UUID(); observers[id] = observer; return id
+    }
+    func removeAccessObserver(_ id: UUID) { observers.removeValue(forKey: id) }
+    func changeAccount() { accessGeneration += 1; Array(observers.values).forEach { $0() } }
+    func releaseTokens() { let held = tokenWaiters; tokenWaiters = []; held.forEach { $0.resume() } }
+    func validAccessToken() async throws -> String {
+        if stallTokens { await withCheckedContinuation { tokenWaiters.append($0) } }
+        return "synthetic-test-token"
+    }
 }
 
 @MainActor final class PlayerController {
@@ -81,6 +94,12 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
     var sockets: [URLSessionWebSocketTask] = []
     var requests: [String] = []
     var demandActions: [String] = []
+    var billingMode: String? = "enforced"
+    var demandAllowed: Bool? = true
+    var leaseSeconds: Double = 120
+    var wireFailure: (Int, String, String)?
+    var wireColumns: [String] = []
+    var stallOmitted = false
     var stallRecovery = false
     var recoveryWaiters: [CheckedContinuation<Void, Never>] = []
     var translationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -94,12 +113,13 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
         let url = request.url!
         requests.append(url.path)
         var body: Any = []
+        var status = 200
         if url.path.contains("request-captions") {
             let sent = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any] ?? [:]
             if let action = sent["action"] as? String { demandActions.append(action) }
-            body = ["allowed": true, "billing_mode": "enforced", "unlimited": true,
+            body = ["allowed": demandAllowed as Any? ?? NSNull(), "billing_mode": billingMode as Any? ?? NSNull(), "unlimited": true,
                     "session_id": sent["session_id"] ?? NSNull(),
-                    "lease_expires_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(120)),
+                    "lease_expires_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(leaseSeconds)),
                     "heartbeat_seconds": 60]
         } else if url.path.contains("translate-caption") {
             translations += 1
@@ -112,12 +132,21 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
             }
         } else if url.path.contains("live_caption_wire") {
             recoveryRequests += 1
-            if stallRecovery { await withCheckedContinuation { recoveryWaiters.append($0) } }
-            body = recoveryRows
+            let columns = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "select" }?.value ?? ""
+            wireColumns.append(columns)
+            if stallRecovery || (stallOmitted && !columns.contains("sentence")) { await withCheckedContinuation { recoveryWaiters.append($0) } }
+            body = recoveryRows.map { row in
+                var projected = row
+                if !columns.contains("sentence") { projected.removeValue(forKey: "sentence") }
+                return projected
+            }
+            if let failure = wireFailure, columns.contains("sentence") {
+                status = failure.0; body = ["code": failure.1, "message": failure.2]
+            }
         } else if url.path.contains("caption-accuracy") {
             body = ["extended_regions": [], "languages": [:], "by_channel": [:]] as [String: Any]
         }
-        return (try! JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        return (try! JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
 }
 
@@ -178,14 +207,37 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
     return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
 }
 
+func changeRecord(_ frame: String, _ change: (inout [String: Any]) -> Void) -> String {
+    var object = try! JSONSerialization.jsonObject(with: Data(frame.utf8)) as! [String: Any]
+    var payload = object["payload"] as! [String: Any], data = payload["data"] as! [String: Any]
+    var record = data["record"] as! [String: Any]
+    change(&record); data["record"] = record; payload["data"] = data; object["payload"] = payload
+    return String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+}
+func sentenceFrame(_ rowID: Int = 801, state: String = "final", revision: Int = 1, native: String = "خبر مکمل۔", english: String = "Complete report.", id: String = "11111111-1111-4111-8111-111111111111") -> String {
+    changeRecord(row(rowID, text: english, atEpoch: 1000)) { record in
+        record["text"] = state == "provisional" ? "" : native
+        record["english"] = state == "provisional" ? "" : english
+        record["sentence"] = ["version": 1, "id": id, "revision": revision, "state": state,
+            "reason": state == "final" ? "punctuation" : state == "provisional" ? "continuing" : "delivery_limit",
+            "native_text": native, "word_count": native.split(whereSeparator: { $0.isWhitespace }).count] as [String: Any]
+    }
+}
+func decodeSentence(_ frame: String) -> CaptionWireRow? {
+    if case .row(let row) = CaptionRealtime.event(frame, channelId: "caption-test") { return row }
+    return nil
+}
+
 @MainActor struct Fixture {
     let network: Network
     let player: PlayerController
     let service: LiveCaptionSession
+    let auth: AuthStore
     init() throws {
         network = Network(); Network.current = network
         player = PlayerController()
-        service = LiveCaptionSession(auth: AuthStore())
+        auth = AuthStore()
+        service = LiveCaptionSession(auth: auth)
         service.attach(try channel(), player: player)
     }
     func start() async throws {
@@ -197,6 +249,7 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
         service.detach()
         network.releaseRecovery()
         network.releaseTranslations()
+        auth.releaseTokens()
     }
 }
 
@@ -204,6 +257,17 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
     @MainActor static func main() async {
         var failed = 0
         var allTests: [(String, @MainActor () async throws -> Void)] = [
+            ("Sentence previews and terminal UPDATE never pay for backfill", sentenceUpdates),
+            ("Sentence malformed metadata and source mutations are rejected", sentenceMalformed),
+            ("Sentence translation deadline cannot revive expired speech", sentenceDeadline),
+            ("Sentence billing mode must authorize delivery", sentenceBilling),
+            ("Sentence account change clears plates and fences suspended auth", sentenceAccount),
+            ("Sentence recovery fallback recognizes only missing column", sentenceRecovery),
+            ("Sentence ledger bounds and timeline labels", sentenceLedgerRules),
+            ("Sentence lease expiry clears plate and late UPDATE", sentenceLease),
+            ("Sentence compatibility projection is frozen across Realtime", sentenceProjectionRace),
+            ("Sentence malformed recovery row cannot suppress another caption", sentenceRecoveryBatch),
+            ("Sentence provisional notice expires and respects later warnings", sentenceNoticeExpiry),
             ("unstamped nonseekable signal uses arrival without configured hold", unstampedArrival),
             ("programme long phrase bounds missing-stamp delay", longProgramme),
             ("programme calibration expires and stale unstamped rows stay excluded", expiredProgramme),
@@ -240,6 +304,164 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
         }
         print("Caption session: \(tests.count - failed)/\(tests.count) passed; no external network")
         exit(failed == 0 ? 0 : 1)
+    }
+
+    @MainActor static func sentenceUpdates() async throws {
+        let f = try Fixture(); defer { f.finish() }; try await f.start()
+        let preview = sentenceFrame(800, state: "provisional", native: "خبر", english: "")
+        f.network.sockets[0].push(preview)
+        try await eventually("text-free listening") { f.service.note.contains("Listening") }
+        try check(f.service.text == nil && f.network.translations == 0, "preview has no text or paid request")
+        let terminal = sentenceFrame(801, revision: 2, english: "")
+        f.network.sockets[0].push(terminal)
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.network.translations == 0, "terminal waits for its worker UPDATE without paid fallback")
+        f.network.sockets[0].push(update(terminal, text: "Complete report."))
+        try await eventually("terminal English displayed") { f.service.text?.contains("Complete report") == true }
+        try check(f.service.sentenceStatus == "Complete sentence", "status belongs to displayed sentence")
+        try check(!f.service.note.contains("Listening"), "successful terminal clears only its own preview notice")
+        f.network.sockets[0].push(update(terminal, text: "REPAINT MUST NOT APPEAR"))
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.service.text?.contains("REPAINT") != true && f.network.translations == 0, "duplicate update cannot repaint")
+    }
+    @MainActor static func sentenceMalformed() async throws {
+        let good = sentenceFrame(802, english: "")
+        let bad = changeRecord(good) { row in
+            var m = row["sentence"] as! [String: Any]; m["extra"] = true; row["sentence"] = m
+        }
+        try check(decodeSentence(bad) == nil, "extra metadata fields fail decoding")
+        let huge = sentenceFrame(native: String(repeating: "𐐀", count: 4097))
+        try check(decodeSentence(huge) == nil, "codepoint bound fails before legacy admission")
+        let f = try Fixture(); defer { f.finish() }; try await f.start()
+        f.network.sockets[0].push(bad);f.network.sockets[0].push(good)
+        let changed = changeRecord(update(good, text: "WRONG SOURCE")) { $0["script"] = "Latn" }
+        f.network.sockets[0].push(changed)
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.service.text == nil && f.network.translations == 0, "malformed and changed source have no fallback")
+        f.network.sockets[0].push(update(good, text: "Right source."))
+        try await eventually("unchanged source completes") { f.service.text?.contains("Right source") == true }
+    }
+    @MainActor static func sentenceDeadline() async throws {
+        let f = try Fixture(); defer { f.finish() }; try await f.start()
+        let pending = sentenceFrame(803, english: "")
+        f.network.sockets[0].push(pending)
+        try await Task.sleep(for: .seconds(CaptionRules.translationWait + 0.3))
+        f.network.sockets[0].push(update(pending, text: "EXPIRED SENTENCE"))
+        try await Task.sleep(for: .milliseconds(200))
+        try check(f.service.text == nil && f.network.translations == 0, "expired terminal cannot repaint or pay")
+    }
+    @MainActor static func sentenceBilling() async throws {
+        for mode: String? in ["atomic_v1", "future_mode", nil] {
+            let f = try Fixture(); defer { f.finish() }; f.network.billingMode = mode
+            f.service.toggle(); try await Task.sleep(for: .milliseconds(180))
+            try check(f.network.sockets.isEmpty && f.network.recoveryRequests == 0 && !f.service.isOn, "unsupported mode fails closed before wire")
+        }
+        let f = try Fixture(); defer { f.finish() }; f.network.demandAllowed = nil
+        f.service.toggle(); try await Task.sleep(for: .milliseconds(180))
+        try check(f.network.sockets.isEmpty && f.network.recoveryRequests == 0, "missing positive authorization cannot read wire")
+    }
+    @MainActor static func sentenceAccount() async throws {
+        let f = try Fixture(); defer { f.finish() }; try await f.start()
+        f.network.sockets[0].push(sentenceFrame())
+        try await eventually("visible before account change") { f.service.text != nil }
+        let stopCount = f.network.demandActions.filter { $0 == "stop" }.count
+        f.auth.changeAccount()
+        try check(!f.service.isOn && f.service.text == nil && f.service.sentenceStatus == nil, "account change synchronously clears captions")
+        try await Task.sleep(for: .milliseconds(150))
+        try check(f.network.demandActions.filter { $0 == "stop" }.count == stopCount, "old stop never borrows new account token")
+        let g = try Fixture(); defer { g.finish() }; g.auth.stallTokens = true; g.service.toggle()
+        try await eventually("token wait started") { !g.auth.tokenWaiters.isEmpty }
+        g.auth.changeAccount();g.auth.releaseTokens()
+        try await Task.sleep(for: .milliseconds(150))
+        try check(g.network.sockets.isEmpty && !g.network.demandActions.contains("start"), "suspended authentication cannot start after replacement")
+    }
+    @MainActor static func sentenceRecovery() async throws {
+        for failure in [(400,"42703","column sentence does not exist"),(401,"42703","sentence permission"),(400,"OTHER","sentence unrelated")] {
+            let f = try Fixture(); defer { f.finish() }; f.network.wireFailure = failure; try await f.start()
+            try await eventually("REST attempted") { f.network.recoveryRequests > 0 }
+            try await Task.sleep(for: .milliseconds(120))
+            let expected = failure.0 == 400 && failure.1 == "42703" ? 2 : 1
+            try check(f.network.wireColumns.count == expected, "fallback occurs only once for explicit missing column")
+            if expected == 2 { try check(!f.network.wireColumns[1].contains("sentence"), "fallback removes only additive column") }
+        }
+    }
+    @MainActor static func sentenceLedgerRules() async throws {
+        var ledger = CaptionSentenceLedger()
+        let first = decodeSentence(sentenceFrame(800,state:"provisional",native:"خبر",english:""))!
+        try check(ledger.receive(first,now:0) == .listening,"preview accepted without text")
+        let rewritten = decodeSentence(sentenceFrame(801,revision:2,native:"different"))!
+        try check(ledger.receive(rewritten,now:1) == .ignore,"prefix rewrite refused")
+        let complete = decodeSentence(sentenceFrame(801,revision:2))!
+        try check(ledger.receive(complete,now:31) == .ignore,"expired group tombstoned")
+        var timeline = CaptionTimeline()
+        let done = decodeSentence(sentenceFrame())!.sentence!
+        try check(done.status(english:"The speaker was Dr.") == "Translation may be incomplete", "abbreviation is not a safe ending")
+        try check(done.status(english:"We are going to.") == "Translation may be incomplete", "punctuated connector remains incomplete")
+        let unfinished = decodeSentence(sentenceFrame(804,state:"unfinished",id:"22222222-2222-4222-8222-222222222222"))!.sentence!
+        timeline.append("First.",at:100,spoken:2,now:99,sentence:done)
+        timeline.append("Second",at:101,spoken:2,now:99,sentence:unfinished)
+        try check(timeline.cues.count == 2 && timeline.cues[0].sentenceStatus == "Complete sentence" && timeline.cues[1].sentenceStatus == "Unfinished speech","compaction preserves distinct sentence labels")
+        var bounded = CaptionSentenceLedger()
+        for i in 0..<64 {
+            let id = String(format:"11111111-1111-4111-8111-%012d",i)
+            let r = decodeSentence(sentenceFrame(900+i,state:"provisional",native:"خبر",id:id))!
+            try check(bounded.receive(r,now:0) == .listening,"capacity accepts first 64")
+        }
+        try check(bounded.receive(first,now:1) == .ignore,"capacity rejects new group")
+        try check(bounded.receive(first,now:31) == .listening,"capacity recovers without replaying tombstones")
+    }
+    @MainActor static func sentenceLease() async throws {
+        let f = try Fixture(); defer { f.finish() }; f.network.leaseSeconds = 3; try await f.start()
+        let frame = sentenceFrame(state:"unfinished")
+        f.network.sockets[0].push(frame)
+        try await eventually("unfinished visible") { f.service.text != nil }
+        try check(f.service.sentenceStatus == "Unfinished speech","honest unfinished label")
+        try await eventually("lease expires",timeout:4) { !f.service.isOn }
+        f.network.sockets[0].push(update(frame,text:"EXPIRED"))
+        try check(f.service.text == nil && f.service.sentenceStatus == nil,"lease clears words and label")
+    }
+
+    static func record(_ frame: String) -> [String: Any] {
+        let object = try! JSONSerialization.jsonObject(with: Data(frame.utf8)) as! [String: Any]
+        let payload = object["payload"] as! [String: Any], data = payload["data"] as! [String: Any]
+        return data["record"] as! [String: Any]
+    }
+    @MainActor static func sentenceProjectionRace() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        f.network.wireFailure = (400,"42703","column sentence does not exist")
+        f.network.stallOmitted = true
+        f.network.recoveryRows = [record(sentenceFrame(801,revision:2,english:""))]
+        try await f.start()
+        try await eventually("omitted metadata request pending") { !f.network.recoveryWaiters.isEmpty }
+        f.network.sockets[0].push(sentenceFrame(800,state:"provisional",native:"خبر",english:""))
+        try await eventually("protocol frame observed while compatibility response suspended") { f.service.note.contains("Listening") }
+        f.network.stallOmitted = false; f.network.releaseRecovery()
+        try await Task.sleep(for:.milliseconds(180))
+        try check(f.network.translations == 0,"response without projected metadata cannot become eligible for paid backfill")
+        f.network.sockets[0].push(update(sentenceFrame(801,revision:2,english:""),text:"Complete report."))
+        try await eventually("full same-source UPDATE restores metadata within original deadline") { f.service.sentenceStatus == "Complete sentence" }
+        try check(f.network.translations == 0,"metadata completion stays unpaid")
+        f.service.toggle(); f.network.wireFailure = nil
+        let before = f.network.wireColumns.count
+        try await f.start()
+        try await eventually("new session probes metadata again") { f.network.wireColumns.count > before }
+        try check(f.network.wireColumns[before].contains("sentence") && f.network.translations == 0,"new session restores full projection without translation")
+    }
+    @MainActor static func sentenceRecoveryBatch() async throws {
+        let f = try Fixture(); defer { f.finish() }
+        var malformed = record(sentenceFrame(810))
+        var meta = malformed["sentence"] as! [String: Any];meta["revision"] = 0;malformed["sentence"] = meta
+        f.network.recoveryRows = [malformed,record(sentenceFrame(811))]
+        try await f.start()
+        try await eventually("valid row survives malformed peer") { f.service.text?.contains("Complete report") == true }
+        try check(f.network.translations == 0,"malformed peer has no paid fallback")
+    }
+    @MainActor static func sentenceNoticeExpiry() async throws {
+        let f = try Fixture(); defer { f.finish() };try await f.start()
+        f.network.sockets[0].push(sentenceFrame(820,state:"provisional",native:"خبر",english:""))
+        try await eventually("listening notice") { f.service.note.contains("Listening") }
+        try await eventually("stalled preview becomes explicitly unfinished",timeout:10) { f.service.note.contains("unfinished") }
+        try check(f.service.text == nil && f.network.translations == 0,"stalled preview remains text free and unbilled")
     }
 
     #if CAPTION_TVOS

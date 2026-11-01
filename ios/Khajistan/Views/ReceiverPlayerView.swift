@@ -29,7 +29,7 @@ struct ReceiverPlayerView: View {
             }
             VStack {
                 Spacer()
-                ReceiverCaptionPlate(text: model.captions.text, skin: model.skin)
+                ReceiverCaptionPlate(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus)
                     .padding(.horizontal, 16)
                     .padding(.bottom, overlay.visible ? panelHeight + 12 : 24)
             }.allowsHitTesting(false)
@@ -259,7 +259,7 @@ struct ReceiverDevice: View {
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .overlay { StationClipLayer(clips: model.clips) }
         .overlay(alignment: .bottom) {
-            ReceiverCaptionPlate(text: model.captions.text, skin: model.skin).padding(8)
+            ReceiverCaptionPlate(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus).padding(8)
         }
         .clipped()
         // Only a radio station's name is read here: it is said nowhere else on the page.

@@ -4,9 +4,11 @@ import SwiftUI
 struct ReceiverCaptionPlate: View {
     let text: String?
     let skin: Skin
+    var status: String? = nil
     var body: some View {
         if let text, !text.isEmpty {
             VStack(spacing: 3) {
+                if let status { Text(status).font(.caption).accessibilityIdentifier("captionSentenceStatus") }
                 ForEach(Array(CaptionText.lines(text).enumerated()), id: \.offset) { line in
                     Text(line.element)
                         .multilineTextAlignment(.center)

@@ -14,6 +14,8 @@ struct SubtitleCue: Equatable, Sendable {
     let start: Double
     let end: Double
     let text: String
+    var sentenceID: String? = nil
+    var sentenceStatus: String? = nil
 }
 
 /// A WebVTT reader for prepared subtitle files. Cue settings (line, align, position) are ignored:
@@ -206,7 +208,7 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
     let id: Int?
     let channel_id: String?
     let text: String?
-    let english: String?
+    var english: String?
     let lang: String?
     let script: String?
     let at_epoch: Double?
@@ -215,6 +217,106 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
     let uncertain: Bool?
     let program_epoch: Double?
     var created_at: String? = nil
+    var sn: Int? = nil
+    var sn_offset: Double? = nil
+    var seg_dur: Double? = nil
+    var confidence: Double? = nil
+    var sentence: CaptionSentence? = nil
+
+    func sameSource(as other: Self, ignoringSentence: Bool = false) -> Bool {
+        var a = self, b = other
+        a.english = nil; b.english = nil
+        if ignoringSentence { a.sentence = nil; b.sentence = nil }
+        return a == b
+    }
+}
+
+
+/// Strict additive metadata: malformed metadata fails decoding, never becomes a legacy row.
+struct CaptionSentence: Decodable, Equatable, Sendable {
+    let version: Int
+    let id: String
+    let revision: Int
+    let state: String
+    let reason: String
+    let native_text: String
+    let word_count: Int
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Key.self)
+        func key(_ s: String) -> Key { Key(stringValue: s)! }
+        guard Set(c.allKeys.map(\.stringValue)) == Set(["version", "id", "revision", "state", "reason", "native_text", "word_count"]) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid sentence fields"))
+        }
+        version = try c.decode(Int.self, forKey: key("version"))
+        id = try c.decode(String.self, forKey: key("id"))
+        revision = try c.decode(Int.self, forKey: key("revision"))
+        state = try c.decode(String.self, forKey: key("state"))
+        reason = try c.decode(String.self, forKey: key("reason"))
+        native_text = try c.decode(String.self, forKey: key("native_text"))
+        word_count = try c.decode(Int.self, forKey: key("word_count"))
+        let reasons = ["silence", "wait_limit", "size_limit", "gap", "clock_reset", "shutdown", "delivery_limit"]
+        guard version == 1, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              (1...999).contains(revision), !native_text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              native_text.unicodeScalars.count <= 4096,
+              word_count == native_text.split(whereSeparator: { $0.isWhitespace }).count,
+              (state == "provisional" && reason == "continuing") || (state == "final" && reason == "punctuation") || (state == "unfinished" && reasons.contains(reason)) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid sentence metadata"))
+        }
+    }
+    func status(english: String) -> String {
+        if state == "unfinished" { return "Unfinished speech" }
+        let token = String(english.split(whereSeparator: { $0.isWhitespace }).last ?? "")
+            .replacingOccurrences(of: #"["'”’\])}]+$"#, with: "", options: .regularExpression)
+        let tail = token.replacingOccurrences(of: #"[.,!;:،؛۔…—–-]+$"#, with: "", options: .regularExpression).lowercased()
+        let connectors = Set("and or but if because of to with the a an in on at for from by".split(separator: " ").map(String.init))
+        let abbreviation = token.range(of: #"^(?:(?:mr|mrs|ms|dr|prof|sr|jr|st|inc|ltd|corp|vs|etc)\.|(?:[a-z]\.)+)$"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let punctuation = token.range(of: #"[.!?。！？؟۔]$"#, options: .regularExpression) != nil
+        let complete = punctuation && !abbreviation && !connectors.contains(tail) && !token.hasSuffix("..")
+        return complete ? "Complete sentence" : "Translation may be incomplete"
+    }
+}
+
+/// Text-free previews in English mode. Bounded revisions and tombstones prevent replay.
+struct CaptionSentenceLedger {
+    private struct Group { let firstSeen: TimeInterval; var row: CaptionWireRow }
+    private var groups: [String: Group] = [:]
+    private var tombstones: [String: TimeInterval] = [:]
+    enum Action { case legacy, listening, terminal, ignore }
+    mutating func expire(now: TimeInterval) {
+        tombstones = tombstones.filter { $0.value > now }
+        for (id, group) in groups where now - group.firstSeen >= 30 {
+            groups.removeValue(forKey: id); tombstones[id] = now + 180
+        }
+    }
+    mutating func receive(_ row: CaptionWireRow, now: TimeInterval) -> Action {
+        expire(now: now)
+        guard let meta = row.sentence else { return .legacy }
+        guard let rowID = row.id, rowID > 0, row.final == true,
+              let epoch = row.at_epoch, epoch.isFinite, tombstones[meta.id] == nil,
+              row.program_epoch?.isFinite != false,
+              meta.state == "provisional" ? (row.text ?? "").isEmpty && (row.english ?? "").isEmpty : row.text == meta.native_text else { return .ignore }
+        if var old = groups[meta.id], let previous = old.row.sentence {
+            if previous.state != "provisional" {
+                return row.sameSource(as: old.row) ? .terminal : .ignore
+            }
+            guard meta.revision > previous.revision, rowID != old.row.id,
+                  row.at_epoch == old.row.at_epoch, row.program_epoch == old.row.program_epoch,
+                  row.lang == old.row.lang, row.script == old.row.script,
+                  meta.native_text == previous.native_text || meta.native_text.hasPrefix(previous.native_text + " ") else { return .ignore }
+            old.row = row; groups[meta.id] = old
+        } else {
+            guard groups.count < 64, tombstones.count < 500 else { return .ignore }
+            groups[meta.id] = Group(firstSeen: now, row: row)
+        }
+        return meta.state == "provisional" ? .listening : .terminal
+    }
 }
 
 enum CaptionRules {
@@ -422,9 +524,9 @@ enum CaptionRules {
     }
 
     /// recoverWire(): the last thirty seconds of the channel's wire, newest first, fifty rows.
-    static func wireRequest(channelId: String, now: Date, accessToken: String) -> URLRequest {
+    static func wireRequest(channelId: String, now: Date, accessToken: String, sentenceColumn: Bool = true) -> URLRequest {
         let since = ISO8601DateFormatter().string(from: now.addingTimeInterval(-30))
-        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch,created_at"
+        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch,created_at" + (sentenceColumn ? ",sentence" : "")
         let query = "select=\(columns)&channel_id=eq.\(KJURL.encodeQueryValue(channelId))&created_at=gte.\(KJURL.encodeQueryValue(since))&order=id.desc&limit=50"
         var request = URLRequest(url: URL(string: KJConfig.supabase.absoluteString + "/rest/v1/live_caption_wire?" + query)!)
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
@@ -602,7 +704,7 @@ struct CaptionTimeline {
         entries.removeAll { $0.cue.end <= now }
     }
 
-    mutating func append(_ text: String, at anchor: Double, spoken: Double?, now: Double) {
+    mutating func append(_ text: String, at anchor: Double, spoken: Double?, now: Double, sentence: CaptionSentence? = nil) {
         guard anchor.isFinite, now.isFinite, anchor - now <= CaptionRules.holdMax + 15 else { return }
         advance(to: now)
         // Recovery is not a transcript replay. An old row must not rewind the picture or
@@ -610,7 +712,8 @@ struct CaptionTimeline {
         guard now - anchor <= CaptionRules.maxQueueAhead else { dropped += 1; return }
         let spoken = spoken.flatMap { $0.isFinite ? $0 : nil }
         let locked = entries.first { $0.cue.start <= now && now < $0.cue.end }
-        for cue in CaptionRules.timed(text, at: anchor, spokenSeconds: spoken) {
+        for var cue in CaptionRules.timed(text, at: anchor, spokenSeconds: spoken) {
+            cue.sentenceID = sentence?.id; cue.sentenceStatus = sentence?.status(english: text)
             entries.append(Entry(anchor: cue.start, duration: cue.end - cue.start, text: cue.text, pieces: [cue], cue: cue))
         }
         var future = entries.filter { entry in
@@ -630,13 +733,14 @@ struct CaptionTimeline {
         var compact: [Entry] = []
         for entry in future {
             if let previous = compact.last, entry.anchor <= previous.anchor + previous.duration,
+               previous.cue.sentenceID == entry.cue.sentenceID, previous.cue.sentenceStatus == entry.cue.sentenceStatus,
                let joined = CaptionRules.blocks(previous.text.replacingOccurrences(of: "\n", with: " ") + " " + entry.text.replacingOccurrences(of: "\n", with: " ")).onlyCaptionBlock {
                 let duration = max(previous.duration, CaptionRules.minOnScreen, Double(joined.replacingOccurrences(of: "\n", with: "").count) / CaptionRules.readingCPS,
                                    entry.anchor + entry.duration - previous.anchor)
                 if duration <= CaptionRules.maxOnScreen {
                     compact.removeLast()
                     compact.append(Entry(anchor: previous.anchor, duration: duration, text: joined, pieces: previous.pieces + entry.pieces,
-                                         cue: SubtitleCue(start: previous.anchor, end: previous.anchor + duration, text: joined)))
+                                         cue: SubtitleCue(start: previous.anchor, end: previous.anchor + duration, text: joined, sentenceID: previous.cue.sentenceID, sentenceStatus: previous.cue.sentenceStatus)))
                     continue
                 }
             }
@@ -651,7 +755,7 @@ struct CaptionTimeline {
                 let entry = compact[index]
                 let start = max(cursor, entry.anchor)
                 if start - max(now, entry.anchor) > CaptionRules.maxQueueAhead { delayed = true }
-                compact[index].cue = SubtitleCue(start: start, end: start + entry.duration, text: entry.text)
+                compact[index].cue = SubtitleCue(start: start, end: start + entry.duration, text: entry.text, sentenceID: entry.cue.sentenceID, sentenceStatus: entry.cue.sentenceStatus)
                 cursor = start + entry.duration
             }
             if !delayed || compact.count <= 1 { break }

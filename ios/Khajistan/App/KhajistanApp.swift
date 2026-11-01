@@ -25,11 +25,22 @@ struct KhajistanApp: App {
         .commands {
             CommandMenu("Khajistan") {
                 ForEach(Array(AppTab.allCases.enumerated()), id: \.element) { index, tab in
-                    Button(tab.title) { model.tab = tab }.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+                    Button(tab.title) { model.selectTab(tab) }.keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+                        .disabled(!model.menuNavigationLocks.isEmpty)
+                }
+                Divider()
+                ForEach(ArchiveDestination.doorsInThisBuild.filter { $0.door != "HOME" }, id: \.door) { door in
+                    Menu(door.door) {
+                        ForEach(door.rooms) { destination in
+                            Button(destination.title) { model.open(destination) }
+                                .disabled(!model.menuNavigationLocks.isEmpty)
+                        }
+                    }
                 }
             }
             CommandGroup(after: .textEditing) {
-                Button("Find") { model.tab = .search }.keyboardShortcut("f")
+                Button("Find") { model.selectTab(.search) }.keyboardShortcut("f")
+                    .disabled(!model.menuNavigationLocks.isEmpty)
             }
         }
         #endif

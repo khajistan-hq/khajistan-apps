@@ -46,6 +46,7 @@ struct PicsVidsView: View {
         }
         .fullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row)
+                .blocksMacNavigation()
         }
     }
 
@@ -284,7 +285,7 @@ struct PnvSavedScreen: View {
             .padding(.vertical, 12)
         }
         .task(id: "\(model.auth.email ?? "")|\(collection ?? "")|\(model.saves.savedPnvKeys.count)") { await hydrate() }
-        .fullScreenCover(item: $viewing) { row in PnvViewerView(row: row, steps: false).environment(model) }
+        .fullScreenCover(item: $viewing) { row in PnvViewerView(row: row, steps: false).blocksMacNavigation().environment(model) }
     }
 
     /// Keys to rows, in the saved order, a hundred at a time.

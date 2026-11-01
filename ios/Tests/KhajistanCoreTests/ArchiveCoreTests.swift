@@ -200,7 +200,45 @@ func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     for destination in ArchiveDestination.all {
         try expect(ArchiveURL.isArchive(destination.url))
     }
-    try expect(ArchiveDestination.doors.map(\.door) == ["HOME", "PUBLICATIONS", "READING ROOM", "RECEIVER", "PICS/VIDS", "CHAT", "WALL", "BAZAAR", "ABOUT", "MAP"])
+    try expect(ArchiveDestination.doors.map(\.door) == ["HOME", "PUBLICATIONS", "READING ROOM", "DATABASES", "RECEIVER", "PICS/VIDS", "CHAT", "WALL", "LIFE", "BAZAAR", "ABOUT", "MAP"])
+}
+
+func everyLiveWebsiteNavigationRouteHasADestination() throws {
+    struct Snapshot: Decodable {
+        struct Destination: Decodable { let door: String; let path: String }
+        let destinations: [Destination]
+    }
+    let data = try Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/website-navigation-20261101.json"))
+    let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+    try expect(snapshot.destinations.count == 27)
+    try expect(Set(ArchiveDestination.all.map(\.id)).count == ArchiveDestination.all.count)
+    try expect(Set(ArchiveDestination.all.map(\.path)).count == ArchiveDestination.all.count)
+    for route in snapshot.destinations {
+        let destination = try require(ArchiveDestination.all.first { $0.path == route.path })
+        try expect(destination.door == route.door)
+        // The native film room and the searchable cinema index are distinct destinations.
+        if route.path == "/cinema/" { try expect(destination.nativeRoom == nil) }
+    }
+}
+
+func previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce() throws {
+    func space(_ host: String = "khajistan-archive.pages.dev", port: Int = 443,
+               scheme: String = "https", method: String = NSURLAuthenticationMethodHTTPBasic) -> URLProtectionSpace {
+        URLProtectionSpace(host: host, port: port, protocol: scheme, realm: "Khajistan Archive", authenticationMethod: method)
+    }
+    for host in ArchiveURL.hosts {
+        try expect(ArchiveURL.canAnswerPreviewChallenge(space(host), previousFailures: 0))
+        try expect(!ArchiveURL.canAnswerPreviewChallenge(space(host), previousFailures: 1))
+    }
+    for rejected in [space("example.com"), space("khajistan-archive.pages.dev.evil.org"),
+                     space(port: 8443), space(scheme: "http"), space(method: NSURLAuthenticationMethodServerTrust),
+                     space(method: NSURLAuthenticationMethodHTTPDigest)] {
+        try expect(!ArchiveURL.canAnswerPreviewChallenge(rejected, previousFailures: 0))
+    }
+    let proxy = URLProtectionSpace(proxyHost: "khajistan-archive.pages.dev", port: 443,
+                                   type: NSURLProtectionSpaceHTTPSProxy, realm: "Khajistan Archive",
+                                   authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+    try expect(!ArchiveURL.canAnswerPreviewChallenge(proxy, previousFailures: 0))
 }
 
 private struct AssertionFailure: Error, CustomStringConvertible {
@@ -270,6 +308,8 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
             ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
+            ("Every live website navigation route has a destination", everyLiveWebsiteNavigationRouteHasADestination),
+            ("Preview password only answers the exact HTTPS archive gate once", previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
         ]
         for (name, run) in tests { try run(); print("PASS \(name)") }

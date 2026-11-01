@@ -269,6 +269,7 @@ struct FilmScreen: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .fullScreenCover(item: $playing) { playback in
             FilmPlayerScreen(playback: playback)
+                .blocksMacNavigation()
                 .environment(model)
         }
         .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }

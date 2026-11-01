@@ -333,6 +333,7 @@ struct ReadingTitleScreen: View {
         .task(id: store.phase == .ready) { openResumeIfAsked() }
         .fullScreenCover(item: $reading) { target in
             ReadingReaderScreen(title: target.title, issue: target.issue, startPage: target.page)
+                .blocksMacNavigation()
                 .environment(model)
                 .environment(\.palette, palette)
         }

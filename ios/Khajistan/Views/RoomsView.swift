@@ -123,9 +123,16 @@ struct RoomList: View {
     }
 
     static var groups: [(name: String, rooms: [ArchiveDestination])] {
+        #if targetEnvironment(macCatalyst)
+        // Match the website's sections on a Mac, where the list stays beside the open room.
+        ArchiveDestination.doorsInThisBuild.map { door in
+            (door.door, door.rooms.filter { $0.id != "home" && $0.nativeRoom.flatMap(AppTab.init) == nil })
+        }.filter { !$0.1.isEmpty }
+        #else
         [("In the app", rooms.filter { $0.nativeRoom != nil }),
          ("On the website", rooms.filter { $0.nativeRoom == nil })]
             .filter { !$0.1.isEmpty }
+        #endif
     }
 
     var body: some View {

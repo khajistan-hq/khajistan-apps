@@ -42,8 +42,9 @@ struct YoursView: View {
         }
         .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
         .quickLookPreview($preview)
+        .blocksMacNavigation(while: preview != nil)
         .onAppear(perform: readFiles)
-        .onChange(of: model.isShowingBrowser) { if !model.isShowingBrowser { readFiles() } }
+        .onChange(of: model.cover) { if model.cover != .browser { readFiles() } }
     }
 
     // MARK: - Places and saved titles
@@ -370,6 +371,7 @@ struct SignInView: View {
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
         .presentationBackground(palette.ground)
+        .blocksMacNavigation()
         .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 

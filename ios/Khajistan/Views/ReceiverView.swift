@@ -72,6 +72,7 @@ struct ReceiverView: View {
             Group {
                 if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
             }
+            .blocksMacNavigation()
             .environment(model)
         }
     }

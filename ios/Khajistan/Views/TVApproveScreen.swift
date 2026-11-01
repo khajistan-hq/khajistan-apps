@@ -41,6 +41,7 @@ struct TVApproveScreen: View {
         }
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
+        .blocksMacNavigation()
         #if !targetEnvironment(macCatalyst)
         .fullScreenCover(isPresented: $scanning) {
             QRScanner { text in

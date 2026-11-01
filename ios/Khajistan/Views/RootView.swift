@@ -56,11 +56,13 @@ struct RootView: View {
             // A field left focused behind another door would keep the keyboard over this one.
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .fullScreenCover(isPresented: $model.isShowingBrowser) {
-            BrowserView(model: model)
-        }
-        .fullScreenCover(isPresented: $model.isShowingChat) {
-            ChatScreen()
+        .fullScreenCover(item: $model.cover) { cover in
+            Group {
+                switch cover {
+                case .browser: BrowserView(model: model)
+                case .chat: ChatScreen()
+                }
+            }
                 .environment(model)
                 .environment(\.palette, palette)
                 .foregroundStyle(palette.ink)

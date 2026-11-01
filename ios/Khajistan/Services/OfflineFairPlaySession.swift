@@ -28,15 +28,29 @@ final class OfflineFairPlaySession: NSObject, @preconcurrency AVContentKeySessio
     private let onFailure: (Error) -> Void
     private let onKeyPersisted: () -> Void
 
-    init(grant: OfflineFilmGrant, asset: OfflineFilmAsset, approvedHosts: Set<String>,
+    convenience init(grant: OfflineFilmGrant, asset: OfflineFilmAsset, approvedHosts: Set<String>,
          deviceID: UUID, certificate: Data, service: any OfflineFairPlayLicenseService,
          scope: OfflineFilmAccountScope, onFailure: @escaping (Error) -> Void,
          onKeyPersisted: @escaping () -> Void) throws {
         try asset.validate(allowedHosts: approvedHosts)
+        try self.init(grant: grant, keyIdentifier: asset.keyIdentifier, deviceID: deviceID,
+                      certificate: certificate, service: service, scope: scope,
+                      onFailure: onFailure, onKeyPersisted: onKeyPersisted)
+    }
+
+    /// Local replay needs no stored signed manifest. The adapter checks the private package
+    /// and existing device key before attaching this session, with a replay-only key service.
+    init(grant: OfflineFilmGrant, keyIdentifier: String, deviceID: UUID, certificate: Data,
+         service: any OfflineFairPlayLicenseService, scope: OfflineFilmAccountScope,
+         onFailure: @escaping (Error) -> Void, onKeyPersisted: @escaping () -> Void) throws {
+        guard let url = URL(string: keyIdentifier), url.scheme == "skd",
+              (2...200).contains(keyIdentifier.utf8.count), !keyIdentifier.contains(where: { $0.isWhitespace }) else {
+            throw OfflineFilmError.invalidAsset
+        }
         try grant.validate(account: scope.accountID ?? "", device: deviceID,
                            film: grant.filmHandle, version: grant.assetVersion)
         guard !certificate.isEmpty, scope.usable else { throw OfflineFilmError.unavailable }
-        self.grant = grant; keyIdentifier = asset.keyIdentifier; self.certificate = certificate
+        self.grant = grant; self.keyIdentifier = keyIdentifier; self.certificate = certificate
         self.service = service; self.scope = scope; generation = scope.generation
         self.onFailure = onFailure; self.onKeyPersisted = onKeyPersisted
         super.init()
@@ -79,6 +93,7 @@ final class OfflineFairPlaySession: NSObject, @preconcurrency AVContentKeySessio
                 updated.lastObservedAt = Date()
                 try OfflineFilmKeys.write(updated)
                 keyRequest.processContentKeyResponse(AVContentKeyResponse(fairPlayStreamingKeyResponseData: updated.key))
+                onKeyPersisted()
             } else {
                 try keyRequest.respondByRequestingPersistableContentKeyRequestAndReturnError()
             }
@@ -187,7 +202,7 @@ final class OfflineFairPlaySession: NSObject, @preconcurrency AVContentKeySessio
     }
 
     private func validate(_ record: OfflineFilmKeys.Record) throws {
-        guard record.grant == grant, record.keyIdentifier == keyIdentifier else { throw OfflineFilmError.invalidGrant }
+        guard record.grant == grant, record.keyIdentifier == keyIdentifier, record.revoked != true else { throw OfflineFilmError.invalidGrant }
         switch grant.access(at: Date(), firstPlayedAt: record.firstPlayedAt, lastObservedAt: record.lastObservedAt) {
         case .allowed: break
         case .reconnect: throw OfflineFilmError.needsConnection

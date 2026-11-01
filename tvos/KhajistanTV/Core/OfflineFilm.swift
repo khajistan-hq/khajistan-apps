@@ -56,7 +56,7 @@ struct OfflineFilmGrant: Codable, Equatable, Sendable {
 enum OfflineFilmAccess: Equatable { case allowed, reconnect, expired }
 
 enum OfflineFilmError: Error, LocalizedError {
-    case unavailable, invalidGrant, wrongAccount, needsConnection, expired, missingKey, invalidAsset, storage
+    case unavailable, invalidGrant, wrongAccount, needsConnection, expired, missingKey, invalidAsset, storage, deviceLocked
 
     var errorDescription: String? {
         switch self {
@@ -66,6 +66,7 @@ enum OfflineFilmError: Error, LocalizedError {
         case .expired: return "This film's rental has ended."
         case .missingKey, .invalidAsset: return "This offline copy is incomplete. Connect to download it again."
         case .storage: return "This device could not save the protected film. Check available storage and try again."
+        case .deviceLocked: return "Unlock this device to check its protected films."
         case .invalidGrant: return "Offline access could not be verified. Connect and try again."
         }
     }

@@ -12,6 +12,7 @@ enum OfflineFilmKeys {
         var key: Data
         var firstPlayedAt: Date?
         var lastObservedAt: Date
+        var revoked: Bool? = nil
     }
 
     private static let service = KJConfig.keychainService + ".offline-films.v1"
@@ -28,27 +29,39 @@ enum OfflineFilmKeys {
         var value: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &value)
         if status == errSecItemNotFound { return nil }
+        if status == errSecInteractionNotAllowed || status == errSecNotAvailable { throw OfflineFilmError.deviceLocked }
         guard status == errSecSuccess, let data = value as? Data else { throw OfflineFilmError.storage }
         return try JSONDecoder().decode(Record.self, from: data)
     }
 
     static func write(_ record: Record) throws {
-        guard !record.key.isEmpty, record.key.count <= 256 * 1024 else { throw OfflineFilmError.missingKey }
+        guard (!record.key.isEmpty || record.revoked == true), record.key.count <= 256 * 1024 else { throw OfflineFilmError.missingKey }
         let data = try JSONEncoder().encode(record)
         let query = identity(record.grant.entitlementID)
         let attributes: [String: Any] = [kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecSuccess { return }
+        if status == errSecInteractionNotAllowed || status == errSecNotAvailable { throw OfflineFilmError.deviceLocked }
         guard status == errSecItemNotFound else { throw OfflineFilmError.storage }
         var item = query.merging(attributes) { _, new in new }
         item[kSecAttrSynchronizable as String] = false
-        guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { throw OfflineFilmError.storage }
+        let added = SecItemAdd(item as CFDictionary, nil)
+        if added == errSecInteractionNotAllowed || added == errSecNotAvailable { throw OfflineFilmError.deviceLocked }
+        guard added == errSecSuccess else { throw OfflineFilmError.storage }
     }
 
     static func delete(_ entitlement: UUID) throws {
         let status = SecItemDelete(identity(entitlement) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw OfflineFilmError.storage }
+    }
+
+    static func markRevoked(grant: OfflineFilmGrant, keyIdentifier: String) throws {
+        if let existing = try read(grant.entitlementID), existing.grant != grant || existing.keyIdentifier != keyIdentifier {
+            throw OfflineFilmError.invalidGrant
+        }
+        try write(Record(grant: grant, keyIdentifier: keyIdentifier, owner: UUID(), key: Data(),
+                         firstPlayedAt: nil, lastObservedAt: Date(), revoked: true))
     }
 
     static func purge() throws {
@@ -92,6 +105,9 @@ final class OfflineFilmAccountScope {
     func accepts(account: String, generation: UUID) -> Bool {
         usable && !account.isEmpty && account == accountID && generation == self.generation
     }
+
+    func observeSession(owner: UUID, stop: @escaping () -> Void) { stops[owner] = stop }
+    func removeObserver(owner: UUID) { stops.removeValue(forKey: owner) }
 
     func claim(entitlement: UUID, owner: UUID, stop: @escaping () -> Void) {
         let previous = owners.claim(entitlement: entitlement, owner: owner)

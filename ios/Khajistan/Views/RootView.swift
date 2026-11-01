@@ -75,7 +75,13 @@ struct RootView: View {
         case .home: HomeView()
         case .rooms: RoomsView()
         case .receiver: ReceiverView()
-        case .library: YoursView()
+        case .library:
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-kjofflineRowFixture") { OfflineFilmLibraryFixtureView() }
+            else { YoursView() }
+            #else
+            YoursView()
+            #endif
         case .search: SearchView()
         }
     }

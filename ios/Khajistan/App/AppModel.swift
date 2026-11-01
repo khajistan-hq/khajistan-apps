@@ -55,6 +55,9 @@ enum AppTab: String, CaseIterable, Identifiable {
 @MainActor @Observable
 final class AppModel {
     var library = LibraryState()
+    /// Nil until an approved offline provider is explicitly provisioned at authenticated launch.
+    /// No streaming token, remote flag or default endpoint can enable the offline controls.
+    var offlineFilms: OfflineFilmRuntime?
     /// A sentence for the house banner.
     var message: String?
     var isShowingBrowser = false
@@ -175,6 +178,14 @@ final class AppModel {
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
         refreshSkin()
+        #if DEBUG
+        // The offline row fixture has no media/provider. Skip ordinary browser warm-up,
+        // storefront observation and backend reachability checks as well.
+        if ProcessInfo.processInfo.arguments.contains("-kjofflineRowFixture") {
+            storefrontCode = "USA"
+            return
+        }
+        #endif
         // WebKit's page process starts once the first screen is up, so the first page opened still
         // does not wait for it. A browser already opened has its process and a page not to replace.
         Task { [weak self] in

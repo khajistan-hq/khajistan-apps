@@ -25,6 +25,17 @@ final class LiveCaptionSession {
     private(set) var note = ""
     /// What is on screen now.
     private(set) var text: String?
+    private(set) var sentenceStatus: String?
+    @ObservationIgnored private var sentenceLedger = CaptionSentenceLedger()
+    @ObservationIgnored private var sentenceColumn = true
+    @ObservationIgnored private var sentenceNotice: String?
+    @ObservationIgnored private var sentenceNoticeAt: TimeInterval?
+    @ObservationIgnored private var acceptedBilling = false
+    @ObservationIgnored private var leaseExpiry: Date?
+    @ObservationIgnored private var leaseDeadline: ContinuousClock.Instant?
+    @ObservationIgnored private var deliveryStarted = false
+    @ObservationIgnored private var sessionAccessGeneration: Int?
+    @ObservationIgnored private var accessObserver: UUID?
 
     @ObservationIgnored private let auth: AuthStore
     @ObservationIgnored private weak var player: PlayerController?
@@ -55,7 +66,7 @@ final class LiveCaptionSession {
     @ObservationIgnored private var lags: [Double] = []
     @ObservationIgnored private var lastResync = Date.distantPast
     /// Rows waiting for their English, in arrival order, so a late translation never overtakes.
-    @ObservationIgnored private var waiting: [(seq: Int, row: CaptionWireRow, english: String?, ready: Bool, canAdjust: Bool, deadline: ContinuousClock.Instant)] = []
+    @ObservationIgnored private var waiting: [(seq: Int, row: CaptionWireRow, english: String?, ready: Bool, canAdjust: Bool, deadline: ContinuousClock.Instant, metadataProjected: Bool)] = []
     @ObservationIgnored private var sequence = 0
     @ObservationIgnored private var firstAt: Double?
     /// The count has reached the first line and stops there.
@@ -73,6 +84,16 @@ final class LiveCaptionSession {
         config.timeoutIntervalForResource = 8
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
+        accessObserver = auth.observeAccess { [weak self] in
+            guard let self else { return }
+            self.stop("Account changed. Turn captions on again.")
+            self.balance = nil
+        }
+    }
+
+    deinit {
+        let store = auth, observer = accessObserver
+        Task { @MainActor in if let observer { store.removeAccessObserver(observer) } }
     }
 
     private var viewerId: String {
@@ -166,6 +187,10 @@ final class LiveCaptionSession {
         let gen = generation
         if billingSession == nil { billingSession = UUID().uuidString.lowercased() }
         isOn = true
+        sessionAccessGeneration = auth.accessGeneration
+        acceptedBilling = false; deliveryStarted = false
+        sentenceLedger = CaptionSentenceLedger(); sentenceStatus = nil
+        sentenceNotice = nil; sentenceNoticeAt = nil; sentenceColumn = true
         note = ""
         timeline = CaptionTimeline(); seen = []; seenOrder = []; received = 0; lastReceivedAt = .distantPast; lags = []; waiting = []
         lastResync = .distantPast
@@ -181,8 +206,7 @@ final class LiveCaptionSession {
         }
 
         tasks.append(Task { await self.start(channel, generation: gen) })
-        tasks.append(Task { await self.openSocket(channel.id, generation: gen) })
-        tasks.append(Task { await self.recoverLoop(channel.id, generation: gen) })
+
         tasks.append(Task { await self.tick(player, generation: gen) })
     }
 
@@ -216,14 +240,54 @@ final class LiveCaptionSession {
         }
     }
 
+    private func showSentenceNotice(_ value: String) {
+        guard note.isEmpty || note == sentenceNotice || note.hasPrefix("Captions in ") else { return }
+        note = value; sentenceNotice = value
+    }
+    private func clearSentenceNotice() {
+        if note == sentenceNotice { note = "" }
+        sentenceNotice = nil; sentenceNoticeAt = nil
+    }
+
+    private func deliveryIsCurrent() -> Bool {
+        guard isOn, acceptedBilling else { return false }
+        guard sessionAccessGeneration == auth.accessGeneration else {
+            stop("Account changed. Turn captions on again."); return false
+        }
+        if let leaseExpiry, let leaseDeadline,
+           Date() >= leaseExpiry || ContinuousClock.now >= leaseDeadline {
+            stop(CaptionRules.leaseExpired); return false
+        }
+        return true
+    }
+
+    private func beginDelivery() {
+        guard isOn, acceptedBilling, !deliveryStarted, let channel else { return }
+        deliveryStarted = true
+        let gen = generation
+        tasks.append(Task { await self.openSocket(channel.id, generation: gen) })
+        tasks.append(Task { await self.recoverLoop(channel.id, generation: gen) })
+    }
+
     /// acceptBilling(): an enforced reply renews the lease and says what is left.
     private func acceptBilling(_ res: CaptionReply) {
-        if res.billing_mode == "legacy" { balance = nil; leaseTask?.cancel(); return }
-        guard res.billing_mode == "enforced", res.allowed != false, isOn else { return }
+        guard isOn, res.allowed == true else { return }
+        guard res.billing_mode == "legacy" || res.billing_mode == "enforced" else {
+            stop("This caption delivery mode is not supported in this app yet.")
+            return
+        }
+        if res.billing_mode == "legacy" {
+            balance = nil; leaseTask?.cancel(); leaseExpiry = nil; leaseDeadline = nil
+            acceptedBilling = true; beginDelivery(); return
+        }
         guard let session = billingSession, let expiry = CaptionRules.leaseExpiry(of: res, session: session, now: Date()) else {
             stop(CaptionRules.renewFailed)
             return
         }
+        leaseExpiry = expiry
+        leaseDeadline = ContinuousClock.now.advanced(by: .seconds(max(0, expiry.timeIntervalSinceNow)))
+        acceptedBilling = true
+        beginDelivery()
         balance = CaptionRules.balance(of: res)
         label = CaptionRules.label(on: true, balance: balance, reserved: res.reserved_seconds ?? 0)
         leaseTask?.cancel()
@@ -275,14 +339,20 @@ final class LiveCaptionSession {
         socket = nil
         if wasOn, let channel {
             let request = (channel.id, viewerId, billingSession)
+            let access = sessionAccessGeneration
             Task {
-                guard let token = try? await auth.validAccessToken() else { return }
+                guard let access, access == auth.accessGeneration,
+                      let token = try? await auth.validAccessToken(), access == auth.accessGeneration else { return }
                 _ = try? await urlSession.data(for: CaptionRules.demandRequest(
                     action: "stop", channelId: request.0, viewerId: request.1, sessionId: request.2, accessToken: token))
             }
         }
         billingSession = nil
         isOn = false
+        acceptedBilling = false; deliveryStarted = false; sessionAccessGeneration = nil
+        leaseExpiry = nil; leaseDeadline = nil
+        sentenceLedger = CaptionSentenceLedger(); sentenceStatus = nil
+        sentenceNotice = nil; sentenceNoticeAt = nil
         timeline = CaptionTimeline()
         socketSubscribed = false
         resyncing = false
@@ -292,6 +362,7 @@ final class LiveCaptionSession {
         translationTasks = [:]
         waiting = []
         text = nil
+        sentenceStatus = nil
         firstAt = nil
         estimateAt = nil
         label = "Captions"
@@ -312,7 +383,7 @@ final class LiveCaptionSession {
 
     /// One connection owns its heartbeat and join deadline. Recovery never blocks live reads.
     private func connectSocket(_ channelId: String, generation gen: Int) async -> Bool {
-        guard let token = try? await auth.validAccessToken(), gen == generation, isOn, !Task.isCancelled else { return false }
+        guard let token = try? await auth.validAccessToken(), gen == generation, deliveryIsCurrent(), !Task.isCancelled else { return false }
         let task = urlSession.webSocketTask(with: CaptionRealtime.socketURL())
         socket = task
         socketSubscribed = false
@@ -376,26 +447,57 @@ final class LiveCaptionSession {
         guard recoveryGeneration != gen, gen == generation, isOn, !Task.isCancelled else { return }
         recoveryGeneration = gen
         defer { if recoveryGeneration == gen { recoveryGeneration = nil } }
-        guard let token = try? await auth.validAccessToken(), gen == generation, isOn, !Task.isCancelled else { return }
-        let request = CaptionRules.wireRequest(channelId: channelId, now: Date(), accessToken: token)
-        guard let (data, response) = try? await urlSession.data(for: request), gen == generation, isOn, !Task.isCancelled,
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let rows = try? JSONDecoder().decode([CaptionWireRow].self, from: data) else { return }
-        rows.reversed().forEach { receive($0, recovered: true) }
+        guard let token = try? await auth.validAccessToken(), gen == generation, deliveryIsCurrent(), !Task.isCancelled else { return }
+        for _ in 0..<2 {
+            let projected = sentenceColumn
+            let request = CaptionRules.wireRequest(channelId: channelId, now: Date(), accessToken: token, sentenceColumn: projected)
+            guard let (data, response) = try? await urlSession.data(for: request), gen == generation, isOn, acceptedBilling, !Task.isCancelled else { return }
+            let status = (response as? HTTPURLResponse)?.statusCode
+            if status == 400, projected,
+               let error = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               ["42703", "PGRST204"].contains(error["code"] as? String ?? ""),
+               (error["message"] as? String ?? "").contains("sentence") {
+                sentenceColumn = false
+                continue
+            }
+            guard status == 200, let records = try? JSONSerialization.jsonObject(with: data) as? [Any], records.count <= 50 else { return }
+            for record in records.reversed() {
+                guard JSONSerialization.isValidJSONObject(record),
+                      let bytes = try? JSONSerialization.data(withJSONObject: record),
+                      let row = try? JSONDecoder().decode(CaptionWireRow.self, from: bytes) else { continue }
+                receive(row, recovered: true, metadataProjected: projected)
+            }
+            return
+        }
     }
 
     /// addCue(): one row, once, English or waiting for it.
-    private func receive(_ row: CaptionWireRow, recovered: Bool = false) {
-        guard isOn, let channel, CaptionRules.admits(row, channelId: channel.id) else { return }
+    private func receive(_ row: CaptionWireRow, recovered: Bool = false, metadataProjected: Bool = true) {
+        guard deliveryIsCurrent(), let channel, row.channel_id == channel.id else { return }
+        if row.sentence != nil { sentenceColumn = true }
+        switch sentenceLedger.receive(row, now: ProcessInfo.processInfo.systemUptime) {
+        case .ignore: return
+        case .listening:
+            if sentenceNoticeAt == nil { sentenceNoticeAt = ProcessInfo.processInfo.systemUptime }
+            if text == nil { showSentenceNotice("Listening for the next complete caption…") }
+            return
+        case .terminal: clearSentenceNotice()
+        case .legacy: break
+        }
+        guard CaptionRules.admits(row, channelId: channel.id) else { return }
         if let id = row.id {
             if seen.contains(id) {
                 // The worker PATCHes English when its inline translation finishes late.
                 // Complete only this still-pending source row; never replay a displayed cue.
                 if row.uncertain != true,
                    let index = waiting.firstIndex(where: { $0.row.id == id && !$0.ready && ContinuousClock.now < $0.deadline }),
+                   (row.sentence == nil && waiting[index].row.sentence == nil) || row.sameSource(as: waiting[index].row) ||
+                    (!waiting[index].metadataProjected && waiting[index].row.sentence == nil && row.sentence != nil && row.sameSource(as: waiting[index].row, ignoringSentence: true)),
                    row.text == waiting[index].row.text, row.lang == waiting[index].row.lang,
                    row.program_epoch == waiting[index].row.program_epoch, row.at_epoch == waiting[index].row.at_epoch,
                    let english = CaptionRules.english(for: row) {
+                    waiting[index].row = row
+                    waiting[index].metadataProjected = metadataProjected
                     waiting[index].english = english
                     waiting[index].ready = true
                     translationTasks.removeValue(forKey: waiting[index].seq)?.cancel()
@@ -423,8 +525,8 @@ final class LiveCaptionSession {
         sequence += 1
         let seq = sequence
         let needsTranslation = english == nil && !(row.text ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-        waiting.append((seq, row, english, !needsTranslation, canAdjust, ContinuousClock.now.advanced(by: .seconds(CaptionRules.translationWait))))
-        if needsTranslation {
+        waiting.append((seq, row, english, !needsTranslation, canAdjust, ContinuousClock.now.advanced(by: .seconds(CaptionRules.translationWait)), metadataProjected))
+        if needsTranslation && row.sentence == nil && metadataProjected {
             let gen = generation
             translationTasks[seq] = Task { await self.translate(row, seq: seq, generation: gen) }
         } else {
@@ -438,7 +540,8 @@ final class LiveCaptionSession {
         let code = CaptionRules.effectiveLangCode(channel, detected: detected)
         guard let token = try? await auth.validAccessToken(),
               context.admits(generation: generation, channelID: self.channel?.id, sessionID: billingSession,
-                             on: isOn, cancelled: Task.isCancelled) else { return }
+                             on: isOn, cancelled: Task.isCancelled),
+              deliveryIsCurrent(), waiting.contains(where: { $0.seq == seq && ContinuousClock.now < $0.deadline }) else { return }
         let request = CaptionRules.translateRequest(row: row, channelLang: code, sessionId: context.sessionID, accessToken: token)
         var english: String?
         if let (data, response) = try? await urlSession.data(for: request),
@@ -462,7 +565,7 @@ final class LiveCaptionSession {
     }
 
     private func flush() {
-        guard !resyncing else { return }
+        guard deliveryIsCurrent(), !resyncing else { return }
         while let head = waiting.first {
             if !head.ready {
                 guard ContinuousClock.now >= head.deadline else { return }
@@ -483,7 +586,7 @@ final class LiveCaptionSession {
     /// numbers for the site's `sn` placement and AVPlayer does not; those rows go by the clock.
     /// False means a seek is in flight: retain the row and remap it after completion.
     private func emit(_ row: CaptionWireRow, english: String?, canAdjust: Bool) -> Bool {
-        guard isOn, let clock = player?.captionClock else { return true }
+        guard deliveryIsCurrent(), let clock = player?.captionClock else { return true }
         guard let body = english, !body.isEmpty else { note = CaptionRules.untranslatedLine; return true }
         var at: Double?
         var missingProgrammeApproximation = false
@@ -542,7 +645,7 @@ final class LiveCaptionSession {
         if freshButLate || missingProgrammeApproximation || arrivalApproximation { note = timingNote }
         else if note == timingNote { note = "" }
         let before = timeline.dropped
-        timeline.append(body, at: displayAt, spoken: row.spoken_seconds, now: clock.now)
+        timeline.append(body, at: displayAt, spoken: row.spoken_seconds, now: clock.now, sentence: row.sentence)
         if timeline.dropped > before { note = "Captions caught up; some delayed speech could not be displayed." }
         if !counted { firstAt = timeline.cues.first?.start }
         return true
@@ -587,6 +690,7 @@ final class LiveCaptionSession {
         let serial = seekSerial
         seekDeadline = ContinuousClock.now.advanced(by: .seconds(8))
         text = nil
+        sentenceStatus = nil
         let gen = generation
         player.seekBack(by: seconds) { [weak self] in
             guard let self, gen == self.generation, serial == self.seekSerial, self.isOn else { return }
@@ -615,6 +719,17 @@ final class LiveCaptionSession {
     /// Ten times a second: what is on screen, and the count to the first line (tickCountdown()).
     private func tick(_ player: PlayerController, generation gen: Int) async {
         while !Task.isCancelled, gen == generation {
+            if acceptedBilling && !deliveryIsCurrent() { return }
+            let uptime = ProcessInfo.processInfo.systemUptime
+            sentenceLedger.expire(now: uptime)
+            if let since = sentenceNoticeAt {
+                if uptime - since >= 30 {
+                    showSentenceNotice("No complete caption received.")
+                    sentenceNoticeAt = nil
+                } else if uptime - since >= 9 {
+                    showSentenceNotice("Speech is unfinished. Waiting for a complete caption.")
+                }
+            }
             if resyncing, let deadline = seekDeadline, ContinuousClock.now >= deadline {
                 seekSerial += 1 // a late completion cannot settle another seek
                 seekDeadline = nil
@@ -625,7 +740,9 @@ final class LiveCaptionSession {
             flush() // absolute translation deadlines include authentication and slow downloads
             if !resyncing, let clock = player.captionClock {
                 timeline.advance(to: clock.now)
-                let showing = timeline.cues.first { $0.start <= clock.now && clock.now < $0.end }?.text
+                let cue = timeline.cues.first { $0.start <= clock.now && clock.now < $0.end }
+                let showing = cue?.text
+                sentenceStatus = cue?.sentenceStatus
                 if text != showing { text = showing }
                 countdown(clock)
             }

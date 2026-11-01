@@ -13,7 +13,20 @@ enum AuthStoreError: LocalizedError {
 /// The viewer's sign-in and the preview password, both kept in the keychain.
 @MainActor @Observable
 final class AuthStore {
-    private(set) var session: Session?
+    private(set) var session: Session? {
+        didSet { if oldValue?.userId != session?.userId { invalidateAccess() } }
+    }
+    private(set) var accessGeneration = 0
+    @ObservationIgnored private var authOperation = 0
+    @ObservationIgnored private var accessObservers: [UUID: @MainActor () -> Void] = [:]
+    func observeAccess(_ observer: @escaping @MainActor () -> Void) -> UUID {
+        let id = UUID(); accessObservers[id] = observer; return id
+    }
+    func removeAccessObserver(_ id: UUID) { accessObservers.removeValue(forKey: id) }
+    private func invalidateAccess() {
+        accessGeneration += 1
+        for observer in Array(accessObservers.values) { observer() }
+    }
     private(set) var previewPassword: String?
 
     private let urlSession: URLSession
@@ -77,12 +90,16 @@ final class AuthStore {
     }
 
     func signIn(email: String, password: String) async throws {
+        authOperation += 1
+        let operation = authOperation
         let (data, response) = try await urlSession.data(for: AuthAPI.passwordRequest(email: email, password: password))
+        guard operation == authOperation else { throw AuthStoreError.unavailable }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 {
             throw AuthError.server(AuthAPI.errorMessage(from: data) ?? "Sign-in failed (HTTP \(code)).")
         }
         let fresh = try AuthAPI.session(from: data, now: Date())
+        if session?.userId == fresh.userId { invalidateAccess() }
         session = fresh
         persist(fresh)
         await lookUpFactor(fresh)
@@ -91,12 +108,16 @@ final class AuthStore {
     /// Signs in with the one-time token hash a phone approved for this TV (TVSignIn): the server
     /// answers as it does a password sign-in, and the session is kept the same way.
     func signIn(tokenHash: String) async throws {
+        authOperation += 1
+        let operation = authOperation
         let (data, response) = try await urlSession.data(for: TVSignIn.verifyRequest(tokenHash: tokenHash))
+        guard operation == authOperation else { throw AuthStoreError.unavailable }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         if code >= 400 {
             throw AuthError.server(AuthAPI.errorMessage(from: data) ?? "Sign-in failed (HTTP \(code)).")
         }
         let fresh = try AuthAPI.session(from: data, now: Date())
+        if session?.userId == fresh.userId { invalidateAccess() }
         session = fresh
         persist(fresh)
         await lookUpFactor(fresh)
@@ -119,7 +140,10 @@ final class AuthStore {
         if !current.isExpired(at: Date()) { return current.accessToken }
         // A network failure or a server fault leaves the session in place for the next try;
         // only a refusal of the refresh token ends it.
+        let access = accessGeneration
+        let operation = authOperation
         let (data, response) = try await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken))
+        guard access == accessGeneration, operation == authOperation, session == current else { throw AuthStoreError.unavailable }
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         // A server fault, a rate limit or a timeout is not a refusal: the session stays.
         if code >= 500 || code == 429 || code == 408 { throw AuthStoreError.unavailable }
@@ -127,6 +151,7 @@ final class AuthStore {
             clearSession()
             throw AuthError.server("Sign in again.")
         }
+        guard fresh.userId == current.userId else { throw AuthStoreError.unavailable }
         session = fresh
         persist(fresh)
         return fresh.accessToken
@@ -162,6 +187,7 @@ final class AuthStore {
     }
 
     private func clearSession() {
+        authOperation += 1
         session = nil
         pendingFactorId = nil
         Keychain.delete(Account.session)

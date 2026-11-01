@@ -32,8 +32,10 @@ jobs:
         run: sh tvos/scripts/test-core.sh
       - name: Caption delivery and preference regressions
         run: |
-          sh tvos/scripts/test-caption-session.sh
+          KJ_CAPTION_TEST_PLATFORMS=tvos sh tvos/scripts/test-caption-session.sh
           sh tvos/scripts/test-caption-preference.sh
+      - name: Account session race regressions
+        run: KJ_AUTH_TEST_PLATFORMS=tvos sh tvos/scripts/test-auth-session.sh
       - name: Select an Apple TV simulator
         id: simulator
         run: |

@@ -284,8 +284,16 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()
+        // Off returns the idle set to the top of the scrolled catalogue. Reveal it before
+        // reading its accessibility state; a successful stop can put it above the viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        for _ in 0..<8 where !state.exists || !catalogue.frame.contains(state.frame) {
+            catalogue.swipeDown()
+            usleep(400_000)
+        }
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
+        XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
 
@@ -446,7 +454,7 @@ final class KhajistanUITests: XCTestCase {
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
         // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
         // it off, for whom leaving the Receiver still cancels what it was opening.
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitForHome(app, 3, "Home opens with one tap")
@@ -634,6 +642,20 @@ final class KhajistanUITests: XCTestCase {
         for _ in 0..<6 where !again.buttons["saved-/open-frequencies"].isHittable { again.swipeUp() }
         waitFor(again.buttons["saved-/open-frequencies"], 10, "the saved page survives relaunch")
         shot("saved-page", again)
+    }
+
+    /// The account sheet must receive the existing model across its presentation boundary.
+    /// No account or network sign-in is needed to catch the missing-environment crash.
+    func testAccountSignInOpensAndCancelsWithoutAStoredSession() {
+        let app = launch(skin: "day", tab: "library", extra: ["-kjtestsignedout", "YES"])
+        let open = app.buttons["accountSignIn"]
+        waitFor(open, 10, "the signed-out account offers Sign in")
+        open.tap()
+        let email = app.textFields["signInEmail"]
+        waitFor(email, 5, "the sheet opens without a missing AppModel crash")
+        app.buttons.matching(NSPredicate(format: "label ==[c] %@", "Cancel")).firstMatch.tap()
+        XCTAssertTrue(email.waitForNonExistence(timeout: 5), "Cancel closes the sheet")
+        waitFor(open, 5, "the account screen remains usable after closing the sheet")
     }
 
     /// Sign in on a TV from the phone: Library → Sign in on a TV, a code typed as people type it,

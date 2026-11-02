@@ -86,7 +86,7 @@ final class SubtitlesUITests: XCTestCase {
 
     func testReceiverCaptionsSignedOut() {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES"]
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
@@ -117,15 +117,19 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let sentence = app.staticTexts["Sign in under Account to use live captions."]
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "signed out, the site's sentence and no request")
-        XCTAssertEqual(control.label, "Captions", "nothing was turned on")
+        XCTAssertEqual(control.label, "Captions", "signed out, no demand started")
+        XCTAssertEqual((control.value as? String)?.uppercased(), "ON", "the requested setting remains On while sign-in is required")
         kjScreenshot("live-2-signed-out-sentence", app: app)
-        // Four seconds after the choice the strip lets go of Captions and hides (owner,
-        // 2026-10-29); it stayed up for good before.
-        XCTAssertTrue(waitFor(8) { !control.isSelected }, "the strip lets go of Captions after the choice")
+        // Five seconds after the choice the strip hides; captions and the saved setting remain.
+        XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
         XCUIRemote.shared.press(.left)
         kjPause(0.5)
         XCTAssertFalse(control.hasFocus)
+        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.select)
+        XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
+        XCUIRemote.shared.press(.left)
         XCUIRemote.shared.press(.menu)
 
         // DD Kashir: Kashmiri is not on the live recogniser, so one line and no control.
@@ -156,7 +160,16 @@ final class SubtitlesUITests: XCTestCase {
         kjLaunch(app, autoplay: true)
         let state = app.staticTexts["playerState"]
         let surf = app.buttons["shuffle"]
-        XCTAssertTrue(surf.waitForExistence(timeout: 60), "the front shows Surf")
+        var surfLoaded = surf.waitForExistence(timeout: 60)
+        // The live index can fail while the simulator reconnects between launches. Retry only
+        // that explicit offline state once; keep every navigation and playback assertion below.
+        if !surfLoaded, app.staticTexts["The Internet connection appears to be offline."].exists {
+            let retry = app.buttons.matching(NSPredicate(format: "label ==[c] %@", "Try again")).firstMatch
+            XCTAssertTrue(kjFocus(retry, app: app), "the offline receiver offers Try again")
+            XCUIRemote.shared.press(.select)
+            surfLoaded = surf.waitForExistence(timeout: 60)
+        }
+        XCTAssertTrue(surfLoaded, "the front shows Surf")
         XCTAssertFalse(state.waitForExistence(timeout: 20), "no player opens by itself")
         let focusedSurf = NSPredicate { _, _ in surf.hasFocus }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focusedSurf, object: nil)], timeout: 10), .completed,

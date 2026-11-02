@@ -269,9 +269,10 @@ struct FilmScreen: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .fullScreenCover(item: $playing) { playback in
             FilmPlayerScreen(playback: playback)
+                .blocksMacNavigation(model)
                 .environment(model)
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
     }
 
     /// The Apple TV app's film page: the poster, the title and its line, one Play, the smaller

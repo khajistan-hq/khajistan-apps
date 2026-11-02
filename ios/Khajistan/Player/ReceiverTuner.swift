@@ -34,6 +34,9 @@ final class ReceiverTuner {
     @ObservationIgnored private var openingRevision = 0
     @ObservationIgnored private var surfRevision = 0
     @ObservationIgnored private var intentRevision = 0
+    #if DEBUG
+    @ObservationIgnored private var heldFirstOpeningForTest = false
+    #endif
     @ObservationIgnored private let clips: StationClips
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private let transmission: TransmissionStore
@@ -95,6 +98,15 @@ final class ReceiverTuner {
             }
         }
         #if DEBUG
+        // Hold only the first opening until normal navigation cancels it. A fixed delay can
+        // elapse while XCUITest is attaching, accidentally testing an already-selected channel.
+        if UserDefaults.standard.bool(forKey: "kjholdfirstopening"), !heldFirstOpeningForTest {
+            heldFirstOpeningForTest = true
+            while !Task.isCancelled, isActive(), opening == openingRevision {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return
+        }
         // Reproduce a tab change while automatic selection is suspended without depending on network speed.
         let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
         if delay > 0 {
@@ -132,6 +144,26 @@ final class ReceiverTuner {
     }
 
     // MARK: - Choosing
+
+    /// A region tap supersedes pending Surf/region loads, and never walks a previous global pool.
+    func selectRegion(_ id: String, allowSelection: @escaping @MainActor () -> Bool = { true }) async {
+        guard !Task.isCancelled, allowSelection() else { return }
+        initialOpenAttempted = true
+        openingPending = false
+        openingRevision += 1
+        intentRevision += 1
+        let intent = intentRevision
+        surfRevision += 1
+        let search = surfRevision
+        surfing = false
+        let currentID = (destination ?? channel)?.id
+        let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
+        guard let eligible = try? await receiver.channels(regionId: id, cameras: false) else { return }
+        // A later Stop, step, play, Surf or region selection owns the receiver now.
+        guard !Task.isCancelled, allowSelection(), intent == intentRevision, search == surfRevision,
+              let choice = ReceiverRegionChoice.choose(from: eligible, currentID: currentID, medium: medium) else { return }
+        play(choice.channel, in: choice.list)
+    }
 
     func play(_ channel: Channel, in list: [Channel]) {
         stop()

@@ -38,7 +38,7 @@ struct RootView: View {
             }
         }
         .fullScreenCover(item: $reopened) { away in
-            ReceiverPlayerView(channel: away.channel, list: away.list)
+            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice)
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG

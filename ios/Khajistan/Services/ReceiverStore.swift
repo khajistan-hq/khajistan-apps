@@ -45,6 +45,7 @@ final class ReceiverStore {
     init() {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 25
+        config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
@@ -201,6 +202,7 @@ final class ReceiverStore {
         async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
         let (denied, suspects, graded) = await (denylist, offAir, health)
+        guard !Task.isCancelled else { return }
         controls = Controls(denylist: denied, offAir: suspects, health: graded)
         if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
     }

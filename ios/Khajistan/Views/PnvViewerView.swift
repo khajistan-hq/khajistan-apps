@@ -65,7 +65,7 @@ struct PnvViewerView: View {
         .task { show(current) }
         .onDisappear { stopEverything() }
         .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { show(current) })
+            SignInView(model: model, onSignedIn: { show(current) })
         }
         .accessibilityActions {
             if steps {

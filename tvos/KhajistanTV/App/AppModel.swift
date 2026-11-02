@@ -17,6 +17,7 @@ final class AppModel {
     var section: Section
     let auth: AuthStore
     let receiver: ReceiverStore
+    var surfHistory = SurfHistory()
     /// The region page's picture cards: stills this device takes from the live streams, in memory only.
     let stills: LiveStills
     let transmission: TransmissionStore

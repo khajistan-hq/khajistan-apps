@@ -32,4 +32,17 @@ final class LibraryStateTests: XCTestCase {
         XCTAssertEqual(state.resume.count, 40)
         XCTAssertEqual(state.resume.first?.ref, "f59")
     }
+
+    func testPageMarksToggleAndSurviveAnOlderFile() throws {
+        var state = try JSONDecoder().decode(LibraryState.self, from: Data(#"{"bookmarks":[],"history":[]}"#.utf8))
+        XCTAssertEqual(state.pageMarks, [], "a file from before page marks opens with none")
+        state.togglePageMark(title: "kayhan", issue: "kayhan|1|0", page: 12)
+        state.togglePageMark(title: "kayhan", issue: "kayhan|1|0", page: 3)
+        state.togglePageMark(title: "kayhan", issue: "kayhan|2|1", page: 3)
+        XCTAssertEqual(state.pageMarks(title: "kayhan", issue: "kayhan|1|0"), [3, 12])
+        state.togglePageMark(title: "kayhan", issue: "kayhan|1|0", page: 12)
+        XCTAssertEqual(state.pageMarks(title: "kayhan", issue: "kayhan|1|0"), [3], "a second press takes the mark off")
+        let again = try JSONDecoder().decode(LibraryState.self, from: JSONEncoder().encode(state))
+        XCTAssertEqual(again.pageMarks(title: "kayhan", issue: "kayhan|2|1"), [3], "marks are written with the library")
+    }
 }

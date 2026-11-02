@@ -647,6 +647,8 @@ private struct SwitchLabel: View {
 /// reach anything.
 enum OverlayTiming {
     static let idle: Duration = .seconds(2.6)
+    /// After a choice on the player's strip (Captions, Like): long enough to read what changed.
+    static let afterChoice: Duration = .seconds(4)
     static var hidesItself: Bool { !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning }
 }
 

@@ -23,6 +23,11 @@ struct ChannelsView: View {
     /// Opened from the front's Cameras shelf: the cameras load first and their shelf leads, so
     /// focus lands on a camera.
     @State private var camerasFirst: Bool
+    /// The channel card focus rests on, and the one the hero shows: the last channel focused, or
+    /// the first card before anything is.
+    @FocusState private var focusedId: String?
+    @State private var heroId: String?
+    @State private var preview = LivePreview()
 
     /// A channel chosen, and the shelf it came from: up and down in the player surf that shelf.
     private struct Playing: Identifiable {
@@ -52,42 +57,91 @@ struct ChannelsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                    .padding(.bottom, 24)
-                results
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 0) {
+            ChannelHero(
+                region: region,
+                native: model.receiver.nativeName(for: region.id),
+                channel: heroChannel,
+                preview: preview,
+                still: heroChannel.flatMap { model.stills.image(for: $0.id) }
+            )
             .padding(.horizontal, KJLayout.inset)
-            .padding(.vertical, 40)
+            .padding(.top, 24)
+            .padding(.bottom, 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    results
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, KJLayout.inset)
+                // Clear of the top fade at rest, so the first shelf's title is not faded.
+                .padding(.top, 20)
+                .padding(.bottom, 40)
+            }
+            .kjTopFade()
         }
-        .kjTopFade()
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
         .task { await start() }
         .task { await model.saves.load() }
         .task { await model.films.load() }
+        .onAppear { model.stills.beginVisit() }
+        .onDisappear {
+            model.stills.endVisit()
+            preview.stop(stills: model.stills)
+        }
+        .onChange(of: focusedId) { _, id in
+            if let id { heroId = id }
+            follow()
+        }
+        .onChange(of: playing == nil) { _, free in
+            // One signal at a time: the hero and the stills give way to the player.
+            if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
+        }
         .fullScreenCover(item: $playing) { choice in
             ReceiverPlayerView(channel: choice.channel, list: choice.list)
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Kicker("Receiver \u{2192} \(region.label)")
-            HStack(alignment: .firstTextBaseline, spacing: 32) {
-                Text(region.label)
-                    .kjDisplay()
-                    .layoutPriority(1)
-                // Native script is never letter-spaced: tracking breaks the joins in Arabic and Persian.
-                if let native = model.receiver.nativeName(for: region.id) {
-                    Text(native)
-                        .kjDisplay(KJType.headline, tracking: 0)
-                        .foregroundStyle(palette.faint)
+    // MARK: - The hero and the stills
+
+    private var tvChannels: [Channel] { channels.filter { $0.mediaType == "tv" } }
+
+    /// Every channel on the page, by id.
+    private func channel(_ id: String?) -> Channel? {
+        guard let id else { return nil }
+        return channels.first { $0.id == id } ?? cameraChannels.first { $0.id == id }
+    }
+
+    /// The hero shows the last channel focused, or the first card of the first shelf.
+    private var heroChannel: Channel? {
+        channel(heroId) ?? (camerasFirst ? cameraChannels.first : nil) ?? tvChannels.first ?? channels.first
+    }
+
+    /// Plays the focused channel in the hero (a picture channel, while focus is on a card and no
+    /// player covers the page), and asks for stills of the cards nearest focus.
+    private func follow() {
+        guard playing == nil else { return }
+        let onCard = focusedId != nil || heroId == nil
+        preview.show(onCard ? heroChannel : nil, receiver: model.receiver, stills: model.stills)
+        model.stills.want(nearFocus)
+    }
+
+    /// The picture cards nearest focus, nearest first: the focused shelf around the focused card,
+    /// then the head of the television and camera shelves.
+    private var nearFocus: [Channel] {
+        var order: [Channel] = []
+        if let focused = channel(focusedId) {
+            let shelf = focused.mediaType == "camera" ? cameraChannels : channels.filter { $0.mediaType == focused.mediaType }
+            if let at = shelf.firstIndex(where: { $0.id == focused.id }) {
+                for step in [0, 1, -1, 2, 3, -2, 4, 5] where shelf.indices.contains(at + step) {
+                    order.append(shelf[at + step])
                 }
             }
         }
+        order += tvChannels.prefix(6) + cameraChannels.prefix(6)
+        var seen = Set<String>()
+        return order.filter { $0.mediaType != "radio" && seen.insert($0.id).inserted }
     }
 
     // MARK: - Shelves
@@ -137,13 +191,21 @@ struct ChannelsView: View {
     private func channelShelf(_ kind: String, _ list: [Channel]) -> some View {
         Shelf(ReceiverRules.mediumLabel(kind), count: "\(list.count)") {
             ForEach(list) { channel in
+                let liked = model.saves.isSaved(channel)
+                let still = kind == "radio" ? nil : model.stills.image(for: channel.id)
                 Button {
                     playing = Playing(channel: channel, list: list)
                 } label: {
-                    ChannelCard(channel: channel, liked: model.saves.isSaved(channel))
+                    if kind == "radio" {
+                        RadioCard(channel: channel, liked: liked)
+                    } else {
+                        PictureCard(channel: channel, still: still, liked: liked)
+                    }
                 }
                 .buttonStyle(HouseCardStyle())
+                .focused($focusedId, equals: channel.id)
                 // No hold-for-Like menu: tvOS draws its focused item white. Like is on the player strip.
+                .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
                 .accessibilityIdentifier("channel-\(channel.id)")
             }
         }
@@ -169,10 +231,10 @@ struct ChannelsView: View {
                         }
                         .buttonStyle(HouseButtonStyle())
                     }
-                    .frame(width: 900, height: ChannelCard.height, alignment: .leading)
+                    .frame(width: 900, height: PictureCard.height, alignment: .leading)
                 } else {
                     TuningLoader("Loading\u{2026}", bird: 120)
-                        .frame(width: ChannelCard.width, height: ChannelCard.height, alignment: .leading)
+                        .frame(width: PictureCard.width, height: PictureCard.height, alignment: .leading)
                 }
             }
             .accessibilityIdentifier("shelf-camera")
@@ -205,6 +267,7 @@ struct ChannelsView: View {
         do {
             channels = try await model.receiver.channels(regionId: region.id, cameras: false)
             mainLoaded = true
+            follow()
         } catch {
             if Task.isCancelled { return }
             errorText = error.localizedDescription
@@ -217,6 +280,7 @@ struct ChannelsView: View {
         do {
             cameraChannels = try await model.receiver.channels(regionId: region.id, cameras: true)
             camerasLoaded = true
+            follow()
         } catch {
             if Task.isCancelled { return }
             cameraError = error.localizedDescription

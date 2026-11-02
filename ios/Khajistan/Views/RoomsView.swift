@@ -164,11 +164,17 @@ struct RoomDoor: View {
                     model.open(room)
                 } label: {
                     HStack(alignment: .center, spacing: 14) {
-                        Image(systemName: room.nativeRoom?.symbol ?? "globe")
-                            .font(.system(.title3, weight: .semibold))
-                            .foregroundStyle(palette.accent)
-                            .frame(width: 30)
-                            .accessibilityHidden(true)
+                        // Picture first where the room has one of the archive's own; the website's
+                        // rooms keep their icon.
+                        if room.nativeRoom?.picture != nil {
+                            RoomPicture(room: room.nativeRoom, corner: 8, inset: 3).frame(width: 52, height: 64)
+                        } else {
+                            Image(systemName: room.nativeRoom?.symbol ?? "globe")
+                                .font(.system(.title3, weight: .semibold))
+                                .foregroundStyle(palette.accent)
+                                .frame(width: 52)
+                                .accessibilityHidden(true)
+                        }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(room.title).font(.system(.body, weight: .semibold))
                                 .foregroundStyle(isCurrent ? palette.accent : palette.ink)

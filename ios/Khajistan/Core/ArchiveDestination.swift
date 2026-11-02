@@ -78,6 +78,21 @@ enum NativeRoom: String, CaseIterable, Sendable {
         }
     }
 
+    /// The room's picture on Home and in Rooms (owner, 2026-10-28: "picture first … like how apple
+    /// tv has photos or images for section"): one of the archive's own, bundled, so Home starts no
+    /// download for it. Nil where the room has none and keeps its icon.
+    var picture: String? {
+        switch self {
+        case .picsVids: return "RoomPicsVids"
+        case .chat: return "RoomChat"
+        case .reading: return "RoomReading"
+        case .screening: return "RoomScreening"
+        case .bazaar: return "RoomBazaar"
+        case .madrassa: return "RoomMadrassa"
+        case .receiver, .yours: return nil
+        }
+    }
+
     /// Whether the room opens inside ROOMS (pushed on its stack) rather than on a bar door of its
     /// own (Receiver, Library) or over the whole app (Chat).
     var opensInRooms: Bool {

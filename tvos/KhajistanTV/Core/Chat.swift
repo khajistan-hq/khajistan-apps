@@ -106,14 +106,6 @@ enum ChatClock {
 // MARK: - The site's rules and words
 
 enum ChatRules {
-    /// The atlas regions in the site's order (data/chat/atlas.json); the last two are not drawn
-    /// on the map and are listed all the same.
-    static let regions: [(id: String, label: String)] = [
-        ("maghreb", "Maghreb"), ("anatolia", "Anatolia"), ("mashriq", "Mashriq"), ("persia", "Persia"),
-        ("khorasan", "Khorasan"), ("indus", "Indus"), ("hindustan", "Delhi \u{00B7} Awadh"), ("dakhan", "Dakhan"),
-        ("qafqaz", "Qafqaz"), ("horn", "The Horn"),
-    ]
-
     /// The house rules, in the site's words (kj-chat.js RULES), as they stand from 2026-10-25.
     static let houseRules = [
         "You need an account, and you need to be 16 or older.",
@@ -128,30 +120,16 @@ enum ChatRules {
         rooms.filter { $0.status == "approved" && $0.category != "partners" && $0.adult != true }
     }
 
-    /// The house rooms first, then each region with its rooms: Daily feelings, Food, Sport and
-    /// Fashion, then the rooms visitors made, in the order they were made (kj-chat.js roomRank).
+    /// The main rooms, first everywhere (owner, 2026-10-29). The region rooms are hidden.
+    static let mainRooms = ["t4t", "m4m", "w4w"]
+
+    /// One list (kj-chat.js buildTree): T4T, M4M and W4W, then every other room the app offers,
+    /// in the order it was made.
     static func grouped(_ rooms: [ChatRoom]) -> [(title: String, rooms: [ChatRoom])] {
         let shown = offered(rooms)
-        var groups: [(String, [ChatRoom])] = []
-        let house = shown.filter { $0.kind == "house" || $0.region == nil }
-        if !house.isEmpty { groups.append(("Khajistan", house)) }
-        for region in regions {
-            let inRegion = shown.filter { $0.region == region.id && $0.kind != "house" }
-            if inRegion.isEmpty { continue }
-            let ranked = inRegion.enumerated().sorted { a, b in
-                let ra = rank(a.element), rb = rank(b.element)
-                return ra != rb ? ra < rb : a.offset < b.offset
-            }.map(\.element)
-            groups.append((region.label, ranked))
-        }
-        return groups
-    }
-
-    private static let baseOrder = ["daily-feelings", "food", "sport", "fashion"]
-    private static func rank(_ room: ChatRoom) -> Int {
-        var base = room.slug
-        if let region = room.region, room.slug.hasPrefix(region + "-") { base = String(room.slug.dropFirst(region.count + 1)) }
-        return baseOrder.firstIndex(of: base) ?? 100
+        let main = mainRooms.compactMap { slug in shown.first { $0.slug == slug } }
+        let list = main + shown.filter { !mainRooms.contains($0.slug) }
+        return list.isEmpty ? [] : [("Khajistan", list)]
     }
 
     /// What a refused post means, in the site's words (kj-chat.js explain()).
@@ -456,7 +434,9 @@ final class ChatFeed {
 
     private func publish() {
         let now = Date()
-        lines = all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id }
+        let next = all.values.filter { $0.isVisible(now: now) }.sorted { $0.id < $1.id }
+        // Every poll publishes; only a change is assigned, so a quiet room does not redraw its list.
+        if next != lines { lines = next }
     }
 
     private func fetch<T: Decodable>(_ request: URLRequest) async -> T? {

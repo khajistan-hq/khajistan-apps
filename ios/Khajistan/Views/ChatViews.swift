@@ -31,8 +31,16 @@ struct ChatScreen: View {
         .background(palette.ground.ignoresSafeArea())
         .task {
             await model.chat.start()
+            openAskedRoom()
             await model.chat.loadAccount()
         }
+    }
+
+    /// The room a card on Home asked for, once the rooms are in hand; the list where it is gone.
+    private func openAskedRoom() {
+        guard let slug = model.chatRoom else { return }
+        model.chatRoom = nil
+        room = model.chat.groups.flatMap(\.rooms).first { $0.slug == slug }
     }
 
     // MARK: - The rooms
@@ -151,12 +159,14 @@ struct ChatRoomView: View {
         }
     }
 
-    private var shown: [ChatMessage] {
+    private var visibleLines: [ChatMessage] {
         (feed?.lines ?? []).filter { !ignored.contains($0.author_handle ?? "") }
     }
 
     private var lines: some View {
-        ScrollViewReader { proxy in
+        // Filtered once per draw: the list reads it four times.
+        let shown = visibleLines
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if let feed, feed.hasOlder, !shown.isEmpty {

@@ -3,6 +3,7 @@ import os
 import Foundation
 import MediaPlayer
 import Observation
+import UIKit
 
 /// One AVPlayer and what the viewer needs to know about it. Every tuning gets a generation
 /// number; a callback that carries an older one belongs to a signal already left behind.
@@ -15,7 +16,9 @@ final class PlayerController {
     }
 
     let player = AVPlayer()
-    var state: State = .idle
+    var state: State = .idle {
+        didSet { if state != oldValue { KeepAwake.update(self) } }
+    }
     /// The samples of the signal now playing, when it was asked to listen and its carrier can be
     /// read (a progressive file or stream; never HLS). The dancer reads this; nil means no dancer.
     private(set) var signal: SignalTap?
@@ -440,5 +443,40 @@ final class PlayerController {
         endObserver = nil
         if let token = failObserver { NotificationCenter.default.removeObserver(token) }
         failObserver = nil
+    }
+}
+
+/// Keeps the Apple TV awake while something plays (owner, 2026-10-29: "the apple tv turns off if
+/// i play radio or tv ... nothing is playing"). A radio station plays through LiveRadio's audio
+/// engine, which tells tvOS nothing, so the box counted as idle: screensaver, then sleep, and sleep
+/// stops the sound. While any player is playing or tuning, the idle timer is off; when the last one
+/// stops, pauses or fails, tvOS's own screensaver and sleep come back. Players are held weakly, and
+/// a sweep every 30 s lets go of the timer if a player went away while it was still playing.
+@MainActor
+enum KeepAwake {
+    private static let players = NSHashTable<PlayerController>.weakObjects()
+    private static var sweep: Task<Void, Never>?
+
+    static func update(_ player: PlayerController) {
+        players.add(player)
+        apply()
+        if sweep == nil {
+            sweep = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(30))
+                    apply()
+                }
+            }
+        }
+    }
+
+    /// True while some player is playing or tuning.
+    static var isHolding: Bool {
+        players.allObjects.contains { $0.state == .playing || $0.state == .tuning }
+    }
+
+    private static func apply() {
+        let hold = isHolding
+        if UIApplication.shared.isIdleTimerDisabled != hold { UIApplication.shared.isIdleTimerDisabled = hold }
     }
 }

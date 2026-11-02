@@ -76,6 +76,10 @@ final class ReadingRoomUITests: XCTestCase {
         return state
     }
 
+    /// The press that turns forward: left in a right-to-left issue, right otherwise (the state says which).
+    private func forward(_ state: String) -> XCUIRemote.Button { state.contains("|rtl") ? .left : .right }
+    private func backward(_ state: String) -> XCUIRemote.Button { state.contains("|rtl") ? .right : .left }
+
     private func pages(in state: String) -> Int {
         Int(state.split(separator: "/").dropFirst().first?.split(separator: "|").first ?? "") ?? 0
     }
@@ -108,19 +112,19 @@ final class ReadingRoomUITests: XCTestCase {
             kjPause(4)
             kjScreenshot("rr-\(skin)-05-reader-clean", app: app)
 
-            // Right turns the page, twice.
-            XCUIRemote.shared.press(.right)
+            // The press on the side the issue runs to turns the page, twice (left in a right-to-left issue).
+            XCUIRemote.shared.press(forward(first))
             let second = waitForPage(app, position: 2)
-            XCTAssertTrue(second.hasPrefix("2/") && second.contains("|page"), "right must turn to page 2; state: \(second)")
-            XCUIRemote.shared.press(.right)
+            XCTAssertTrue(second.hasPrefix("2/") && second.contains("|page"), "forward must turn to page 2; state: \(second)")
+            XCUIRemote.shared.press(forward(first))
             let third = waitForPage(app, position: 3)
-            XCTAssertTrue(third.hasPrefix("3/") && third.contains("|page"), "right must turn to page 3; state: \(third)")
+            XCTAssertTrue(third.hasPrefix("3/") && third.contains("|page"), "forward must turn to page 3; state: \(third)")
             kjPause(3)
             kjScreenshot("rr-\(skin)-06-page-three", app: app)
 
-            // Left turns back.
-            XCUIRemote.shared.press(.left)
-            XCTAssertTrue(waitForPage(app, position: 2).hasPrefix("2/"), "left must turn back to page 2")
+            // The other side turns back.
+            XCUIRemote.shared.press(backward(first))
+            XCTAssertTrue(waitForPage(app, position: 2).hasPrefix("2/"), "back must turn to page 2")
 
             // Select zooms to 2x, the remote moves the page, Select zooms out.
             XCUIRemote.shared.press(.select)
@@ -164,6 +168,66 @@ final class ReadingRoomUITests: XCTestCase {
         }
     }
 
+    /// Down brings the controls (the band, the page line, the strip of pages), the remote walks the
+    /// strip and Select goes to a page; Play/Pause zooms like Select; Menu steps out of the zoom,
+    /// then the controls, then the reader, and never traps.
+    func testControlsStripAndZoomStepOutWithMenu() throws {
+        for skin in skins {
+            let app = launch(skin: skin)
+            waitForShelf(app)
+            _ = try XCTUnwrap(focusCard(app, tagged: "read in full"), "a free title must be on the shelf")
+            XCTAssertNotNil(openFirstIssue(app))
+            let first = waitForPage(app, position: 1)
+            XCTAssertGreaterThanOrEqual(pages(in: first), 3, "the issue must run to three pages; state: \(first)")
+            kjPause(4)
+            kjScreenshot("rr-\(skin)-tv-page", app: app)
+
+            XCUIRemote.shared.press(.down)
+            let strip = app.descendants(matching: .any)["rrStrip"]
+            XCTAssertTrue(strip.waitForExistence(timeout: 5), "Down brings the strip of pages")
+            XCTAssertTrue(readerState(app).contains("|chrome"), "the reader says its controls are up: \(readerState(app))")
+            XCTAssertEqual(app.staticTexts["rrReaderPageLabel"].label, "Page 1 of \(pages(in: first))")
+            let one = app.buttons["rrThumb-1"]
+            XCTAssertTrue(one.waitForExistence(timeout: 5) && one.hasFocus, "the remote lands on the page being read")
+            // The strip runs the way the pages do: forward walks to page 2.
+            XCUIRemote.shared.press(forward(first))
+            kjPause(0.8)
+            XCTAssertTrue(app.buttons["rrThumb-2"].hasFocus, "the remote walks the strip, not the pages")
+            XCTAssertTrue(readerState(app).hasPrefix("1/"), "walking the strip turns nothing: \(readerState(app))")
+            kjPause(3)
+            kjScreenshot("rr-\(skin)-tv-chrome", app: app)
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(waitForPage(app, position: 2).hasPrefix("2/"), "Select on a page in the strip goes to it")
+            XCTAssertTrue(strip.waitForNonExistence(timeout: 5), "and puts the controls away")
+
+            // Menu takes the controls away before it leaves.
+            XCUIRemote.shared.press(.down)
+            XCTAssertTrue(strip.waitForExistence(timeout: 5))
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(strip.waitForNonExistence(timeout: 5), "Menu puts the controls away")
+            XCTAssertTrue(app.buttons["rrReaderSurface"].exists, "and stays in the reader")
+
+            // Play/Pause zooms as Select does; Menu steps out a zoom at a time.
+            XCUIRemote.shared.press(.playPause)
+            kjPause(0.6)
+            XCTAssertTrue(readerState(app).hasSuffix("|zoom"), "Play/Pause zooms: \(readerState(app))")
+            XCUIRemote.shared.press(.select)
+            kjPause(0.6)
+            XCUIRemote.shared.press(.up)
+            kjPause(2.5)
+            kjScreenshot("rr-\(skin)-tv-zoomed", app: app)
+            XCUIRemote.shared.press(.menu)
+            kjPause(0.5)
+            XCUIRemote.shared.press(.menu)
+            kjPause(0.6)
+            XCTAssertFalse(readerState(app).hasSuffix("|zoom"), "two Menus come out of two zooms: \(readerState(app))")
+            XCTAssertTrue(app.buttons["rrReaderSurface"].exists, "still in the reader")
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(app.staticTexts["rrTitleSummary"].waitForExistence(timeout: 20), "the next Menu leaves the reader")
+            app.terminate()
+        }
+    }
+
     // MARK: - The refusals
 
     func testMembersGateAtPageThree() throws {
@@ -172,11 +236,11 @@ final class ReadingRoomUITests: XCTestCase {
             waitForShelf(app)
             _ = try XCTUnwrap(focusCard(app, tagged: "Members"), "a members' title must be on the shelf")
             XCTAssertNotNil(openFirstIssue(app))
-            waitForPage(app, position: 1)
-            XCUIRemote.shared.press(.right)
+            let first = waitForPage(app, position: 1)
+            XCUIRemote.shared.press(forward(first))
             waitForPage(app, position: 2)
             kjPause(1)
-            XCUIRemote.shared.press(.right)
+            XCUIRemote.shared.press(forward(first))
             let heading = app.staticTexts["rrGateTitle"]
             XCTAssertTrue(heading.waitForExistence(timeout: 60), "the third page of a paid title is the gate")
             XCTAssertEqual(heading.label, "Membership required")
@@ -187,8 +251,8 @@ final class ReadingRoomUITests: XCTestCase {
             XCTAssertFalse(app.images["rrTitleCode"].exists, "and offers no code")
             kjPause(2)
             kjScreenshot("rr-\(skin)-08-members-gate", app: app)
-            // Left goes back to the free preview, and right cannot pass the gate.
-            XCUIRemote.shared.press(.left)
+            // Back goes to the free preview, and forward cannot pass the gate.
+            XCUIRemote.shared.press(backward(first))
             XCTAssertTrue(waitForPage(app, position: 2).hasPrefix("2/"), "left from the gate returns to the preview")
             app.terminate()
         }
@@ -210,11 +274,11 @@ final class ReadingRoomUITests: XCTestCase {
                 throw XCTSkip("no account-open title on the shelf today")
             }
             XCTAssertNotNil(openFirstIssue(app))
-            waitForPage(app, position: 1)
+            let first = waitForPage(app, position: 1)
             // The cover is free, and a declared cover page can be the second leaf; the next one asks for an account.
             let heading = app.staticTexts["rrGateTitle"]
             for _ in 0..<4 where !heading.exists {
-                XCUIRemote.shared.press(.right)
+                XCUIRemote.shared.press(forward(first))
                 _ = heading.waitForExistence(timeout: 12)
             }
             XCTAssertTrue(heading.waitForExistence(timeout: 60), "the page after the cover of an account-open title is the sign-in")
@@ -252,6 +316,52 @@ final class ReadingRoomUITests: XCTestCase {
     }
 
     // MARK: - The shelf's shape
+
+    // MARK: - Search and a whole shelf
+
+    /// Apple Books' two ways in, on the remote: a shelf's "Name ›" opens the whole shelf as a grid,
+    /// and the search bar over the shelf finds a title by part of its name.
+    func testWholeShelfAndSearch() throws {
+        for skin in skins {
+            let app = launch(skin: skin)
+            waitForShelf(app)
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-shelf-'")).firstMatch.exists, "each shelf is headed \"Name ›\"")
+            // Up from a cover on a shelf lands on its heading, as on the remote.
+            XCTAssertTrue(kjFocus(cards(app).firstMatch, app: app), "the remote reaches a cover")
+            // From a cover well to the right of the heading, which sits at the left.
+            for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.4) }
+            XCUIRemote.shared.press(.up)
+            kjPause(0.8)
+            let heading = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            XCTAssertTrue(heading.identifier.hasPrefix("rr-shelf-"), "Up from a cover reaches its shelf's heading, not \(heading.identifier)")
+            let name = heading.label.components(separatedBy: ",").first ?? ""
+            XCUIRemote.shared.press(.select)
+            let title = app.staticTexts[name]
+            XCTAssertTrue(title.waitForExistence(timeout: 10), "the shelf opens whole, under its name: \(name)")
+            kjPause(4)
+            kjScreenshot("\(skin)-rr-shelf-grid", app: app)
+            let card = cards(app).firstMatch
+            XCTAssertTrue(kjFocus(card, app: app), "the grid's covers take the remote")
+            let wanted = card.label.components(separatedBy: ",").first ?? ""
+            XCUIRemote.shared.press(.menu)
+            XCTAssertTrue(title.waitForNonExistence(timeout: 5), "Menu returns to the shelf")
+
+            let field = app.textFields.firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "the Reading Room has a search bar")
+            XCTAssertTrue(kjFocus(field, app: app), "the remote reaches the search bar")
+            XCUIRemote.shared.press(.select)
+            kjPause(1.5)
+            app.typeText(String(wanted.prefix(6)))
+            kjPause(1)
+            XCUIRemote.shared.press(.menu)
+            let count = app.staticTexts["rrSearchCount"]
+            XCTAssertTrue(count.waitForExistence(timeout: 10), "the search says what it found")
+            XCTAssertFalse(count.label.hasPrefix("No title"), "part of a title's name finds it: \(wanted)")
+            kjPause(3)
+            kjScreenshot("\(skin)-rr-search", app: app)
+            app.terminate()
+        }
+    }
 
     func testTabsWhenTheModuleIndexIsThere() throws {
         guard ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"] != nil else {

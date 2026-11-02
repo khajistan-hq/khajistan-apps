@@ -207,6 +207,7 @@ struct FilmPlayerView: View {
 
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
+        model.silenceRadio()
         if startsFull {
             await watchFull()
             if full == nil { watchFocused = true }

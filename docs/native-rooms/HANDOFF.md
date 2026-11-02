@@ -53,6 +53,10 @@ repo). A Mobbin subscription is not bought and is not needed: the patterns below
 | Small player | Sonos | floating band-coloured bar: mark, name and state, play/pause, off |
 | App chrome | iOS conventions | icon tab bar, "‹ Back", large titles as written, rounded search fields, Rooms as a grouped list with icons |
 
+The Apple TV has every piece too since 2026-10-28, adapted to the remote (tvos/DESIGN.md, Rooms;
+DECISIONS 25): pages a phone would open in a browser, and the shop's checkout, are QR codes for the
+phone. Room tiles lead with one of the archive's own pictures on every device.
+
 Shared building blocks: `ios/Khajistan/Views/Shelves.swift` (`LargeTitle`, `SearchField`,
 `ChipRow`/`ChipStyle`, `ShelfHeader`, `RoomLink`, `ProgressLine`, `SolidActionStyle`, `IconAction`,
 `InfoRow`).

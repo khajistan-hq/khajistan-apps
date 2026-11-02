@@ -46,6 +46,9 @@ struct DatabaseScreen: View {
     @State private var sort: DBSort = .listed
     /// Whether any record carries a year, worked out once when the records arrive.
     @State private var hasYears = false
+    /// Each facet with more than one value and its first 60 values, worked out once when the
+    /// records arrive rather than on every keystroke in the search field.
+    @State private var facetValues: [(name: String, values: [(value: String, count: Int)])] = []
     @State private var results: [DBRecord] = []
     /// False until the first filter has run, so an empty list never reads as "no match" while it fills.
     @State private var filtered = false
@@ -82,11 +85,15 @@ struct DatabaseScreen: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .task(id: model.auth.previewPassword) {
-            await feed.load()
-            if let records = feed.value {
-                hasYears = await Task.detached(priority: .utility) { records.contains { DBQuery.year($0) != nil } }.value
-            }
+        .task(id: model.auth.previewPassword) { await feed.load() }
+        // Worked out when the records arrive, however they arrive (a retry included), as tvOS does.
+        .task(id: feed.value?.count ?? 0) {
+            guard let records = feed.value else { return }
+            let names = db.facetNames
+            (facetValues, hasYears) = await Task.detached(priority: .utility) {
+                (names.map { (name: $0, values: Array(DBQuery.values($0, in: records).prefix(60))) }.filter { $0.values.count > 1 },
+                 records.contains { DBQuery.year($0) != nil })
+            }.value
         }
         // Filtering runs a moment after the last keystroke, and a newer query replaces an older one.
         .task(id: "\(query)|\(facets)|\(sort.rawValue)|\(feed.value?.count ?? -1)") {
@@ -109,16 +116,16 @@ struct DatabaseScreen: View {
     private func controls(_ records: [DBRecord]) -> some View {
         SearchField(prompt: "Every word must match", text: $query, id: "dbSearch")
             .textInputAutocapitalization(.never)
-        let names = db.facetNames.filter { DBQuery.values($0, in: records).count > 1 }
         // Year orders are offered only where the records carry a year.
         let orders = DBSort.allCases.filter { $0 == .listed || $0 == .title || hasYears }
         HStack(spacing: 8) {
-            if !names.isEmpty {
+            if !facetValues.isEmpty {
                 Menu {
-                    ForEach(names, id: \.self) { name in
+                    ForEach(facetValues, id: \.name) { facet in
+                        let name = facet.name
                         Menu(name) {
                             Button("All") { facets[name] = nil }
-                            ForEach(DBQuery.values(name, in: records).prefix(60), id: \.value) { value in
+                            ForEach(facet.values, id: \.value) { value in
                                 Button { facets[name] = value.value } label: {
                                     if facets[name] == value.value { Label("\(value.value) \u{00B7} \(value.count.formatted())", systemImage: "checkmark") }
                                     else { Text("\(value.value) \u{00B7} \(value.count.formatted())") }

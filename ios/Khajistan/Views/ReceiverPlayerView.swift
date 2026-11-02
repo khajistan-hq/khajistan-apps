@@ -20,7 +20,7 @@ struct ReceiverPlayerView: View {
         let palette = Palette(model.skin)
         ZStack {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: controller.player).ignoresSafeArea()
+            PlayerLayerView(player: controller.player, soundCarriesInBackground: true).ignoresSafeArea()
             if let current, current.mediaType == "radio" && controller.state == .playing {
                 Text(current.name)
                     .kjDisplay()
@@ -157,14 +157,15 @@ struct ReceiverDevice: View {
 
     var body: some View {
         Group {
-            if sizeClass == .regular || verticalClass == .compact {
-                // A phone on its side is as short as it is wide: the set sits beside its words,
-                // small enough to leave the page room under it.
+            if sizeClass == .regular && verticalClass != .compact {
+                // An iPad: the set sits beside its words.
                 HStack(alignment: .top, spacing: 28) {
-                    set.frame(width: verticalClass == .compact ? 300 : 560)
+                    set.frame(width: 560)
                     if !fullScreen { copy.padding(.top, 52) }
                 }
             } else {
+                // A phone, upright or on its side (where ReceiverView stands the set beside the
+                // page): the words under the set.
                 VStack(alignment: .leading, spacing: 10) {
                     set
                     if !fullScreen { copy }
@@ -244,7 +245,7 @@ struct ReceiverDevice: View {
         ZStack {
             (showsPicture ? Color.black : palette.ground)
             if hasPicture {
-                PlayerLayerView(player: player.player).accessibilityHidden(true)
+                PlayerLayerView(player: player.player, soundCarriesInBackground: true).accessibilityHidden(true)
             } else if tuner.source == nil {
                 idleMark.accessibilityHidden(true)
             } else {

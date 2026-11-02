@@ -55,7 +55,10 @@ struct ReadingTitleView: View {
             ReadingReaderView(title: title, issue: place.issue, startPage: place.page)
         }
         .defaultFocus($actionFocused, true)
-        .onAppear { store.want(title) }
+        .onAppear {
+            store.want(title)
+            OpenedLately.record(.reading, ref: title.slug, title: title.name)
+        }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all
             if now != places { places = now }

@@ -307,17 +307,8 @@ private struct LiveSection: View {
     }
 
     private func tune(region id: String) {
-        if model.tuner.channel?.regionIds?.contains(id) == true, model.tuner.canStep {
-            model.tuner.step(1)
-            return
-        }
         Task {
-            guard let all = try? await model.receiver.channels(regionId: id, cameras: false) else { return }
-            let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
-            let pool = all.filter { medium.includes($0.mediaType) }
-            let list = pool.isEmpty ? all : pool
-            guard let channel = list.randomElement() else { return }
-            model.tuner.play(channel, in: list)
+            await model.tuner.selectRegion(id, allowSelection: { model.tab == .receiver })
         }
     }
 

@@ -284,8 +284,16 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()
+        // Off returns the idle set to the top of the scrolled catalogue. Reveal it before
+        // reading its accessibility state; a successful stop can put it above the viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        for _ in 0..<8 where !state.exists || !catalogue.frame.contains(state.frame) {
+            catalogue.swipeDown()
+            usleep(400_000)
+        }
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
+        XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
 

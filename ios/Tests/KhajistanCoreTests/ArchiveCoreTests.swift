@@ -263,6 +263,42 @@ func storeBuildLeavesOutTheSitesOwnRoutes() throws {
     }
 }
 
+private func regionChannel(_ id: String, region: String, medium: String = "tv") throws -> Channel {
+    let body: [String: Any] = ["id": id, "name": id, "mediaType": medium,
+                               "regionIds": [region], "streams": [["id": "https://example.invalid/\(id).m3u8"]]]
+    return try JSONDecoder().decode(Channel.self, from: JSONSerialization.data(withJSONObject: body))
+}
+
+func regionTapAfterGlobalSurfNeverEscapesItsRegion() throws {
+    let westA = try regionChannel("west-a", region: "maghreb")
+    let east = try regionChannel("east", region: "indus")
+    let westB = try regionChannel("west-b", region: "maghreb")
+    let globalSurf = [westA, east, westB]
+    let regional = [westA, westB]
+    let first = try require(ReceiverRegionChoice.choose(from: regional, currentID: globalSurf[0].id, medium: .all))
+    try expect(first.channel.id == westB.id)
+    try expect(first.list.map(\.id) == regional.map(\.id))
+    let wrapped = try require(ReceiverRegionChoice.choose(from: regional, currentID: first.channel.id, medium: .all))
+    try expect(wrapped.channel.id == westA.id)
+    try expect(!wrapped.list.contains(where: { $0.regionIds == ["indus"] }))
+}
+
+func regionTapPreservesMediumAndEligibleCatalogue() throws {
+    let tv = try regionChannel("tv", region: "maghreb")
+    let radio = try regionChannel("radio", region: "maghreb", medium: "radio")
+    let radioPick = try require(ReceiverRegionChoice.choose(from: [tv, radio], currentID: tv.id, medium: .radio))
+    try expect(radioPick.channel.id == radio.id && radioPick.list == [radio])
+    let tvPick = try require(ReceiverRegionChoice.choose(from: [tv, radio], currentID: radio.id, medium: .tv))
+    try expect(tvPick.channel.id == tv.id && tvPick.list == [tv])
+    // The region dial has always fallen back to its available medium when the preferred one is absent.
+    let fallback = try require(ReceiverRegionChoice.choose(from: [tv], currentID: nil, medium: .radio))
+    try expect(fallback.channel == tv)
+    try expect(ReceiverRegionChoice.choose(from: [], currentID: tv.id, medium: .all) == nil)
+    // A withdrawn current ID cannot re-enter the list supplied by ReceiverStore's eligibility filter.
+    let changed = try require(ReceiverRegionChoice.choose(from: [radio], currentID: "withdrawn", medium: .all))
+    try expect(changed.channel == radio && changed.list == [radio])
+}
+
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
     guard try condition() else { throw AssertionFailure(description: "\(file):\(line) assertion failed") }
 }
@@ -310,6 +346,8 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
             ("Every live website navigation route has a destination", everyLiveWebsiteNavigationRouteHasADestination),
             ("Preview password only answers the exact HTTPS archive gate once", previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce),
+            ("A region tap after global Surf steps and wraps only within that region", regionTapAfterGlobalSurfNeverEscapesItsRegion),
+            ("Region taps preserve media choices and the eligible catalogue", regionTapPreservesMediumAndEligibleCatalogue),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
         ]
         for (name, run) in tests { try run(); print("PASS \(name)") }

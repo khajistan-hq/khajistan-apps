@@ -82,6 +82,13 @@ final class ReceiverTuner {
 
     /// A canceled pre-selection opening may retry; explicit Stop remains off on tab return.
     func receiverOpened(isActive: @escaping @MainActor () -> Bool) async {
+        #if DEBUG
+        // UI tests control navigation's opening separately from AppModel's launch Surf.
+        // Otherwise a late random pick can replace the channel row they are inspecting.
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "kjreceiverautoplay") != nil,
+           !defaults.bool(forKey: "kjreceiverautoplay") { return }
+        #endif
         guard isActive(), !initialOpenAttempted else { return }
         initialOpenAttempted = true
         guard source == nil else { return }

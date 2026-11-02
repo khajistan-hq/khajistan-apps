@@ -279,3 +279,24 @@ struct ReceiverTuneIntent {
 
     func admits(_ ticket: Int) -> Bool { wantsPlayback && ticket == revision }
 }
+
+/// Only the playback controls expire. Caption text and open menus have separate lifetimes.
+/// The deadline makes an older timer harmless after a new remote interaction.
+struct ReceiverControlsVisibility {
+    static let idleSeconds: TimeInterval = 5
+    private(set) var isVisible = true
+    private var deadline: TimeInterval?
+
+    mutating func wake(at now: TimeInterval, canHide: Bool) {
+        isVisible = true
+        deadline = canHide ? now + Self.idleSeconds : nil
+    }
+
+    @discardableResult
+    mutating func expire(at now: TimeInterval, canHide: Bool) -> Bool {
+        guard canHide, let deadline, now >= deadline else { return false }
+        isVisible = false
+        self.deadline = nil
+        return true
+    }
+}

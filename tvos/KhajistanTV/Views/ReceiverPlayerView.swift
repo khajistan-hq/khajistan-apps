@@ -11,6 +11,7 @@ import UIKit
 /// what it does, which a hidden gesture would not.
 struct ReceiverPlayerView: View {
     let list: [Channel]
+    let surfChoice: SurfChoice?
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -24,7 +25,7 @@ struct ReceiverPlayerView: View {
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
     /// press steps on from here, not from the channel still on screen.
     @State private var destination: Channel?
-    @State private var overlayVisible = true
+    @State private var controls = ReceiverControlsVisibility()
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var tuneIntent = ReceiverTuneIntent()
@@ -49,8 +50,9 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel]) {
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil) {
         self.list = list
+        self.surfChoice = surfChoice
         _current = State(initialValue: channel)
     }
 
@@ -88,10 +90,10 @@ struct ReceiverPlayerView: View {
                 switch armed {
                 case .captions:
                     model.captions.toggle()
-                    hideAfterChoice()
+                    wake()
                 case .like:
                     like()
-                    hideAfterChoice()
+                    wake()
                 case .guide: openGuide()
                 case nil: wake()
                 }
@@ -104,10 +106,10 @@ struct ReceiverPlayerView: View {
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
-            .accessibilityHint("Swipe up or down to change channel.")
+            .accessibilityHint(surfChoice == nil ? "Swipe up or down to change channel." : "Swipe up or down to surf the whole selected atlas without repeats.")
             .accessibilityAction(named: "Next channel") { step(by: 1) }
-            .accessibilityAction(named: "Previous channel") { step(by: -1) }
-            .accessibilityAction(named: model.captions.isOn ? "Captions off" : "Captions on") { model.captions.toggle() }
+            .accessibilityAction(named: surfChoice == nil ? "Previous channel" : "Another unvisited channel") { step(by: -1) }
+            .accessibilityAction(named: model.captions.isEnabled ? "Captions off" : "Captions on") { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
             overlay(palette)
@@ -162,12 +164,15 @@ struct ReceiverPlayerView: View {
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
             // while you browse; a picture stops with its screen.
             if current.mediaType == "radio", destination == nil, controller.state == .playing {
-                model.radioAway = RadioAway(channel: current, list: list, controller: controller)
+                model.radioAway = RadioAway(channel: current, list: list, controller: controller, surfChoice: surfChoice)
             }
             stopEverything()
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
+        .onChange(of: focus) { wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
             await open()
             #if DEBUG
@@ -194,17 +199,20 @@ struct ReceiverPlayerView: View {
         let shown = destination ?? current
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
-            PlayerStrip(
-                // Radio carries its name in display type on the ground; the strip leaves it out.
-                name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
-                detail: stripDetail,
-                attribution: shown.sourceLine,
-                trailing: stripTrailing,
-                accessory: AnyView(stripControls)
-            )
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
-            .offset(y: stripShown ? 0 : 40)
-            .opacity(stripShown ? 1 : 0)
+            // Remove the hidden strip so its controls also leave accessibility traversal.
+            // Hiding the container alone leaves its custom accessibility actions exposed on tvOS.
+            if stripShown {
+                PlayerStrip(
+                    // Radio carries its name in display type on the ground; the strip leaves it out.
+                    name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
+                    detail: stripDetail,
+                    attribution: shown.sourceLine,
+                    trailing: stripTrailing,
+                    accessory: AnyView(stripControls)
+                )
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
+                .transition(.opacity.combined(with: .offset(y: 40)))
+            }
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
         #if DEBUG
@@ -228,7 +236,7 @@ struct ReceiverPlayerView: View {
 
     /// While a signal tunes the ground already says so; the strip waits for the picture.
     private var stripShown: Bool {
-        guard overlayVisible else { return false }
+        guard controls.isVisible else { return false }
         switch controller.state {
         case .playing, .paused, .failed: return true
         case .idle, .tuning: return false
@@ -251,14 +259,14 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isEnabled, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
-            .accessibilityAction { model.captions.toggle() }
+            .accessibilityAction { model.captions.toggle(); wake() }
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
-            .accessibilityValue(model.captions.isOn ? "On" : "Off")
+            .accessibilityValue(model.captions.isEnabled ? "On" : "Off")
     }
 
     private var stripControls: some View {
@@ -301,6 +309,7 @@ struct ReceiverPlayerView: View {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         guard target.id != (destination ?? current).id else { return wake() }
+        if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()
         changeTask = Task { await change(to: target) }
@@ -325,7 +334,6 @@ struct ReceiverPlayerView: View {
     private func moveRight() {
         // A failed channel's strip carries no controls, so there is nothing to the right.
         guard stripShown else { return }
-        hideTask?.cancel()
         switch armed {
         case nil: armed = .captions
         case .captions: armed = .like
@@ -441,6 +449,16 @@ struct ReceiverPlayerView: View {
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
     /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
+        if let surfChoice {
+            guard let target = model.surfHistory.next(for: surfChoice) else {
+                say("You have visited the available channels. Go back to Surf to load the rest of the atlas.")
+                return
+            }
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
+            return
+        }
         let from = destination ?? current
         guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
         let target = list[(position + delta + list.count) % list.count]
@@ -528,7 +546,7 @@ struct ReceiverPlayerView: View {
     }
 
     /// Pause cancels a pending resolver/change immediately; no late attach can resume it.
-    /// Captions release their lease and resume only after another explicit CC press.
+    /// Captions release their lease. Resuming playback restores the saved CC preference.
     private func pauseReceiver() {
         tuneIntent.cancel()
         tuneTask?.cancel()
@@ -560,33 +578,21 @@ struct ReceiverPlayerView: View {
         model.pigeon.clear()
     }
 
-    /// After Captions or Like is chosen the strip lets go of the control and hides 4 seconds
-    /// later (owner, 2026-10-29: captions "shows the timer but doesnt auto hide the bar, can you
-    /// hide it after 4 secs"). It stayed up for good before: an armed control holds the strip.
-    /// A press in those 4 seconds keeps it, as any press does.
-    private func hideAfterChoice() {
-        hideTask?.cancel()
-        guard OverlayTiming.hidesItself else { return }
-        hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.afterChoice)
-            guard !Task.isCancelled, guideRow == nil, controller.state == .playing else { return }
-            armed = nil
-            overlayVisible = false
-        }
+    private var controlsCanHide: Bool {
+        controller.state == .playing && guideRow == nil && focus == .surface && OverlayTiming.hidesItself
     }
 
-    /// Shows the overlay. Once the signal is playing it hides again after 2.6 seconds without
-    /// a press; while tuning, paused or failed it stays, because that is what there is to read.
+    /// Every remote interaction starts a fresh five seconds. An open guide, a system focus
+    /// change, VoiceOver or Switch Control keeps the controls available. CaptionLayer is separate.
     private func wake() {
-        overlayVisible = true
         hideTask?.cancel()
-        guard controller.state == .playing else { return }
-        guard OverlayTiming.hidesItself else { return }
+        controls.wake(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide)
+        guard controlsCanHide else { return }
         hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.idle)
-            // The strip stays while the viewer is on its Captions control or in the guide.
-            if !Task.isCancelled, armed == nil, guideRow == nil {
-                overlayVisible = false
+            try? await Task.sleep(for: .seconds(ReceiverControlsVisibility.idleSeconds))
+            guard !Task.isCancelled else { return }
+            if controls.expire(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide) {
+                armed = nil
             }
         }
     }
@@ -603,6 +609,7 @@ struct RadioAway: Identifiable {
     let channel: Channel
     let list: [Channel]
     let controller: PlayerController
+    let surfChoice: SurfChoice?
     var id: String { channel.id }
 }
 

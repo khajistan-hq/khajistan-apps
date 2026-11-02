@@ -199,18 +199,20 @@ struct ReceiverPlayerView: View {
         let shown = destination ?? current
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
-            PlayerStrip(
-                // Radio carries its name in display type on the ground; the strip leaves it out.
-                name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
-                detail: stripDetail,
-                attribution: shown.sourceLine,
-                trailing: stripTrailing,
-                accessory: AnyView(stripControls)
-            )
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
-            .offset(y: stripShown ? 0 : 40)
-            .opacity(stripShown ? 1 : 0)
-            .accessibilityHidden(!stripShown)
+            // Remove the hidden strip so its controls also leave accessibility traversal.
+            // Hiding the container alone leaves its custom accessibility actions exposed on tvOS.
+            if stripShown {
+                PlayerStrip(
+                    // Radio carries its name in display type on the ground; the strip leaves it out.
+                    name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
+                    detail: stripDetail,
+                    attribution: shown.sourceLine,
+                    trailing: stripTrailing,
+                    accessory: AnyView(stripControls)
+                )
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
+                .transition(.opacity.combined(with: .offset(y: 40)))
+            }
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
         #if DEBUG

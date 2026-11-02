@@ -121,8 +121,7 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertEqual((control.value as? String)?.uppercased(), "ON", "the requested setting remains On while sign-in is required")
         kjScreenshot("live-2-signed-out-sentence", app: app)
         // Five seconds after the choice the strip hides; captions and the saved setting remain.
-        XCTAssertTrue(waitFor(8) { !control.isSelected }, "the strip lets go of Captions after the choice")
-        XCTAssertFalse(control.exists, "hidden controls are also absent from accessibility traversal")
+        XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
         XCUIRemote.shared.press(.left)
         kjPause(0.5)
@@ -161,7 +160,16 @@ final class SubtitlesUITests: XCTestCase {
         kjLaunch(app, autoplay: true)
         let state = app.staticTexts["playerState"]
         let surf = app.buttons["shuffle"]
-        XCTAssertTrue(surf.waitForExistence(timeout: 60), "the front shows Surf")
+        var surfLoaded = surf.waitForExistence(timeout: 60)
+        // The live index can fail while the simulator reconnects between launches. Retry only
+        // that explicit offline state once; keep every navigation and playback assertion below.
+        if !surfLoaded, app.staticTexts["The Internet connection appears to be offline."].exists {
+            let retry = app.buttons.matching(NSPredicate(format: "label ==[c] %@", "Try again")).firstMatch
+            XCTAssertTrue(kjFocus(retry, app: app), "the offline receiver offers Try again")
+            XCUIRemote.shared.press(.select)
+            surfLoaded = surf.waitForExistence(timeout: 60)
+        }
+        XCTAssertTrue(surfLoaded, "the front shows Surf")
         XCTAssertFalse(state.waitForExistence(timeout: 20), "no player opens by itself")
         let focusedSurf = NSPredicate { _, _ in surf.hasFocus }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: focusedSurf, object: nil)], timeout: 10), .completed,

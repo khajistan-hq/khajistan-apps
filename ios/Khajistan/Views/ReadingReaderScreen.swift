@@ -123,7 +123,7 @@ struct ReadingReaderScreen: View {
             companionTask?.cancel()
         }
         .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { retryAfterSignIn() })
+            SignInView(model: model, onSignedIn: { retryAfterSignIn() })
         }
         .sheet(isPresented: $showGrid) {
             PagesGrid(issue: issue, pages: pages, map: map, current: position, marks: marks, rightToLeft: rightToLeft,

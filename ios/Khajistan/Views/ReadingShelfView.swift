@@ -333,10 +333,11 @@ struct ReadingTitleScreen: View {
         .task(id: store.phase == .ready) { openResumeIfAsked() }
         .fullScreenCover(item: $reading) { target in
             ReadingReaderScreen(title: target.title, issue: target.issue, startPage: target.page)
+                .blocksMacNavigation(model)
                 .environment(model)
                 .environment(\.palette, palette)
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
     }
 
     private var held: Bool { title.map(store.isRights) ?? false }

@@ -54,12 +54,17 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 @MainActor @Observable
 final class AppModel {
+    enum Cover: String, Identifiable {
+        case browser, chat
+        var id: String { rawValue }
+    }
     var library = LibraryState()
     /// A sentence for the house banner.
     var message: String?
-    var isShowingBrowser = false
-    /// Chat opens over the tabs, as the browser does.
-    var isShowingChat = false
+    /// One full-screen destination at a time, including when a Mac menu switches between them.
+    var cover: Cover?
+    /// Local reader/player/form presentations keep menu navigation disabled until closed.
+    var menuNavigationLocks: Set<UUID> = []
     /// A finger is turning the Receiver map's dial: the page under it holds still meanwhile.
     var mapScrubbing = false
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
@@ -87,7 +92,7 @@ final class AppModel {
     /// in `init` held up the first screen.
     var browser: ArchiveBrowser {
         if let madeBrowser { return madeBrowser }
-        let made = ArchiveBrowser()
+        let made = ArchiveBrowser(previewPassword: { [weak auth] in auth?.previewPassword })
         made.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
         if let skinScript { made.applySkin(script: skinScript) }
         madeBrowser = made
@@ -260,6 +265,12 @@ final class AppModel {
 
     // MARK: - Rooms
 
+    /// A Mac menu command can arrive while a full-screen page is covering the tab bar.
+    func selectTab(_ tab: AppTab) {
+        cover = nil
+        self.tab = tab
+    }
+
     /// A website page in the in-app browser. Only the archive's own two hosts open here. Off the
     /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
@@ -290,7 +301,7 @@ final class AppModel {
     func openWebsite(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
         browser.load(showsJoin ? url : JoinOffer.tagged(url))
-        isShowingBrowser = true
+        cover = .browser
     }
 
     /// A door from the website's menu: a room the app draws itself switches tab, the rest is web.
@@ -317,10 +328,12 @@ final class AppModel {
         instant.disablesAnimations = true
         withTransaction(instant) {
             if room == .chat {
-                isShowingChat = true
+                cover = .chat
             } else if let tab = AppTab(room) {
+                cover = nil
                 self.tab = tab
             } else {
+                cover = nil
                 self.room = room
                 if let route { roomPaths[room] = route }
                 self.tab = .rooms

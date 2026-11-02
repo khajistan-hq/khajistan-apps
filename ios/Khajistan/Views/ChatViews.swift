@@ -13,7 +13,7 @@ struct ChatScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             PlayerTopBar(leading: ["Khajistan", "Chat"], trailing: []) {
-                model.isShowingChat = false
+                model.cover = nil
             }
             ZStack {
                 if let room {
@@ -205,6 +205,7 @@ struct ChatRoomView: View {
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
                 PnvViewerView(row: row, steps: false)
+                    .blocksMacNavigation(model)
             }
             .overlay(alignment: .bottom) {
                 if let line = actionsFor {

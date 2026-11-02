@@ -31,7 +31,7 @@ struct TransmissionSection: View {
             }
         }
         .sheet(isPresented: $showSignIn, onDismiss: openChosen) {
-            SignInView(onSignedIn: { openAfterSignIn = chosen })
+            SignInView(model: model, onSignedIn: { openAfterSignIn = chosen })
         }
     }
 
@@ -198,7 +198,7 @@ struct TransmissionPlayerView: View {
         .onAppear { overlay.wake(settled: store.player.state == .playing) }
         .onDisappear { overlay.stop() }
         .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
+            SignInView(model: model, onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
         .accessibilityAction(named: "Switch channel") { switchChannel() }
     }

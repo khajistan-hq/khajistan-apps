@@ -2,7 +2,14 @@ import SwiftUI
 
 @main
 struct KhajistanApp: App {
-    @State private var model = AppModel()
+    @State private var model: AppModel = {
+        #if DEBUG && KJ_NAVIGATION_FIXTURE
+        // The separately identified UI fixture launches through the native app controller,
+        // which cannot supply arguments. Never read real auth or start a signal in this build.
+        UserDefaults.standard.register(defaults: ["kjtestsignedout": true, "kjautoplay": false, "kjtab": "rooms"])
+        #endif
+        return AppModel()
+    }()
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {

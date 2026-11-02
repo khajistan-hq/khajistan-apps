@@ -76,8 +76,19 @@ this navigation change does not bypass that policy.
 - Native UI walkthrough has not been performed. The preview has not been
   launched or installed. Verify You →
   Sign in disables menu commands, closing it re-enables them, and browser → Chat
-  → native destination changes the visible screen. Use `-kjtestsignedout YES
-  -kjautoplay NO -kjtab rooms` on the separate preview; do not replace the
-  installed app or enter real credentials during this fixture walkthrough.
+  → native destination changes the visible screen. The separate preview can be built with `DEBUG KJ_NAVIGATION_FIXTURE`, which
+  registers signed-out, autoplay-off and Rooms defaults before constructing the
+  app model; normal builds omit this fixture. Do not replace the installed app
+  or enter real credentials during this walkthrough.
 - Authenticated page content and real game/account operations: not exercised.
   Anonymous production page requests correctly reach the existing preview gate.
+
+### November 2 UI continuation
+
+The fixture compiled for both Mac architectures, but Xcode signing failed because
+Finder metadata was repeatedly re-added to the generated bundle in Documents.
+Automatic approval review denied copying/signing the generated preview in `/tmp`,
+saying it could not establish authorization beyond the captions task. The command
+did not execute and was not retried. The preview remains unlaunched, and the
+installed app and credentials are unchanged. Explicit authorization for signing
+and running this isolated Mac navigation preview is needed to resume the UI check.

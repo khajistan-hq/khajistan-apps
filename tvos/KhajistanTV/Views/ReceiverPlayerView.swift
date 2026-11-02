@@ -24,7 +24,7 @@ struct ReceiverPlayerView: View {
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
     /// press steps on from here, not from the channel still on screen.
     @State private var destination: Channel?
-    @State private var overlayVisible = true
+    @State private var controls = ReceiverControlsVisibility()
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var tuneIntent = ReceiverTuneIntent()
@@ -88,10 +88,10 @@ struct ReceiverPlayerView: View {
                 switch armed {
                 case .captions:
                     model.captions.toggle()
-                    hideAfterChoice()
+                    wake()
                 case .like:
                     like()
-                    hideAfterChoice()
+                    wake()
                 case .guide: openGuide()
                 case nil: wake()
                 }
@@ -107,7 +107,7 @@ struct ReceiverPlayerView: View {
             .accessibilityHint("Swipe up or down to change channel.")
             .accessibilityAction(named: "Next channel") { step(by: 1) }
             .accessibilityAction(named: "Previous channel") { step(by: -1) }
-            .accessibilityAction(named: model.captions.isOn ? "Captions off" : "Captions on") { model.captions.toggle() }
+            .accessibilityAction(named: model.captions.isEnabled ? "Captions off" : "Captions on") { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
             overlay(palette)
@@ -168,6 +168,9 @@ struct ReceiverPlayerView: View {
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
+        .onChange(of: focus) { wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
             await open()
             #if DEBUG
@@ -205,6 +208,7 @@ struct ReceiverPlayerView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
             .offset(y: stripShown ? 0 : 40)
             .opacity(stripShown ? 1 : 0)
+            .accessibilityHidden(!stripShown)
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
         #if DEBUG
@@ -228,7 +232,7 @@ struct ReceiverPlayerView: View {
 
     /// While a signal tunes the ground already says so; the strip waits for the picture.
     private var stripShown: Bool {
-        guard overlayVisible else { return false }
+        guard controls.isVisible else { return false }
         switch controller.state {
         case .playing, .paused, .failed: return true
         case .idle, .tuning: return false
@@ -251,14 +255,14 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isEnabled, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
-            .accessibilityAction { model.captions.toggle() }
+            .accessibilityAction { model.captions.toggle(); wake() }
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
-            .accessibilityValue(model.captions.isOn ? "On" : "Off")
+            .accessibilityValue(model.captions.isEnabled ? "On" : "Off")
     }
 
     private var stripControls: some View {
@@ -325,7 +329,6 @@ struct ReceiverPlayerView: View {
     private func moveRight() {
         // A failed channel's strip carries no controls, so there is nothing to the right.
         guard stripShown else { return }
-        hideTask?.cancel()
         switch armed {
         case nil: armed = .captions
         case .captions: armed = .like
@@ -528,7 +531,7 @@ struct ReceiverPlayerView: View {
     }
 
     /// Pause cancels a pending resolver/change immediately; no late attach can resume it.
-    /// Captions release their lease and resume only after another explicit CC press.
+    /// Captions release their lease. Resuming playback restores the saved CC preference.
     private func pauseReceiver() {
         tuneIntent.cancel()
         tuneTask?.cancel()
@@ -560,33 +563,21 @@ struct ReceiverPlayerView: View {
         model.pigeon.clear()
     }
 
-    /// After Captions or Like is chosen the strip lets go of the control and hides 4 seconds
-    /// later (owner, 2026-10-29: captions "shows the timer but doesnt auto hide the bar, can you
-    /// hide it after 4 secs"). It stayed up for good before: an armed control holds the strip.
-    /// A press in those 4 seconds keeps it, as any press does.
-    private func hideAfterChoice() {
-        hideTask?.cancel()
-        guard OverlayTiming.hidesItself else { return }
-        hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.afterChoice)
-            guard !Task.isCancelled, guideRow == nil, controller.state == .playing else { return }
-            armed = nil
-            overlayVisible = false
-        }
+    private var controlsCanHide: Bool {
+        controller.state == .playing && guideRow == nil && focus == .surface && OverlayTiming.hidesItself
     }
 
-    /// Shows the overlay. Once the signal is playing it hides again after 2.6 seconds without
-    /// a press; while tuning, paused or failed it stays, because that is what there is to read.
+    /// Every remote interaction starts a fresh five seconds. An open guide, a system focus
+    /// change, VoiceOver or Switch Control keeps the controls available. CaptionLayer is separate.
     private func wake() {
-        overlayVisible = true
         hideTask?.cancel()
-        guard controller.state == .playing else { return }
-        guard OverlayTiming.hidesItself else { return }
+        controls.wake(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide)
+        guard controlsCanHide else { return }
         hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.idle)
-            // The strip stays while the viewer is on its Captions control or in the guide.
-            if !Task.isCancelled, armed == nil, guideRow == nil {
-                overlayVisible = false
+            try? await Task.sleep(for: .seconds(ReceiverControlsVisibility.idleSeconds))
+            guard !Task.isCancelled else { return }
+            if controls.expire(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide) {
+                armed = nil
             }
         }
     }

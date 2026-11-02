@@ -454,7 +454,7 @@ final class KhajistanUITests: XCTestCase {
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
         // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
         // it off, for whom leaving the Receiver still cancels what it was opening.
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitForHome(app, 3, "Home opens with one tap")

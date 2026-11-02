@@ -15,6 +15,8 @@ struct KhajistanApp: App {
     var body: some Scene {
         WindowGroup {
             RootView(model: model)
+                // Supply the model above presentation boundaries, including native sheets.
+                .environment(model)
                 #if targetEnvironment(macCatalyst)
                 .onAppear { DesktopSupport.configureWindows() }
                 #endif

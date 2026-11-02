@@ -2,7 +2,7 @@
 
 Prepared November 1, 2026 on `codex/macos-website-navigation-20261101` from
 `app/simple-nav` at `cc429a9` (distributed build 10 source `106914e` plus two
-UI-test corrections). This branch has not been published, installed or released.
+UI-test corrections). The separate local preview has been tested; no installed app or distribution build was replaced.
 It is separate from machinery PR #104.
 
 ## What changes
@@ -73,22 +73,31 @@ this navigation change does not bypass that policy.
   27 destinations respectively; the same three store exclusions remain.
 - Independent source review: no remaining required findings after modal routing
   and command availability were corrected.
-- Native UI walkthrough has not been performed. The preview has not been
-  launched or installed. Verify You →
-  Sign in disables menu commands, closing it re-enables them, and browser → Chat
-  → native destination changes the visible screen. The separate preview can be built with `DEBUG KJ_NAVIGATION_FIXTURE`, which
-  registers signed-out, autoplay-off and Rooms defaults before constructing the
-  app model; normal builds omit this fixture. Do not replace the installed app
-  or enter real credentials during this walkthrough.
-- Authenticated page content and real game/account operations: not exercised.
-  Anonymous production page requests correctly reach the existing preview gate.
+- Native UI walkthrough completed November 2 in the separate preview with
+  `DEBUG KJ_NAVIGATION_FIXTURE`: signed out, autoplay off. The fixture registers
+  its defaults before constructing the app model; normal builds omit it.
+- All eleven new web destinations were selected through the Mac menu. Each
+  displayed the existing password gate with the exact expected `next` path.
+  Protected page content and the game were not entered; no credentials were used.
+- Sign In rendered its empty form. All 34 navigation commands were disabled while
+  it was open, and re-enabled when closed. The same command guard was verified
+  while the free Baba Sharu reader was open in its loading state; page-image
+  rendering was not asserted.
+- Browser → Chat → native Reading Room and Chat → browser transitions passed.
+  The public Reading Room title shelf loaded and remained selected after closing
+  the browser. Native Search opened after the reader closed. No chat message,
+  account change, paid caption probe or protected-content request was submitted.
+- The walkthrough found a real Sign In crash: the sheet could not find AppModel
+  in its presentation environment. SignInView and the modal guard now take the
+  existing model explicitly, and the window root supplies it to descendants.
+  The repaired sheet and transitions passed the same walkthrough.
+- The isolated preview was quit after testing; the installed Khajistan app's
+  process remained running. No TestFlight build was submitted or released.
+- Shared iOS Simulator build after the sheet fix: passed.
+- A focused account Sign In open/cancel UI regression was added. Test-target
+  compilation: passed. Its interaction was verified manually on the Mac preview;
+  the automated XCTest case itself has not been executed.
 
-### November 2 UI continuation
-
-The fixture compiled for both Mac architectures, but Xcode signing failed because
-Finder metadata was repeatedly re-added to the generated bundle in Documents.
-Automatic approval review denied copying/signing the generated preview in `/tmp`,
-saying it could not establish authorization beyond the captions task. The command
-did not execute and was not retried. The preview remains unlaunched, and the
-installed app and credentials are unchanged. Explicit authorization for signing
-and running this isolated Mac navigation preview is needed to resume the UI check.
+The initial preview-signing approval hold was resolved by explicit approval on
+November 2. The approved retry succeeded. Generated bundles are signed in `/tmp`
+to avoid Finder metadata reappearing in the Documents build directory.

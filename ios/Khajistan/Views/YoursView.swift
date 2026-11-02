@@ -40,9 +40,9 @@ struct YoursView: View {
                 ])
             }
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
         .quickLookPreview($preview)
-        .blocksMacNavigation(while: preview != nil)
+        .blocksMacNavigation(model, while: preview != nil)
         .onAppear(perform: readFiles)
         .onChange(of: model.cover) { if model.cover != .browser { readFiles() } }
     }
@@ -323,9 +323,8 @@ struct YoursView: View {
 
 /// Email and password, for Khajistan Transmission: the account the reader has on the website.
 struct SignInView: View {
+    let model: AppModel
     let onSignedIn: () async -> Void
-
-    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
@@ -371,7 +370,7 @@ struct SignInView: View {
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
         .presentationBackground(palette.ground)
-        .blocksMacNavigation()
+        .blocksMacNavigation(model)
         .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 

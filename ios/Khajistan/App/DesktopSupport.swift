@@ -17,7 +17,7 @@ enum DesktopSupport {
 /// Otherwise the root's retained tabs can change underneath a still-presented local cover.
 private struct MacNavigationGuard: ViewModifier {
     let isActive: Bool
-    @Environment(AppModel.self) private var model
+    let model: AppModel
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
@@ -38,9 +38,9 @@ import SwiftUI
 
 extension View {
     @ViewBuilder
-    func blocksMacNavigation(while isActive: Bool = true) -> some View {
+    func blocksMacNavigation(_ model: AppModel, while isActive: Bool = true) -> some View {
         #if targetEnvironment(macCatalyst)
-        modifier(MacNavigationGuard(isActive: isActive))
+        modifier(MacNavigationGuard(isActive: isActive, model: model))
         #else
         self
         #endif

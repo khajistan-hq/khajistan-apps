@@ -205,7 +205,7 @@ struct ChatRoomView: View {
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
                 PnvViewerView(row: row, steps: false)
-                    .blocksMacNavigation()
+                    .blocksMacNavigation(model)
             }
             .overlay(alignment: .bottom) {
                 if let line = actionsFor {

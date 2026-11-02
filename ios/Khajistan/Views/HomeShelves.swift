@@ -218,7 +218,8 @@ struct HomeShelves: View {
                 heading("Chat", count: rooms.count) { model.open(.chat) }
                 row {
                     ForEach(rooms.prefix(Self.shelfLength)) { room in
-                        Button { model.open(.chat) } label: {
+                        // The room on the card, as the other shelves open the thing on theirs.
+                        Button { model.chatRoom = room.slug; model.open(.chat) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 if let place = room.country ?? room.region { Kicker(place).lineLimit(1) }
                                 Text(room.label).font(.system(.headline, weight: .bold)).lineLimit(2)

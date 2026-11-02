@@ -60,6 +60,8 @@ final class AppModel {
     var isShowingBrowser = false
     /// Chat opens over the tabs, as the browser does.
     var isShowingChat = false
+    /// A room asked for from outside Chat (a card on Home): Chat opens on it, then clears it.
+    var chatRoom: String?
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions

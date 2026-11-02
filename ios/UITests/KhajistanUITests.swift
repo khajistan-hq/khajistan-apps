@@ -505,6 +505,30 @@ final class KhajistanUITests: XCTestCase {
     /// Chat (own builds only; App Store builds leave it out): ROOMS' Chat door opens the rooms,
     /// a room shows its lines or says there are none, a signed-out reader is told to sign in to
     /// write, and back and close return to HOME. Reads the live site's rooms.
+    /// A Chat card on Home opens its own room, as the other shelves open the thing on the card.
+    /// The shelf shows rooms already loaded, so Chat is opened once first.
+    func testHomeChatCardOpensItsRoom() throws {
+#if KJ_APP_STORE
+        throw XCTSkip("App Store builds leave chat out")
+#else
+        let app = launch(skin: "grove", tab: "rooms")
+        let door = app.buttons["destination-chat"]
+        for _ in 0..<8 where !door.exists { app.swipeUp() }
+        door.tap()
+        waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch, 30, "the rooms load")
+        app.buttons["closePlayer"].tap()
+        app.buttons["tab-home"].tap()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home-chat-'")).firstMatch
+        for _ in 0..<12 where !(card.exists && card.isHittable) { app.swipeUp() }
+        waitFor(card, 5, "Home has a Chat shelf once the rooms are loaded")
+        let slug = card.identifier.replacingOccurrences(of: "home-chat-", with: "")
+        card.tap()
+        waitFor(app.staticTexts["chatRoomName"], 10, "the card opens its own room, not the list")
+        XCTAssertFalse(app.buttons["chat-room-\(slug)"].exists, "the room list is not what opened")
+        shot("chat-from-home-card", app)
+#endif
+    }
+
     func testChatOpensFromHomeAndShowsARoom() throws {
 #if KJ_APP_STORE
         throw XCTSkip("App Store builds leave chat out")

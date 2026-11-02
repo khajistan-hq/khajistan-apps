@@ -3,7 +3,12 @@ import XCTest
 /// Chat on the Apple TV: the website's rooms load in the site's order, a room shows its lines,
 /// and a viewer with no account is told where to sign in rather than offered a field.
 final class ChatUITests: XCTestCase {
-    func testRoomsLoadAndTheHouseRoomShowsItsLines() {
+    /// App Store builds leave chat out (StoreBuild, owner 2026-10-06); the phone's suite skips
+    /// its chat tests the same way (ios/UITests/KhajistanUITests.swift).
+    func testRoomsLoadAndTheHouseRoomShowsItsLines() throws {
+#if KJ_APP_STORE
+        throw XCTSkip("App Store builds leave chat out")
+#else
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "chat", "-kjskin", "day"]
         kjLaunch(app)
@@ -44,5 +49,6 @@ final class ChatUITests: XCTestCase {
         kjScreenshot("chat-02-line-actions", app: app)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(actions.waitForNonExistence(timeout: 5), "Back closes the actions")
+#endif
     }
 }

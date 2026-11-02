@@ -15,9 +15,9 @@ final class KhajistanUITests: XCTestCase {
     /// test of another storefront passes its own in `extra`, which comes later and wins.
     private func launch(skin: String, tab: String = "home", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
-        // The app plays a channel when it opens on the Receiver; the tests that drive the
-        // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
+        // Launch Surf and Receiver navigation have separate automatic-opening paths. Keep both
+        // quiet unless this test opts in, so a random region cannot replace a row being queried.
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO", "-kjreceiverautoplay", "NO"] + extra
         app.launch()
         return app
     }
@@ -66,6 +66,25 @@ final class KhajistanUITests: XCTestCase {
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
         return channel
+    }
+
+    /// Quiet navigation tests must not race a region change from the Receiver's opening Surf.
+    func testAutoplayOffKeepsReceiverIdleAtLaunchAndOnNavigation() {
+        for tab in ["receiver", "home"] {
+            let app = launch(skin: "day", tab: tab, extra: ["-kjtestsignedout", "YES"])
+            if tab == "home" {
+                waitForHome(app, 10, "HOME opens before navigating to Receiver")
+                app.buttons["tab-receiver"].tap()
+            }
+            let state = app.staticTexts["screenState"]
+            waitFor(state, 10, "Receiver exposes its standby state")
+            XCTAssertFalse(app.buttons["receiverOff"].waitForExistence(timeout: 3),
+                           "Autoplay off must not start Surf or tune a channel")
+            XCTAssertEqual(state.label, "Standing by")
+            XCTAssertEqual(state.value as? String, "")
+            shot("autoplay-off-\(tab)", app)
+            app.terminate()
+        }
     }
 
     /// The house bar is the app's own: no system tab bar anywhere.
@@ -224,7 +243,7 @@ final class KhajistanUITests: XCTestCase {
     /// The app opens on the Receiver with a channel already tuning on the set, before anything
     /// is touched (Pluto TV's lesson). A live signal may fail; the set must at least be on.
     func testAppOpensWithAChannelOn() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjautoplay", "YES"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjreceiverautoplay", "YES"])
         let state = app.staticTexts["screenState"]
         waitFor(state, 40, "a channel is on the set at launch, untouched")
         let on = NSPredicate(format: "label != 'Standing by'")
@@ -302,7 +321,7 @@ final class KhajistanUITests: XCTestCase {
     /// (owner, 2026-10-28: "every button needs to be immediately responsive"). Each part now
     /// comes up on screen, under the set, on its first tap.
     func testReceiverPartsComeUpUnderTheDockedSet() {
-        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjreceiverautoplay", "YES", "-kjtestsignedout", "YES"])
         let state = app.staticTexts["screenState"]
         waitFor(state, 40, "the receiver opens")
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
@@ -432,7 +451,7 @@ final class KhajistanUITests: XCTestCase {
     }
 
     func testReceiverAutoplaysAndOneTapStopStaysOff() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjreceiverautoplay", "YES", "-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let pause = app.buttons["screenPlayPause"]
         waitFor(pause, 60, "Opening Receiver chooses a live signal without a channel tap")
         XCTAssertFalse(app.buttons["closePlayer"].exists)
@@ -454,7 +473,7 @@ final class KhajistanUITests: XCTestCase {
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
         // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
         // it off, for whom leaving the Receiver still cancels what it was opening.
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjreceiverautoplay", "YES", "-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitForHome(app, 3, "Home opens with one tap")
@@ -470,7 +489,7 @@ final class KhajistanUITests: XCTestCase {
 
     /// A signed-out viewer receives a visible reason on the first CC tap; this never spends allowance.
     func testReceiverCCRespondsInDockAndFullScreen() {
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjreceiverautoplay", "YES", "-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let cc = app.buttons["receiverCC"]
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
@@ -1036,7 +1055,7 @@ final class KhajistanUITests: XCTestCase {
     /// The Receiver keeps playing under the other doors, with a small bar that pauses it, turns it
     /// off, and leads back to it.
     func testNowPlayingBarFollowsTheReceiverAcrossDoors() {
-        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let app = launch(skin: "grove", tab: "receiver", extra: ["-kjautoplay", "YES", "-kjreceiverautoplay", "YES", "-kjtestsignedout", "YES"])
         let state = app.staticTexts["screenState"]
         waitFor(state, 40, "the receiver opens")
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
@@ -1063,7 +1082,7 @@ final class KhajistanUITests: XCTestCase {
     /// covers the house bar (owner, 2026-10-28: "play a tv channel as they read"). Its name closes
     /// the reader and opens the Receiver.
     func testNowPlayingBarStaysOverTheReader() {
-        let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjautoplay", "YES", "-kjtestsignedout", "YES"])
+        let app = launch(skin: "day", extra: ["-kjroom", "reading", "-kjautoplay", "YES", "-kjreceiverautoplay", "YES", "-kjtestsignedout", "YES"])
         app.buttons["tab-receiver"].tap()
         let state = app.staticTexts["screenState"]
         waitFor(state, 40, "the receiver opens")
@@ -1095,7 +1114,7 @@ final class KhajistanUITests: XCTestCase {
     /// returning. The choice comes as a launch argument so no test leaves it behind.
     func testLeavingTheReceiverStopsItWhenKeepPlayingIsOff() {
         let app = launch(skin: "smut", tab: "receiver",
-                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+                         extra: ["-kjautoplay", "YES", "-kjreceiverautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
         let state = app.staticTexts["screenState"]
         waitFor(state, 40, "the receiver opens")
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
@@ -1116,7 +1135,7 @@ final class KhajistanUITests: XCTestCase {
     /// turn-off that only stopped what was on let it play under ROOMS.)
     func testLeavingDuringTheLaunchSurfPlaysNothingWhenKeepPlayingIsOff() {
         let app = launch(skin: "day", tab: "receiver",
-                         extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
+                         extra: ["-kjautoplay", "YES", "-kjreceiverautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-rooms"], 5, "the house bar is up")
         app.buttons["tab-rooms"].tap()
         XCTAssertFalse(app.descendants(matching: .any)["nowPlayingName"].waitForExistence(timeout: 20),

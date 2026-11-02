@@ -6,7 +6,7 @@ struct KhajistanApp: App {
         #if DEBUG && KJ_NAVIGATION_FIXTURE
         // The separately identified UI fixture launches through the native app controller,
         // which cannot supply arguments. Never read real auth or start a signal in this build.
-        UserDefaults.standard.register(defaults: ["kjtestsignedout": true, "kjautoplay": false, "kjtab": "rooms"])
+        UserDefaults.standard.register(defaults: ["kjtestsignedout": true, "kjautoplay": false, "kjreceiverautoplay": false, "kjtab": "rooms"])
         #endif
         return AppModel()
     }()

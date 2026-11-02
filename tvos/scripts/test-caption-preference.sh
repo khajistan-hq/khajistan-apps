@@ -8,7 +8,7 @@ printf 'import Foundation\n' > "$output_dir/UIKit.swift"
 swiftc -emit-module -module-name UIKit "$output_dir/UIKit.swift" -emit-module-path "$output_dir/UIKit.swiftmodule"
 swiftc -swift-version 5 -parse-as-library -I "$output_dir" \
     tvos/KhajistanTV/Core/Config.swift tvos/KhajistanTV/Core/Sky.swift \
-    tvos/KhajistanTV/Core/Receiver.swift tvos/KhajistanTV/Core/Captions.swift \
+    tvos/KhajistanTV/Core/Receiver.swift tvos/KhajistanTV/Core/Captions.swift tvos/KhajistanTV/Core/Shuffle.swift \
     tvos/KhajistanTV/Services/LiveCaptionSession.swift \
     tvos/Tests/CaptionPreferenceTests/Harness.swift -o "$output_dir/tests"
 "$output_dir/tests"

@@ -13,6 +13,8 @@ struct ReceiverView: View {
     @State private var cameraWanted: [Channel] = []
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
+    @State private var surfTask: Task<Void, Never>?
+    @State private var surfRevision = 0
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
@@ -34,8 +36,12 @@ struct ReceiverView: View {
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $shuffled) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, surfChoice: pick.surfChoice)
         }
+        .onDisappear { cancelSurf() }
+        .onChange(of: mediumRaw) { cancelSurf() }
+        .onChange(of: model.extendedAtlas) { cancelSurf() }
+        .onChange(of: model.receiverPath) { cancelSurf() }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         // Nothing plays until it is chosen (owner, 2026-10-29: "it goes straight to playing a
@@ -156,7 +162,7 @@ struct ReceiverView: View {
     private var surf: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                Task { await shuffle() }
+                surfTask = Task { await shuffle() }
             } label: {
                 // The shuffle mark says what Surf does before the word has been learnt.
                 Label(shuffling ? "Surfing\u{2026}" : "Surf", systemImage: "shuffle").kjKicker()
@@ -200,19 +206,32 @@ struct ReceiverView: View {
     }
 
     private func shuffle() async {
-        guard let index = model.receiver.index, !shuffling else { return }
+        guard let index = model.receiver.index, !shuffling, !Task.isCancelled, model.receiverPath.isEmpty else { return }
+        surfRevision += 1
+        let revision = surfRevision
         shuffling = true
         surfNote = nil
-        defer { shuffling = false }
-        let pool = await ShufflePick.surf(index, medium: medium, scope: scope) { region in
+        defer { if revision == surfRevision { shuffling = false } }
+        let choice = SurfChoice(medium: medium, scope: scope)
+        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope) { region in
             try? await model.receiver.channels(regionId: region, cameras: false)
         }
-        guard !Task.isCancelled else { return }
-        if let channel = pool.first {
-            shuffled = ShufflePick(channel: channel, list: pool)
+        guard !Task.isCancelled, revision == surfRevision, model.receiverPath.isEmpty,
+              choice == SurfChoice(medium: medium, scope: scope) else { return }
+        model.surfHistory.update(catalogue, for: choice)
+        if let channel = model.surfHistory.next(for: choice) {
+            if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }
+            shuffled = ShufflePick(channel: channel, list: catalogue.channels, surfChoice: choice)
             return
         }
-        surfNote = "Nothing to surf there right now."
+        surfNote = catalogue.isComplete ? "Nothing to surf there right now." : "You have visited the available channels. Try Surf again to load the rest of the atlas."
+    }
+
+    private func cancelSurf() {
+        surfRevision += 1
+        surfTask?.cancel()
+        surfTask = nil
+        shuffling = false
     }
 
     // MARK: - Cameras

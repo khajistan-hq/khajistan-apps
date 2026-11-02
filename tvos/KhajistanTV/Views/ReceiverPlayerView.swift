@@ -11,6 +11,7 @@ import UIKit
 /// what it does, which a hidden gesture would not.
 struct ReceiverPlayerView: View {
     let list: [Channel]
+    let surfChoice: SurfChoice?
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -49,8 +50,9 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel]) {
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil) {
         self.list = list
+        self.surfChoice = surfChoice
         _current = State(initialValue: channel)
     }
 
@@ -104,9 +106,9 @@ struct ReceiverPlayerView: View {
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
-            .accessibilityHint("Swipe up or down to change channel.")
+            .accessibilityHint(surfChoice == nil ? "Swipe up or down to change channel." : "Swipe up or down to surf the whole selected atlas without repeats.")
             .accessibilityAction(named: "Next channel") { step(by: 1) }
-            .accessibilityAction(named: "Previous channel") { step(by: -1) }
+            .accessibilityAction(named: surfChoice == nil ? "Previous channel" : "Another unvisited channel") { step(by: -1) }
             .accessibilityAction(named: model.captions.isEnabled ? "Captions off" : "Captions on") { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
@@ -162,7 +164,7 @@ struct ReceiverPlayerView: View {
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
             // while you browse; a picture stops with its screen.
             if current.mediaType == "radio", destination == nil, controller.state == .playing {
-                model.radioAway = RadioAway(channel: current, list: list, controller: controller)
+                model.radioAway = RadioAway(channel: current, list: list, controller: controller, surfChoice: surfChoice)
             }
             stopEverything()
             dismiss()
@@ -305,6 +307,7 @@ struct ReceiverPlayerView: View {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         guard target.id != (destination ?? current).id else { return wake() }
+        if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()
         changeTask = Task { await change(to: target) }
@@ -444,6 +447,16 @@ struct ReceiverPlayerView: View {
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
     /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
+        if let surfChoice {
+            guard let target = model.surfHistory.next(for: surfChoice) else {
+                say("You have visited the available channels. Go back to Surf to load the rest of the atlas.")
+                return
+            }
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
+            return
+        }
         let from = destination ?? current
         guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
         let target = list[(position + delta + list.count) % list.count]
@@ -594,6 +607,7 @@ struct RadioAway: Identifiable {
     let channel: Channel
     let list: [Channel]
     let controller: PlayerController
+    let surfChoice: SurfChoice?
     var id: String { channel.id }
 }
 

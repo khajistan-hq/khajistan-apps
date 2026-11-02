@@ -186,6 +186,12 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
     @MainActor static func main() async {
         var failures = 0
         let tests: [(String, @MainActor () async throws -> Void)] = [
+            ("Surf waits for slower main-atlas regions", surfLoadsAllRegions),
+            ("Surf visits every stable ID once before cycle rollover", surfFullCycle),
+            ("Surf adds new channels and retires unavailable channels without forgetting visits", surfCatalogueChanges),
+            ("partial atlas cannot become a short repeat loop", surfPartialAtlas),
+            ("Surf keeps explicit media, atlas and access filters", surfFilters),
+            ("Surf preserves captions across the entire cycle and hides controls independently", surfCaptionInteraction),
             ("new installation stays off", startsOff),
             ("on survives retunes, playback reconnect and relaunch", persistsOn),
             ("explicit off survives retunes and relaunch", persistsOff),
@@ -324,6 +330,139 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
             controls.wake(at: 21, canHide: true)
             try check(!controls.expire(at: 25.9, canHide: true), "releasing \(reason) grants a fresh interval")
             try check(controls.expire(at: 26, canHide: true), "controls resume hiding after \(reason) closes")
+        }
+    }
+}
+
+extension CaptionPreferenceHarness {
+    @MainActor static func surfIndex() throws -> ReceiverIndex {
+        let text = #"{"regions":[{"id":"indus","label":"Indus","kind":"state","tier":"heartbeat"},{"id":"parsistan","label":"Parsistan","kind":"state","tier":"core"},{"id":"anatolia","label":"Anatolia","kind":"state","tier":"core"},{"id":"beyond","label":"Beyond","kind":"state","tier":"extension"}],"regionFiles":{"indus":"/i.json","parsistan":"/p.json","anatolia":"/a.json","beyond":"/b.json"},"regionCounts":{},"totals":{"channels":0,"live":0,"byMedium":{}}}"#
+        return try JSONDecoder().decode(ReceiverIndex.self, from: Data(text.utf8))
+    }
+
+    @MainActor static func surfChannel(_ id: String, region: String, medium: String = "tv", extra: [String: Any] = [:]) throws -> Channel {
+        var object: [String: Any] = ["id": id, "name": id, "mediaType": medium, "primaryLanguage": "Urdu",
+                                    "languageCode": "ur", "country": "Pakistan", "regionIds": [region],
+                                    "streams": [["id": "stream-" + id]], "activeStreamId": "stream-" + id]
+        object.merge(extra) { _, new in new }
+        return try JSONDecoder().decode(Channel.self, from: JSONSerialization.data(withJSONObject: object))
+    }
+
+    @MainActor static func surfLoadsAllRegions() async throws {
+        let index = try surfIndex()
+        var requested = Set<String>()
+        let result = await ShufflePick.catalogue(index, medium: .all, scope: .main) { region in
+            requested.insert(region)
+            if region == "parsistan" { try? await Task.sleep(for: .seconds(4.1)) }
+            return [try! surfChannel(region, region: region)]
+        }
+        try check(requested == ["indus", "parsistan", "anatolia"], "default loads every main region, no extension")
+        try check(Set(result.channels.map(\.id)) == requested && result.isComplete, "a region slower than the old four-second cutoff still joins Surf")
+    }
+
+    @MainActor static func surfFullCycle() throws {
+        let channels = try (0..<12).map { try surfChannel("channel-\($0)", region: ["indus", "parsistan", "anatolia"][$0 % 3]) }
+        var cycle = SurfCycle()
+        var previous: String?
+        for _ in 0..<3 {
+            var ids: [String] = []
+            for i in 0..<channels.count {
+                let picked = cycle.next(in: channels + channels.reversed(), allowNewCycle: true)!
+                if i == 0, let previous { try check(picked.id != previous, "rollover cannot immediately repeat the last channel") }
+                ids.append(picked.id)
+                previous = picked.id
+            }
+            try check(Set(ids) == Set(channels.map(\.id)), "every stable ID across all regions appears exactly once per cycle")
+        }
+        var history = SurfHistory()
+        let choice = SurfChoice(medium: .all, scope: .main)
+        var visited = Set<String>()
+        for _ in channels {
+            history.update(SurfCatalogue(channels: channels.shuffled(), missingRegions: []), for: choice)
+            try check(visited.insert(history.next(for: choice)!.id).inserted, "reopening Surf cannot forget earlier visits")
+        }
+    }
+
+    @MainActor static func surfCatalogueChanges() throws {
+        let a = try surfChannel("a", region: "indus"), b = try surfChannel("b", region: "parsistan")
+        let c = try surfChannel("c", region: "anatolia"), new = try surfChannel("new", region: "anatolia")
+        var cycle = SurfCycle()
+        cycle.visit(a.id) // explicit guide selection also counts as a visit
+        let picked = cycle.next(in: [a, b, c], allowNewCycle: false)!
+        let removed = picked.id == b.id ? c : b
+        let changed = [a, picked, new] // the unvisited old channel is now unavailable
+        try check(cycle.next(in: changed, allowNewCycle: false)?.id == "new", "a newly added channel joins before any repeat")
+        try check(cycle.next(in: changed, allowNewCycle: false) == nil, "removed channels do not force a regional retry loop")
+        try check(cycle.next(in: changed + [removed], allowNewCycle: false)?.id == removed.id, "an unvisited channel returning to the catalogue joins this cycle")
+        try check(cycle.next(in: [], allowNewCycle: true) == nil, "empty availability cannot reset the cycle")
+        try check(cycle.next(in: changed + [removed], allowNewCycle: false) == nil, "temporary disappearance does not erase earlier visits")
+        var one = SurfCycle()
+        try check(one.next(in: [a], allowNewCycle: true)?.id == a.id, "one channel is playable")
+        try check(one.next(in: [a], allowNewCycle: true)?.id == a.id, "a one-channel complete atlas can only start its next cycle with that channel")
+    }
+
+    @MainActor static func surfPartialAtlas() async throws {
+        let index = try surfIndex()
+        var history = SurfHistory()
+        let choice = SurfChoice(medium: .all, scope: .main)
+        let partial = await ShufflePick.catalogue(index, medium: .all, scope: .main) { region in
+            region == "indus" ? [try! surfChannel("indus", region: region)] : nil
+        }
+        try check(Set(partial.missingRegions) == ["parsistan", "anatolia"], "failed region loads remain visible in the result")
+        history.update(partial, for: choice)
+        try check(history.next(for: choice)?.id == "indus", "available shard can play")
+        for _ in 0..<5 { try check(history.next(for: choice) == nil, "partial atlas must not loop the first region") }
+        let complete = await ShufflePick.catalogue(index, medium: .all, scope: .main) { [try! surfChannel($0, region: $0)] }
+        history.update(complete, for: choice)
+        let remaining = [history.next(for: choice)!.id, history.next(for: choice)!.id]
+        try check(Set(remaining) == ["parsistan", "anatolia"], "recovered regions are visited before the old region repeats")
+    }
+
+    @MainActor static func surfFilters() throws {
+        let index = try surfIndex()
+        let tv = try surfChannel("tv", region: "indus"), radio = try surfChannel("radio", region: "parsistan", medium: "radio")
+        let camera = try surfChannel("camera", region: "indus", medium: "camera")
+        let other = try surfChannel("outside", region: "beyond")
+        let empty = try surfChannel("empty-regions", region: "indus", extra: ["regionIds": []])
+        let blocked = try surfChannel("blocked", region: "indus", extra: ["publicationStatus": "hidden"])
+        let offline = try surfChannel("offline", region: "indus", extra: ["healthStatus": "offline"])
+        let disabled = try surfChannel("disabled", region: "indus", extra: ["manualDisabled": true])
+        let noStream = try surfChannel("no-stream", region: "indus", extra: ["activeStreamId": NSNull()])
+        let denied = try surfChannel("denied", region: "indus")
+        let controls = Controls(denylist: Denylist(disabledChannelIds: ["denied"]), offAir: nil, health: nil)
+        let eligible = ReceiverRules.eligible([tv, camera, empty, blocked, offline, disabled, noStream, denied], controls: controls)
+        let lists = [(region: "indus", channels: eligible), (region: "parsistan", channels: [radio, tv]), (region: "beyond", channels: [other])]
+        func ids(_ medium: ShuffleMedium, _ scope: ShuffleScope) -> Set<String> {
+            Set(ShufflePick.pool(lists, index: index, medium: medium, scope: scope).map(\.id))
+        }
+        try check(ids(.all, .main) == ["tv", "radio", "empty-regions"], "default is all live media in main atlas, deduplicated and gated")
+        try check(ids(.tv, .main) == ["tv", "empty-regions"], "explicit TV filter remains")
+        try check(ids(.radio, .main) == ["radio"], "explicit radio filter remains")
+        try check(ids(.all, .everywhere) == ["tv", "radio", "empty-regions", "outside"], "explicit Beyond the atlas remains")
+    }
+
+    @MainActor static func surfCaptionInteraction() async throws {
+        try await withFixture { defaults, auth, player, network, suite in
+            let channels = try (0..<6).map { try surfChannel("surf-\($0)", region: ["indus", "parsistan", "anatolia"][$0 % 3]) }
+            var cycle = SurfCycle()
+            let service = LiveCaptionSession(auth: auth, defaults: defaults)
+            var controls = ReceiverControlsVisibility()
+            for i in 0..<channels.count {
+                let picked = cycle.next(in: channels, allowNewCycle: true)!
+                let socketCount = network.sockets.count
+                service.attach(picked, player: player)
+                if i == 0 { service.toggle() }
+                try check(service.isOn && service.isEnabled, "Surf retune retains the chosen CC setting")
+                try await eventually("retune connects current channel") { network.sockets.count > socketCount }
+                network.sockets.last!.push(subscribed(picked.id))
+                let caption = "Current channel \(i)."
+                network.sockets.last!.push(row(900 + i, text: caption, channel: picked.id))
+                try await eventually("current channel caption paints") { service.text == caption }
+                controls.wake(at: Double(i * 10), canHide: true)
+                try check(controls.expire(at: Double(i * 10 + 5), canHide: true), "every Surf retune grants five readable seconds")
+                try check(service.text == caption && service.isOn, "hiding controls cannot clear subtitles or demand")
+            }
+            service.detach()
         }
     }
 }

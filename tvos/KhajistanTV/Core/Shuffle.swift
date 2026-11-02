@@ -4,13 +4,14 @@ import Foundation
 struct ShufflePick: Identifiable {
     let channel: Channel
     let list: [Channel]
+    var surfChoice: SurfChoice? = nil
     var id: String { channel.id }
 }
 
 /// What Surf draws from (owner, 2026-10-07: "a shuffle feature for tv or radio with global
 /// settings, main atlas or extended atlas settings"; 2026-10-29: all channels, "with an option to
 /// choose tv only or radio only"). Kept on the device, in both apps.
-enum ShuffleMedium: String, CaseIterable, Identifiable, Sendable {
+enum ShuffleMedium: String, CaseIterable, Identifiable, Hashable, Sendable {
     case all, tv, radio
     var id: String { rawValue }
     var label: String {
@@ -30,7 +31,7 @@ enum ShuffleMedium: String, CaseIterable, Identifiable, Sendable {
 
 /// Where Surf draws from: the main atlas (the heartbeat and core regions), the extended atlas
 /// (the regions behind "Beyond the atlas"), or everywhere.
-enum ShuffleScope: String, CaseIterable, Identifiable, Sendable {
+enum ShuffleScope: String, CaseIterable, Identifiable, Hashable, Sendable {
     case main, extended, everywhere
     var id: String { rawValue }
     var label: String {
@@ -68,7 +69,8 @@ extension ShufflePick {
         var pool: [Channel] = []
         for (region, channels) in lists {
             for channel in channels where medium.includes(channel.mediaType) {
-                let inMain = !Set(channel.regionIds ?? [region]).isDisjoint(with: main)
+                let filed = channel.regionIds.flatMap { $0.isEmpty ? nil : $0 } ?? [region]
+                let inMain = !Set(filed).isDisjoint(with: main)
                 let fits = scope == .everywhere || (scope == .main) == inMain
                 if fits, seen.insert(channel.id).inserted { pool.append(channel) }
             }
@@ -76,42 +78,95 @@ extension ShufflePick {
         return pool
     }
 
-    /// How long Surf waits for the slowest list once another has come: past it, Surf plays from
-    /// what has come, and a list still on its way is read (and kept) by the next surf.
-    static let patience: Duration = .seconds(4)
-
-    /// Reads every list in `scope` at once and returns the pool shuffled: Surf plays the first,
-    /// and next and previous walk the rest, so one surf crosses the whole of the scope rather than
-    /// one region. A list that will not load, or is still loading after `patience`, is left out;
-    /// the others still surf.
+    /// Wait for every requested shard's bounded request. Returning after the first fast region
+    /// silently shrank Surf to that region. Failed shards are explicit and cannot start a short
+    /// repeat cycle; a later Surf request retries them through ReceiverStore.
     @MainActor
-    static func surf(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
-                     patience: Duration = patience,
-                     load: @escaping @MainActor (String) async -> [Channel]?) async -> [Channel] {
+    static func catalogue(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
+                          load: @escaping @MainActor (String) async -> [Channel]?) async -> SurfCatalogue {
         let ids = regions(index, scope: scope)
-        guard !ids.isEmpty else { return [] }
         var lists: [String: [Channel]] = [:]
-        await withTaskGroup(of: (String, [Channel]?)?.self) { group in
+        var failed: [String] = []
+        await withTaskGroup(of: (String, [Channel]?).self) { group in
             for id in ids { group.addTask { @MainActor in (id, await load(id)) } }
-            // The clock: answers nil when the patience runs out.
-            group.addTask { try? await Task.sleep(for: patience); return nil }
-            var answered = 0
-            var waitedLongEnough = false
-            for await result in group {
-                if let (id, list) = result {
-                    answered += 1
+            for await (id, list) in group {
+                if let list {
                     lists[id] = list
                 } else {
-                    waitedLongEnough = true
-                }
-                if answered == ids.count || (waitedLongEnough && !lists.isEmpty) {
-                    group.cancelAll()
-                    break
+                    failed.append(id)
                 }
             }
         }
         let read = ids.compactMap { id in lists[id].map { (region: id, channels: $0) } }
-        return pool(read, index: index, medium: medium, scope: scope).shuffled()
+        return SurfCatalogue(channels: pool(read, index: index, medium: medium, scope: scope),
+                             missingRegions: failed.sorted())
+    }
+
+    @MainActor
+    static func surf(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
+                     load: @escaping @MainActor (String) async -> [Channel]?) async -> [Channel] {
+        await catalogue(index, medium: medium, scope: scope, load: load).channels.shuffled()
+    }
+}
+
+struct SurfChoice: Hashable {
+    let medium: ShuffleMedium
+    let scope: ShuffleScope
+}
+
+struct SurfCatalogue {
+    let channels: [Channel]
+    let missingRegions: [String]
+    var isComplete: Bool { missingRegions.isEmpty }
+}
+
+/// Stable channel IDs, not regions or stream URLs, define one complete visit cycle.
+/// A changed catalogue adds unseen IDs and removes unavailable ones without forgetting visits.
+struct SurfCycle {
+    private var visited = Set<String>()
+    private var remaining: [String] = []
+    private var last: String?
+
+    mutating func visit(_ id: String) {
+        visited.insert(id)
+        remaining.removeAll { $0 == id }
+        last = id
+    }
+
+    mutating func next(in channels: [Channel], allowNewCycle: Bool) -> Channel? {
+        var byID: [String: Channel] = [:]
+        for channel in channels where byID[channel.id] == nil { byID[channel.id] = channel }
+        remaining.removeAll { byID[$0] == nil || visited.contains($0) }
+        let queued = Set(remaining)
+        remaining += byID.keys.filter { !visited.contains($0) && !queued.contains($0) }.shuffled()
+        if remaining.isEmpty, allowNewCycle, !byID.isEmpty {
+            visited.removeAll()
+            remaining = Array(byID.keys).shuffled()
+            // Finish one cycle and start another without the same channel twice in a row.
+            if remaining.count > 1, remaining.first == last { remaining.swapAt(0, 1) }
+        }
+        guard let id = remaining.first, let channel = byID[id] else { return nil }
+        visit(id)
+        return channel
+    }
+}
+
+/// Held by the TV app, so closing and reopening Surf does not reshuffle already visited channels.
+struct SurfHistory {
+    private var cycles: [SurfChoice: SurfCycle] = [:]
+    private var catalogues: [SurfChoice: SurfCatalogue] = [:]
+
+    mutating func update(_ catalogue: SurfCatalogue, for choice: SurfChoice) {
+        catalogues[choice] = catalogue
+    }
+
+    mutating func next(for choice: SurfChoice) -> Channel? {
+        guard let catalogue = catalogues[choice] else { return nil }
+        return cycles[choice, default: SurfCycle()].next(in: catalogue.channels, allowNewCycle: catalogue.isComplete)
+    }
+
+    mutating func visit(_ channel: Channel, for choice: SurfChoice) {
+        cycles[choice, default: SurfCycle()].visit(channel.id)
     }
 }
 

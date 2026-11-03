@@ -3013,7 +3013,11 @@ func liveCaptionLanguageOrder() throws {
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["detectedLanguageName": "Arabic"]), detected: nil), "ar")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Dari"]), detected: nil), "fa")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Persian, Dari"]), detected: nil), "fa")
-    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Egypt"]), detected: nil), "ar")
+    for country in ["Egypt", "Pakistan", "Iran", "Turkey", "Morocco"] {
+        let unknown = try liveChannel(["primaryLanguage": NSNull(), "country": country])
+        try expect(CaptionRules.effectiveLangCode(unknown, detected: nil) == nil, "country is not language evidence")
+        try expect(CaptionRules.eligible(unknown, detected: nil, accuracy: nil), "unknown source stays Auto")
+    }
     try expect(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Israel"]), detected: nil) == nil, "two-language countries are held")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(), detected: DetectedLanguage(lang_code: "pa", confirmed_lang_code: nil, needs_confirmation: true)), "pa")
 }

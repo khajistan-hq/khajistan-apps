@@ -345,14 +345,6 @@ enum CaptionRules {
     static let supported: Set<String> = ["af", "sq", "ar", "az", "eu", "be", "bn", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "gu", "he", "hi", "hu", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk", "ms", "ml", "mr", "no", "fa", "pl", "pt", "pa", "ro", "ru", "sr", "sk", "sl", "es", "sw", "sv", "tl", "ta", "te", "th", "tr", "uk", "ur", "vi", "cy"]
     static let parked = ["ps": "The current live recognizer does not support Pashto. Select Persian / Dari only when that is what is being spoken."]
     static let langNames: [String: String] = ["af": "Afrikaans", "sq": "Albanian", "ar": "Arabic", "az": "Azerbaijani", "eu": "Basque", "be": "Belarusian", "bn": "Bengali", "bs": "Bosnian", "bg": "Bulgarian", "ca": "Catalan", "zh": "Chinese", "hr": "Croatian", "cs": "Czech", "da": "Danish", "nl": "Dutch", "en": "English", "et": "Estonian", "fi": "Finnish", "fr": "French", "gl": "Galician", "de": "German", "el": "Greek", "gu": "Gujarati", "he": "Hebrew", "hi": "Hindi", "hu": "Hungarian", "id": "Indonesian", "it": "Italian", "ja": "Japanese", "kn": "Kannada", "kk": "Kazakh", "ko": "Korean", "lv": "Latvian", "lt": "Lithuanian", "mk": "Macedonian", "ms": "Malay", "ml": "Malayalam", "mr": "Marathi", "no": "Norwegian", "fa": "Persian / Dari", "pl": "Polish", "pt": "Portuguese", "pa": "Punjabi", "ro": "Romanian", "ru": "Russian", "sr": "Serbian", "sk": "Slovak", "sl": "Slovenian", "es": "Spanish", "sw": "Swahili", "sv": "Swedish", "tl": "Tagalog", "ta": "Tamil", "te": "Telugu", "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu", "vi": "Vietnamese", "cy": "Welsh", "ps": "Pashto", "hy": "Armenian", "ckb": "Kurdish (Sorani)", "sd": "Sindhi", "skr": "Saraiki", "ks": "Kashmiri", "bal": "Balochi", "hno": "Hindko", "brh": "Brahui", "kab": "Kabyle", "syr": "Syriac", "ku": "Kurdish (Kurmanji)", "pnb": "Punjabi (Shahmukhi)"]
-    /// Last resort, one-language countries only (COUNTRY_LANG). A language inference, never filing.
-    static let countryLang: [String: String] = [
-        "T\u{00FC}rkiye": "tr", "Turkey": "tr", "Iran": "fa", "Pakistan": "ur",
-        "Saudi Arabia": "ar", "Qatar": "ar", "United Arab Emirates": "ar", "Oman": "ar",
-        "Jordan": "ar", "Iraq": "ar", "Lebanon": "ar", "Palestine": "ar", "Egypt": "ar",
-        "Yemen": "ar", "Bahrain": "ar", "Libya": "ar", "Tunisia": "ar", "Syria": "ar",
-        "Sudan": "ar", "Kuwait": "ar", "Algeria": "ar", "Morocco": "ar", "Mauritania": "ar"
-    ]
     private static let aliases: [String: String] = ["farsi": "fa", "dari": "fa", "فارسی": "fa", "bangla": "bn", "বাংলা": "bn", "español": "es", "castellano": "es", "bahasa indonesia": "id", "bahasa melayu": "ms", "kiswahili": "sw", "azeri": "az", "filipino": "tl", "mandarin": "zh", "pushto": "ps", "sorani": "ckb", "kurdish": "ckb", "русский": "ru", "العربية": "ar", "اردو": "ur", "עברית": "he", "türkçe": "tr"]
 
     /// langCodeFromName(): a code, an alias, or a name that begins with a known language.
@@ -370,14 +362,14 @@ enum CaptionRules {
     }
 
     /// effectiveLangCode(): a viewer-confirmed language, the registry's code, the machine's, the
-    /// detected name, the stated language, and last the one-language country.
+    /// detected name, then the stated language. Country is not language evidence.
     static func effectiveLangCode(_ ch: Channel, detected: DetectedLanguage?) -> String? {
         if let confirmed = detected?.confirmed_lang_code, !confirmed.isEmpty { return confirmed }
         if let code = ch.languageCode, !code.isEmpty { return code }
         if let code = detected?.lang_code, !code.isEmpty { return code }
         if let code = langCode(fromName: ch.detectedLanguageName) { return code }
         if let code = langCode(fromName: ch.primaryLanguage) { return code }
-        return countryLang[(ch.country ?? "").trimmingCharacters(in: .whitespaces)]
+        return nil
     }
 
     /// Every region the channel sits in is an extension of the atlas. Unknown reads as core.

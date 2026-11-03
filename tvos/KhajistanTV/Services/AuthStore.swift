@@ -18,6 +18,37 @@ final class AuthStore {
 
     private let urlSession: URLSession
 
+    /// Set after a sign-in when the account has a verified authenticator: the session is kept, and
+    /// the six-digit code is still owed before staff films play (vod-token wants aal2).
+    private(set) var pendingFactorId: String?
+
+    func verifyCode(_ typed: String) async throws {
+        guard let factorId = pendingFactorId else { throw AuthError.server("Sign in again.") }
+        _ = try await validAccessToken()
+        guard let current = session else { throw AuthError.server("Sign in again.") }
+        let fresh = try await AuthAPI.verify(typed, factorId: factorId, session: current, using: urlSession)
+        session = fresh
+        persist(fresh)
+        pendingFactorId = nil
+    }
+
+    /// Asked outside the caller's task, so leaving the sign-in screen mid-lookup cannot cancel it
+    /// into "no code owed".
+    private func lookUpFactor(_ fresh: Session) async {
+        let urlSession = urlSession
+        let owed = await Task { await AuthAPI.factorOwed(by: fresh, using: urlSession) }.value
+        // Signed out, or into another account, while it was asked: the answer is not this session's.
+        guard session?.userId == fresh.userId else { return }
+        pendingFactorId = owed
+    }
+
+    /// A stored aal1 session (a relaunch mid-step, Not now, or a launch that was offline) asks
+    /// again for its code. Also run when a film is refused, so the refusal says the right thing.
+    func rearmCode() async {
+        guard session?.assurance == "aal1", (try? await validAccessToken()) != nil, let current = session else { return }
+        await lookUpFactor(current)
+    }
+
     var isSignedIn: Bool { session != nil }
     var email: String? { session?.email }
 
@@ -35,6 +66,7 @@ final class AuthStore {
         if let data = Keychain.read(Account.session),
            let stored = try? JSONDecoder().decode(Session.self, from: data) {
             session = stored
+            Task { await rearmCode() }
         }
         if let data = Keychain.read(Account.preview),
            let text = String(data: data, encoding: .utf8), !text.isEmpty {
@@ -53,6 +85,7 @@ final class AuthStore {
         let fresh = try AuthAPI.session(from: data, now: Date())
         session = fresh
         persist(fresh)
+        await lookUpFactor(fresh)
     }
 
     /// Signs in with the one-time token hash a phone approved for this TV (TVSignIn): the server
@@ -66,6 +99,7 @@ final class AuthStore {
         let fresh = try AuthAPI.session(from: data, now: Date())
         session = fresh
         persist(fresh)
+        await lookUpFactor(fresh)
     }
 
     /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
@@ -129,6 +163,7 @@ final class AuthStore {
 
     private func clearSession() {
         session = nil
+        pendingFactorId = nil
         Keychain.delete(Account.session)
     }
 }

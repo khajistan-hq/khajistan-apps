@@ -379,6 +379,9 @@ private struct AtlasPanel: View {
     static let stripAnchor = "atlasStrip"
     @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
+    /// The region lit in the A–Z list at the right of the map. Its own focus state: the strip and
+    /// the list both carry every region, and one value bound to both is ambiguous.
+    @FocusState private var listedRegion: String?
     /// Up to three television channels per region, by region id: the card shows the first whose
     /// still has come.
     @State private var picks: [String: [Channel]] = [:]
@@ -393,9 +396,10 @@ private struct AtlasPanel: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .center, spacing: 40) {
                         leading
-                        RegionMapView(map: composed, highlighted: focusedRegion)
+                        RegionMapView(map: composed, highlighted: listedRegion ?? focusedRegion)
                             .frame(maxWidth: .infinity)
                             .frame(height: Self.mapHeight)
+                        regionList(composed)
                     }
 
                     regionStrip(composed).id(Self.stripAnchor)
@@ -468,6 +472,52 @@ private struct AtlasPanel: View {
         .task(id: regions.map(\.id)) { await pick(regions) }
     }
 
+    /// Every region that opens channels, A to Z, at the right of the map (Joey, 2026-11-02: "a
+    /// list on the right side of the screen that when you scroll down and highlight it,
+    /// highlights that particular region"). A name lit here lights its shape on the map; Select
+    /// opens the region's page, its television and its radio on shelves of their own.
+    /// It repeats the picture strip under the map on purpose: asked whether to drop the strip, the
+    /// owner chose to keep both (2026-11-03).
+    private func regionList(_ map: ComposedMap) -> some View {
+        let regions = map.regions
+            .filter(\.opensChannels)
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: 8) {
+            Kicker("Regions A\u{2013}Z")
+            ScrollView(.vertical, showsIndicators: false) {
+                // Not lazy: tens of rows, and every one must exist for the remote and for tests.
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(regions) { region in
+                        Button {
+                            open(region)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(region.label).kjName(28).lineLimit(1)
+                                Spacer(minLength: 8)
+                                if let live = region.live, live > 0 {
+                                    Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                        .focused($listedRegion, equals: region.id)
+                        .accessibilityIdentifier("regionList-\(region.id)")
+                        .accessibilityLabel(region.label)
+                        .accessibilityValue(region.live.map { "\($0) live" } ?? "")
+                    }
+                }
+                // Room inside the clip for a focused row's lift.
+                .padding(12)
+            }
+            .padding(-12)
+        }
+        .frame(width: Self.listWidth, height: Self.mapHeight, alignment: .topLeading)
+        .focusSection()
+        .accessibilityIdentifier("regionList")
+    }
+
+    static let listWidth: CGFloat = 320
     static let cardWidth = ChannelCard.width
     static let cardHeight = ChannelCard.height
     /// Was 520 beside a 560-point sidebar, with the strip under the map only.

@@ -1,8 +1,9 @@
 import SwiftUI
 import UIKit
 
-/// A receiver channel, full screen. Up and down tune the neighbouring channel in the list the
-/// viewer came from, behind the pigeon (StationClips); play/pause pauses, and pressing it again tunes the
+/// A receiver channel, full screen. A click up or down tunes the neighbouring channel in the list
+/// the viewer came from, behind the pigeon (StationClips); a swipe down opens the guide, and a
+/// swipe never changes channel (RemoteGestures); play/pause pauses, and pressing it again tunes the
 /// channel afresh, because a live signal paused for a minute is not the live signal any more.
 ///
 /// Live captions: where the channel offers them the strip ends in the Captions control. Right moves
@@ -40,6 +41,11 @@ struct ReceiverPlayerView: View {
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
     @State private var guideRow: Int?
+    /// When a swipe opened the guide: the rest of that swipe must not walk its rows.
+    @State private var guideOpenedBySwipe: TimeInterval = 0
+    /// Set as the screen closes: the remote's recognisers stay on the window until the cover's
+    /// animation ends, and a click then must not tune a player already stopped.
+    @State private var leaving = false
     private enum Chip { case captions, like, guide }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
@@ -106,7 +112,8 @@ struct ReceiverPlayerView: View {
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
-            .accessibilityHint(surfChoice == nil ? "Swipe up or down to change channel." : "Swipe up or down to surf the whole selected atlas without repeats.")
+            // No swipe in the hint: under VoiceOver a swipe moves VoiceOver; the Guide action is below.
+            .accessibilityHint(surfChoice == nil ? "Click up or down to change channel." : "Click up or down to surf the whole selected atlas without repeats.")
             .accessibilityAction(named: "Next channel") { step(by: 1) }
             .accessibilityAction(named: surfChoice == nil ? "Previous channel" : "Another unvisited channel") { step(by: -1) }
             .accessibilityAction(named: model.captions.isEnabled ? "Captions off" : "Captions on") { model.captions.toggle(); wake() }
@@ -122,9 +129,22 @@ struct ReceiverPlayerView: View {
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
+        // Clicks change channel, a swipe down opens the guide. Inside the guide clicks and swipes
+        // alike walk the rows, through onMoveCommand below.
+        .background(RemoteGestures(
+            clickUp: { click(by: -1) },
+            clickDown: { click(by: 1) },
+            swipeDown: {
+                guard guideRow == nil, !leaving else { return }
+                guideOpenedBySwipe = ProcessInfo.processInfo.systemUptime
+                armed = nil
+                openGuide()
+            }
+        ))
         .onMoveCommand { direction in
             wake()
             if let row = guideRow {
+                if ProcessInfo.processInfo.systemUptime - guideOpenedBySwipe < 0.4, direction == .down || direction == .up { return }
                 switch direction {
                 case .up: guideRow = (row - 1 + list.count) % list.count
                 case .down: guideRow = (row + 1) % list.count
@@ -133,9 +153,8 @@ struct ReceiverPlayerView: View {
                 }
                 return
             }
+            // Up and down here are a click or a swipe alike; RemoteGestures tells them apart.
             switch direction {
-            case .up: armed = nil; step(by: -1)
-            case .down: armed = nil; step(by: 1)
             case .right: moveRight()
             case .left: moveLeft()
             default: break
@@ -247,7 +266,7 @@ struct ReceiverPlayerView: View {
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
-        case .failed(let message): return message + " Press Down for the next channel."
+        case .failed(let message): return message + " Click down for the next channel."
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
@@ -330,6 +349,15 @@ struct ReceiverPlayerView: View {
     /// "→ " before the first control on the strip while nothing is armed: the strip's controls are
     /// reached with a press right, and nothing else said so (owner, 2026-10-09).
     private var rightCue: String { armed == nil ? "\u{2192} " : "" }
+
+    /// A click up or down, outside the guide: the neighbouring channel. In the guide the same
+    /// click walks the rows instead, through onMoveCommand.
+    private func click(by delta: Int) {
+        guard guideRow == nil, !leaving else { return }
+        wake()
+        armed = nil
+        step(by: delta)
+    }
 
     private func moveRight() {
         // A failed channel's strip carries no controls, so there is nothing to the right.
@@ -565,6 +593,7 @@ struct ReceiverPlayerView: View {
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
     private func stopEverything() {
+        leaving = true
         guideRow = nil
         tuneIntent.cancel()
         tuneTask?.cancel()

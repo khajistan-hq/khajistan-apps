@@ -14,6 +14,8 @@ struct SubtitleCue: Equatable, Sendable {
     let start: Double
     let end: Double
     let text: String
+    var sentenceID: String? = nil
+    var sentenceStatus: String? = nil
 }
 
 /// A WebVTT reader for prepared subtitle files. Cue settings (line, align, position) are ignored:
@@ -206,7 +208,7 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
     let id: Int?
     let channel_id: String?
     let text: String?
-    let english: String?
+    var english: String?
     let lang: String?
     let script: String?
     let at_epoch: Double?
@@ -214,6 +216,107 @@ struct CaptionWireRow: Decodable, Equatable, Sendable {
     let final: Bool?
     let uncertain: Bool?
     let program_epoch: Double?
+    var created_at: String? = nil
+    var sn: Int? = nil
+    var sn_offset: Double? = nil
+    var seg_dur: Double? = nil
+    var confidence: Double? = nil
+    var sentence: CaptionSentence? = nil
+
+    func sameSource(as other: Self, ignoringSentence: Bool = false) -> Bool {
+        var a = self, b = other
+        a.english = nil; b.english = nil
+        if ignoringSentence { a.sentence = nil; b.sentence = nil }
+        return a == b
+    }
+}
+
+
+/// Strict additive metadata: malformed metadata fails decoding, never becomes a legacy row.
+struct CaptionSentence: Decodable, Equatable, Sendable {
+    let version: Int
+    let id: String
+    let revision: Int
+    let state: String
+    let reason: String
+    let native_text: String
+    let word_count: Int
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Key.self)
+        func key(_ s: String) -> Key { Key(stringValue: s)! }
+        guard Set(c.allKeys.map(\.stringValue)) == Set(["version", "id", "revision", "state", "reason", "native_text", "word_count"]) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid sentence fields"))
+        }
+        version = try c.decode(Int.self, forKey: key("version"))
+        id = try c.decode(String.self, forKey: key("id"))
+        revision = try c.decode(Int.self, forKey: key("revision"))
+        state = try c.decode(String.self, forKey: key("state"))
+        reason = try c.decode(String.self, forKey: key("reason"))
+        native_text = try c.decode(String.self, forKey: key("native_text"))
+        word_count = try c.decode(Int.self, forKey: key("word_count"))
+        let reasons = ["silence", "wait_limit", "size_limit", "gap", "clock_reset", "shutdown", "delivery_limit"]
+        guard version == 1, UUID(uuidString: id)?.uuidString.lowercased() == id,
+              (1...999).contains(revision), !native_text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              native_text.unicodeScalars.count <= 4096,
+              word_count == native_text.split(whereSeparator: { $0.isWhitespace }).count,
+              (state == "provisional" && reason == "continuing") || (state == "final" && reason == "punctuation") || (state == "unfinished" && reasons.contains(reason)) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid sentence metadata"))
+        }
+    }
+    func status(english: String) -> String {
+        if state == "unfinished" { return "Unfinished speech" }
+        let token = String(english.split(whereSeparator: { $0.isWhitespace }).last ?? "")
+            .replacingOccurrences(of: #"["'”’\])}]+$"#, with: "", options: .regularExpression)
+        let tail = token.replacingOccurrences(of: #"[.,!;:،؛۔…—–-]+$"#, with: "", options: .regularExpression).lowercased()
+        let connectors = Set("and or but if because of to with the a an in on at for from by".split(separator: " ").map(String.init))
+        let abbreviation = token.range(of: #"^(?:(?:mr|mrs|ms|dr|prof|sr|jr|st|inc|ltd|corp|vs|etc)\.|(?:[a-z]\.)+)$"#, options: [.regularExpression, .caseInsensitive]) != nil
+        let punctuation = token.range(of: #"[.!?。！？؟۔]$"#, options: .regularExpression) != nil
+        let complete = punctuation && !abbreviation && !connectors.contains(tail) && !token.hasSuffix("..")
+        return complete ? "Complete sentence" : "Translation may be incomplete"
+    }
+}
+
+/// Text-free previews in English mode. Bounded revisions and tombstones prevent replay.
+struct CaptionSentenceLedger {
+    private struct Group { let firstSeen: TimeInterval; var row: CaptionWireRow }
+    private var groups: [String: Group] = [:]
+    private var tombstones: [String: TimeInterval] = [:]
+    enum Action { case legacy, listening, terminal, ignore }
+    mutating func expire(now: TimeInterval) {
+        tombstones = tombstones.filter { $0.value > now }
+        for (id, group) in groups where now - group.firstSeen >= 30 {
+            groups.removeValue(forKey: id); tombstones[id] = now + 180
+        }
+    }
+    mutating func receive(_ row: CaptionWireRow, now: TimeInterval) -> Action {
+        expire(now: now)
+        guard let meta = row.sentence else { return .legacy }
+        guard let rowID = row.id, rowID > 0, row.final == true,
+              let epoch = row.at_epoch, epoch.isFinite, tombstones[meta.id] == nil,
+              row.program_epoch?.isFinite != false,
+              meta.state == "provisional" ? (row.text ?? "").isEmpty && (row.english ?? "").isEmpty : row.text == meta.native_text else { return .ignore }
+        if var old = groups[meta.id], let previous = old.row.sentence {
+            if previous.state != "provisional" {
+                return row.sameSource(as: old.row) ? .terminal : .ignore
+            }
+            guard meta.revision > previous.revision, rowID != old.row.id,
+                  row.at_epoch == old.row.at_epoch, row.program_epoch == old.row.program_epoch,
+                  row.lang == old.row.lang, row.script == old.row.script,
+                  meta.native_text == previous.native_text || meta.native_text.hasPrefix(previous.native_text + " ") else { return .ignore }
+            old.row = row; groups[meta.id] = old
+        } else {
+            guard groups.count < 64, tombstones.count < 500 else { return .ignore }
+            groups[meta.id] = Group(firstSeen: now, row: row)
+        }
+        return meta.state == "provisional" ? .listening : .terminal
+    }
 }
 
 enum CaptionRules {
@@ -230,7 +333,7 @@ enum CaptionRules {
     static let minOnScreen: Double = 2
     static let maxOnScreen: Double = 7
     static let readingCPS: Double = 20
-    static let maxQueueAhead: Double = 30
+    static let maxQueueAhead: Double = 6
     static let lineChars = 42
     static let translationWait: Double = 8
     static let firstLineSeconds: Double = 10
@@ -421,9 +524,9 @@ enum CaptionRules {
     }
 
     /// recoverWire(): the last thirty seconds of the channel's wire, newest first, fifty rows.
-    static func wireRequest(channelId: String, now: Date, accessToken: String) -> URLRequest {
+    static func wireRequest(channelId: String, now: Date, accessToken: String, sentenceColumn: Bool = true) -> URLRequest {
         let since = ISO8601DateFormatter().string(from: now.addingTimeInterval(-30))
-        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch"
+        let columns = "id,channel_id,text,english,lang,script,at_epoch,spoken_seconds,final,sn,sn_offset,seg_dur,confidence,uncertain,program_epoch,created_at" + (sentenceColumn ? ",sentence" : "")
         let query = "select=\(columns)&channel_id=eq.\(KJURL.encodeQueryValue(channelId))&created_at=gte.\(KJURL.encodeQueryValue(since))&order=id.desc&limit=50"
         var request = URLRequest(url: URL(string: KJConfig.supabase.absoluteString + "/rest/v1/live_caption_wire?" + query)!)
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
@@ -456,7 +559,8 @@ enum CaptionRules {
     /// isEnglishSource(): said in English and written only in Latin letters.
     static func isEnglishSource(_ row: CaptionWireRow) -> Bool {
         let source = row.text ?? ""
-        return row.lang == "en" && (row.script == nil || row.script == "Latn") && !hasNonLatinLetter(source)
+        let script = row.script?.lowercased()
+        return row.lang == "en" && (script == nil || script == "latin" || script == "latn") && !hasNonLatinLetter(source)
     }
 
     /// checkedEnglish(): provider output that is untranslated script, a code fence or JSON, or
@@ -566,7 +670,8 @@ enum CaptionRules {
     static func mediaTime(atEpoch: Double, now: Double, mediaNow: Double, behindLive: Double) -> Double? {
         let lag = now - atEpoch
         if lag > 180 || lag < -30 { return nil }
-        return mediaNow + max(0, atEpoch + behindLive - now)
+        guard [atEpoch, now, mediaNow, behindLive].allSatisfy(\.isFinite) else { return nil }
+        return mediaNow + atEpoch + behindLive - now
     }
 
     /// The hold the picture wants: the site's resync() target, the 90th percentile of the measured
@@ -576,6 +681,94 @@ enum CaptionRules {
         let p90 = sorted.isEmpty ? holdStart - holdMargin : sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.9))]
         return min(ceiling, max(holdStart, (p90 + holdMargin).rounded(.up)))
     }
+}
+
+/// A bounded live display queue. Source anchors remain independent of reading-time padding.
+/// Only unseen text can be combined or shed; the caption being read is never cut short.
+struct CaptionTimeline {
+    private struct Entry {
+        let anchor: Double
+        let duration: Double
+        let text: String
+        let pieces: [SubtitleCue]
+        var cue: SubtitleCue
+    }
+    private var entries: [Entry] = []
+    private(set) var dropped = 0
+    var cues: [SubtitleCue] { entries.map(\.cue) }
+    /// Last plate start before queue padding; includes within-phrase reading allocation.
+    var latestUnshiftedPlateStart: Double? { entries.flatMap(\.pieces).map(\.start).max() }
+
+    mutating func advance(to now: Double) {
+        guard now.isFinite else { return }
+        entries.removeAll { $0.cue.end <= now }
+    }
+
+    mutating func append(_ text: String, at anchor: Double, spoken: Double?, now: Double, sentence: CaptionSentence? = nil) {
+        guard anchor.isFinite, now.isFinite, anchor - now <= CaptionRules.holdMax + 15 else { return }
+        advance(to: now)
+        // Recovery is not a transcript replay. An old row must not rewind the picture or
+        // displace present speech, even when a reconnect returns thirty seconds at once.
+        guard now - anchor <= CaptionRules.maxQueueAhead else { dropped += 1; return }
+        let spoken = spoken.flatMap { $0.isFinite ? $0 : nil }
+        let locked = entries.first { $0.cue.start <= now && now < $0.cue.end }
+        for var cue in CaptionRules.timed(text, at: anchor, spokenSeconds: spoken) {
+            cue.sentenceID = sentence?.id; cue.sentenceStatus = sentence?.status(english: text)
+            entries.append(Entry(anchor: cue.start, duration: cue.end - cue.start, text: cue.text, pieces: [cue], cue: cue))
+        }
+        var future = entries.filter { entry in
+            guard let locked else { return true }
+            return entry.cue != locked.cue
+        }.flatMap { $0.pieces }.enumerated().sorted { ($0.element.start, $0.offset) < ($1.element.start, $1.offset) }.map {
+            Entry(anchor: $0.element.start, duration: $0.element.end - $0.element.start,
+                  text: $0.element.text, pieces: [$0.element], cue: $0.element)
+        }
+        if let locked {
+            let before = future.count
+            future.removeAll { $0.anchor < locked.anchor }
+            dropped += before - future.count
+        }
+        // Short finalized fragments arriving together share a readable plate, instead of
+        // each acquiring two more seconds of delay. Never rewrite an active plate.
+        var compact: [Entry] = []
+        for entry in future {
+            if let previous = compact.last, entry.anchor <= previous.anchor + previous.duration,
+               previous.cue.sentenceID == entry.cue.sentenceID, previous.cue.sentenceStatus == entry.cue.sentenceStatus,
+               let joined = CaptionRules.blocks(previous.text.replacingOccurrences(of: "\n", with: " ") + " " + entry.text.replacingOccurrences(of: "\n", with: " ")).onlyCaptionBlock {
+                let duration = max(previous.duration, CaptionRules.minOnScreen, Double(joined.replacingOccurrences(of: "\n", with: "").count) / CaptionRules.readingCPS,
+                                   entry.anchor + entry.duration - previous.anchor)
+                if duration <= CaptionRules.maxOnScreen {
+                    compact.removeLast()
+                    compact.append(Entry(anchor: previous.anchor, duration: duration, text: joined, pieces: previous.pieces + entry.pieces,
+                                         cue: SubtitleCue(start: previous.anchor, end: previous.anchor + duration, text: joined, sentenceID: previous.cue.sentenceID, sentenceStatus: previous.cue.sentenceStatus)))
+                    continue
+                }
+            }
+            compact.append(entry)
+        }
+        // Prefer current speech over stale unseen backlog. Rebuild from the same source
+        // anchors after each eviction; no shortening and no accumulating lastEnd debt.
+        while true {
+            var cursor = max(now, locked?.cue.end ?? now)
+            var delayed = false
+            for index in compact.indices {
+                let entry = compact[index]
+                let start = max(cursor, entry.anchor)
+                if start - max(now, entry.anchor) > CaptionRules.maxQueueAhead { delayed = true }
+                compact[index].cue = SubtitleCue(start: start, end: start + entry.duration, text: entry.text, sentenceID: entry.cue.sentenceID, sentenceStatus: entry.cue.sentenceStatus)
+                cursor = start + entry.duration
+            }
+            if !delayed || compact.count <= 1 { break }
+            compact.removeFirst()
+            dropped += 1
+        }
+        if compact.count > 200 { dropped += compact.count - 200; compact = Array(compact.suffix(200)) }
+        entries = (locked.map { [$0] } ?? []) + compact
+    }
+}
+
+private extension Array where Element == String {
+    var onlyCaptionBlock: String? { count == 1 ? first : nil }
 }
 
 // MARK: - Supabase Realtime (the receiver's postgres_changes subscription)
@@ -591,14 +784,16 @@ enum CaptionRealtime {
 
     static func topic(_ channelId: String) -> String { "realtime:captions:\(channelId)" }
 
-    /// sb.channel("captions:<id>").on("postgres_changes", INSERT on live_caption_wire for the channel).
+    /// Subscribe to new source rows and the worker's late-English patches for this channel.
     static func join(channelId: String, accessToken: String, ref: String) -> String {
         let message: [String: Any] = [
             "topic": topic(channelId), "event": "phx_join", "ref": ref, "join_ref": ref,
             "payload": [
                 "config": [
                     "broadcast": ["ack": false, "self": false], "presence": ["key": ""], "private": false,
-                    "postgres_changes": [["event": "INSERT", "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]]
+                    "postgres_changes": ["INSERT", "UPDATE"].map { event in
+                        ["event": event, "schema": "public", "table": "live_caption_wire", "filter": "channel_id=eq.\(channelId)"]
+                    }
                 ] as [String: Any],
                 "access_token": accessToken
             ] as [String: Any]
@@ -628,7 +823,7 @@ enum CaptionRealtime {
         case "phx_error", "phx_close":
             return .closed
         case "postgres_changes":
-            guard let data = payload?["data"] as? [String: Any], data["type"] as? String == "INSERT",
+            guard let data = payload?["data"] as? [String: Any], let change = data["type"] as? String, ["INSERT", "UPDATE"].contains(change),
                   let record = data["record"],
                   let bytes = try? JSONSerialization.data(withJSONObject: record),
                   let row = try? JSONDecoder().decode(CaptionWireRow.self, from: bytes) else { return .other }

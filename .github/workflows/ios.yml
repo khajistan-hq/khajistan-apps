@@ -33,6 +33,10 @@ jobs:
           lfs: false
       - name: Core behavior tests
         run: ios/scripts/test-core.sh
+      - name: Caption session failure regressions
+        run: KJ_CAPTION_TEST_PLATFORMS=ios sh tvos/scripts/test-caption-session.sh
+      - name: Account session race regressions
+        run: KJ_AUTH_TEST_PLATFORMS=ios sh tvos/scripts/test-auth-session.sh
       - name: Select an available iPhone simulator
         id: simulator
         run: |

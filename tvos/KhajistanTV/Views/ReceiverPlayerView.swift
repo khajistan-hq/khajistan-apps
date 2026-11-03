@@ -111,7 +111,7 @@ struct ReceiverPlayerView: View {
                 ReceiverGuide(list: list, current: current, lit: guideRow)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
+            CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)

@@ -10,12 +10,14 @@ import SwiftUI
 struct CaptionView: View {
     let text: String?
     let skin: Skin
+    var status: String? = nil
 
     private static let size: CGFloat = 52   // 2.7% of 1920
 
     var body: some View {
         if let text, !text.isEmpty {
             VStack(spacing: Self.size * 0.25) {
+                if let status { Text(status).font(.caption).accessibilityIdentifier("captionSentenceStatus") }
                 ForEach(Array(CaptionText.lines(text).enumerated()), id: \.offset) { line in
                     Text(line.element)
                         .multilineTextAlignment(.center)
@@ -38,11 +40,12 @@ struct CaptionView: View {
 struct CaptionLayer: View {
     let text: String?
     let skin: Skin
+    var status: String? = nil
     let lift: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        CaptionView(text: text, skin: skin)
+        CaptionView(text: text, skin: skin, status: status)
             .padding(.horizontal, 115)   // 6% of the frame, as the site's plate keeps
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, lift > 0 ? lift + 24 : 12)

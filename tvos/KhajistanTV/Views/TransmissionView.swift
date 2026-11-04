@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Khajistan Transmission, the station page. It names the two channels and what is on each, and
+/// Khajistan Transmission, the station page. It names the channels and what is on each, and
 /// opens one of them full screen. A channel is tuned and the clock says what is on it: there is
 /// no list of programmes to choose from and no scrub bar.
 struct TransmissionView: View {
@@ -58,8 +58,15 @@ struct TransmissionView: View {
             case .transmission:
                 model.link = nil
             case .channel(let number):
+                // Only a channel the schedule names opens; any other number stays on this page.
+                // The link is cleared first, so it cannot replay on a later visit. Clearing it
+                // restarts this task, but the fetch runs in the store's own Task, which that
+                // cancellation does not reach.
                 model.link = nil
-                choose(number)
+                await store.loadSchedule()
+                if store.channelNumbers.contains(number) {
+                    choose(number)
+                }
             default:
                 break
             }
@@ -81,8 +88,9 @@ struct TransmissionView: View {
     }
 
     private var metaText: String {
-        let tail = "two scheduled channels \u{00B7} Pakistan time (UTC+5)"
-        guard case .ready = store.schedule, let count = store.programmeCount else { return "Two" + tail.dropFirst(3) }
+        let channels = store.channelNumbers.count
+        let tail = "\(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
+        guard case .ready = store.schedule, let count = store.programmeCount else { return tail }
         return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
     }
 
@@ -102,7 +110,7 @@ struct TransmissionView: View {
                     .accessibilityElement()
                     .accessibilityAddTraits(.isStaticText)
                     .transmissionState("Preview password")
-                PreviewLock(about: "Khajistan's own two TV channels, on the air all day.", message: message) {
+                PreviewLock(about: "Khajistan's own TV channels, on the air all day.", message: message) {
                     await store.loadSchedule()
                 }
             }
@@ -124,12 +132,18 @@ struct TransmissionView: View {
             VStack(alignment: .leading, spacing: 48) {
                 // The cards read the clock. Slots start on the minute, so they are drawn again on
                 // every minute and "now" is never the slot that has just ended.
+                // One row of the channels the schedule names, scrolled sideways past the third.
                 TimelineView(.everyMinute) { context in
-                    HStack(alignment: .top, spacing: 64) {
-                        ForEach([1, 2], id: \.self) { number in
-                            card(number, at: TransmissionStore.now(context.date))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 64) {
+                            ForEach(store.channelNumbers, id: \.self) { number in
+                                card(number, at: TransmissionStore.now(context.date))
+                            }
                         }
+                        // Room for the focused card's lift and shadow.
+                        .padding(.vertical, 40)
                     }
+                    .scrollClipDisabled()
                 }
                 if !model.auth.isSignedIn && !store.isScheduleFile {
                     VStack(alignment: .leading, spacing: 24) {
@@ -196,7 +210,7 @@ struct TransmissionView: View {
 
 /// One channel's card, as the website's channel card reads: the channel, whether it is on air,
 /// the show on now and its hours, and what is up next. Off air, when it is back and with what.
-/// Show names only: programme titles are file names (owner, 2026-09-06, on the receiver's two
+/// Show names only: programme titles are file names (owner, 2026-09-06, on the receiver's
 /// channel rows). It sits inside a button's plate, so every colour comes from the palette the
 /// plate sets for it, through the kicker and the inherited ink.
 private struct ChannelCardLabel: View {
@@ -206,7 +220,8 @@ private struct ChannelCardLabel: View {
     let upcoming: [ScheduleStrip]
 
     var body: some View {
-        CardPlate(height: 460) { card }
+        // Three to a screen at the page's inset; the rest are a scroll to the right.
+        CardPlate(width: 560, height: 460) { card }
     }
 
     private var card: some View {

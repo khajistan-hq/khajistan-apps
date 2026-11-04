@@ -1086,7 +1086,7 @@ func stationClockMatchesTheJS() throws {
     try expect(onAir >= 300, "only \(onAir) on-air cases")
     try expect(offAir >= 6, "only \(offAir) off-air cases")
     try expect(trimmed >= 1, "no case exercises clean_start")
-    try expect(Set(cases.map(\.channel)) == [1, 2], "both channels must be present")
+    try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
 }
@@ -1132,7 +1132,7 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
     let f = try fixture()
     let p = f.programming
     // 10-10 is the first kept day; before 06:00 it is the late strip filed from the same day.
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.startLabel, "06:00")
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.into, 0)
@@ -1315,8 +1315,13 @@ func realProgrammingDecodesInEveryMonth() throws {
         let rawProgrammes = try require(raw["programmes"] as? [String: [String: Any]])
         try expectEqual(p.programmes.count, rawProgrammes.count, month)
         try expectEqual(p.programme_order.count, p.programmes.count, month)
-        try expectEqual(p._meta.channels.map(\.number), [1, 2], month)
-        try expectEqual(p._meta.channels.map(\.id), ["transfers", "audio"], month)
+        // Channels are numbered from 1 with no gap, and each id names one channel: two before
+        // 2026-11-04, seven after.
+        let numbers = StationClock.channelNumbers(p)
+        try expect(!numbers.isEmpty, "\(month): no channels")
+        try expectEqual(numbers, Array(1...numbers.count), month)
+        let ids = Set(p._meta.channels.map(\.id))
+        try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
         for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }
         for (key, value) in p.programmes { try expectEqual(key, value.id, month) }
         // The titleless programmes are exactly the ones whose raw record has no usable title.
@@ -1325,7 +1330,7 @@ func realProgrammingDecodesInEveryMonth() throws {
         var slots = 0
         for day in p.days {
             for (channel, strips) in day.channels {
-                try expect(channel == "transfers" || channel == "audio", "\(month): channel \(channel)")
+                try expect(ids.contains(channel), "\(month): channel \(channel) is not in _meta.channels")
                 for slot in strips {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
@@ -1353,7 +1358,7 @@ func realProgrammingDecodesInEveryMonth() throws {
 func realProgrammingClockInvariants() throws {
     let p = try realProgramming("2026-10")
     var checked = 0, offAir = 0, joinedPastLeader = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         var t = pkt(2026, 10, 1, 0, 0, 0)
         let end = pkt(2026, 10, 31, 23, 59, 59)
         while t <= end {

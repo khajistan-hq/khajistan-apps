@@ -211,6 +211,13 @@ struct TransmissionPlayerView: View {
                 .opacity(0.01)
                 .accessibilityIdentifier("playerState")
         }
+        // The channel tuned, for the UI tests; nothing on screen.
+        .overlay(alignment: .bottomTrailing) {
+            Text("\(store.channelNumber)")
+                .font(.system(size: 1))
+                .opacity(0.01)
+                .accessibilityIdentifier("transmissionChannel")
+        }
     }
 
     private var stripShown: Bool {
@@ -361,19 +368,21 @@ struct TransmissionPlayerView: View {
         captionArmed = false
         guard holdsFocus, !switching else { return }
         switching = true
+        // Up is Channel Up, to the next number; down is Channel Down. Both go round the dial.
+        let step = direction == .up ? 1 : -1
         Task {
-            await switchUnderThePigeon()
+            await switchUnderThePigeon(step: step)
             switching = false
         }
     }
 
-    /// The other channel tunes behind the programme on screen while the pigeon flies over it, and
-    /// cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the channel
-    /// plays, with the bird flying on over it (2026-10-07).
+    /// The channel `step` places on tunes behind the programme on screen while the pigeon flies
+    /// over it, and cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the
+    /// channel plays, with the bird flying on over it (2026-10-07).
     /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
-    private func switchUnderThePigeon() async {
+    private func switchUnderThePigeon(step: Int) async {
         let pigeon = model.pigeon
-        let key = "transmission-\(store.channelNumber == 1 ? 2 : 1)"
+        let key = "transmission-\(store.channel(step: step))"
         if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
             guard !left else { return }
@@ -381,7 +390,7 @@ struct TransmissionPlayerView: View {
         }
         async let quiet: Void = store.player.fadeOut()
         let started = ContinuousClock.now
-        if let pending = await store.switchBehind(), !left {
+        if let pending = await store.switchBehind(step: step), !left {
             let next = store.incoming
             // The channel's own tune time, signing included, to its first frame; never the bird.
             TuneTimes.recordWhenPlaying(key, player: next, since: started) { !left }
@@ -406,7 +415,7 @@ struct TransmissionPlayerView: View {
                 try? await Task.sleep(for: .milliseconds(30))
             }
         } else if !left {
-            await store.switchChannel()
+            await store.switchChannel(step: step)
         }
         await quiet
     }

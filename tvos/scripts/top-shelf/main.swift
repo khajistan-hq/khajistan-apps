@@ -55,7 +55,7 @@ if args[2] == "--slides", args.count == 5 {
         write(ShelfArt.receiver(skin: skin, scale: 1, map: map, live: index.totals.live), to: out.appendingPathComponent("receiver-\(skin.rawValue).png"))
         write(ShelfArt.transmission(skin: skin, scale: 1, pigeon: pigeon), to: out.appendingPathComponent("transmission-\(skin.rawValue).png"))
         guard let p = programming else { continue }
-        for number in [1, 2] {
+        for number in StationClock.channelNumbers(p) {
             let id = StationClock.channelId(p, number: number)
             write(ShelfArt.channel(skin: skin, scale: 1, number: number, air: StationClock.onAir(p, channel: number, at: now),
                                    returns: id.flatMap { StationClock.returnTime(p, channelId: $0, at: now) },

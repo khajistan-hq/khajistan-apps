@@ -16,6 +16,7 @@ struct ReceiverView: View {
     @State private var surfTask: Task<Void, Never>?
     @State private var surfRevision = 0
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
+    @AppStorage(SurfGenre.key) private var genreRaw = SurfGenre.any.rawValue
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
@@ -40,6 +41,7 @@ struct ReceiverView: View {
         }
         .onDisappear { cancelSurf() }
         .onChange(of: mediumRaw) { cancelSurf() }
+        .onChange(of: genreRaw) { cancelSurf() }
         .onChange(of: model.extendedAtlas) { cancelSurf() }
         .onChange(of: model.receiverPath) { cancelSurf() }
         // The id restarts the load when the switch moves, so the map follows it.
@@ -181,11 +183,14 @@ struct ReceiverView: View {
             // The plate's padding is pulled back so the label sits on the page margin.
             .padding(.leading, -26)
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
+            chips(SurfGenre.allCases.map { ($0.rawValue, $0.label) }, current: genreRaw, id: "surf-genre") { genreRaw = $0 }
             if let surfNote { Text(surfNote).kjSmall(faint: true) }
         }
     }
 
     private var medium: ShuffleMedium { .stored(mediumRaw) }
+    private var genre: SurfGenre { .stored(genreRaw) }
+    private var choiceNow: SurfChoice { SurfChoice(medium: medium, scope: scope, genre: genre) }
 
     /// Surf follows the Beyond the atlas switch: the atlas when it is off, everywhere when it is on.
     /// One control for both (owner, 2026-10-29), where the front had a switch and a row of chips.
@@ -212,12 +217,12 @@ struct ReceiverView: View {
         shuffling = true
         surfNote = nil
         defer { if revision == surfRevision { shuffling = false } }
-        let choice = SurfChoice(medium: medium, scope: scope)
-        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope) { region in
+        let choice = choiceNow
+        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope, genre: choice.genre) { region in
             try? await model.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled, revision == surfRevision, model.receiverPath.isEmpty,
-              choice == SurfChoice(medium: medium, scope: scope) else { return }
+              choice == choiceNow else { return }
         model.surfHistory.update(catalogue, for: choice)
         if let channel = model.surfHistory.next(for: choice) {
             if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }

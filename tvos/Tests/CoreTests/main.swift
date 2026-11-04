@@ -4344,6 +4344,7 @@ let tests: [(String, () throws -> Void)] = [
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),
+    ("Surf: Any, Songs, Film, Local", surfGenreChoices),
     ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
@@ -4499,6 +4500,37 @@ func surfMediumChoices() throws {
     try expectEqual(ShuffleMedium.stored(nil), .all, "a new device surfs everything")
     try expectEqual(ShuffleMedium.stored("tv"), .tv, "a kept choice stays")
     try expectEqual(ShuffleScope.stored("nonsense"), .main)
+}
+
+func surfGenreChoices() throws {
+    func tagged(_ id: String, _ medium: String, _ genres: [String]?) throws -> Channel {
+        var object: [String: Any] = ["id": id, "name": id, "mediaType": medium, "regionIds": ["indus"],
+                                     "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"]
+        if let genres { object["genres"] = genres }
+        return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+    }
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data("""
+    {"regions":[{"id":"indus","label":"Indus","kind":"state","tier":"heartbeat"}],
+     "regionFiles":{"indus":"/data/i.json"},"regionCounts":{},"totals":{"channels":0,"live":0,"byMedium":{}}}
+    """.utf8))
+    let list = [try tagged("songs-tv", "tv", ["music"]), try tagged("songs-radio", "radio", ["music", "local"]),
+                try tagged("film", "tv", ["film"]), try tagged("drama", "tv", ["drama"]),
+                try tagged("news", "tv", ["news"]), try tagged("untagged", "radio", nil),
+                try tagged("general", "tv", ["general"])]
+    func pool(_ medium: ShuffleMedium, _ genre: SurfGenre) -> [String] {
+        ShufflePick.pool([(region: "indus", channels: list)], index: index, medium: medium, scope: .main, genre: genre).map(\.id)
+    }
+    try expectEqual(pool(.all, .any).count, list.count, "Any keeps every channel, tagged or not")
+    try expectEqual(pool(.all, .songs), ["songs-tv", "songs-radio"])
+    try expectEqual(pool(.tv, .songs), ["songs-tv"], "genre and medium narrow together")
+    try expectEqual(pool(.all, .film), ["film", "drama"], "Film takes drama too")
+    try expectEqual(pool(.all, .local), ["songs-radio"])
+    try expect(!pool(.all, .songs).contains("untagged") && !pool(.all, .songs).contains("general"),
+               "an untagged or general channel is not a song channel")
+    try expectEqual(SurfGenre.stored(nil), .any, "a new device surfs every genre")
+    try expectEqual(SurfGenre.stored("songs"), .songs)
+    try expect(SurfChoice(medium: .all, scope: .main) != SurfChoice(medium: .all, scope: .main, genre: .songs),
+               "each genre keeps its own surf history")
 }
 
 func shuffleScopesAndCameraRegions() throws {

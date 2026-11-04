@@ -29,6 +29,35 @@ enum ShuffleMedium: String, CaseIterable, Identifiable, Hashable, Sendable {
     }
 }
 
+/// What kind of channel Surf draws (owner, 2026-11-04: "they are mostly news and boring and i need
+/// more songs and dance and film and weird channels"). Read from each channel's genre tags, which
+/// carry their evidence in the registry (machinery scripts/signal-room/apply_genres.py). A channel
+/// with no tag is reachable under Any only.
+enum SurfGenre: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case any, songs, film, local
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .any: return "Any"
+        case .songs: return "Songs"
+        case .film: return "Film"
+        case .local: return "Local"
+        }
+    }
+    static let key = "kj.surf.genre"
+    static func stored(_ raw: String?) -> Self { raw.flatMap(Self.init(rawValue:)) ?? .any }
+
+    func includes(_ genres: [String]?) -> Bool {
+        let tags = Set(genres ?? [])
+        switch self {
+        case .any: return true
+        case .songs: return tags.contains("music")
+        case .film: return tags.contains("film") || tags.contains("drama")
+        case .local: return tags.contains("local")
+        }
+    }
+}
+
 /// Where Surf draws from: the main atlas (the heartbeat and core regions), the extended atlas
 /// (the regions behind "Beyond the atlas"), or everywhere.
 enum ShuffleScope: String, CaseIterable, Identifiable, Hashable, Sendable {
@@ -63,12 +92,12 @@ extension ShufflePick {
     /// A channel filed to any main-atlas region is a main-atlas signal, even where an extension
     /// lists it too (2026-09-03), so Extended takes only channels filed nowhere in the main atlas.
     static func pool(_ lists: [(region: String, channels: [Channel])], index: ReceiverIndex,
-                     medium: ShuffleMedium, scope: ShuffleScope) -> [Channel] {
+                     medium: ShuffleMedium, scope: ShuffleScope, genre: SurfGenre = .any) -> [Channel] {
         let main = Set(index.regions.filter { ReceiverRules.tiersOnByDefault.contains($0.tier) }.map(\.id))
         var seen = Set<String>()
         var pool: [Channel] = []
         for (region, channels) in lists {
-            for channel in channels where medium.includes(channel.mediaType) {
+            for channel in channels where medium.includes(channel.mediaType) && genre.includes(channel.genres) {
                 let filed = channel.regionIds.flatMap { $0.isEmpty ? nil : $0 } ?? [region]
                 let inMain = !Set(filed).isDisjoint(with: main)
                 let fits = scope == .everywhere || (scope == .main) == inMain
@@ -83,6 +112,7 @@ extension ShufflePick {
     /// repeat cycle; a later Surf request retries them through ReceiverStore.
     @MainActor
     static func catalogue(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
+                          genre: SurfGenre = .any,
                           load: @escaping @MainActor (String) async -> [Channel]?) async -> SurfCatalogue {
         let ids = regions(index, scope: scope)
         var lists: [String: [Channel]] = [:]
@@ -98,7 +128,7 @@ extension ShufflePick {
             }
         }
         let read = ids.compactMap { id in lists[id].map { (region: id, channels: $0) } }
-        return SurfCatalogue(channels: pool(read, index: index, medium: medium, scope: scope),
+        return SurfCatalogue(channels: pool(read, index: index, medium: medium, scope: scope, genre: genre),
                              missingRegions: failed.sorted())
     }
 
@@ -112,6 +142,7 @@ extension ShufflePick {
 struct SurfChoice: Hashable {
     let medium: ShuffleMedium
     let scope: ShuffleScope
+    var genre: SurfGenre = .any
 }
 
 struct SurfCatalogue {

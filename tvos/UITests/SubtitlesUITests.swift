@@ -123,9 +123,7 @@ final class SubtitlesUITests: XCTestCase {
         // Five seconds after the choice the strip hides; captions and the saved setting remain.
         XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
-        XCUIRemote.shared.press(.left)
-        kjPause(0.5)
-        XCTAssertFalse(control.hasFocus)
+        // Left here would open the guide (owner, 2026-11-04); Right comes straight back to CC.
         XCUIRemote.shared.press(.right)
         XCUIRemote.shared.press(.select)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")

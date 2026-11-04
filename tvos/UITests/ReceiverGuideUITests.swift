@@ -74,6 +74,12 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.left)
         XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Left closes the guide")
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of its control")
+        // Left on the picture, with nothing lit, opens the guide straight away.
+        kjPause(0.6)
+        XCUIRemote.shared.press(.left)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Left on the picture opens the guide")
+        XCUIRemote.shared.press(.left)
+        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Left closes it again")
 
         // Radio: Menu back to the region; television is the first shelf and radio the next, so one
         // press down from the channel just left reaches a station.

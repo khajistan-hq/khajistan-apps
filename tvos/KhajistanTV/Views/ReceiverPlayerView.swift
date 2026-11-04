@@ -113,7 +113,7 @@ struct ReceiverPlayerView: View {
             // what the arrows and the strip do.
             .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
             // No swipe in the hint: under VoiceOver a swipe moves VoiceOver; the Guide action is below.
-            .accessibilityHint(surfChoice == nil ? "Click up or down to change channel." : "Click up or down to surf the whole selected atlas without repeats.")
+            .accessibilityHint(surfChoice == nil ? "Click up or down to change channel, left for the guide." : "Click up or down to surf the whole selected atlas without repeats.")
             .accessibilityAction(named: "Next channel") { step(by: 1) }
             .accessibilityAction(named: surfChoice == nil ? "Previous channel" : "Another unvisited channel") { step(by: -1) }
             .accessibilityAction(named: model.captions.isEnabled ? "Captions off" : "Captions on") { model.captions.toggle(); wake() }
@@ -278,7 +278,7 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isEnabled, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + captionsFace), isOn: model.captions.isEnabled, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
@@ -286,6 +286,13 @@ struct ReceiverPlayerView: View {
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
             .accessibilityValue(model.captions.isEnabled ? "On" : "Off")
+    }
+
+    /// "CC Off" or "CC On · English", with what is left on the account: the chip says plainly
+    /// that Select turns captions off as well as on (owner, 2026-11-04).
+    private var captionsFace: String {
+        let rest = model.captions.label.replacingOccurrences(of: "Captions", with: "")
+        return "CC " + (model.captions.isEnabled ? "On" : "Off") + rest
     }
 
     private var stripControls: some View {
@@ -375,7 +382,8 @@ struct ReceiverPlayerView: View {
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
-        case nil: return
+        // Left on the picture opens the guide, as a live TV app does (owner, 2026-11-04).
+        case nil: return openGuide()
         }
         if armed == nil { wake() }
     }

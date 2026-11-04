@@ -42,7 +42,8 @@ struct RootView: View {
             }
         }
         .fullScreenCover(item: $reopened) { away in
-            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice)
+            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
+                               regionId: away.listRegion, listTitle: away.listTitle)
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG
@@ -83,7 +84,7 @@ struct RootView: View {
             if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
             goingBack = false
         }
-        .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty || !visited.isEmpty) {
+        .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {
                 model.receiverPath.removeLast()
             } else {

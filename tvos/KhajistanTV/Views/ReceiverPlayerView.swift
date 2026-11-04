@@ -176,7 +176,8 @@ struct ReceiverPlayerView: View {
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
             // while you browse; a picture stops with its screen.
             if current.mediaType == "radio", destination == nil, controller.state == .playing {
-                model.radioAway = RadioAway(channel: current, list: list, controller: controller, surfChoice: surfChoice)
+                model.radioAway = RadioAway(channel: current, list: list, controller: controller, surfChoice: surfChoice,
+                                           listRegion: listRegion, listTitle: listTitle)
             }
             stopEverything()
             dismiss()
@@ -411,6 +412,7 @@ struct ReceiverPlayerView: View {
         let regions = guideRegions
         guard regions.count > 1, let at = regions.firstIndex(where: { $0.id == regionId }) else { return }
         let cameras = (destination ?? current).mediaType == "camera"
+        cancelPrefetches()
         for delta in [1, -1] {
             let id = regions[((at + delta) % regions.count + regions.count) % regions.count].id
             prefetches.append(Task { _ = try? await model.receiver.channels(regionId: id, cameras: cameras) })
@@ -749,6 +751,9 @@ struct RadioAway: Identifiable {
     let list: [Channel]
     let controller: PlayerController
     let surfChoice: SurfChoice?
+    /// What the guide titles its first page by when the station is opened again.
+    let listRegion: String?
+    let listTitle: String?
     var id: String { channel.id }
 }
 

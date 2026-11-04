@@ -54,9 +54,10 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertTrue(transmission.waitForExistence(timeout: 15))
         open("Receiver")
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "the top bar returns to the atlas")
-        // On the atlas the first Back moves focus to Surf; the second is the one that leaves.
-        XCUIRemote.shared.press(.menu)
-        kjPause(1)
+        // Back from the top bar is the press that reads the history (the front's content hands
+        // Back to tvOS), so press it there.
+        for _ in 0..<4 { XCUIRemote.shared.press(.up) }
+        kjPause(0.5)
         XCUIRemote.shared.press(.menu)
         // Transmission takes seconds to draw, so give it the time it would need to come back.
         XCTAssertFalse(transmission.waitForExistence(timeout: 6), "Back on the atlas must not go back to Transmission")

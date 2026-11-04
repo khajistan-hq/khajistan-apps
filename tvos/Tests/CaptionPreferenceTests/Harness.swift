@@ -6,6 +6,13 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
 
 @MainActor final class AuthStore {
     var isSignedIn = true
+    // The account-isolation surface LiveCaptionSession reads since main's d20ced6.
+    var accessGeneration = 0
+    var observers: [UUID: @MainActor () -> Void] = [:]
+    func observeAccess(_ observer: @escaping @MainActor () -> Void) -> UUID {
+        let id = UUID(); observers[id] = observer; return id
+    }
+    func removeAccessObserver(_ id: UUID) { observers.removeValue(forKey: id) }
     func validAccessToken() async throws -> String { "synthetic-test-token" }
 }
 

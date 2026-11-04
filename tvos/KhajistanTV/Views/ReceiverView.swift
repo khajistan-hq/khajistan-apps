@@ -96,6 +96,7 @@ struct ReceiverView: View {
                                // of the map under the top bar.
                                stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
                         .padding(.bottom, 12)
+                    GenreShelves()
                     HomeSections()
                     camerasRow(index)
                     filmsRow
@@ -549,5 +550,113 @@ private struct AtlasPanel: View {
             // The plan takes one still every 1.5 s at most and gives each up to 10 s.
             try? await Task.sleep(for: .seconds(Double(wanted.count) * 4))
         }
+    }
+}
+
+/// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
+/// 2026-11-04: news was not on the front as a category). The kinds are the region lists' own
+/// `genres`; a channel sits on every shelf it is tagged for. The shelves follow the Beyond the
+/// atlas switch, and up and down in the player surf the shelf the channel came from.
+private struct GenreShelves: View {
+    private struct Kind: Identifiable {
+        let id: String
+        let label: String
+        let tags: Set<String>
+    }
+
+    private struct Row: Identifiable {
+        let kind: Kind
+        let channels: [Channel]
+        var id: String { kind.id }
+    }
+
+    private struct Pick: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        var id: String { channel.id }
+    }
+
+    /// News first (asked for by name), then music and film, then the rest.
+    private static let kinds = [
+        Kind(id: "news", label: "News", tags: ["news"]),
+        Kind(id: "music", label: "Music", tags: ["music"]),
+        Kind(id: "film", label: "Film & drama", tags: ["film", "drama"]),
+        Kind(id: "faith", label: "Faith", tags: ["faith"]),
+        Kind(id: "culture", label: "Culture", tags: ["culture"]),
+        Kind(id: "sport", label: "Sport", tags: ["sport"]),
+        Kind(id: "children", label: "Children", tags: ["children"]),
+    ]
+    /// A kind with fewer channels than this is not a shelf yet.
+    private static let fewest = 3
+    /// The shelves whose first cards get live stills, and how many each. The region cards above
+    /// take their share first; 24 a visit in all (StillPlan).
+    private static let pictured: [String] = ["news", "music"]
+    private static let picturedCards = 4
+
+    @Environment(AppModel.self) private var model
+    @State private var rows: [Row] = []
+    @State private var playing: Pick?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(rows) { row in
+                Shelf(row.kind.label, count: "\(row.channels.count) live") {
+                    ForEach(row.channels) { channel in
+                        let liked = model.saves.isSaved(channel)
+                        let still = model.stills.image(for: channel.id)
+                        Button {
+                            playing = Pick(channel: channel, list: row.channels)
+                        } label: {
+                            PictureCard(channel: channel, still: still, liked: liked)
+                        }
+                        .buttonStyle(HouseCardStyle())
+                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
+                        .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
+                    }
+                }
+                .accessibilityIdentifier("genre-\(row.id)")
+            }
+        }
+        .task(id: model.extendedAtlas) { await load() }
+        // Back from a player: the visit ended, and with it the wanted lists.
+        .onAppear { wantStills() }
+        .fullScreenCover(item: $playing) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+        }
+    }
+
+    /// Every region list in the atlas shown, read together (each is cached after its first read),
+    /// then sorted into the kinds in region order, each channel once per shelf.
+    private func load() async {
+        guard let index = model.receiver.index else { return }
+        let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
+        let ids = index.listedRegions.filter { scope.includes(tier: $0.tier) }.map(\.id)
+        var lists: [String: [Channel]] = [:]
+        await withTaskGroup(of: (String, [Channel]).self) { group in
+            for id in ids {
+                group.addTask { @MainActor in
+                    (id, (try? await model.receiver.channels(regionId: id, cameras: false)) ?? [])
+                }
+            }
+            for await (id, list) in group { lists[id] = list }
+        }
+        guard !Task.isCancelled else { return }
+        let channels = ids.flatMap { lists[$0] ?? [] }.filter { $0.mediaType != "camera" }
+        rows = Self.kinds.compactMap { kind in
+            var seen = Set<String>()
+            let shelf = channels.filter { channel in
+                guard !Set((channel.genres ?? []).map { $0.lowercased() }).isDisjoint(with: kind.tags) else { return false }
+                return seen.insert(channel.id).inserted
+            }
+            return shelf.count >= Self.fewest ? Row(kind: kind, channels: shelf) : nil
+        }
+        wantStills()
+    }
+
+    private func wantStills() {
+        let first = Self.pictured.flatMap { id in
+            rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
+        }
+        if !first.isEmpty { model.stills.wantNext(first) }
     }
 }

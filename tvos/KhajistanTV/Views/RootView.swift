@@ -6,6 +6,10 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     /// The radio from the small player, opened full screen again.
     @State private var reopened: RadioAway?
+    /// The sections visited before this one, so Back goes one step back (owner, 2026-11-04).
+    @State private var visited: [Section] = []
+    /// Set while Back changes the section, so the change is not recorded as a visit.
+    @State private var goingBack = false
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -69,12 +73,21 @@ struct RootView: View {
                 scene.windows.forEach { $0.overrideUserInterfaceStyle = style }
             }
         }
-        // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
-        // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
-        // what tvOS does: a region pops back to the map, and the map leaves the app. The pop is
-        // done here as well, because Back pressed in the top bar never reaches the Receiver's stack.
-        .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
-            if model.section != .receiver { model.section = .receiver } else { model.receiverPath.removeLast() }
+        // Back (Menu) goes one step back (owner, 2026-11-04: "Back click goes one step back"): a
+        // region pops back to the map, another section returns to the section visited before it,
+        // and with nothing visited to the atlas (owner, 2026-10-05). The map with nothing behind it
+        // leaves the app, as tvOS does. The pop is done here as well, because Back pressed in the
+        // top bar never reaches the Receiver's stack.
+        .onChange(of: model.section) { old, _ in
+            if goingBack { goingBack = false } else { visited.append(old) }
+        }
+        .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty || !visited.isEmpty) {
+            if model.section == .receiver, !model.receiverPath.isEmpty {
+                model.receiverPath.removeLast()
+            } else {
+                goingBack = true
+                model.section = visited.popLast() ?? .receiver
+            }
         })
     }
 

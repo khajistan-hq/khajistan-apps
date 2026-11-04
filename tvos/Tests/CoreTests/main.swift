@@ -4382,7 +4382,7 @@ let tests: [(String, () throws -> Void)] = [
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),
-    ("Surf: Any, Songs, Film, Local", surfGenreChoices),
+    ("Surf: Any, Music, Film, Local", surfGenreChoices),
     ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 

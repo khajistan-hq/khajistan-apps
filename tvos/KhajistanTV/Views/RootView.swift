@@ -78,8 +78,10 @@ struct RootView: View {
         // and with nothing visited to the atlas (owner, 2026-10-05). The map with nothing behind it
         // leaves the app, as tvOS does. The pop is done here as well, because Back pressed in the
         // top bar never reaches the Receiver's stack.
-        .onChange(of: model.section) { old, _ in
-            if goingBack { goingBack = false } else { visited.append(old) }
+        .onChange(of: model.section) { old, new in
+            // The atlas is the root: reaching it, by Back or the top bar, ends the history.
+            if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
+            goingBack = false
         }
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty || !visited.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {

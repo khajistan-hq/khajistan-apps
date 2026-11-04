@@ -4567,6 +4567,8 @@ func surfGenreChoices() throws {
                "an untagged or general channel is not a song channel")
     try expectEqual(SurfGenre.stored(nil), .any, "a new device surfs every genre")
     try expectEqual(SurfGenre.stored("songs"), .songs)
+    try expectEqual(SurfGenre.allCases.map(\.label), ["Any", "Music", "Film", "Local"],
+                    "the music filter reads Music (owner, 2026-11-04); its stored value stays songs")
     try expect(SurfChoice(medium: .all, scope: .main) != SurfChoice(medium: .all, scope: .main, genre: .songs),
                "each genre keeps its own surf history")
 }

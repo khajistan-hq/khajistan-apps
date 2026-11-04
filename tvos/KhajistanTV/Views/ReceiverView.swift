@@ -573,6 +573,7 @@ private struct GenreShelves: View {
     private struct Pick: Identifiable {
         let channel: Channel
         let list: [Channel]
+        let title: String
         var id: String { channel.id }
     }
 
@@ -605,7 +606,7 @@ private struct GenreShelves: View {
                         let liked = model.saves.isSaved(channel)
                         let still = model.stills.image(for: channel.id)
                         Button {
-                            playing = Pick(channel: channel, list: row.channels)
+                            playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
                         } label: {
                             PictureCard(channel: channel, still: still, liked: liked)
                         }
@@ -621,7 +622,7 @@ private struct GenreShelves: View {
         // Back from a player: the visit ended, and with it the wanted lists.
         .onAppear { wantStills() }
         .fullScreenCover(item: $playing) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
     }
 

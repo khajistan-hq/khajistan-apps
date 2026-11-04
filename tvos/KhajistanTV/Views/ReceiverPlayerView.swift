@@ -14,8 +14,13 @@ struct ReceiverPlayerView: View {
     /// chosen from in the guide.
     @State private var list: [Channel]
     let surfChoice: SurfChoice?
-    /// The region the shelf is from, when the viewer came from a region page.
-    let regionId: String?
+    /// The region `list` is from: the region page the viewer came from, or the region last chosen
+    /// from in the guide. Nil for a shelf that spans regions (News, Music) and for Surf.
+    @State private var listRegion: String?
+    /// The name of a shelf that spans regions, which titles the guide's first page.
+    @State private var listTitle: String?
+    /// The guide's neighbour-region fetches, cancelled when the guide or the player closes.
+    @State private var prefetches: [Task<Void, Never>] = []
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -63,10 +68,11 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil) {
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil) {
         _list = State(initialValue: list)
         self.surfChoice = surfChoice
-        self.regionId = regionId
+        _listRegion = State(initialValue: regionId)
+        _listTitle = State(initialValue: listTitle)
         _current = State(initialValue: channel)
     }
 
@@ -339,10 +345,13 @@ struct ReceiverPlayerView: View {
         hideTask?.cancel()
         guideLoad?.cancel()
         guideLoading = false
-        guideList = list
-        guideRegion = surfChoice == nil ? homeRegion : nil
+        // The medium playing only, as on every page the guide turns to.
+        let medium = (destination ?? current).mediaType
+        guideList = list.filter { $0.mediaType == medium }
+        // A region page's list is titled by its region; a cross-region shelf and Surf by name.
+        guideRegion = surfChoice == nil && listTitle == nil ? homeRegion : nil
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-            guideRow = list.firstIndex { $0.id == (destination ?? current).id } ?? 0
+            guideRow = guideList.firstIndex { $0.id == (destination ?? current).id } ?? 0
         }
         prefetchGuide(around: guideRegion ?? homeRegion)
     }
@@ -359,12 +368,12 @@ struct ReceiverPlayerView: View {
     /// The region the shelf came from, or the first of the channel's own.
     private var homeRegion: String? {
         let ids = guideRegions.map(\.id)
-        if let regionId, ids.contains(regionId) { return regionId }
+        if let listRegion, ids.contains(listRegion) { return listRegion }
         return (destination ?? current).regionIds?.first { ids.contains($0) }
     }
 
     private var guideTitle: String {
-        guard let guideRegion else { return "Surf" }
+        guard let guideRegion else { return listTitle ?? "Surf" }
         return guideRegions.first { $0.id == guideRegion }?.label ?? guideRegion
     }
 
@@ -391,6 +400,11 @@ struct ReceiverPlayerView: View {
         prefetchGuide(around: target.id)
     }
 
+    private func cancelPrefetches() {
+        prefetches.forEach { $0.cancel() }
+        prefetches = []
+    }
+
     /// Fetches the regions either side of this one into the store's cache, so the next left or
     /// right shows its channels at once instead of "Loading".
     private func prefetchGuide(around regionId: String?) {
@@ -399,7 +413,7 @@ struct ReceiverPlayerView: View {
         let cameras = (destination ?? current).mediaType == "camera"
         for delta in [1, -1] {
             let id = regions[((at + delta) % regions.count + regions.count) % regions.count].id
-            Task { _ = try? await model.receiver.channels(regionId: id, cameras: cameras) }
+            prefetches.append(Task { _ = try? await model.receiver.channels(regionId: id, cameras: cameras) })
         }
     }
 
@@ -407,6 +421,7 @@ struct ReceiverPlayerView: View {
     /// keeps the strip up and takes the next Menu.
     private func closeGuide() {
         guideLoad?.cancel()
+        cancelPrefetches()
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         wake()
@@ -417,7 +432,10 @@ struct ReceiverPlayerView: View {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         // Up and down then step through the region chosen from. Surf keeps its own walk.
-        if surfChoice == nil, guideList.count > 1 { list = guideList }
+        if surfChoice == nil, guideList.count > 1 {
+            list = guideList
+            if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
+        }
         guard target.id != (destination ?? current).id else { return wake() }
         if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
@@ -451,7 +469,6 @@ struct ReceiverPlayerView: View {
     }
 
     private func moveRight() {
-        // A failed channel's strip carries no controls, so there is nothing to the right.
         switch armed {
         case nil: return openGuide()
         case .captions: armed = .like
@@ -687,6 +704,7 @@ struct ReceiverPlayerView: View {
         leaving = true
         guideRow = nil
         guideLoad?.cancel()
+        cancelPrefetches()
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()

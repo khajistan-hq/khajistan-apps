@@ -85,28 +85,38 @@ final class ReceiverStore {
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera
     /// shard instead of the television and radio one.
+    /// Region downloads under way, by shard key, so a second ask waits on the first.
+    @ObservationIgnored private var inFlight: [String: Task<[Channel], Error>] = [:]
+
     func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
         let key = cameras ? regionId + "-camera" : regionId
         let raw: [Channel]
         if let cached = shards[key] {
             raw = cached
+        } else if let pending = inFlight[key] {
+            // The guide's prefetch and a turn can ask for the same region at once: one download.
+            raw = try await pending.value
         } else {
             guard let url = cameras ? index.cameraURL(regionId: regionId) : index.shardURL(regionId: regionId) else {
                 return []
             }
-            let (data, response) = try await urlSession.data(from: url)
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            guard code == 200 else { throw ReceiverStoreError.http(code) }
-            let shard: RegionShard
-            do {
-                shard = try await Task.detached(priority: .userInitiated) {
-                    try JSONDecoder().decode(RegionShard.self, from: data)
-                }.value
-            } catch {
-                throw ReceiverStoreError.unreadable
+            let session = urlSession
+            let load = Task { () throws -> [Channel] in
+                let (data, response) = try await session.data(from: url)
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard code == 200 else { throw ReceiverStoreError.http(code) }
+                do {
+                    return try await Task.detached(priority: .userInitiated) {
+                        try JSONDecoder().decode(RegionShard.self, from: data)
+                    }.value.channels
+                } catch {
+                    throw ReceiverStoreError.unreadable
+                }
             }
-            raw = shard.channels
+            inFlight[key] = load
+            defer { inFlight[key] = nil }
+            raw = try await load.value
             shards[key] = raw
         }
         await refreshControlsIfStale()

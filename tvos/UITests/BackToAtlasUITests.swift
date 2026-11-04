@@ -32,20 +32,35 @@ final class BackToAtlasUITests: XCTestCase {
             for _ in 0..<4 { XCUIRemote.shared.press(.up) }
             let tab = app.buttons.matching(NSPredicate(format: "label ==[c] %@", section)).firstMatch
             XCTAssertTrue(tab.waitForExistence(timeout: 10), "the top bar must offer \(section)")
-            for _ in 0..<6 where !tab.hasFocus { XCUIRemote.shared.press(.right) }
+            // The tab may sit either side of the focus: walk to the left end, then right.
+            for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.left) }
+            for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.right) }
             XCTAssertTrue(tab.hasFocus, "\(section) must take focus in the top bar")
             XCUIRemote.shared.press(.select)
         }
         open("Transmission")
         XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 3), "Transmission must replace the atlas")
+        let transmission = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'transmission'")).firstMatch
+        XCTAssertTrue(transmission.waitForExistence(timeout: 15), "Transmission must show")
         open("Account")
-        kjPause(1)
+        XCTAssertTrue(transmission.waitForNonExistence(timeout: 10), "Account must replace Transmission")
         XCUIRemote.shared.press(.menu)
-        kjPause(1.5)
-        XCTAssertFalse(regions.firstMatch.exists, "Back from Account must not jump to the atlas")
+        XCTAssertTrue(transmission.waitForExistence(timeout: 10), "Back from Account must return to Transmission")
+        XCTAssertFalse(regions.firstMatch.exists, "and not jump to the atlas")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "a second Back reaches the atlas")
-        XCTAssertEqual(app.state, .runningForeground)
+        // Reaching the atlas ends the history: Back there never returns to Transmission.
+        open("Transmission")
+        XCTAssertTrue(transmission.waitForExistence(timeout: 15))
+        open("Receiver")
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "the top bar returns to the atlas")
+        // On the atlas the first Back moves focus to Surf; the second is the one that leaves.
+        XCUIRemote.shared.press(.menu)
+        kjPause(1)
+        XCUIRemote.shared.press(.menu)
+        // Transmission takes seconds to draw, so give it the time it would need to come back.
+        XCTAssertFalse(transmission.waitForExistence(timeout: 6), "Back on the atlas must not go back to Transmission")
+        XCTAssertNotEqual(app.state, .runningForeground, "Back from the atlas, with nothing behind it, leaves the app")
     }
 
     /// Back pressed in the top bar while a region is open pops to the map. The top bar sits

@@ -8,6 +8,9 @@ import Foundation
 /// The route is decided by asking both at once and kept for the next launch, so a later launch
 /// starts on the way that last worked and checks again behind it. An address the server hands back
 /// (a signed page, a stored file) is moved onto the route with `routed(_:)`.
+///
+/// Also here: `URLError.isDroppedConnection`, the one test of "worth one more try" that the stores
+/// share (bottom of the file).
 enum SupabaseRoute {
     enum Path: String, Sendable {
         case direct, proxy
@@ -177,6 +180,14 @@ enum SupabaseRoute {
         return result
     }
 
+    #if DEBUG
+    /// The probe's session settings. The network harness (ios/Tests/PnvRetry) stubs them, so it
+    /// runs without reaching the project. Debug only: a release build has no seam to swap.
+    nonisolated(unsafe) static var probeConfiguration: () -> URLSessionConfiguration = { .ephemeral }
+    #else
+    private static func probeConfiguration() -> URLSessionConfiguration { .ephemeral }
+    #endif
+
     private static func probe(viaProxy: Bool) async -> Bool {
         var request = URLRequest(url: base(for: viaProxy ? .proxy : .direct).appendingPathComponent("rest/v1/"))
         request.timeoutInterval = probeLimit
@@ -184,12 +195,21 @@ enum SupabaseRoute {
         request.httpMethod = "HEAD"
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
-        let config = URLSessionConfiguration.ephemeral
+        let config = probeConfiguration()
         config.timeoutIntervalForRequest = probeLimit
         config.timeoutIntervalForResource = probeLimit + 0.5
         let session = URLSession(configuration: config)
         defer { session.finishTasksAndInvalidate() }
         guard let (_, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return false }
         return answers(status: http.statusCode, routeHeader: http.value(forHTTPHeaderField: "x-kj-route"), viaProxy: viaProxy)
+    }
+}
+
+extension URLError {
+    /// A server that is there did not answer this time: worth one more try after a short wait. A
+    /// dropped TLS handshake is one (CI, 2026-11-03). No network at all, or a host that does not
+    /// resolve, is not going to change in a few seconds, so those are not asked again.
+    var isDroppedConnection: Bool {
+        [.timedOut, .networkConnectionLost, .cannotConnectToHost, .secureConnectionFailed].contains(code)
     }
 }

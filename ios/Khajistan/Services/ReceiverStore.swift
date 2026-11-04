@@ -42,8 +42,7 @@ final class ReceiverStore {
     /// How long a fetched index or set of feeds is trusted before the next look.
     private static let staleAfter: TimeInterval = 600
 
-    init() {
-        let config = URLSessionConfiguration.ephemeral
+    init(configuration config: URLSessionConfiguration = .ephemeral) {
         config.timeoutIntervalForRequest = 25
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
@@ -74,7 +73,7 @@ final class ReceiverStore {
         defer { isLoading = false }
         if index == nil { indexError = nil }
         do {
-            let (data, response) = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            let (data, response) = try await indexData()
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw ReceiverStoreError.http(code) }
             let decoded: ReceiverIndex
@@ -93,6 +92,22 @@ final class ReceiverStore {
             if Task.isCancelled { return }
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
+        }
+    }
+
+    /// One quiet second try when the first cannot connect: a dropped handshake on a cold launch
+    /// otherwise leaves the Receiver on "has not loaded" until the reader presses Try again (CI,
+    /// 2026-11-03). The second try gets 10 s rather than 25, so a server that does not answer
+    /// keeps the spinner up for about 37 s, not 52. An answer, even a refusal, is not asked again.
+    private func indexData() async throws -> (Data, URLResponse) {
+        let url = Self.dataURL("receiver-index.json")
+        do {
+            return try await urlSession.data(from: url)
+        } catch let error as URLError where error.isDroppedConnection {
+            try await Task.sleep(for: .seconds(2))
+            var again = URLRequest(url: url)
+            again.timeoutInterval = 10
+            return try await urlSession.data(for: again)
         }
     }
 

@@ -24,6 +24,9 @@ final class ReceiverTuner {
 
     let captions: LiveCaptionSession
     @ObservationIgnored private var initialOpenAttempted = false
+    #if DEBUG
+    @ObservationIgnored private var openingHeld = false
+    #endif
     @ObservationIgnored private var openingPending = false
     @ObservationIgnored private var openingRevision = 0
     @ObservationIgnored private var surfRevision = 0
@@ -89,11 +92,13 @@ final class ReceiverTuner {
             }
         }
         #if DEBUG
-        // Reproduce a tab change while automatic selection is suspended without depending on network speed.
-        let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
-        if delay > 0 {
-            try? await Task.sleep(for: .milliseconds(min(delay, 10_000)))
-            guard !Task.isCancelled, isActive(), opening == openingRevision else { return }
+        // `-kjopeninghold YES`: the first automatic selection waits until the reader leaves, so a
+        // test leaves mid-selection however slow the runner is, and the selection on return runs at
+        // once. A timed hold raced a slow launch (CI, 2026-11-04: the Home tap landed 10 s in).
+        if UserDefaults.standard.bool(forKey: "kjopeninghold"), !openingHeld {
+            openingHeld = true
+            while !Task.isCancelled, isActive() { try? await Task.sleep(for: .milliseconds(100)) }
+            return
         }
         #endif
         await surf(allowSelection: { isActive() && self.openingRevision == opening })

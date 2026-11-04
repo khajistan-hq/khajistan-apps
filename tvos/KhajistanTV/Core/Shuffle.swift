@@ -34,12 +34,13 @@ enum ShuffleMedium: String, CaseIterable, Identifiable, Hashable, Sendable {
 /// carry their evidence in the registry (machinery scripts/signal-room/apply_genres.py). A channel
 /// with no tag is reachable under Any only.
 enum SurfGenre: String, CaseIterable, Identifiable, Hashable, Sendable {
+    // `songs` stays the stored value; the label is Music (owner, 2026-11-04).
     case any, songs, film, local
     var id: String { rawValue }
     var label: String {
         switch self {
         case .any: return "Any"
-        case .songs: return "Songs"
+        case .songs: return "Music"
         case .film: return "Film"
         case .local: return "Local"
         }

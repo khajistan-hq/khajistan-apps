@@ -4382,7 +4382,7 @@ let tests: [(String, () throws -> Void)] = [
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),
-    ("Surf: Any, Songs, Film, Local", surfGenreChoices),
+    ("Surf: Any, Music, Film, Local", surfGenreChoices),
     ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
@@ -4567,6 +4567,8 @@ func surfGenreChoices() throws {
                "an untagged or general channel is not a song channel")
     try expectEqual(SurfGenre.stored(nil), .any, "a new device surfs every genre")
     try expectEqual(SurfGenre.stored("songs"), .songs)
+    try expectEqual(SurfGenre.allCases.map(\.label), ["Any", "Music", "Film", "Local"],
+                    "the music filter reads Music (owner, 2026-11-04); its stored value stays songs")
     try expect(SurfChoice(medium: .all, scope: .main) != SurfChoice(medium: .all, scope: .main, genre: .songs),
                "each genre keeps its own surf history")
 }

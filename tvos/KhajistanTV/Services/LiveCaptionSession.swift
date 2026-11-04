@@ -94,6 +94,9 @@ final class LiveCaptionSession {
         accessObserver = auth.observeAccess { [weak self] in
             guard let self else { return }
             self.stop("Account changed. Turn captions on again.")
+            // The saved On is the last viewer's choice, not the new account's: a channel
+            // change must not start paid demand on a balance nobody pressed CC for.
+            self.forgetChoice()
             self.balance = nil
         }
     }
@@ -152,7 +155,15 @@ final class LiveCaptionSession {
         Task { await self.loadAccuracy(target, generation: gen) }
         guard offered else { return }
         askBalance()
-        if isEnabled { turnOn() }
+        // A channel still tuning is picked up by onPlaybackResumed when it plays; asking now
+        // only puts "Wait for the signal…" under a press nobody made.
+        if isEnabled, player.state == .playing || player.state == .paused { turnOn() }
+    }
+
+    /// Off, saved: an account change or a refusal from request-captions ends the choice.
+    private func forgetChoice() {
+        isEnabled = false
+        defaults.set("off", forKey: CaptionRules.modeKey)
     }
 
     /// Release demand while playback is interrupted without forgetting the viewer's choice.
@@ -258,6 +269,7 @@ final class LiveCaptionSession {
         guard isOn, gen == generation else { return }
         if res.allowed == false {
             stop(CaptionRules.startRefusal(res.reason))
+            forgetChoice()   // or every buffer recovery would ask again
             return
         }
         tasks.append(Task { await self.heartbeat(every: res.heartbeat_seconds ?? 30, generation: gen) })
@@ -272,7 +284,7 @@ final class LiveCaptionSession {
             guard gen == generation, isOn else { return }
             guard let res else { continue }
             acceptBilling(res)
-            if res.allowed == false { stop(CaptionRules.heartbeatRefusal(res.reason)); return }
+            if res.allowed == false { stop(CaptionRules.heartbeatRefusal(res.reason)); forgetChoice(); return }
         }
     }
 

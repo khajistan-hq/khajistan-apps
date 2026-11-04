@@ -87,6 +87,7 @@ final class LiveCaptionSession {
         accessObserver = auth.observeAccess { [weak self] in
             guard let self else { return }
             self.stop("Account changed. Turn captions on again.")
+            self.carry = false   // the last viewer's choice is not the new account's
             self.balance = nil
         }
     }
@@ -123,12 +124,18 @@ final class LiveCaptionSession {
         guard offered else { return }
         askBalance()
         // Preserve build10: a channel change carries an explicit CC choice for this sitting.
-        if carry { turnOn() }
+        // A channel still tuning is picked up by playbackResumed() when it plays.
+        if carry, player.state == .playing || player.state == .paused { turnOn() }
 
     }
 
     /// A system Pause, another player, Stop or failure releases demand without losing the channel.
     /// Playback resuming alone never restarts metered captions; CC remains an explicit action.
+    /// The tuner calls this when its picture starts playing: a carried CC choice comes back on.
+    func playbackResumed() {
+        if carry && !isOn { turnOn() }
+    }
+
     func suspendForPlaybackInterruption() {
         guard isOn || billingSession != nil else { return }
         carry = false
@@ -221,6 +228,7 @@ final class LiveCaptionSession {
         acceptBilling(res)
         guard isOn, gen == generation else { return }
         if res.allowed == false {
+            carry = false   // or every channel change would ask again
             stop(CaptionRules.startRefusal(res.reason))
             return
         }
@@ -236,7 +244,7 @@ final class LiveCaptionSession {
             guard gen == generation, isOn else { return }
             guard let res else { continue }
             acceptBilling(res)
-            if res.allowed == false { stop(CaptionRules.heartbeatRefusal(res.reason)); return }
+            if res.allowed == false { carry = false; stop(CaptionRules.heartbeatRefusal(res.reason)); return }
         }
     }
 

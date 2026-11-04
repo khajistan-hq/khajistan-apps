@@ -13,6 +13,7 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
         let id = UUID(); observers[id] = observer; return id
     }
     func removeAccessObserver(_ id: UUID) { observers.removeValue(forKey: id) }
+    func changeAccount() { accessGeneration += 1; Array(observers.values).forEach { $0() } }
     func validAccessToken() async throws -> String { "synthetic-test-token" }
 }
 
@@ -98,6 +99,7 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
     var translationReturnsNil = false
     var recoveryRequests = 0
     var recoveryRows: [[String: Any]] = []
+    var refuseStart = false
     func releaseRecovery() { let held = recoveryWaiters; recoveryWaiters = []; held.forEach { $0.resume() } }
     func releaseTranslations() { let held = translationWaiters; translationWaiters = []; held.forEach { $0.resume() } }
     func data(_ request: URLRequest) async -> (Data, URLResponse) {
@@ -107,7 +109,8 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
         if url.path.contains("request-captions") {
             let sent = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any] ?? [:]
             if let action = sent["action"] as? String { demandActions.append(action); demandChannels.append(sent["channel_id"] as? String ?? "") }
-            body = ["allowed": true, "billing_mode": "enforced", "unlimited": true,
+            body = ["allowed": !refuseStart, "reason": refuseStart ? "credits_exhausted" : NSNull(),
+                    "billing_mode": "enforced", "unlimited": true,
                     "session_id": sent["session_id"] ?? NSNull(),
                     "lease_expires_at": ISO8601DateFormatter().string(from: Date().addingTimeInterval(120)),
                     "heartbeat_seconds": 60]
@@ -204,6 +207,9 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
             ("explicit off survives retunes and relaunch", persistsOff),
             ("unavailable channel and signed-out state retain preference without demand", unavailable),
             ("explicit off remains possible when an enabled channel is unavailable", offWhileUnavailable),
+            ("an account change forgets On, so the next account is never billed unasked", accountChangeForgetsOn),
+            ("a refused start turns CC Off instead of asking on every recovery", refusalTurnsOff),
+            ("a channel still tuning waits for its picture, with no wait note", tuningRetuneWaitsForPicture),
             ("controls hide after five seconds and remote interaction resets deadline", controlsDeadline),
             ("guide, focus and accessibility holds survive stale timers", controlsHold)
         ]
@@ -252,6 +258,54 @@ func update(_ original: String, text: String, native: String? = nil, uncertain: 
             // New service models a new app process: no in-memory carry state survives.
             service.attach(try channel("relaunch"), player: player)
             try check(service.isOn, "saved on preference restores after service recreation")
+            service.detach()
+        }
+    }
+
+    @MainActor static func accountChangeForgetsOn() async throws {
+        try await withFixture { defaults, auth, player, network, suite in
+            let service = LiveCaptionSession(auth: auth, defaults: defaults)
+            service.attach(try channel("first"), player: player)
+            service.toggle()
+            try await eventually("A's captions start") { network.demandActions.filter { $0 == "start" }.count == 1 }
+            auth.changeAccount()   // A signs out, B signs in on the same Apple TV
+            try check(!service.isOn && !service.isEnabled, "the new account starts with CC Off")
+            try check(defaults.string(forKey: CaptionRules.modeKey) == "off", "and Off is what is saved")
+            service.attach(try channel("second"), player: player)
+            try await Task.sleep(for: .milliseconds(150))
+            try check(network.demandActions.filter { $0 == "start" }.count == 1, "B's channel change starts no paid demand")
+            service.detach()
+        }
+    }
+
+    @MainActor static func refusalTurnsOff() async throws {
+        try await withFixture { defaults, auth, player, network, suite in
+            network.refuseStart = true
+            let service = LiveCaptionSession(auth: auth, defaults: defaults)
+            service.attach(try channel(), player: player)
+            service.toggle()
+            try await eventually("the refusal lands") { !service.isEnabled }
+            try check(!service.isOn && defaults.string(forKey: CaptionRules.modeKey) == "off", "refused: Off, saved")
+            for _ in 0..<3 { player.state = .tuning; player.state = .playing }
+            try await Task.sleep(for: .milliseconds(150))
+            try check(network.demandActions.filter { $0 == "start" }.count == 1, "buffer recoveries do not ask again")
+            service.detach()
+        }
+    }
+
+    @MainActor static func tuningRetuneWaitsForPicture() async throws {
+        try await withFixture { defaults, auth, player, network, suite in
+            let service = LiveCaptionSession(auth: auth, defaults: defaults)
+            service.attach(try channel("first"), player: player)
+            service.toggle()
+            try await eventually("first channel starts") { network.demandActions.filter { $0 == "start" }.count == 1 }
+            let next = PlayerController()
+            next.state = .tuning
+            service.attach(try channel("second"), player: next)
+            try check(!service.note.contains("Wait for the signal"), "no instruction under a press nobody made: \(service.note)")
+            try check(service.isEnabled, "the choice is kept while the channel tunes")
+            next.state = .playing
+            try await eventually("captions come back when the picture plays") { service.isOn }
             service.detach()
         }
     }

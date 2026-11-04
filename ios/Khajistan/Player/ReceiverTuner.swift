@@ -309,6 +309,8 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
+        // Before the change guard: the first play after a retune is what brings carried CC back.
+        if new == .playing, source != nil { captions.playbackResumed() }
         guard !changing, source != nil else { return }
         if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
             Task {

@@ -4344,6 +4344,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the clock and the hold", liveCaptionClock),
     ("Live captions: bounded timeline preserves readable source order", liveCaptionBoundedTimeline),
     ("Live captions: realtime messages", liveCaptionRealtime),
+    ("Live captions: bounded readable timeline", liveCaptionBoundedTimeline),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
     ("Reading Room: covers past the budget are let go oldest first, never on screen", readingCoverBudget),

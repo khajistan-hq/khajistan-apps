@@ -129,13 +129,14 @@ final class LiveCaptionSession {
 
     }
 
-    /// A system Pause, another player, Stop or failure releases demand without losing the channel.
-    /// Playback resuming alone never restarts metered captions; CC remains an explicit action.
-    /// The tuner calls this when its picture starts playing: a carried CC choice comes back on.
+    /// The tuner calls this when its picture starts playing: a CC choice carried across a channel
+    /// change comes back on. A Pause, another player, Stop or failure clears `carry` first
+    /// (suspendForPlaybackInterruption), so resuming after those still needs a CC press.
     func playbackResumed() {
         if carry && !isOn { turnOn() }
     }
 
+    /// A system Pause, another player, Stop or failure releases demand without losing the channel.
     func suspendForPlaybackInterruption() {
         guard isOn || billingSession != nil else { return }
         carry = false

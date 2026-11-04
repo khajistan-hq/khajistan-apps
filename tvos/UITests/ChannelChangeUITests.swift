@@ -62,6 +62,44 @@ final class ChannelChangeUITests: XCTestCase {
         XCTAssertNotEqual(current.label, start)
     }
 
+    /// A press made while the sign-on's pigeon is still flying must not stop channel changes for
+    /// the rest of the player's life (found 2026-11-04): Up at once, and Up again once the change
+    /// has had time to land, must each move the channel.
+    func testAPressDuringTheSignOnDoesNotStopLaterPresses() {
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-10.json").path
+        let station = XCUIApplication()
+        station.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
+                                   "-kjnow", "2026-10-15T14:10:00+05:00"]
+        kjLaunch(station)
+        let page = station.staticTexts["transmissionState"]
+        XCTAssertTrue(page.waitForExistence(timeout: 30))
+        waitUntil(20) { (page.value as? String) == "Ready" }
+        let card = station.buttons["transmission-channel-1"]
+        XCTAssertTrue(kjFocus(card, app: station), "channel 1's card must take focus")
+        XCUIRemote.shared.press(.select)
+
+        let channel = station.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "Channel 1 opens")
+        XCTAssertEqual(channel.label, "1")
+        // The sign-on is still flying: this press lands mid-flight, or is skipped.
+        XCUIRemote.shared.press(.up)
+        kjPause(12)
+        let afterFirst = channel.label
+        // Whatever the first press did, every later one moves the channel.
+        for press in 1...2 {
+            let before = channel.label
+            XCUIRemote.shared.press(.up)
+            waitUntil(12) { channel.exists && channel.label != before }
+            XCTAssertNotEqual(channel.label, before, "press \(press) after the sign-on moves the channel (first press left it on \(afterFirst))")
+        }
+    }
+
+    private func waitUntil(_ timeout: TimeInterval, _ condition: @escaping () -> Bool) {
+        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)],
+                           timeout: timeout)
+    }
+
     private let app = XCUIApplication()
 
     private func openChannel() {

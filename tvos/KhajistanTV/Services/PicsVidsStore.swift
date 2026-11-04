@@ -275,9 +275,8 @@ final class PicsVidsStore {
                 let http = response as? HTTPURLResponse
                 if let code = http?.statusCode, (200..<300).contains(code) { return (data, http) }
                 status = http?.statusCode ?? 0
-            } catch let error as URLError where [.timedOut, .networkConnectionLost, .cannotConnectToHost].contains(error.code) {
-                // No answer from a server that is there: retried like a 5xx. No network at all,
-                // or a host that does not resolve, is not going to change in seven seconds.
+            } catch let error as URLError where error.isDroppedConnection {
+                // No answer from a server that is there: retried like a 5xx.
                 status = nil
             }
             guard let wait = PnvAPI.retryDelay(status: status, attempt: attempt), gen == generation else {

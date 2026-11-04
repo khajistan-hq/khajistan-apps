@@ -272,7 +272,7 @@ struct FilmScreen: View {
                 .blocksMacNavigation(model)
                 .environment(model)
         }
-        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { refusal = nil }) }
     }
 
     /// The Apple TV app's film page: the poster, the title and its line, one Play, the smaller
@@ -317,10 +317,16 @@ struct FilmScreen: View {
                 ProgressLine(value: place.position / Double(minutes * 60))
             }
             if let refusal {
-                Text(Self.refusalText(film, status: refusal)).kjBody().multilineTextAlignment(.center)
+                // A staff account that still owes its authenticator code is refused like a buyer.
+                Text(refusal == 403 && model.auth.pendingFactorId != nil
+                     ? "Finish two-step sign-in, then try again."
+                     : Self.refusalText(film, status: refusal)).kjBody().multilineTextAlignment(.center)
                     .accessibilityIdentifier("filmRefusal")
                 if refusal == 401 {
                     Button(kicker: "Sign in") { showSignIn = true }.accessibilityIdentifier("filmSignIn")
+                }
+                if refusal == 403 && model.auth.pendingFactorId != nil {
+                    Button(kicker: "Finish two-step sign-in") { showSignIn = true }.accessibilityIdentifier("filmFinishCode")
                 }
             }
             HStack(spacing: 8) {
@@ -404,6 +410,7 @@ struct FilmScreen: View {
             playing = FilmPlayback(film: film, url: url, isFull: true,
                                    line: Films.accessLine(kind: kind, expiresAt: expiresAt), startAt: resume)
         case .refused(let status):
+            if status == 403 { await model.auth.rearmCode() }
             refusal = status
             if status == 401 { showSignIn = true }
         }

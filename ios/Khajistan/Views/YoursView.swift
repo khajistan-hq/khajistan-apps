@@ -133,6 +133,10 @@ struct YoursView: View {
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName(KJType.title)
+                if model.auth.pendingFactorId != nil {
+                    Button(kicker: "Finish two-step sign-in") { showSignIn = true }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                }
                 Button(kicker: "Sign out") { Task { await model.auth.signOut() } }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
                 tvSignInButton
@@ -330,8 +334,12 @@ struct SignInView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var errorLine: String?
+    @State private var code = ""
+    @State private var askCode = false
 
     private var canSubmit: Bool { !email.isEmpty && !password.isEmpty && !busy }
+    /// The password went through and the account has an authenticator.
+    private var codeOwed: Bool { model.auth.isSignedIn && model.auth.pendingFactorId != nil }
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -340,8 +348,28 @@ struct SignInView: View {
                 HStack {
                     Kicker("Khajistan account")
                     Spacer()
-                    Button(kicker: "Cancel") { dismiss() }.buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 0)))
+                    // During the code step the reader is signed in already: Cancel is "Not now".
+                    Button(kicker: "Cancel") { if askCode { Task { await finish() } } else { dismiss() } }
+                        .disabled(askCode && busy).buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 0)))
                 }
+                if askCode {
+                    // kj-mfa.js's words.
+                    Text("Two-step sign-in").kjDisplay()
+                    Text("Enter the six-digit code from your authenticator to finish signing in.").kjBody()
+                    HouseInputField("Six-digit code") {
+                        TextField("", text: $code)
+                            .textContentType(.oneTimeCode)
+                            .keyboardType(.numberPad)
+                            .accessibilityIdentifier("signInCode")
+                    }
+                    Button(kicker: busy ? "Checking\u{2026}" : "Finish signing in") { Task { await submitCode() } }
+                        .buttonStyle(HouseButtonStyle(solid: true))
+                        .disabled(busy)
+                    // Signed in already, at the lower level: everything but staff films works.
+                    Button(kicker: "Not now") { Task { await finish() } }
+                        .buttonStyle(HouseButtonStyle())
+                        .disabled(busy)
+                } else {
                 Text("Sign in").kjDisplay()
                 Text("The email and password you use on the website.").kjBody()
                 HouseInputField("Email") {
@@ -358,6 +386,7 @@ struct SignInView: View {
                 Button(kicker: busy ? "Signing in\u{2026}" : "Sign in") { Task { await submit() } }
                     .buttonStyle(HouseButtonStyle(solid: true))
                     .disabled(!canSubmit)
+                }
                 if let errorLine {
                     Text(errorLine).kjBody()
                         .onAppear { UIAccessibility.post(notification: .announcement, argument: errorLine) }
@@ -370,6 +399,9 @@ struct SignInView: View {
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
         .presentationBackground(palette.ground)
+        .onAppear { if codeOwed { askCode = true } }
+        // No swipe-away mid-step: Cancel or Not now, so the screen that asked still hears it.
+        .interactiveDismissDisabled(askCode)
         .blocksMacNavigation(model)
         .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
@@ -380,9 +412,33 @@ struct SignInView: View {
         errorLine = nil
         do {
             try await model.auth.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-            await onSignedIn()
-            dismiss()
+            if codeOwed { askCode = true } else { await finish() }
         } catch {
+            show(error)
+        }
+        busy = false
+    }
+
+    private func finish() async {
+        await onSignedIn()
+        dismiss()
+    }
+
+    private func submitCode() async {
+        busy = true
+        errorLine = nil
+        do {
+            try await model.auth.verifyCode(code)
+            await finish()
+        } catch {
+            code = ""
+            show(error)
+            if !codeOwed { askCode = false }
+        }
+        busy = false
+    }
+
+    private func show(_ error: Error) {
             if let failure = error as? AuthError {
                 switch failure {
                 case .server(let text): errorLine = text
@@ -392,7 +448,5 @@ struct SignInView: View {
             } else {
                 errorLine = error.localizedDescription
             }
-        }
-        busy = false
     }
 }

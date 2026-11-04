@@ -48,6 +48,11 @@ struct AccountView: View {
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName()
+                if model.auth.pendingFactorId != nil {
+                    Button(kicker: "Finish two-step sign-in") { showSignIn = true }
+                        .buttonStyle(HouseButtonStyle())
+                        .padding(.leading, -26)
+                }
                 Button(kicker: "Sign out") {
                     Task { await model.auth.signOut() }
                 }

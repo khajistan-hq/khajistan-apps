@@ -692,6 +692,39 @@ func authSessionRefusesAnonymousAndMalformed() throws {
     }
 }
 
+func authTwoStep() throws {
+    func totp(_ json: String) -> String? { AuthAPI.verifiedTOTP(from: Data(json.utf8)) }
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"verified"}]}"#), "f1")
+    // Negative cases: an unverified factor, another kind of factor, no factors, not JSON.
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"unverified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"","factor_type":"totp","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"id":"u","email":"a@b.c"}"#), nil)
+    try expectEqual(totp("not json"), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"},{"id":"f2","factor_type":"totp","status":"verified"}]}"#), "f2")
+    try expectEqual(AuthAPI.code("123456"), "123456")
+    try expectEqual(AuthAPI.code(" 123 456 "), "123456")
+    try expectEqual(AuthAPI.code("12345"), nil)
+    try expectEqual(AuthAPI.code("1234567"), nil)
+    try expectEqual(AuthAPI.code("١٢٣٤٥٦"), nil)
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":"c9","type":"totp","expires_at":1}"#.utf8)), "c9")
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":""}"#.utf8)), nil)
+    let verify = AuthAPI.verifyRequest(factorId: "f1", challengeId: "c9", code: "123456", accessToken: "tok")
+    try expectEqual(verify.url?.path, "/auth/v1/factors/f1/verify")
+    try expectEqual(verify.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    try expectEqual(String(data: verify.httpBody ?? Data(), encoding: .utf8), #"{"challenge_id":"c9","code":"123456"}"#)
+    try expectEqual(AuthAPI.userRequest(accessToken: "tok").httpMethod, "GET")
+    // The session's own sign-in level, read off its token: a relaunch re-asks on aal1 only.
+    func aal(_ token: String) -> String? {
+        Session(accessToken: token, refreshToken: "r", expiresAt: Date(), email: nil, userId: "u").assurance
+    }
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMSJ9.sig"), "aal1")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMiJ9.sig"), "aal2")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.sig"), nil)
+    try expectEqual(aal("not-a-jwt"), nil)
+    try expectEqual(aal("a.%%%.c"), nil)
+}
+
 func authErrorMessages() throws {
     func message(_ json: String) -> String? { AuthAPI.errorMessage(from: Data(json.utf8)) }
     try expectEqual(message(#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#), "Invalid login credentials")
@@ -4219,6 +4252,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Auth session from a body", authSessionFromBody),
     ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
     ("Auth error messages", authErrorMessages),
+    ("Auth two-step sign-in", authTwoStep),
     ("Auth requests", authRequests),
     ("Session expiry and storage", sessionExpiryAndStorage),
     ("stationNow agrees with Calendar", stationNowAgreesWithCalendar),

@@ -170,20 +170,38 @@ struct FilmCard: View {
     }
 }
 
-/// A note for a room whose data is behind the site password while the archive is in preview.
+/// A room that is closed until launch, said plainly where the room would be, with the preview
+/// password field right there so the page is never a dead end. Rooms read their data again when
+/// the password changes, so keeping it is all this has to do.
 struct LockedNote: View {
     let subject: String
     @Environment(AppModel.self) private var model
+    @State private var password = ""
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("\(subject) is behind the site password while the archive is in preview.").kjBody()
-            Button(kicker: "Set it under Library \u{2192}") { model.tab = .library }
-                .accessibilityIdentifier("lockedToLibrary")
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(subject) opens to everyone when Khajistan launches.").kjBody()
+            Text("Testers: type the preview password.").kjBody()
+            HouseInputField("Preview password") {
+                SecureField("", text: $password).focused($fieldFocused).onSubmit(open)
+            }
+            Button(kicker: "Open", action: open)
+                .buttonStyle(HouseButtonStyle(solid: true))
+                .accessibilityIdentifier("lockedOpen")
+                // Whether a password has been typed, for VoiceOver and the UI test.
+                .accessibilityValue(password.isEmpty ? "Nothing typed" : "Password typed")
         }
-        // A container, so the button inside stays its own element for VoiceOver.
+        // A container, so the controls inside stay their own elements for VoiceOver.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("roomLocked")
+    }
+
+    private func open() {
+        // Open pressed before anything was typed: the field is where to start.
+        guard !password.isEmpty else { fieldFocused = true; return }
+        model.auth.setPreviewPassword(password)
+        password = ""
     }
 }
 
@@ -251,9 +269,10 @@ struct FilmScreen: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .fullScreenCover(item: $playing) { playback in
             FilmPlayerScreen(playback: playback)
+                .blocksMacNavigation(model)
                 .environment(model)
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { refusal = nil }) }
     }
 
     /// The Apple TV app's film page: the poster, the title and its line, one Play, the smaller
@@ -298,10 +317,16 @@ struct FilmScreen: View {
                 ProgressLine(value: place.position / Double(minutes * 60))
             }
             if let refusal {
-                Text(Self.refusalText(film, status: refusal)).kjBody().multilineTextAlignment(.center)
+                // A staff account that still owes its authenticator code is refused like a buyer.
+                Text(refusal == 403 && model.auth.pendingFactorId != nil
+                     ? "Finish two-step sign-in, then try again."
+                     : Self.refusalText(film, status: refusal)).kjBody().multilineTextAlignment(.center)
                     .accessibilityIdentifier("filmRefusal")
                 if refusal == 401 {
                     Button(kicker: "Sign in") { showSignIn = true }.accessibilityIdentifier("filmSignIn")
+                }
+                if refusal == 403 && model.auth.pendingFactorId != nil {
+                    Button(kicker: "Finish two-step sign-in") { showSignIn = true }.accessibilityIdentifier("filmFinishCode")
                 }
             }
             HStack(spacing: 8) {
@@ -385,6 +410,7 @@ struct FilmScreen: View {
             playing = FilmPlayback(film: film, url: url, isFull: true,
                                    line: Films.accessLine(kind: kind, expiresAt: expiresAt), startAt: resume)
         case .refused(let status):
+            if status == 403 { await model.auth.rearmCode() }
             refusal = status
             if status == 401 { showSignIn = true }
         }

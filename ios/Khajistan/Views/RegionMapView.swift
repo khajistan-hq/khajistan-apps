@@ -19,7 +19,7 @@ struct RegionMapView: View {
     @State private var passing: String?
 
     /// How long a press rests before the finger is a dial rather than a scroll.
-    private static let pressToScrub = 0.18
+    private static let pressToScrub = 0.3
 
     var body: some View {
         GeometryReader { proxy in
@@ -28,31 +28,87 @@ struct RegionMapView: View {
                 RegionMapPainter(map: map, layout: layout, palette: palette, focusedID: passing ?? highlighted).paint(&context)
             }
             .contentShape(Rectangle())
-            .onTapGesture(coordinateSpace: .local) { point in
-                if let id = layout.region(at: point, in: map) { onTap(id) }
-            }
-            .gesture(scrub(layout), including: onScrub == nil ? .none : .all)
+            // The dial is UIKit's long press, which claims the finger only after a real hold. As a
+            // SwiftUI gesture it held every slow swipe that began on the map, and the page would
+            // not scroll past it. The tap is UIKit's too: beside the long press a SwiftUI tap
+            // never fired.
+            .modifier(DialPress.Attached(enabled: onScrub != nil, hold: Self.pressToScrub,
+                                         tapped: { point in if let id = layout.region(at: point, in: map) { onTap(id) } },
+                                         moved: { scrub(to: $0, layout) }, ended: endScrub))
         }
         .aspectRatio(CGFloat(map.viewBox.width / map.viewBox.height), contentMode: .fit)
         .accessibilityHidden(true)
     }
 
-    private func scrub(_ layout: RegionMapLayout) -> some Gesture {
-        LongPressGesture(minimumDuration: Self.pressToScrub)
-            .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .local))
-            .onChanged { value in
-                guard case .second(true, let drag?) = value,
-                      let id = layout.region(at: drag.location, in: map), id != passing else { return }
-                passing = id
-                UISelectionFeedbackGenerator().selectionChanged()
-                onScrub?(id)
+    private func scrub(to point: CGPoint, _ layout: RegionMapLayout) {
+        guard let id = layout.region(at: point, in: map), id != passing else { return }
+        passing = id
+        UISelectionFeedbackGenerator().selectionChanged()
+        onScrub?(id)
+    }
+
+    private func endScrub() {
+        let chosen = passing
+        passing = nil
+        onScrub?(nil)
+        if let chosen { onTap(chosen) }
+    }
+}
+
+/// A press held on the map, then slid across it: where the finger is while it moves, and when it
+/// lifts. iOS 18 and later; on iOS 17 the map is tapped, as the strip is.
+private struct DialPress {
+    struct Attached: ViewModifier {
+        let enabled: Bool
+        let hold: TimeInterval
+        let tapped: (CGPoint) -> Void
+        let moved: (CGPoint) -> Void
+        let ended: () -> Void
+
+        func body(content: Content) -> some View {
+            if #available(iOS 18.0, *), enabled {
+                content
+                    .gesture(Tap(tapped: tapped))
+                    .gesture(Recognizer(hold: hold, moved: moved, ended: ended))
+            } else {
+                content.onTapGesture(coordinateSpace: .local, perform: tapped)
             }
-            .onEnded { _ in
-                let chosen = passing
-                passing = nil
-                onScrub?(nil)
-                if let chosen { onTap(chosen) }
+        }
+    }
+
+    @available(iOS 18.0, *)
+    struct Tap: UIGestureRecognizerRepresentable {
+        let tapped: (CGPoint) -> Void
+
+        func makeUIGestureRecognizer(context: Context) -> UITapGestureRecognizer { UITapGestureRecognizer() }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UITapGestureRecognizer, context: Context) {
+            if recognizer.state == .ended { tapped(context.converter.localLocation) }
+        }
+    }
+
+    @available(iOS 18.0, *)
+    struct Recognizer: UIGestureRecognizerRepresentable {
+        let hold: TimeInterval
+        let moved: (CGPoint) -> Void
+        let ended: () -> Void
+
+        func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+            let press = UILongPressGestureRecognizer()
+            press.minimumPressDuration = hold
+            // Moving further than this before the hold is up is a swipe: the press fails and the
+            // page scrolls.
+            press.allowableMovement = 10
+            return press
+        }
+
+        func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+            switch recognizer.state {
+            case .began, .changed: moved(context.converter.localLocation)
+            case .ended, .cancelled, .failed: ended()
+            default: break
             }
+        }
     }
 }
 
@@ -70,10 +126,6 @@ private struct MapFace {
     /// The website's main label, scaled for a television; `crowded` is the size it falls back to.
     static let label = MapFace(size: 9, weight: .black, uiWeight: .black, em: 0.01)
     static let crowded = MapFace(size: 7.5, weight: .black, uiWeight: .black, em: 0.01)
-    /// The three lines of the plate under the chosen region.
-    static let plateName = MapFace(size: 12, weight: .black, uiWeight: .black, em: 0.01)
-    static let plateNative = MapFace(size: 11, weight: .semibold, uiWeight: .semibold, em: 0)
-    static let plateLive = MapFace(size: 9, weight: .black, uiWeight: .black, em: 0.05)
 
     func text(_ string: String) -> Text {
         Text(string).font(.system(size: size, weight: weight)).tracking(size * em)
@@ -212,18 +264,6 @@ private struct RegionMapLayout {
             return (region.id, hypot(c.x - point.x, c.y - point.y))
         }.min { $0.1 < $1.1 }
         return nearest.flatMap { $0.1 <= reach ? $0.0 : nil }
-    }
-
-    /// The region's own extent on screen. Null when it has no points.
-    func extent(of region: MapRegion) -> CGRect {
-        var extent = CGRect.null
-        for polygon in region.polygons {
-            for p in polygon {
-                let q = point(p)
-                extent = extent.union(CGRect(x: q.x, y: q.y, width: 0, height: 0))
-            }
-        }
-        return extent
     }
 
     /// What a label keeps clear: its capitals, the black halo round them and a little air. The
@@ -377,38 +417,20 @@ private struct RegionMapPainter {
         context.draw(face, at: label.center, anchor: .center)
     }
 
-    /// The website's callout: the name, the native name and the live count in black on yellow.
+    /// The lit region's name on a plate of the band's colour, standing where its label stands and
+    /// no bigger than it. The website's callout adds the native name and the live count; on a
+    /// phone that plate had to go somewhere, and wherever it went it covered a neighbour's name or
+    /// fell under the fold. The count is on the region's chip under the map.
     private func paintPlate(for label: RegionMapLabel, in context: GraphicsContext) {
-        let region = label.region
-        var rows: [(face: MapFace, string: String, size: CGSize)] = []
-        rows.append((.plateName, label.text, MapFace.plateName.measure(label.text)))
-        if let native = region.native {
-            rows.append((.plateNative, native, MapFace.plateNative.measure(native)))
-        }
-        if let live = region.live {
-            let line = "\(live.formatted()) LIVE"
-            rows.append((.plateLive, line, MapFace.plateLive.measure(line)))
-        }
-
-        let across: CGFloat = 8
-        let down: CGFloat = 5
-        let gap: CGFloat = 1
+        let rows: [(face: MapFace, string: String, size: CGSize)] = [
+            // The label's own face, so the plate covers no more than the label it replaces.
+            (label.face, label.text, label.face.measure(label.text)),
+        ]
+        let across: CGFloat = 5
+        let down: CGFloat = 2
         let width = (rows.map { $0.size.width }.max() ?? 0) + 2 * across
-        let height = rows.reduce(2 * down) { $0 + $1.size.height } + gap * CGFloat(rows.count - 1)
-        // Centred on the label. A region smaller than its plate would be buried under it, outline
-        // and all, so there the plate stands just above the region, or below when the map has no
-        // room above. Either way it is moved in if it would run off the map.
+        let height = rows.reduce(2 * down) { $0 + $1.size.height }
         var plate = CGRect(x: label.center.x - width / 2, y: label.center.y - height / 2, width: width, height: height)
-        let extent = layout.extent(of: region)
-        if !extent.isNull, width > 0.6 * extent.width || height > 0.6 * extent.height {
-            let above = plate.offsetBy(dx: 0, dy: extent.minY - 6 - plate.maxY)
-            let below = plate.offsetBy(dx: 0, dy: extent.maxY + 6 - plate.minY)
-            if above.minY >= 0 {
-                plate = above
-            } else if below.maxY <= layout.size.height {
-                plate = below
-            }
-        }
         plate.origin.x = min(max(plate.minX, 0), max(layout.size.width - width, 0))
         plate.origin.y = min(max(plate.minY, 0), max(layout.size.height - height, 0))
         // On day a yellow plate sat on the yellow page at 1.0:1; there it is the band, yellow on green.
@@ -420,7 +442,7 @@ private struct RegionMapPainter {
             var text = context.resolve(row.face.text(row.string))
             text.shading = .color(onDay ? palette.onBand : .black)
             context.draw(text, at: CGPoint(x: plate.midX, y: top), anchor: .top)
-            top += row.size.height + gap
+            top += row.size.height
         }
     }
 }

@@ -5,7 +5,7 @@ import Foundation
 /// signed-out visitor nothing a browser does not already have. No other key belongs here.
 enum KJConfig {
     /// Where sign-in lives, as this app's bar names it. Shared messages name it through this.
-    static let signInDoor = "Library"
+    static let signInDoor = "You"
 
     static let site = URL(string: "https://khajistan-archive.pages.dev")!
     /// The database, directly or by the site's /sb/ proxy where its host cannot be reached (SupabaseRoute).

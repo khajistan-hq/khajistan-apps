@@ -112,23 +112,36 @@ private struct RoomStack: View {
     }
 }
 
-/// The website's menu, door by door, without the rooms the bar already holds (one control once).
+/// Every room in two groups: the rooms the app draws itself first, then the rooms that open the
+/// website. Rooms the bar already holds are left out (one control once).
 struct RoomList: View {
     let selected: NativeRoom?
 
-    static var doors: [(door: String, rooms: [ArchiveDestination])] {
-        ArchiveDestination.doorsInThisBuild
-            .map { ($0.door, $0.rooms.filter { room in room.id != "home" && room.nativeRoom.flatMap(AppTab.init) == nil }) }
+    private static var rooms: [ArchiveDestination] {
+        ArchiveDestination.doorsInThisBuild.flatMap(\.rooms)
+            .filter { $0.id != "home" && $0.nativeRoom.flatMap(AppTab.init) == nil }
+    }
+
+    static var groups: [(name: String, rooms: [ArchiveDestination])] {
+        #if targetEnvironment(macCatalyst)
+        // Match the website's sections on a Mac, where the list stays beside the open room.
+        ArchiveDestination.doorsInThisBuild.map { door in
+            (door.door, door.rooms.filter { $0.id != "home" && $0.nativeRoom.flatMap(AppTab.init) == nil })
+        }.filter { !$0.1.isEmpty }
+        #else
+        [("In the app", rooms.filter { $0.nativeRoom != nil }),
+         ("On the website", rooms.filter { $0.nativeRoom == nil })]
             .filter { !$0.1.isEmpty }
+        #endif
     }
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                LargeTitle(title: "Rooms", line: "The archive, as the website's menu has it")
+                LargeTitle(title: "Rooms", line: "Everything in Khajistan")
                     .padding(.bottom, 16)
-                ForEach(Self.doors, id: \.door) { group in
-                    RoomDoor(name: group.door, rooms: group.rooms, selected: selected)
+                ForEach(Self.groups, id: \.name) { group in
+                    RoomDoor(name: group.name, rooms: group.rooms, selected: selected)
                 }
             }
             .padding(.horizontal, KJLayout.inset)
@@ -139,7 +152,7 @@ struct RoomList: View {
     }
 }
 
-/// One door of the menu and its rooms, as a grouped list: the door's name, then a row per room
+/// One group of rooms, as a list: the group's name, then a row per room
 /// with its icon, its line, and a chevron (in the app) or an arrow (the website).
 struct RoomDoor: View {
     let name: String
@@ -150,25 +163,28 @@ struct RoomDoor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            // A door with one room of its own name is named once, by the room.
-            if !(rooms.count == 1 && rooms[0].title.caseInsensitiveCompare(name) == .orderedSame) {
-                Text(name.capitalized(with: nil))
-                    .font(.system(.subheadline, weight: .semibold))
-                    .foregroundStyle(palette.faint)
-                    .padding(.top, 6)
-                    .accessibilityAddTraits(.isHeader)
-            }
+            Text(name)
+                .font(.system(.subheadline, weight: .semibold))
+                .foregroundStyle(palette.faint)
+                .padding(.top, 6)
+                .accessibilityAddTraits(.isHeader)
             ForEach(rooms) { room in
                 let isCurrent = room.nativeRoom != nil && room.nativeRoom == selected
                 Button {
                     model.open(room)
                 } label: {
                     HStack(alignment: .center, spacing: 14) {
-                        Image(systemName: room.nativeRoom?.symbol ?? "globe")
-                            .font(.system(.title3, weight: .semibold))
-                            .foregroundStyle(palette.accent)
-                            .frame(width: 30)
-                            .accessibilityHidden(true)
+                        // Picture first where the room has one of the archive's own; the website's
+                        // rooms keep their icon.
+                        if room.nativeRoom?.picture != nil {
+                            RoomPicture(room: room.nativeRoom, corner: 8, inset: 3).frame(width: 52, height: 64)
+                        } else {
+                            Image(systemName: room.nativeRoom?.symbol ?? "globe")
+                                .font(.system(.title3, weight: .semibold))
+                                .foregroundStyle(palette.accent)
+                                .frame(width: 52)
+                                .accessibilityHidden(true)
+                        }
                         VStack(alignment: .leading, spacing: 2) {
                             Text(room.title).font(.system(.body, weight: .semibold))
                                 .foregroundStyle(isCurrent ? palette.accent : palette.ink)

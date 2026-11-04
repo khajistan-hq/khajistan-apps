@@ -11,10 +11,12 @@ struct ReadingShelfView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var tabID: String?
     @State private var query = ""
+    /// The query a moment after the last keystroke, which is what the shelf is searched for.
+    @State private var settled = ""
 
     private var store: ReadingStore { model.reading }
     private var tab: RRTab? { store.tabs.first { $0.id == tabID } ?? store.tabs.first }
-    private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmed: String { settled.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         ScrollView {
@@ -50,6 +52,12 @@ struct ReadingShelfView: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .task { await store.start() }
+        // Searching a thousand-odd titles waits for a pause in typing, as Search does.
+        .task(id: query) {
+            // A cleared field clears at once.
+            if !query.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            if !Task.isCancelled { settled = query }
+        }
     }
 
     // MARK: - Search
@@ -261,6 +269,9 @@ struct RRCover: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .accessibilityHidden(true)
+        // The store keeps the pictures of covers on screen and lets go of the rest past its budget.
+        .onAppear { state.shown(true) }
+        .onDisappear { state.shown(false) }
     }
 }
 
@@ -322,10 +333,11 @@ struct ReadingTitleScreen: View {
         .task(id: store.phase == .ready) { openResumeIfAsked() }
         .fullScreenCover(item: $reading) { target in
             ReadingReaderScreen(title: target.title, issue: target.issue, startPage: target.page)
+                .blocksMacNavigation(model)
                 .environment(model)
                 .environment(\.palette, palette)
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
     }
 
     private var held: Bool { title.map(store.isRights) ?? false }

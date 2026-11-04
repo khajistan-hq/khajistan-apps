@@ -16,7 +16,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "house"
         case .rooms: return "square.grid.2x2"
         case .receiver: return "dot.radiowaves.left.and.right"
-        case .library: return "books.vertical"
+        case .library: return "person.crop.circle"
         case .search: return "magnifyingglass"
         }
     }
@@ -26,7 +26,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "Home"
         case .rooms: return "Rooms"
         case .receiver: return "Receiver"
-        case .library: return "Library"
+        case .library: return "You"
         case .search: return "Search"
         }
     }
@@ -54,12 +54,19 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 @MainActor @Observable
 final class AppModel {
+    enum Cover: String, Identifiable {
+        case browser, chat
+        var id: String { rawValue }
+    }
     var library = LibraryState()
     /// A sentence for the house banner.
     var message: String?
-    var isShowingBrowser = false
-    /// Chat opens over the tabs, as the browser does.
-    var isShowingChat = false
+    /// One full-screen destination at a time, including when a Mac menu switches between them.
+    var cover: Cover?
+    /// Local reader/player/form presentations keep menu navigation disabled until closed.
+    var menuNavigationLocks: Set<UUID> = []
+    /// A finger is turning the Receiver map's dial: the page under it holds still meanwhile.
+    var mapScrubbing = false
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions
@@ -81,9 +88,23 @@ final class AppModel {
     private(set) var storefrontCode: String?
     var showsJoin: Bool { JoinOffer.isOffered(storefront: storefrontCode) }
 
-    let browser = ArchiveBrowser()
+    /// The in-app browser, made on first use or once launch has settled (`init`): a WKWebView made
+    /// in `init` held up the first screen.
+    var browser: ArchiveBrowser {
+        if let madeBrowser { return madeBrowser }
+        let made = ArchiveBrowser(previewPassword: { [weak auth] in auth?.previewPassword })
+        made.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
+        if let skinScript { made.applySkin(script: skinScript) }
+        madeBrowser = made
+        return made
+    }
+    @ObservationIgnored private var madeBrowser: ArchiveBrowser?
+    /// The website's skin keys as last read, for a browser made after them.
+    @ObservationIgnored private var skinScript: String?
     let auth: AuthStore
     let receiver = ReceiverStore()
+    /// The Receiver list's thumbnails: stills this device takes from the live streams, in memory only.
+    let stills: LiveStills
     let transmission: TransmissionStore
     let pnv: PicsVidsStore
     /// The channel-change pigeon. One player for the life of the app.
@@ -122,6 +143,7 @@ final class AppModel {
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
         captions = LiveCaptionSession(auth: auth)
+        stills = LiveStills(receiver: receiver)
         tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission, captions: captions)
         pnv = PicsVidsStore(auth: auth)
         chat = ChatStore(auth: auth)
@@ -157,9 +179,14 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
-        browser.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
         refreshSkin()
-        browser.warm()
+        // WebKit's page process starts once the first screen is up, so the first page opened still
+        // does not wait for it. A browser already opened has its process and a page not to replace.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard let self, self.madeBrowser == nil else { return }
+            self.browser.warm()
+        }
         watchTheSky()
         watchTheStorefront(forced: defaults.string(forKey: "kjstorefront"))
         // Which way the database answers, decided while the first screen draws.
@@ -207,7 +234,9 @@ final class AppModel {
         let resolved = Sky.resolve(chosen: chosen, band: band, at: now, timeZone: zone)
         skinPick = Sky.isHonoured(chosen: chosen, band: band, at: now, timeZone: zone) ? resolved : nil
         if resolved != skin { skin = resolved }
-        browser.applySkin(script: Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone))
+        let script = Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone)
+        skinScript = script
+        madeBrowser?.applySkin(script: script)
     }
 
     /// The website re-reads its sky every minute; so does the app.
@@ -236,6 +265,12 @@ final class AppModel {
 
     // MARK: - Rooms
 
+    /// A Mac menu command can arrive while a full-screen page is covering the tab bar.
+    func selectTab(_ tab: AppTab) {
+        cover = nil
+        self.tab = tab
+    }
+
     /// A website page in the in-app browser. Only the archive's own two hosts open here. Off the
     /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
@@ -248,12 +283,25 @@ final class AppModel {
         openWebsite(url)
     }
 
+    /// A page kept on this device (saved or recently opened). One that is a room the app draws
+    /// itself, addressed with no particulars ("/open-frequencies"), opens the room here rather
+    /// than its web page; any other opens as `open(_:)` does.
+    func openKept(_ url: URL) {
+        if url.query == nil, url.fragment == nil,
+           let room = ArchiveDestination.all.first(where: { $0.path == url.path && $0.nativeRoom != nil }),
+           StoreBuild.includes(room) {
+            open(room)
+        } else {
+            open(url)
+        }
+    }
+
     /// A website page in the house browser, even where the app has a native room for it: for the
     /// "on the website" controls, whose point is the page itself.
     func openWebsite(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
         browser.load(showsJoin ? url : JoinOffer.tagged(url))
-        isShowingBrowser = true
+        cover = .browser
     }
 
     /// A door from the website's menu: a room the app draws itself switches tab, the rest is web.
@@ -280,10 +328,12 @@ final class AppModel {
         instant.disablesAnimations = true
         withTransaction(instant) {
             if room == .chat {
-                isShowingChat = true
+                cover = .chat
             } else if let tab = AppTab(room) {
+                cover = nil
                 self.tab = tab
             } else {
+                cover = nil
                 self.room = room
                 if let route { roomPaths[room] = route }
                 self.tab = .rooms
@@ -305,6 +355,11 @@ final class AppModel {
 
     /// Where reading or watching stopped, kept on this device.
     func record(_ place: Resume) { updateLibrary { $0.record(place) } }
+
+    /// A page marked in the reader, kept with the reading places.
+    func togglePageMark(title: String, issue: String, page: Int) {
+        updateLibrary { $0.togglePageMark(title: title, issue: issue, page: page) }
+    }
 
     func toggleSaved(_ url: URL, title: String) { updateLibrary { $0.toggleBookmark(url, title: title) } }
     func removeSaved(_ id: UUID) { updateLibrary { $0.bookmarks.removeAll { $0.id == id } } }

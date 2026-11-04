@@ -9,6 +9,8 @@ struct BazaarView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var shelf: BazaarShelf?
     @State private var query = ""
+    /// The query a moment after the last keystroke, which is what the grid filters by.
+    @State private var settled = ""
 
     private var feed: SiteFeed<[BazaarItem]> { model.bazaar }
 
@@ -27,8 +29,9 @@ struct BazaarView: View {
                 case .failed(let message):
                     ReadingProblem(message: message) { Task { await feed.load(force: true) } }
                 case .ready:
-                    filters
-                    grid
+                    let found = shown
+                    filters(found)
+                    grid(found)
                 }
             }
             .padding(.horizontal, KJLayout.inset)
@@ -41,12 +44,18 @@ struct BazaarView: View {
             await feed.load()
             await model.bazaarSwap.load()
         }
+        // Filtering a thousand-odd products waits for a pause in typing, as Search does.
+        .task(id: query) {
+            // A cleared field clears at once.
+            if !query.isEmpty { try? await Task.sleep(for: .milliseconds(200)) }
+            if !Task.isCancelled { settled = query }
+        }
     }
 
     private var items: [BazaarItem] { feed.value ?? [] }
 
     private var shown: [BazaarItem] {
-        let needle = DBQuery.fold(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        let needle = DBQuery.fold(settled.trimmingCharacters(in: .whitespacesAndNewlines))
         return items.filter { item in
             (shelf == nil || item.shelf == shelf)
                 && (needle.isEmpty || DBQuery.fold(item.product.title).contains(needle)
@@ -54,7 +63,7 @@ struct BazaarView: View {
         }
     }
 
-    private var filters: some View {
+    private func filters(_ shown: [BazaarItem]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             SearchField(prompt: "Title or region", text: $query, id: "bazaarSearch")
             // The shelves the catalogue fills, in the page's order (CAT_LABELS).
@@ -68,7 +77,7 @@ struct BazaarView: View {
     }
 
     /// Etsy's listing grid: two to a row on a phone, the picture on a soft plate, the name, the price.
-    private var grid: some View {
+    private func grid(_ shown: [BazaarItem]) -> some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: sizeClass == .regular ? 200 : 150), spacing: 14, alignment: .top)],
                   alignment: .leading, spacing: 20) {
             ForEach(shown) { item in

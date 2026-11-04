@@ -74,9 +74,11 @@ final class LiveCaptionSession {
     @ObservationIgnored private var estimateAt: Date?
     @ObservationIgnored private var countSaid = ""
     private let urlSession: URLSession
+    @ObservationIgnored private let defaults: UserDefaults
 
-    init(auth: AuthStore) {
+    init(auth: AuthStore, defaults: UserDefaults = .standard) {
         self.auth = auth
+        self.defaults = defaults
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 8
@@ -85,6 +87,7 @@ final class LiveCaptionSession {
         accessObserver = auth.observeAccess { [weak self] in
             guard let self else { return }
             self.stop("Account changed. Turn captions on again.")
+            self.carry = false   // the last viewer's choice is not the new account's
             self.balance = nil
         }
     }
@@ -95,9 +98,9 @@ final class LiveCaptionSession {
     }
 
     private var viewerId: String {
-        if let held = UserDefaults.standard.string(forKey: CaptionRules.viewerKey) { return held }
+        if let held = defaults.string(forKey: CaptionRules.viewerKey) { return held }
         let fresh = "v" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(20)
-        UserDefaults.standard.set(fresh, forKey: CaptionRules.viewerKey)
+        defaults.set(fresh, forKey: CaptionRules.viewerKey)
         return fresh
     }
 
@@ -105,6 +108,8 @@ final class LiveCaptionSession {
 
     /// A channel was tuned on `player`. A live carrier in a language the recogniser takes offers
     /// the control; anything else says why in one line, or nothing.
+    private var carry = false
+
     func attach(_ target: Channel, player: PlayerController) {
         stop("")
         channelGeneration += 1
@@ -118,18 +123,28 @@ final class LiveCaptionSession {
         Task { await self.loadAccuracy(target, generation: gen) }
         guard offered else { return }
         askBalance()
-        // Playback never starts metered transcription. Each channel needs an explicit CC tap.
+        // Preserve build10: a channel change carries an explicit CC choice for this sitting.
+        // A channel still tuning is picked up by playbackResumed() when it plays.
+        if carry, player.state == .playing || player.state == .paused { turnOn() }
 
+    }
+
+    /// The tuner calls this when its picture starts playing: a CC choice carried across a channel
+    /// change comes back on. A Pause, another player, Stop or failure clears `carry` first
+    /// (suspendForPlaybackInterruption), so resuming after those still needs a CC press.
+    func playbackResumed() {
+        if carry && !isOn { turnOn() }
     }
 
     /// A system Pause, another player, Stop or failure releases demand without losing the channel.
-    /// Playback resuming alone never restarts metered captions; CC remains an explicit action.
     func suspendForPlaybackInterruption() {
         guard isOn || billingSession != nil else { return }
+        carry = false
         stop("Captions stopped. Turn CC on again after playback resumes.")
     }
 
-    func detach() {
+    func detach(keepingCarry: Bool = false) {
+        if !keepingCarry { carry = false }
         channelGeneration += 1
         stop("")
         channel = nil
@@ -145,7 +160,8 @@ final class LiveCaptionSession {
 
     func toggle() {
         if isOn {
-            UserDefaults.standard.set("off", forKey: CaptionRules.modeKey)
+            carry = false
+            defaults.set("off", forKey: CaptionRules.modeKey)
             stop("Captions off.")
         } else {
             turnOn()
@@ -173,7 +189,8 @@ final class LiveCaptionSession {
             note = reason.isEmpty ? "Captions are not available for this signal." : reason
             return
         }
-        UserDefaults.standard.set("english", forKey: CaptionRules.modeKey)
+        defaults.set("english", forKey: CaptionRules.modeKey)
+        carry = true
         generation += 1
         let gen = generation
         if billingSession == nil { billingSession = UUID().uuidString.lowercased() }
@@ -212,6 +229,7 @@ final class LiveCaptionSession {
         acceptBilling(res)
         guard isOn, gen == generation else { return }
         if res.allowed == false {
+            carry = false   // or every channel change would ask again
             stop(CaptionRules.startRefusal(res.reason))
             return
         }
@@ -227,7 +245,7 @@ final class LiveCaptionSession {
             guard gen == generation, isOn else { return }
             guard let res else { continue }
             acceptBilling(res)
-            if res.allowed == false { stop(CaptionRules.heartbeatRefusal(res.reason)); return }
+            if res.allowed == false { carry = false; stop(CaptionRules.heartbeatRefusal(res.reason)); return }
         }
     }
 
@@ -783,7 +801,10 @@ final class LiveCaptionSession {
             offered = false
             return
         }
-        if !isOn { decide() }
+        if !isOn {
+            decide()
+            if carry && offered { turnOn() }
+        }
     }
 
     private func loadAccuracy(_ target: Channel, generation gen: Int) async {
@@ -796,7 +817,7 @@ final class LiveCaptionSession {
         guard gen == channelGeneration, channel?.id == target.id else { return }
         if CaptionRules.isExtension(target, accuracy: Self.accuracy),
            !CaptionRules.measured(target, code: CaptionRules.effectiveLangCode(target, detected: detected), accuracy: Self.accuracy) {
-            if isOn { UserDefaults.standard.set("off", forKey: CaptionRules.modeKey) }
+            if isOn { defaults.set("off", forKey: CaptionRules.modeKey) }
             stop(CaptionRules.parkedReason(target, detected: detected, accuracy: Self.accuracy))
             offered = false
         }

@@ -56,11 +56,13 @@ struct RootView: View {
             // A field left focused behind another door would keep the keyboard over this one.
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        .fullScreenCover(isPresented: $model.isShowingBrowser) {
-            BrowserView(model: model)
-        }
-        .fullScreenCover(isPresented: $model.isShowingChat) {
-            ChatScreen()
+        .fullScreenCover(item: $model.cover) { cover in
+            Group {
+                switch cover {
+                case .browser: BrowserView(model: model)
+                case .chat: ChatScreen()
+                }
+            }
                 .environment(model)
                 .environment(\.palette, palette)
                 .foregroundStyle(palette.ink)
@@ -83,9 +85,13 @@ struct RootView: View {
 
 /// The Receiver's signal, small, while another door is open: what is on, play or pause, off, and
 /// a tap on the name goes back to the Receiver. One source plays at a time, so there is one bar.
+/// Full-screen pages that cover the house bar (the reader) carry it too, so a channel left on
+/// while reading can still be paused or turned off there.
 struct NowPlayingBar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    /// Closes the full-screen page this bar is in before the Receiver opens; does nothing at the root.
+    @Environment(\.dismiss) private var dismiss
 
     private var state: PlayerController.State {
         if case .transmission = model.tuner.source { return model.transmission.player.state }
@@ -127,6 +133,7 @@ struct NowPlayingBar: View {
                 var instant = Transaction()
                 instant.disablesAnimations = true
                 withTransaction(instant) { model.tab = .receiver }
+                dismiss()
             } label: {
                 HStack(spacing: 12) {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)

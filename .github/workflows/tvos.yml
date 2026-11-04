@@ -3,9 +3,9 @@ name: tvOS app
 on:
   push:
     branches: [main, 'app/tvos-*']
-    paths: ['tvos/**', '.github/workflows/tvos.yml']
+    paths: ['tvos/**', 'ios/Khajistan/Services/LiveCaptionSession.swift', '.github/workflows/tvos.yml']
   pull_request:
-    paths: ['tvos/**', '.github/workflows/tvos.yml']
+    paths: ['tvos/**', 'ios/Khajistan/Services/LiveCaptionSession.swift', '.github/workflows/tvos.yml']
   workflow_dispatch:
 
 permissions:
@@ -24,12 +24,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: tvos
+          sparse-checkout: |
+            tvos
+            ios/Khajistan/Services
           lfs: false
       - name: Core behavior tests
         run: sh tvos/scripts/test-core.sh
-      - name: Caption session failure regressions
-        run: KJ_CAPTION_TEST_PLATFORMS=tvos sh tvos/scripts/test-caption-session.sh
+      - name: Caption delivery and preference regressions
+        run: |
+          sh tvos/scripts/test-caption-session.sh   # both platforms: this job also triggers on the iOS session
+          sh tvos/scripts/test-caption-preference.sh
       - name: Account session race regressions
         run: KJ_AUTH_TEST_PLATFORMS=tvos sh tvos/scripts/test-auth-session.sh
       - name: Select an Apple TV simulator

@@ -13,7 +13,7 @@ struct ChatScreen: View {
     var body: some View {
         VStack(spacing: 0) {
             PlayerTopBar(leading: ["Khajistan", "Chat"], trailing: []) {
-                model.isShowingChat = false
+                model.cover = nil
             }
             ZStack {
                 if let room {
@@ -151,12 +151,14 @@ struct ChatRoomView: View {
         }
     }
 
-    private var shown: [ChatMessage] {
+    private var visibleLines: [ChatMessage] {
         (feed?.lines ?? []).filter { !ignored.contains($0.author_handle ?? "") }
     }
 
     private var lines: some View {
-        ScrollViewReader { proxy in
+        // Filtered once per draw: the list reads it four times.
+        let shown = visibleLines
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if let feed, feed.hasOlder, !shown.isEmpty {
@@ -203,6 +205,7 @@ struct ChatRoomView: View {
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
                 PnvViewerView(row: row, steps: false)
+                    .blocksMacNavigation(model)
             }
             .overlay(alignment: .bottom) {
                 if let line = actionsFor {

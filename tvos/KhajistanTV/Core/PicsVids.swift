@@ -152,6 +152,10 @@ enum PnvMedia {
         var seen = Set<URL>()
         return [full(row), medium(row), thumb(row)].compactMap { $0 }.filter { seen.insert($0).inserted }
     }
+
+    /// A decoded picture is kept by its address and the size it was shrunk to, so a tile's small
+    /// copy is never handed to the viewer that asked for the large one.
+    static func imageKey(_ url: URL, maxPixel: Int) -> String { "\(maxPixel) \(url.absoluteString)" }
 }
 
 // MARK: - Regions (kj-regions.js)

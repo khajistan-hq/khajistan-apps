@@ -23,6 +23,20 @@ TV app also take `-kjroom <screening|bazaar|madrassa|databases>`.
 in the machinery repo). Most room data is behind the site password until launch; without `KJ_SITE` the
 tests check the locked note instead.
 
+## Last measured (2026-10-28, Mobbin gaps on Apple TV and picture-first tiles)
+
+Local site from the machinery repo (`KJ_SITE`/`KJ_FILMS_ORIGIN` = `http://127.0.0.1:8831`), Apple TV 4K (3rd generation) simulator.
+
+| Suite | Result |
+|---|---|
+| Apple TV `RoomsLayoutUITests` (Day, Grove, Smut + index search) | 4 of 4 on the final build: Chat tile, film Website QR, Opened lately, bag + stepper + Checkout QR, Madrassa Save, Filter value → pill → removed, Sort A–Z |
+| Apple TV `ReceiverGuideUITests` (3 skins) | 3 of 3: Menu on a playing station leaves the radio bar; Off stops it. An earlier run lost one skin at "Right three times lights Guide" (before the new code; it moved between skins run to run) |
+| Apple TV `ReadingRoomUITests` | 5 of 5, incl. `testWholeShelfAndSearch` (3 skins) |
+| Apple TV `PicsVidsUITests` | 5 of 5, incl. `testViewerSaveControls` (3 skins; signed out) |
+| Apple TV `RoomsUITests` | 1 of 1 |
+| iOS core / TV core | 74 passed, 1 skipped / 151 passed, 3 skipped |
+| Builds | tvOS, tvOS `KJ_APP_STORE`, iOS, iOS `KJ_APP_STORE`, Mac Catalyst: all build |
+
 ## Full run on the combined branch (2026-10-28, at 422aded; later commits to d04263b are docs only)
 
 Run on a clean checkout of the pushed head, so no session's uncommitted work was in it.

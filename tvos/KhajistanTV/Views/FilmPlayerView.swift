@@ -132,7 +132,10 @@ struct FilmPlayerView: View {
                 .padding(.top, 12)
                 .padding(.leading, -26)
             if let refusal {
-                Text(Films.denyText(film, status: refusal))
+                // A staff account that still owes its authenticator code is refused like a buyer.
+                Text(refusal == 403 && model.auth.pendingFactorId != nil
+                     ? "Finish two-step sign-in, then press Watch the full film again."
+                     : Films.denyText(film, status: refusal))
                     .kjBody()
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("filmNote")
@@ -165,6 +168,15 @@ struct FilmPlayerView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
                 .accessibilityIdentifier("subtitlesControl")
+            }
+            if refusal == 403 && model.auth.pendingFactorId != nil {
+                Button {
+                    showSignIn = true
+                } label: {
+                    Text("Finish two-step sign-in").kjKicker()
+                }
+                .buttonStyle(HouseButtonStyle())
+                .accessibilityIdentifier("filmFinishCode")
             }
             if refusal == 401 && !model.auth.isSignedIn {
                 Button {
@@ -207,6 +219,7 @@ struct FilmPlayerView: View {
 
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
+        model.silenceRadio()
         if startsFull {
             await watchFull()
             if full == nil { watchFocused = true }
@@ -257,6 +270,7 @@ struct FilmPlayerView: View {
             await controller.settled()
             model.clips.uncover()
         case .refused(let status):
+            if status == 403 { await model.auth.rearmCode() }
             refusal = status
         }
     }

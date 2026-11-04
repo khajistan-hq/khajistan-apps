@@ -36,7 +36,6 @@ struct ReceiverGuide: View {
                     .onAppear { proxy.scrollTo(lit, anchor: .center) }
                     .onChange(of: lit) { withAnimation(.smooth(duration: 0.2)) { proxy.scrollTo(lit, anchor: .center) } }
                 }
-                Text("Up and down to choose \u{00B7} Select to tune \u{00B7} Left to close").kjSmall(faint: true)
             }
             .padding(.horizontal, KJLayout.inset)
             .padding(.vertical, 56)

@@ -7,7 +7,7 @@ import UIKit
 final class PnvImages: @unchecked Sendable {
     static let shared = PnvImages()
 
-    private let cache = NSCache<NSURL, UIImage>()
+    private let cache = NSCache<NSString, UIImage>()
     private let session: URLSession
 
     private init() {
@@ -16,6 +16,9 @@ final class PnvImages: @unchecked Sendable {
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         session = URLSession(configuration: config)
         cache.countLimit = 400
+        // Bounded by decoded bytes too: a viewer picture at 2,400 px is up to 23 MB, so 400 of
+        // anything but thumbnails is far more than the device has.
+        cache.totalCostLimit = 72 * 1024 * 1024
     }
 
     /// The first candidate that loads, no larger than `maxPixel` on its long side. Nil when none does
@@ -24,14 +27,14 @@ final class PnvImages: @unchecked Sendable {
     func image(_ candidates: [URL], maxPixel: Int, authorization: String? = nil) async -> UIImage? {
         for url in candidates {
             if Task.isCancelled { return nil }
-            let key = url as NSURL
+            let key = PnvMedia.imageKey(url, maxPixel: maxPixel) as NSString
             if let hit = cache.object(forKey: key) { return hit }
             var request = URLRequest(url: url)
             if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
             guard let (data, response) = try? await SupabaseRoute.data(for: request, session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = Self.downsample(data, maxPixel: maxPixel) else { continue }
-            cache.setObject(image, forKey: key)
+            cache.setObject(image, forKey: key, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
             return image
         }
         return nil

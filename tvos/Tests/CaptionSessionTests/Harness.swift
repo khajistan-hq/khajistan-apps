@@ -25,11 +25,13 @@ enum SupabaseRoute { static let base = URL(string: "https://caption-test.invalid
 @MainActor final class PlayerController {
     enum State: Equatable { case idle, tuning, playing, paused, failed(String) }
     var onPlaybackUnavailable: (() -> Void)?
+    var onPlaybackResumed: (() -> Void)?
     var state = State.playing {
         didSet {
             switch state {
             case .idle, .paused, .failed: onPlaybackUnavailable?()
-            case .playing, .tuning: break
+            case .playing: onPlaybackResumed?()
+            case .tuning: break
             }
         }
     }
@@ -232,21 +234,23 @@ func decodeSentence(_ frame: String) -> CaptionWireRow? {
     let network: Network
     let player: PlayerController
     let service: LiveCaptionSession
+    let suite = "khajistan.caption-session.test." + UUID().uuidString
     let auth: AuthStore
     init() throws {
         network = Network(); Network.current = network
         player = PlayerController()
         auth = AuthStore()
-        service = LiveCaptionSession(auth: auth)
+        service = LiveCaptionSession(auth: auth, defaults: UserDefaults(suiteName: suite)!)
         service.attach(try channel(), player: player)
     }
     func start() async throws {
-        service.toggle()
+        if !service.isOn { service.toggle() }
         try await eventually("service should start socket") { !network.sockets.isEmpty }
         network.sockets.last!.push(subscribed())
     }
     func finish() {
         service.detach()
+        UserDefaults.standard.removePersistentDomain(forName: suite)
         network.releaseRecovery()
         network.releaseTranslations()
         auth.releaseTokens()
@@ -293,7 +297,7 @@ func decodeSentence(_ frame: String) -> CaptionWireRow? {
             ("fresh REST receipt survives translation wait", receiptFreshness)
         ]
         #if CAPTION_TVOS
-        allTests.append(("playback interruption releases captions without automatic restart", playbackInterruption))
+        allTests.append(("playback interruption releases demand and restores saved preference", playbackInterruption))
         #endif
         let filter = ProcessInfo.processInfo.environment["KJ_CAPTION_TEST_FILTER"]
         let tests = allTests.filter { entry in filter.map { entry.0.contains($0) } ?? true }
@@ -469,29 +473,28 @@ func decodeSentence(_ frame: String) -> CaptionWireRow? {
         let f = try Fixture(); defer { f.finish() }
         try await f.start()
         f.player.state = .tuning
-        try check(f.service.isOn, "transient buffering must retain captions")
+        try check(f.service.isOn, "transient buffering retains captions")
         f.player.state = .playing
         f.player.state = .failed("test stream lost")
-        try check(!f.service.isOn && f.service.text == nil, "terminal playback failure must stop caption session")
-        try await eventually("failure releases paid worker demand") { f.network.demandActions.contains("stop") }
+        try check(!f.service.isOn && f.service.text == nil, "terminal failure releases captions")
+        try await eventually("failure releases worker demand") { f.network.demandActions.contains("stop") }
         f.player.state = .playing
-        try check(!f.service.isOn, "playback recovery must not restart captions")
-        try await f.start()
+        try check(f.service.isOn, "playback recovery restores the saved On choice")
         f.player.state = .paused
-        try check(!f.service.isOn, "system pause must stop caption session")
-        f.player.state = .tuning
+        try check(!f.service.isOn && f.service.isEnabled, "pause suspends demand without forgetting On")
         f.service.toggle()
-        try check(!f.service.isOn, "CC cannot start while signal is unavailable")
+        try check(!f.service.isEnabled, "explicit Off works while runtime is suspended")
         f.player.state = .playing
+        try check(!f.service.isOn, "playback recovery respects saved Off")
         try await f.start()
         let replacement = PlayerController()
         f.service.attach(try channel(), player: replacement)
-        f.service.toggle()
-        try await eventually("replacement starts") { f.service.isOn }
+        try await eventually("replacement preserves On") { f.service.isOn }
         f.player.state = .failed("old player")
-        try check(f.service.isOn, "old player must not stop replacement captions")
+        f.player.state = .playing
+        try check(f.service.isOn, "old player cannot stop or restart replacement captions")
         replacement.state = .idle
-        try check(!f.service.isOn, "idle must stop caption session")
+        try check(!f.service.isOn, "idle releases demand")
     }
     #endif
 
@@ -698,7 +701,7 @@ func decodeSentence(_ frame: String) -> CaptionWireRow? {
         old.push(original)
         try await eventually("old pending translation exists") { f.network.translations == 1 }
         f.service.attach(try channel("update-new-channel"), player: f.player)
-        f.service.toggle()
+        if !f.service.isOn { f.service.toggle() }
         try await eventually("retune opens replacement") { f.network.sockets.count == 2 }
         let current = f.network.sockets[1]
         current.push(subscribed("update-new-channel"))
@@ -907,7 +910,7 @@ func decodeSentence(_ frame: String) -> CaptionWireRow? {
         old.push(row(40, text: "", english: false))
         try await eventually("old channel translation started") { f.network.translations == 1 }
         f.service.attach(try channel("new-channel"), player: f.player)
-        f.service.toggle()
+        if !f.service.isOn { f.service.toggle() }
         try await eventually("retune creates one new connection") { f.network.sockets.count == 2 }
         let current = f.network.sockets[1]
         current.push(subscribed("new-channel"))

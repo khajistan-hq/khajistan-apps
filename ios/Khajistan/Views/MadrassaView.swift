@@ -266,7 +266,7 @@ struct PostScreen: View {
             .textSelection(.enabled)
         }
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
         // A link in the text to an archive page opens in the app; any other in Safari.
         .environment(\.openURL, OpenURLAction { url in
             guard ArchiveURL.isArchive(url) else { return .systemAction }

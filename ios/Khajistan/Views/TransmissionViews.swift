@@ -8,6 +8,7 @@ struct TransmissionSection: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @State private var password = ""
+    @FocusState private var passwordFocused: Bool
     @State private var showSignIn = false
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
@@ -30,7 +31,7 @@ struct TransmissionSection: View {
             }
         }
         .sheet(isPresented: $showSignIn, onDismiss: openChosen) {
-            SignInView(onSignedIn: { openAfterSignIn = chosen })
+            SignInView(model: model, onSignedIn: { openAfterSignIn = chosen })
         }
     }
 
@@ -49,15 +50,14 @@ struct TransmissionSection: View {
                 .accessibilityIdentifier("transmissionLoading")
         case .needsPreviewPassword(let message):
             VStack(alignment: .leading, spacing: 14) {
-                Text("The schedule is behind the preview password until launch.").kjBody()
+                Text("Khajistan's own two TV channels open to everyone when Khajistan launches. Testers: type the preview password.").kjBody()
                     .accessibilityIdentifier("transmissionPreview")
                 if let message { Text(message).kjBody() }
                 HouseInputField("Preview password") {
-                    SecureField("", text: $password).onSubmit(submitPassword)
+                    SecureField("", text: $password).focused($passwordFocused).onSubmit(submitPassword)
                 }
-                Button(kicker: "Continue", action: submitPassword)
+                Button(kicker: "Open", action: submitPassword)
                     .buttonStyle(HouseButtonStyle(solid: true))
-                    .disabled(password.isEmpty)
             }
         case .noSchedule:
             problem("The schedule for this month has not been published.")
@@ -120,6 +120,8 @@ struct TransmissionSection: View {
     }
 
     private func submitPassword() {
+        // Open pressed before anything was typed: the field is where to start.
+        guard !password.isEmpty else { passwordFocused = true; return }
         let entered = password
         password = ""
         Task {
@@ -196,7 +198,7 @@ struct TransmissionPlayerView: View {
         .onAppear { overlay.wake(settled: store.player.state == .playing) }
         .onDisappear { overlay.stop() }
         .sheet(isPresented: $showSignIn) {
-            SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
+            SignInView(model: model, onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
         .accessibilityAction(named: "Switch channel") { switchChannel() }
     }
@@ -265,7 +267,7 @@ struct TransmissionPlayerView: View {
                 .padding(.horizontal, KJLayout.inset)
             } else {
                 Color.black.ignoresSafeArea()
-                PlayerLayerView(player: store.player.player).ignoresSafeArea()
+                PlayerLayerView(player: store.player.player, soundCarriesInBackground: true).ignoresSafeArea()
             }
             if store.player.state == .tuning { palette.ground.ignoresSafeArea() }
             Color.clear.channelGestures(step: { _ in switchChannel() }, tap: { overlay.toggle(settled: store.player.state == .playing) })

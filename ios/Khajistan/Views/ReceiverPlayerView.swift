@@ -404,12 +404,12 @@ struct ReceiverDevice: View {
         case .transmission:
             if player.state == .paused { return "Paused" }
             switch store.phase {
-            case .idle, .tuning: return "Channel \(store.channelNumber) \u{00B7} Connecting\u{2026}"
+            case .idle, .tuning: return "\(store.channelName(store.channelNumber)) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in to watch"
             case .offAir(_, let returns):
                 return returns.map { "Off air \u{00B7} returns at \($0) \(StationClock.tzLabel)" } ?? "Off air"
             case .failed(let message): return message
-            case .onAir: return "Channel \(store.channelNumber) \u{00B7} \(playerText)"
+            case .onAir: return "\(store.channelName(store.channelNumber)) \u{00B7} \(playerText)"
             }
         case .live: return playerText
         }

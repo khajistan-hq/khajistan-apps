@@ -180,7 +180,7 @@ final class ReceiverTuner {
         changeTask = Task { await openTransmission(number) }
     }
 
-    /// The next channel (1) or the one before (-1). Transmission has two, so either way switches.
+    /// The next channel (1) or the one before (-1), round the list or the dial.
     func step(_ delta: Int) {
         intentRevision += 1
         switch source {
@@ -193,7 +193,7 @@ final class ReceiverTuner {
             changeTask = Task { await change(to: target) }
         case .transmission:
             changeTask?.cancel()
-            changeTask = Task { await switchTransmission() }
+            changeTask = Task { await switchTransmission(step: delta) }
         case nil:
             return
         }
@@ -423,11 +423,15 @@ final class ReceiverTuner {
         settledAt = Date()
     }
 
-    private func switchTransmission() async {
+    private func switchTransmission(step: Int) async {
         guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
-        let next = transmission.channelNumber == 1 ? 2 : 1
+        // From the channel this tuner last asked for, not the one the store has reached: a second
+        // swipe lands before the first has tuned, and stepping from the store would lose it.
+        let from: Int
+        if case .transmission(let number) = source { from = number } else { from = transmission.channelNumber }
+        let next = transmission.channel(from: from, step: step)
         source = .transmission(next)
         async let quiet: Void = transmission.player.fadeOut()
         clips.cover(caption: transmission.channelName(next), animated: false)

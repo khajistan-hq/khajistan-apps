@@ -91,10 +91,10 @@ final class KhajistanUITests: XCTestCase {
                 app.buttons["transmission-channel-1"].exists || app.staticTexts["transmissionPreview"].exists
             }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 40), .completed,
-                           "Transmission shows its two channels, or the preview-password step")
+                           "Transmission shows its channels, or the preview-password step")
             shot("\(skin)-05-transmission", app)
 
-            // Khajistan Radio's mixes play on Transmission's channel 2, not in a section of their own
+            // Khajistan Radio's mixes play on Transmission's Music channel, not in a section of their own
             // (owner, 2026-10-06).
             XCTAssertFalse(app.buttons["part-radio"].exists, "there is no Khajistan Radio section")
 
@@ -335,6 +335,35 @@ final class KhajistanUITests: XCTestCase {
         let map = app.descendants(matching: .any)["receiverMap"]
         expectation(for: NSPredicate { _, _ in onScreen(map) }, evaluatedWith: map)
         waitForExpectations(timeout: 5)
+    }
+
+    /// Seven channels, from the Apple TV app's hand-made schedule (one 24-hour strip on each
+    /// channel, 2026-11-04 and 05): the station page counts them and carries a card for each,
+    /// named from the schedule's `_meta.channels`, down to Channel 7.
+    func testTransmissionListsEveryScheduledChannel() {
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../tvos/UITests/Fixtures/programming-seven-channels.json").standardized.path
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjpart", "transmission", "-kjschedulefile", schedule])
+        let count = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "7 scheduled channels")).firstMatch
+        waitFor(count, 40, "the station page counts seven channels")
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        let names = ["Cinema", "State Television", "Music", "Family Tapes", "Mehfil", "Trailers", "Macabre"]
+        for (index, name) in names.enumerated() {
+            let card = app.buttons["transmission-channel-\(index + 1)"]
+            // Short drags with no momentum, towards the card: on an iPhone SE a flick carries a
+            // card past the gap between the docked set and the house bar.
+            for _ in 0..<16 where !(card.exists && card.isHittable) {
+                let start = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
+                let move: CGFloat = card.frame.midY < catalogue.frame.midY ? 160 : -160
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
+                usleep(400_000)
+            }
+            XCTAssertTrue(card.exists && card.isHittable, "Channel \(index + 1) has a card")
+            XCTAssertTrue(card.label.contains("Channel \(index + 1) \u{00B7} \(name)"), card.label)
+            if index % 2 == 1 || index == names.count - 1 { shot("transmission-seven-\(index + 1)", app) }
+        }
+        XCTAssertFalse(app.buttons["transmission-channel-8"].exists, "no card the schedule does not name")
     }
 
     /// Share of the pixels in `rect` (points) that are not near black, read off a screenshot.

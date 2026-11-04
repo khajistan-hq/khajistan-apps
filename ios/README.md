@@ -9,7 +9,7 @@ Redesigned 2026-10-05 after the owner opened the app: *"its UX/UI needs work mak
 | Door | Native or web | What it carries |
 |---|---|---|
 | HOME | native menu, web rooms | the website's own menu door by door (kj-chrome.js SITEMAP/DOORS), the site's search, and Reading Room All Access (the site's checkout, `?join=monthly` / `annual`, no price in the app) |
-| RECEIVER | native | LIVE: the region map from `region-shapes.json` (tap a region, or its name in the strip), the "Beyond the atlas" switch, the region's television, radio and cameras with a filter; TRANSMISSION: Khajistan TV's two channels on the station clock, now and up next, sign-in and the preview password; KHAJISTAN RADIO: the 22 mixes of `data/radio/mixtapes.json` |
+| RECEIVER | native | LIVE: the region map from `region-shapes.json` (tap a region, or its name in the strip), the "Beyond the atlas" switch, the region's television, radio and cameras with a filter; TRANSMISSION: Khajistan TV's channels as the schedule names them (seven since 2026-11-04) on the station clock, now and up next, sign-in and the preview password; KHAJISTAN RADIO: the 22 mixes of `data/radio/mixtapes.json` |
 | PICS/VIDS | native | the Born Digital stream as `/browse-archive.html` reads it, the site's adult notice, kind and region filters, a two-column stream at each object's own shape, a full-screen viewer |
 | ACCOUNT | native, web links | the skin control, All Access, the account Transmission plays under, saved pages, recent pages and downloaded files on this device, links to Your Khajistan and Your downloads on the website |
 

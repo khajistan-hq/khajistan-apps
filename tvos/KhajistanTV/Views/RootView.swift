@@ -113,12 +113,11 @@ private struct BackToAtlas: ViewModifier {
     let active: Bool
     let back: () -> Void
 
+    // Always attached, handing Back to tvOS (nil) when there is nothing to go back to. An if/else
+    // here rebuilt the whole screen on every move to or from the Receiver, and the rebuild lost
+    // the section change it happened on, so the history never recorded leaving the atlas.
     func body(content: Content) -> some View {
-        if active {
-            content.onExitCommand(perform: back)
-        } else {
-            content
-        }
+        content.onExitCommand(perform: active ? back : nil)
     }
 }
 

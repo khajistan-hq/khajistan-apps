@@ -4277,7 +4277,36 @@ func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
     try expectEqual(Set(taken).count, taken.count, "no channel twice")
 }
 
+// MARK: - The song on air
+
+func nowPlayingReadsTheRPC() throws {
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"TLC","title":"No Scrubs","heard_at":"x"}]"#.utf8)), "TLC \u{2013} No Scrubs")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":null,"title":"Ya Am Al Shal"}]"#.utf8)), "Ya Am Al Shal")
+    // Nothing on air is "", which clears the line; an unreadable answer is nil, which keeps it.
+    try expectEqual(NowPlaying.parse(Data("[]".utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"A","title":"  "}]"#.utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"{"message":"No API key"}"#.utf8)), nil)
+    try expectEqual(NowPlaying.caption(song: "A \u{2013} B", mediaType: "tv"), "Now playing: A \u{2013} B")
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "radio"), NowPlaying.unavailable)
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "tv"), nil)
+}
+
+func houseSongsFindTheSpan() throws {
+    let file = #"{"_meta":{},"songs":{"tvx-1":[[80,252,"Walid Sarkis","Ya Am Al Shal"],[300,400,"","Untitled"]]}}"#
+    let spans = try require(HouseSongs.decode(Data(file.utf8))?["tvx-1"])
+    try expectEqual(spans.count, 2)
+    try expectEqual(HouseSongs.song(in: spans, at: 80), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    try expectEqual(HouseSongs.song(in: spans, at: 251.9), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    // The end is exclusive, the gap between songs is silent, and a span with no artist is the title.
+    try expectEqual(HouseSongs.song(in: spans, at: 252), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 79.9), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 350), "Untitled")
+    try expectEqual(HouseSongs.decode(Data("not json".utf8)), nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
+    ("houseSongsFindTheSpan", houseSongsFindTheSpan),
     ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
     ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),

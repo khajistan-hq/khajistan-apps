@@ -45,6 +45,8 @@ final class TransmissionStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var offAirWatch: Task<Void, Never>?
     private unowned let auth: AuthStore
+    /// The preview password, for the gated files a player reads beside the schedule (songs.json).
+    var previewPassword: String? { auth.previewPassword }
     private let urlSession: URLSession
 
     private struct Reply {

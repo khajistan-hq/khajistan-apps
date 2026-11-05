@@ -27,6 +27,9 @@ final class ReceiverTuner {
     private(set) var list: [Channel] = []
     /// The live channels' player. Transmission plays on its store's own.
     let controller = PlayerController()
+    /// The song on the live channel (NowPlaying), or "". Every surface showing the channel reads it.
+    private(set) var song = ""
+    @ObservationIgnored private var songTask: Task<Void, Never>?
 
     let captions: LiveCaptionSession
     @ObservationIgnored private var initialOpenAttempted = false
@@ -176,6 +179,7 @@ final class ReceiverTuner {
     func playTransmission(_ number: Int) {
         stop()
         source = .transmission(number)
+        watchHouseSong()
         transmission.player.state = .tuning
         changeTask = Task { await openTransmission(number) }
     }
@@ -298,6 +302,8 @@ final class ReceiverTuner {
         captions.detach()
         tuneTask?.cancel()
         changeTask?.cancel()
+        songTask?.cancel()
+        song = ""
         controller.stop()
         if case .transmission = source { transmission.stop() }
         clips.clear()
@@ -360,6 +366,17 @@ final class ReceiverTuner {
         controller.state = .tuning
         source = .live(target)
         captions.attach(target, player: controller)
+        songTask?.cancel()
+        song = ""
+        if target.mediaType == "radio" || target.mediaType == "tv" {
+            songTask = Task { [weak self] in
+                await NowPlaying.watch(target.id) { line in
+                    // Left for Transmission or another channel: the line is not this one's.
+                    guard let self else { return }
+                    self.song = self.channel?.id == target.id ? line : ""
+                }
+            }
+        }
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -368,6 +385,30 @@ final class ReceiverTuner {
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Khajistan Transmission's song: the span of songs.json the player's position is in, checked
+    /// each second while the receiver stays on Transmission (the website reads `timeupdate`).
+    private func watchHouseSong() {
+        songTask?.cancel()
+        song = ""
+        songTask = Task { [weak self] in
+            var heldFor = "", spans: [SongSpan] = []
+            while !Task.isCancelled {
+                guard let self, case .transmission = self.source else { return }
+                var line = ""
+                if case .onAir(let air) = self.transmission.phase {
+                    if air.programmeId != heldFor {
+                        heldFor = air.programmeId
+                        spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)
+                    }
+                    let time = self.transmission.player.player.currentTime().seconds
+                    if time.isFinite { line = HouseSongs.song(in: spans, at: time) }
+                }
+                if line != self.song { self.song = line }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
@@ -433,6 +474,7 @@ final class ReceiverTuner {
         if case .transmission(let number) = source { from = number } else { from = transmission.channelNumber }
         let next = transmission.channel(from: from, step: step)
         source = .transmission(next)
+        watchHouseSong()
         async let quiet: Void = transmission.player.fadeOut()
         clips.cover(caption: transmission.channelName(next), animated: false)
         await quiet

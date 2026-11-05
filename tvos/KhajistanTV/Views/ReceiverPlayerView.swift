@@ -45,6 +45,8 @@ struct ReceiverPlayerView: View {
     /// lets go, Select works it. Focus never leaves the surface (see below).
     @State private var armed: Chip?
     @State private var likeNote: String?
+    /// The song on the channel on screen (NowPlaying), or "".
+    @State private var song = ""
     /// The guide, open over the left of the picture: the row the remote has lit, as an index in
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
@@ -94,7 +96,7 @@ struct ReceiverPlayerView: View {
             // front of the channel's name. The band says live radio; the centre carries the name.
             DancerLayer(controller: controller) {
                 if current.mediaType == "radio" && controller.state == .playing {
-                    RadioNowPlaying(channel: current)
+                    RadioNowPlaying(channel: current, song: song)
                 }
             }
             // The focus target. It draws nothing; its job is to hold focus so the remote's
@@ -201,6 +203,12 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
+        // A new channel starts with no song; the watch asks every 20 s while it stays on screen.
+        .task(id: current.id) {
+            song = ""
+            guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
+            await NowPlaying.watch(current.id) { song = $0 }
+        }
         .onDisappear { stopEverything() }
     }
 
@@ -298,7 +306,10 @@ struct ReceiverPlayerView: View {
         default:
             if let likeNote { return likeNote }
             if !model.captions.note.isEmpty { return model.captions.note }
-            return current.place.isEmpty ? nil : current.place
+            // Radio prints its song on the ground; television carries it after the place.
+            let tvSong = current.mediaType == "tv" ? NowPlaying.caption(song: song, mediaType: "tv") : nil
+            let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
+            return line.isEmpty ? nil : line
         }
     }
 

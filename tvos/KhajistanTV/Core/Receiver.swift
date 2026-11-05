@@ -300,3 +300,131 @@ struct ReceiverControlsVisibility {
         return true
     }
 }
+
+// MARK: - The song on air
+
+/// The song on a channel, as the website's receiver shows it (open-frequencies.js
+/// watchSongMetadata; owner, 2026-11-04: "shazam so our channels show metadata of songs being
+/// played"). A live channel asks the now_playing() RPC, which also marks the channel wanted, so
+/// the fingerprinting worker (scripts/signal-room/now_playing_worker.py) listens to it. A
+/// Khajistan TV programme is a fixed file, so its songs were heard once and sit in songs.json.
+enum NowPlaying {
+    static let unavailable = "Current song title unavailable."
+    static let pollSeconds = 20
+    /// Failed calls in a row before a kept song is dropped (60 s), as on the website.
+    static let misses = 3
+
+    /// "Artist – Title", or the title alone.
+    static func line(artist: String?, title: String) -> String {
+        let artist = artist?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return artist.isEmpty ? title : artist + " \u{2013} " + title
+    }
+
+    /// What a player prints for a live channel: the song, or for radio the site's
+    /// "unavailable" line; television with no song prints nothing.
+    static func caption(song: String, mediaType: String) -> String? {
+        if !song.isEmpty { return "Now playing: " + song }
+        return mediaType == "radio" ? unavailable : nil
+    }
+
+    private struct Row: Decodable { let artist: String?; let title: String? }
+
+    /// The RPC's answer as a line: "" when nothing is playing, nil when it could not be read.
+    static func parse(_ data: Data) -> String? {
+        guard let rows = try? JSONDecoder().decode([Row].self, from: data) else { return nil }
+        guard let row = rows.first, let title = row.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return "" }
+        return line(artist: row.artist, title: title)
+    }
+
+    /// One call. Nil: the call failed.
+    static func fetch(_ channelId: String) async -> String? {
+        guard let url = SupabaseRoute.url("/rest/v1/rpc/now_playing"),
+              let body = try? JSONSerialization.data(withJSONObject: ["p_channel": channelId]) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.timeoutInterval = 10
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(KJConfig.anonKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        guard let (data, response) = try? await SupabaseRoute.data(for: request, session: .shared),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return parse(data)
+    }
+
+    /// Asks every 20 s for as long as the calling task lives (a view's `.task(id:)`), handing each
+    /// change to `update`. A failed call keeps the last song for up to `misses` polls.
+    static func watch(_ channelId: String, update: @MainActor @escaping (String) -> Void) async {
+        var kept = "", failures = 0
+        while !Task.isCancelled {
+            if let line = await fetch(channelId) {
+                failures = 0
+                kept = line
+            } else {
+                failures += 1
+                if failures >= misses { kept = "" }
+            }
+            if Task.isCancelled { return }
+            let shown = kept
+            await update(shown)
+            try? await Task.sleep(for: .seconds(pollSeconds))
+        }
+    }
+}
+
+/// songs.json: [start_s, end_s, artist, title] spans, seconds into a programme's file, keyed by
+/// programme id (scripts/khajistan_tv/song_pass.py). Read once an hour, as the site does.
+struct SongSpan: Decodable, Equatable, Sendable {
+    let start: Double, end: Double, artist: String, title: String
+    init(start: Double, end: Double, artist: String, title: String) {
+        self.start = start; self.end = end; self.artist = artist; self.title = title
+    }
+    init(from decoder: Decoder) throws {
+        var c = try decoder.unkeyedContainer()
+        start = try c.decode(Double.self); end = try c.decode(Double.self)
+        artist = (try? c.decode(String.self)) ?? ""; title = try c.decode(String.self)
+    }
+}
+
+actor HouseSongs {
+    static let shared = HouseSongs()
+    private struct File: Decodable { let songs: [String: [SongSpan]] }
+    private var songs: [String: [SongSpan]] = [:]
+    private var loadedAt = Date.distantPast
+
+    static func decode(_ data: Data) -> [String: [SongSpan]]? { (try? JSONDecoder().decode(File.self, from: data))?.songs }
+
+    /// The song playing `seconds` into a programme, or "".
+    static func song(in spans: [SongSpan], at seconds: Double) -> String {
+        guard let span = spans.first(where: { seconds >= $0.start && seconds < $0.end }) else { return "" }
+        return NowPlaying.line(artist: span.artist, title: span.title)
+    }
+
+    /// Asked without the preview password first and with it on a 401, as the schedule is
+    /// (TransmissionStore.fetchSchedule): the file sits behind the gate until launch.
+    func spans(for programmeId: String, previewPassword: String?) async -> [SongSpan] {
+        if Date().timeIntervalSince(loadedAt) > 3600 {
+            loadedAt = Date()
+            let hour = Int(Date().timeIntervalSince1970 / 3600)
+            if let url = KJURL.sitePath("/data/khajistan-tv/songs.json?h=\(hour)") {
+                var request = URLRequest(url: url)
+                request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
+                var reply = try? await URLSession.shared.data(for: request)
+                if (reply?.1 as? HTTPURLResponse)?.statusCode == 401, let previewPassword {
+                    request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: previewPassword),
+                                     forHTTPHeaderField: "Authorization")
+                    reply = try? await URLSession.shared.data(for: request)
+                }
+                if let (data, response) = reply, (response as? HTTPURLResponse)?.statusCode == 200,
+                   let read = Self.decode(data) {
+                    songs = read  // a failed read keeps the songs already known
+                } else if songs.isEmpty {
+                    loadedAt = .distantPast  // nothing held yet: ask again next time
+                }
+            }
+        }
+        return songs[programmeId] ?? []
+    }
+}

@@ -21,6 +21,16 @@ struct HomeView: View {
                 upNext
                 HomeShelves()
                 rooms
+                // The bar's ROOMS door, where the bar has none (a phone): one way in, never two.
+                if !AppTab.inBar.contains(.rooms) {
+                    Button(kicker: "Every room \u{2192}") {
+                        // The list itself, not the room last left open in it.
+                        model.room = nil
+                        model.roomReturn = nil
+                        model.tab = .rooms
+                    }
+                        .accessibilityIdentifier("homeAllRooms")
+                }
                 if !recent.isEmpty { recentBlock }
             }
             .padding(.horizontal, KJLayout.inset)

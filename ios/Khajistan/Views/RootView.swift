@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The five doors and the house bar under them. There is no system tab bar: its tint, its glass
+/// The doors and the house bar under them (five on iPad and Mac, four on a phone: `AppTab.inBar`). There is no system tab bar: its tint, its glass
 /// and its selection pill are not the house's. A door is mounted the first time it is opened and
 /// then kept, so going back to it finds it where it was left.
 struct RootView: View {
@@ -29,7 +29,8 @@ struct RootView: View {
             if model.tab != .receiver, model.tuner.source != nil {
                 NowPlayingBar()
             }
-            HouseTabBar(current: model.tab) { tab in
+            // ROOMS off the bar (a phone): the door it was opened from stays lit, HOME for the list.
+            HouseTabBar(current: AppTab.inBar.contains(model.tab) ? model.tab : (model.roomReturn ?? .home)) { tab in
                 // At once, as the system tab bar switches: no fade between pages (owner, 2026-10-07).
                 var instant = Transaction()
                 instant.disablesAnimations = true
@@ -189,7 +190,7 @@ struct HouseTabBar: View {
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {
-                ForEach(AppTab.allCases) { tab in
+                ForEach(AppTab.inBar) { tab in
                     Button {
                         select(tab)
                     } label: {

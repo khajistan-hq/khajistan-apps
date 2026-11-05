@@ -4,11 +4,18 @@ import StoreKit
 
 /// The bottom bar's doors (owner brief, 2026-10-27): HOME, ROOMS (every room of the website's
 /// menu, the native ones drawn here), the RECEIVER, the LIBRARY (account, saved work, what is on
-/// this device) and SEARCH.
+/// this device) and SEARCH. All five on iPad and Mac; a phone's bar has four (`inBar`, owner
+/// 2026-11-04), so `allCases` is every door, not the bar.
 enum AppTab: String, CaseIterable, Identifiable {
     case home, rooms, receiver, library, search
 
     var id: String { rawValue }
+
+    /// The doors the bar shows. A phone leaves ROOMS out (owner, 2026-11-04: "hide rooms on the
+    /// iphone"); its rooms open from HOME's tiles and HOME's "Every room" link. iPad and Mac keep it.
+    @MainActor static var inBar: [AppTab] {
+        UIDevice.current.userInterfaceIdiom == .phone ? allCases.filter { $0 != .rooms } : allCases
+    }
 
     /// The tab bar's icon (SF Symbols: monochrome, in the text's colour).
     var symbol: String {
@@ -74,6 +81,11 @@ final class AppModel {
     /// The room open in ROOMS, nil for the list of rooms. Kept while another bar door is on show,
     /// so coming back finds the room where it was left.
     var room: NativeRoom?
+    /// The door a room was opened from when the bar has no ROOMS door (a phone): Back out of the
+    /// room goes there rather than to the hidden list, and the bar keeps it lit meanwhile.
+    /// Set only by `open(_ room:)`; cleared by HOME's "Every room" and by Back. Anything else that
+    /// switches to `.rooms` must clear it too, or Back revives an old door.
+    var roomReturn: AppTab?
     /// Each room's own stack of pushed screens, kept per room for the same reason.
     var roomPaths: [NativeRoom: [RoomRoute]] = [:]
     /// The skin on screen: the sky's, or the reader's pick while the sky is in the band it was
@@ -334,6 +346,7 @@ final class AppModel {
                 self.tab = tab
             } else {
                 cover = nil
+                if tab != .rooms { roomReturn = AppTab.inBar.contains(.rooms) ? nil : tab }
                 self.room = room
                 if let route { roomPaths[room] = route }
                 self.tab = .rooms

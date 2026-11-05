@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// RECEIVER, the website's /open-frequencies on a phone: live television, radio and public cameras
-/// by region on the map, and Khajistan Transmission's two channels. The Khajistan Radio mixes are
-/// not a section here (owner, 2026-10-06): they play on Transmission's channel 2. Everything is read from the public files the
+/// by region on the map, and Khajistan Transmission's channels. The Khajistan Radio mixes are
+/// not a section here (owner, 2026-10-06): they play on Transmission's Music channel. Everything is read from the public files the
 /// website reads (Core/Receiver.swift, Services/ReceiverStore.swift).
 struct ReceiverView: View {
     enum Part: String, CaseIterable, Identifiable {

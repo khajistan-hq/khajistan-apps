@@ -80,6 +80,9 @@ final class AppModel {
     /// The room open in ROOMS, nil for the list of rooms. Kept while another bar door is on show,
     /// so coming back finds the room where it was left.
     var room: NativeRoom?
+    /// The door a room was opened from when the bar has no ROOMS door (a phone): Back out of the
+    /// room goes there rather than to the hidden list, and the bar keeps it lit meanwhile.
+    var roomReturn: AppTab?
     /// Each room's own stack of pushed screens, kept per room for the same reason.
     var roomPaths: [NativeRoom: [RoomRoute]] = [:]
     /// The skin on screen: the sky's, or the reader's pick while the sky is in the band it was
@@ -340,6 +343,7 @@ final class AppModel {
                 self.tab = tab
             } else {
                 cover = nil
+                if tab != .rooms { roomReturn = AppTab.inBar.contains(.rooms) ? nil : tab }
                 self.room = room
                 if let route { roomPaths[room] = route }
                 self.tab = .rooms

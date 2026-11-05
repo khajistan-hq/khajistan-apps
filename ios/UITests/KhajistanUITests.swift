@@ -38,12 +38,22 @@ final class KhajistanUITests: XCTestCase {
     /// ROOMS: the bar's door on iPad and Mac; on a phone, whose bar has none, HOME's "Every room".
     private func openRooms(_ app: XCUIApplication) {
         if app.buttons["tab-rooms"].exists { app.buttons["tab-rooms"].tap(); return }
+        tapOnHome(app, "homeAllRooms")
+    }
+
+    /// Scrolls HOME until a control sits clear above the bar and the small player, then taps it.
+    /// Measured by frame, not isHittable: under the small player the activation point can be unreadable.
+    private func tapOnHome(_ app: XCUIApplication, _ id: String) {
         app.buttons["tab-home"].tap()
-        let link = app.buttons["homeAllRooms"]
-        // Its frame on screen, not isHittable: under the small player the activation point can be unreadable.
-        let screen = app.windows.firstMatch.frame
-        for _ in 0..<10 where !(link.exists && !link.frame.isEmpty && screen.contains(link.frame)) { app.swipeUp() }
-        link.tap()
+        let target = app.buttons[id]
+        // The top of the bar, or of the small player when one sits over it.
+        let player = app.descendants(matching: .any)["nowPlaying"]
+        let floor = (player.exists ? player.frame.minY : app.buttons["tab-home"].frame.minY) - 4
+        // Its middle, which is where tap() lands; a tall tile need not fit whole.
+        let clear = { target.exists && !target.frame.isEmpty && target.frame.midY > 60 && target.frame.midY < floor - 20 }
+        for _ in 0..<16 where !clear() { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(clear(), "HOME scrolls to \(id)")
+        target.tap()
     }
 
     /// HOME is on screen. Its first room tile marks it: "Every room" sits below the picture tiles
@@ -84,9 +94,22 @@ final class KhajistanUITests: XCTestCase {
         for skin in skins {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
+            waitForHome(app, 10, "HOME leads to every room")
+            XCTAssertTrue(app.buttons["tab-home"].exists, "the bar is drawn")
             XCTAssertEqual(app.buttons["tab-rooms"].exists, UIDevice.current.userInterfaceIdiom != .phone,
                            "ROOMS is on the bar of an iPad, never a phone's (owner, 2026-11-04)")
-            waitForHome(app, 10, "HOME leads to every room")
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // A room opened from HOME goes back to HOME, not to the list the bar no longer offers.
+                tapOnHome(app, "home-room-reading")
+                waitFor(app.buttons["stackBack"], 10, "the Reading Room opens from its HOME tile")
+                XCTAssertTrue(app.buttons["tab-home"].isSelected, "HOME stays lit over a room opened from it")
+                app.buttons["stackBack"].tap()
+                waitForHome(app, 10, "Back from a room opened on HOME returns to HOME")
+                // Every door stays mounted under the one on show, so test what can be touched, not what exists.
+                XCTAssertTrue(app.buttons["home-room-reading"].isHittable, "HOME is the page on show after Back")
+                XCTAssertFalse(app.staticTexts["Everything in Khajistan"].isHittable, "Back does not land on the ROOMS list")
+                app.swipeDown(); app.swipeDown()
+            }
             shot("\(skin)-01-home", app)
             openRooms(app)
             waitFor(app.buttons["destination-reading"], 10, "ROOMS lists the website's menu")
@@ -542,8 +565,11 @@ final class KhajistanUITests: XCTestCase {
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
 #if KJ_APP_STORE
-        let roomsLit = app.buttons["tab-rooms"].exists ? "tab-rooms" : "tab-home"
-        XCTAssertTrue(app.buttons[roomsLit].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
+        if app.buttons["tab-rooms"].exists {
+            XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
+        } else {
+            waitFor(app.staticTexts["Everything in Khajistan"], 5, "an excluded Pics/Vids launch falls back to the ROOMS list")
+        }
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch.waitForExistence(timeout: 5),
                        "a stored Pics/Vids launch does not open the stream in a store build")
         openRooms(app)
@@ -1112,7 +1138,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(state, 40, "the receiver opens")
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 40)
-        openRooms(app)
+        if app.buttons["tab-rooms"].exists { app.buttons["tab-rooms"].tap() } else { tapOnHome(app, "home-room-reading") }
         let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
         waitFor(titles.firstMatch, 60, "the shelf loads")
         let free = titles.matching(NSPredicate(format: "label CONTAINS[c] 'read in full'")).firstMatch

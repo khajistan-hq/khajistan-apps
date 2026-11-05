@@ -29,7 +29,8 @@ struct RootView: View {
             if model.tab != .receiver, model.tuner.source != nil {
                 NowPlayingBar()
             }
-            HouseTabBar(current: model.tab) { tab in
+            // ROOMS off the bar (a phone): the door it was opened from stays lit, HOME for the list.
+            HouseTabBar(current: AppTab.inBar.contains(model.tab) ? model.tab : (model.roomReturn ?? .home)) { tab in
                 // At once, as the system tab bar switches: no fade between pages (owner, 2026-10-07).
                 var instant = Transaction()
                 instant.disablesAnimations = true
@@ -186,8 +187,6 @@ struct HouseTabBar: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        // ROOMS off the bar (a phone) is reached from HOME, so HOME stays lit while it is open.
-        let current = AppTab.inBar.contains(self.current) ? self.current : .home
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {

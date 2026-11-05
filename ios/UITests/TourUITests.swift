@@ -43,7 +43,8 @@ final class TourUITests: XCTestCase {
         } else {   // a phone's bar has no ROOMS: HOME's "Every room" opens it
             app.buttons["tab-home"].tap()
             let link = app.buttons["homeAllRooms"]
-            for _ in 0..<10 where !(link.exists && link.isHittable) { app.swipeUp(); sleep(1) }
+            let floor = app.buttons["tab-home"].frame.minY - 4
+            for _ in 0..<16 where !(link.exists && !link.frame.isEmpty && link.frame.maxY < floor) { app.swipeUp(); sleep(1) }
             link.tap()
         }
         sleep(2)

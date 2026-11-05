@@ -58,7 +58,12 @@ private struct NarrowRooms: View {
             guard let room = model.room else { return [] }
             return [.room(room)] + model.roomPaths[room, default: []]
         } set: { path in
-            guard case .room(let room)? = path.first else { model.room = nil; return }
+            guard case .room(let room)? = path.first else {
+                model.room = nil
+                // Opened from another door on a phone (no ROOMS on its bar): Back goes back there.
+                if let back = model.roomReturn { model.roomReturn = nil; model.tab = back }
+                return
+            }
             model.room = room
             model.roomPaths[room] = Array(path.dropFirst())
         }

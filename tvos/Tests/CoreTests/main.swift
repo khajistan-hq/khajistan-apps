@@ -4307,6 +4307,9 @@ func houseSongsFindTheSpan() throws {
     let read = try require(HouseSongs.decode(Data(rough.utf8)))
     try expectEqual(read["a"], [SongSpan(start: 1, end: 9, artist: "", title: "T")])
     try expectEqual(read["b"]?.count, 1)
+    let oops = try require(HouseSongs.decode(Data(#"{"songs":{"a":"oops","b":[[0,5,"A","B"]]}}"#.utf8)))
+    try expectEqual(oops["a"], [])
+    try expectEqual(oops["b"]?.count, 1)
 }
 
 func nowPlayingKeepsThroughMisses() throws {

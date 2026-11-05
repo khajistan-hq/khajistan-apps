@@ -363,18 +363,29 @@ enum NowPlaying {
 
     /// Asks every 20 s for as long as the calling task lives (a view's `.task(id:)`), handing each
     /// change to `update`. While `active` says no (paused, tuning, failed) nothing is asked, so a
-    /// paused radio does not keep the worker listening for nobody.
+    /// paused radio does not keep the worker listening for nobody, and the song is cleared: a
+    /// paused channel is playing nothing. It asks at once when the channel plays again.
     static func watch(_ channelId: String, active: @MainActor @escaping () -> Bool = { true },
                       update: @MainActor @escaping (String) -> Void) async {
         var state = (kept: "", failures: 0)
+        var wasActive = false
+        var due = Date.distantPast
         while !Task.isCancelled {
             if await active() {
-                state = step(kept: state.kept, failures: state.failures, answer: await fetch(channelId))
-                if Task.isCancelled { return }
-                let shown = state.kept
-                await update(shown)
+                if !wasActive || Date() >= due {
+                    state = step(kept: state.kept, failures: state.failures, answer: await fetch(channelId))
+                    if Task.isCancelled { return }
+                    due = Date().addingTimeInterval(TimeInterval(pollSeconds))
+                    let shown = state.kept
+                    await update(shown)
+                }
+                wasActive = true
+            } else if wasActive {
+                wasActive = false
+                state = ("", 0)
+                await update("")
             }
-            try? await Task.sleep(for: .seconds(pollSeconds))
+            try? await Task.sleep(for: .seconds(1))
         }
     }
 }
@@ -401,15 +412,21 @@ private struct LossySpan: Decodable {
     init(from decoder: Decoder) throws { span = try? SongSpan(from: decoder) }
 }
 
+/// And a programme whose value is not a list of spans is no songs, not a lost file.
+private struct LossySpans: Decodable {
+    let spans: [SongSpan]
+    init(from decoder: Decoder) throws { spans = ((try? [LossySpan](from: decoder)) ?? []).compactMap(\.span) }
+}
+
 actor HouseSongs {
     static let shared = HouseSongs()
-    private struct File: Decodable { let songs: [String: [LossySpan]] }
+    private struct File: Decodable { let songs: [String: LossySpans] }
     private var songs: [String: [SongSpan]] = [:]
     private var loadedAt = Date.distantPast
     private var loading: Task<[String: [SongSpan]]?, Never>?
 
     static func decode(_ data: Data) -> [String: [SongSpan]]? {
-        (try? JSONDecoder().decode(File.self, from: data))?.songs.mapValues { $0.compactMap(\.span) }
+        (try? JSONDecoder().decode(File.self, from: data))?.songs.mapValues(\.spans)
     }
 
     /// The song playing `seconds` into a programme, or "".

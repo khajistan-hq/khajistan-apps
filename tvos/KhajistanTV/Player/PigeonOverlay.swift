@@ -65,9 +65,12 @@ final class PigeonOverlay {
         return FlightChoice.next(in: FlightChoice.pool(all, expected: expected), after: last).flatMap { flights[$0] }
     }
 
-    /// Loads a flight's two videos at their first frame, decoders warmed.
+    /// Loads a flight's two videos at their first frame, decoders warmed. Does nothing while a
+    /// flight is on screen: the players are its players, and `preroll` on a player already at
+    /// rate 1 never returns, so a press during the sign-on waited here for good and Transmission
+    /// took no channel change again (2026-11-04). The change goes on under the bird in the air.
     func arm(_ flight: Flight) async {
-        if armed == flight { return }
+        if showing || armed == flight { return }
         armed = nil
         let colour = AVPlayerItem(url: flight.colour), matte = AVPlayerItem(url: flight.matte)
         renderer.attach(colour: colour, matte: matte)
@@ -80,7 +83,8 @@ final class PigeonOverlay {
             if Task.isCancelled || ContinuousClock.now > deadline { return }
             try? await Task.sleep(for: .milliseconds(20))
         }
-        guard colour.status == .readyToPlay, matte.status == .readyToPlay else { return }
+        // A flight may have started while these loaded.
+        guard !showing, colour.status == .readyToPlay, matte.status == .readyToPlay else { return }
         async let a: Bool = colourPlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         async let b: Bool = mattePlayer.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         let seeked = await (a, b)

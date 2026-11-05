@@ -351,7 +351,8 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Up and down switch channel behind the pigeon. While it is flying they skip it.
+    /// Up and down switch channel behind the pigeon. While a change is under way they skip it; one
+    /// made while the sign-on flies switches under that bird.
     private func move(_ direction: MoveCommandDirection) {
         wake()
         if direction == .right, !subtitles.tracks.isEmpty, stripShown {

@@ -10,6 +10,12 @@ enum AppTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The doors the bar shows. A phone leaves ROOMS out (owner, 2026-11-04: "hide rooms on the
+    /// iphone"); its rooms open from HOME's tiles and HOME's "Every room" link. iPad and Mac keep it.
+    @MainActor static var inBar: [AppTab] {
+        UIDevice.current.userInterfaceIdiom == .phone ? allCases.filter { $0 != .rooms } : allCases
+    }
+
     /// The tab bar's icon (SF Symbols: monochrome, in the text's colour).
     var symbol: String {
         switch self {

@@ -186,10 +186,12 @@ struct HouseTabBar: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
+        // ROOMS off the bar (a phone) is reached from HOME, so HOME stays lit while it is open.
+        let current = AppTab.inBar.contains(self.current) ? self.current : .home
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {
-                ForEach(AppTab.allCases) { tab in
+                ForEach(AppTab.inBar) { tab in
                     Button {
                         select(tab)
                     } label: {

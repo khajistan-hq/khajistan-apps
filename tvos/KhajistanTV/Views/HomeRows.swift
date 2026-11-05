@@ -65,7 +65,19 @@ struct HomeRows: View {
         let store = model.transmission
         let now = TransmissionStore.now()
         return Shelf("Khajistan Transmission") {
-            ForEach([1, 2], id: \.self) { number in
+            // Until the schedule says which channels there are, one door to the station page.
+            if store.channelNumbers.isEmpty {
+                Button {
+                    model.open(DeepLink.transmission.url)
+                } label: {
+                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
+                        Kicker("Khajistan Transmission")
+                    }
+                }
+                .buttonStyle(HouseCardStyle())
+                .accessibilityIdentifier("home-transmission-station")
+            }
+            ForEach(store.channelNumbers, id: \.self) { number in
                 let onAir = store.nowOn(channel: number, at: now)
                 Button {
                     model.open(DeepLink.channel(number).url)

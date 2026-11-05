@@ -1,8 +1,9 @@
 import Foundation
 
 /// The places the Top Shelf can open: `khajistan://receiver`, `khajistan://receiver/<region id>`,
-/// `khajistan://transmission` and `khajistan://transmission/<1 or 2>`. Anything else, including a
-/// query, a fragment, a user or a port, is not a link the app follows.
+/// `khajistan://transmission` and `khajistan://transmission/<channel number>` (1 to 99; a number
+/// the schedule does not name opens the station page and goes no further). Anything else,
+/// including a query, a fragment, a user or a port, is not a link the app follows.
 enum DeepLink: Hashable, Sendable {
     case receiver
     case region(String)
@@ -29,7 +30,9 @@ enum DeepLink: Hashable, Sendable {
         case ("transmission", 0):
             self = .transmission
         case ("transmission", 1):
-            guard let number = Int(path[0]), String(number) == path[0], (1...2).contains(number) else { return nil }
+            // The shape of a channel number. Which channels exist is the schedule's to say, and
+            // the station page opens only one the schedule names.
+            guard let number = Int(path[0]), String(number) == path[0], (1...99).contains(number) else { return nil }
             self = .channel(number)
         default:
             return nil

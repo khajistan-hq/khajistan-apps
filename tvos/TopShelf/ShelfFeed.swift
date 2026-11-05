@@ -44,7 +44,7 @@ enum ShelfFeed {
 
     // MARK: Transmission
 
-    /// Channel 1 and Channel 2 as the station clock has them now. The schedule is asked for
+    /// Every channel the schedule names, as the station clock has it now. The schedule is asked for
     /// without a password first, as the app does (after launch it is public), then with the
     /// preview password the app keeps in the keychain group it shares with this extension. With
     /// no schedule, one slide carries the website's own description of the station.
@@ -60,14 +60,14 @@ enum ShelfFeed {
         guard let p = programming else {
             let item = TVTopShelfCarouselItem(identifier: "transmission")
             item.contextTitle = "Khajistan Transmission"
-            item.title = "Two scheduled channels"
+            item.title = "Scheduled channels"
             guard draw(item, name: "transmission-\(skin.rawValue)", folder: folder, art: { scale in
                 ShelfArt.transmission(skin: skin, scale: scale, pigeon: pigeon)
             }) else { return [] }
             item.displayAction = TVTopShelfAction(url: DeepLink.transmission.url)
             return [item]
         }
-        return [1, 2].compactMap { number -> TVTopShelfCarouselItem? in
+        return StationClock.channelNumbers(p).compactMap { number -> TVTopShelfCarouselItem? in
             let air = StationClock.onAir(p, channel: number, at: now)
             let returns = StationClock.channelId(p, number: number).flatMap { StationClock.returnTime(p, channelId: $0, at: now) }
             let line = p._meta.channels.first { $0.number == number }?.line

@@ -354,21 +354,26 @@ enum NowPlaying {
         return parse(data)
     }
 
+    /// One poll's effect on what is shown: an answer replaces the song ("" clears it at once);
+    /// a failed call keeps it until `misses` failures in a row.
+    static func step(kept: String, failures: Int, answer: String?) -> (kept: String, failures: Int) {
+        guard let answer else { return (failures + 1 >= misses ? "" : kept, failures + 1) }
+        return (answer, 0)
+    }
+
     /// Asks every 20 s for as long as the calling task lives (a view's `.task(id:)`), handing each
-    /// change to `update`. A failed call keeps the last song for up to `misses` polls.
-    static func watch(_ channelId: String, update: @MainActor @escaping (String) -> Void) async {
-        var kept = "", failures = 0
+    /// change to `update`. While `active` says no (paused, tuning, failed) nothing is asked, so a
+    /// paused radio does not keep the worker listening for nobody.
+    static func watch(_ channelId: String, active: @MainActor @escaping () -> Bool = { true },
+                      update: @MainActor @escaping (String) -> Void) async {
+        var state = (kept: "", failures: 0)
         while !Task.isCancelled {
-            if let line = await fetch(channelId) {
-                failures = 0
-                kept = line
-            } else {
-                failures += 1
-                if failures >= misses { kept = "" }
+            if await active() {
+                state = step(kept: state.kept, failures: state.failures, answer: await fetch(channelId))
+                if Task.isCancelled { return }
+                let shown = state.kept
+                await update(shown)
             }
-            if Task.isCancelled { return }
-            let shown = kept
-            await update(shown)
             try? await Task.sleep(for: .seconds(pollSeconds))
         }
     }
@@ -384,17 +389,28 @@ struct SongSpan: Decodable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         var c = try decoder.unkeyedContainer()
         start = try c.decode(Double.self); end = try c.decode(Double.self)
-        artist = (try? c.decode(String.self)) ?? ""; title = try c.decode(String.self)
+        // A null artist is no artist; a failed decode would not move past it.
+        artist = try c.decodeNil() ? "" : c.decode(String.self)
+        title = try c.decode(String.self)
     }
+}
+
+/// A span that does not read is dropped alone, never the file round it.
+private struct LossySpan: Decodable {
+    let span: SongSpan?
+    init(from decoder: Decoder) throws { span = try? SongSpan(from: decoder) }
 }
 
 actor HouseSongs {
     static let shared = HouseSongs()
-    private struct File: Decodable { let songs: [String: [SongSpan]] }
+    private struct File: Decodable { let songs: [String: [LossySpan]] }
     private var songs: [String: [SongSpan]] = [:]
     private var loadedAt = Date.distantPast
+    private var loading: Task<[String: [SongSpan]]?, Never>?
 
-    static func decode(_ data: Data) -> [String: [SongSpan]]? { (try? JSONDecoder().decode(File.self, from: data))?.songs }
+    static func decode(_ data: Data) -> [String: [SongSpan]]? {
+        (try? JSONDecoder().decode(File.self, from: data))?.songs.mapValues { $0.compactMap(\.span) }
+    }
 
     /// The song playing `seconds` into a programme, or "".
     static func song(in spans: [SongSpan], at seconds: Double) -> String {
@@ -406,25 +422,29 @@ actor HouseSongs {
     /// (TransmissionStore.fetchSchedule): the file sits behind the gate until launch.
     func spans(for programmeId: String, previewPassword: String?) async -> [SongSpan] {
         if Date().timeIntervalSince(loadedAt) > 3600 {
-            loadedAt = Date()
-            let hour = Int(Date().timeIntervalSince1970 / 3600)
-            if let url = KJURL.sitePath("/data/khajistan-tv/songs.json?h=\(hour)") {
-                var request = URLRequest(url: url)
-                request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
-                var reply = try? await URLSession.shared.data(for: request)
-                if (reply?.1 as? HTTPURLResponse)?.statusCode == 401, let previewPassword {
-                    request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: previewPassword),
-                                     forHTTPHeaderField: "Authorization")
-                    reply = try? await URLSession.shared.data(for: request)
-                }
-                if let (data, response) = reply, (response as? HTTPURLResponse)?.statusCode == 200,
-                   let read = Self.decode(data) {
-                    songs = read  // a failed read keeps the songs already known
-                } else if songs.isEmpty {
-                    loadedAt = .distantPast  // nothing held yet: ask again next time
-                }
-            }
+            // A second caller while the file is on its way waits for the same read.
+            let task = loading ?? Task { await Self.read(previewPassword: previewPassword) }
+            loading = task
+            let read = await task.value
+            loading = nil
+            // A failed read keeps the songs already known and is asked again next time.
+            if let read { songs = read; loadedAt = Date() }
         }
         return songs[programmeId] ?? []
+    }
+
+    private static func read(previewPassword: String?) async -> [String: [SongSpan]]? {
+        let hour = Int(Date().timeIntervalSince1970 / 3600)
+        guard let url = KJURL.sitePath("/data/khajistan-tv/songs.json?h=\(hour)") else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        var reply = try? await URLSession.shared.data(for: request)
+        if (reply?.1 as? HTTPURLResponse)?.statusCode == 401, let previewPassword {
+            request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: previewPassword),
+                             forHTTPHeaderField: "Authorization")
+            reply = try? await URLSession.shared.data(for: request)
+        }
+        guard let (data, response) = reply, (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return decode(data)
     }
 }

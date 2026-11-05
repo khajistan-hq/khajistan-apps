@@ -257,10 +257,11 @@ struct TransmissionPlayerView: View {
     /// The slot, then where the programme is from and, on a picture, the song inside it. A sound
     /// programme already carries both on the ground.
     private func stripDetail(_ air: OnAir, soundOnly: Bool) -> String {
-        let playing: Bool
-        switch store.player.state { case .idle, .playing: playing = true; default: playing = false }
-        guard playing, !soundOnly else { return stateText(air) }
-        return [stateText(air), nonEmpty(air.programme?.country), song.isEmpty ? nil : "Now playing: " + song]
+        // The country is not a playback state: it stays through a pause. A failure's message stands alone.
+        if case .failed = store.player.state { return stateText(air) }
+        if soundOnly { return stateText(air) }
+        let playing = store.player.state == .playing || store.player.state == .idle
+        return [stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -268,8 +269,13 @@ struct TransmissionPlayerView: View {
     private func watchSong() async {
         song = ""
         guard case .onAir(let air) = store.phase else { return }
-        let spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: model.auth.previewPassword)
-        guard !spans.isEmpty else { return }
+        var spans: [SongSpan] = []
+        // A file that has not arrived yet (or names no song here) is asked again each minute.
+        while !Task.isCancelled {
+            spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: model.auth.previewPassword)
+            if !spans.isEmpty { break }
+            try? await Task.sleep(for: .seconds(60))
+        }
         while !Task.isCancelled {
             let time = store.player.player.currentTime().seconds
             let now = time.isFinite ? HouseSongs.song(in: spans, at: time) : ""

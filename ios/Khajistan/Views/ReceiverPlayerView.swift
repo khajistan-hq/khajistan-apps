@@ -359,7 +359,8 @@ struct ReceiverDevice: View {
                 Text(title).kjName().lineLimit(2)
             }
             if let place, !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }
-            if case .live(let channel) = tuner.source, let song = NowPlaying.caption(song: tuner.song, mediaType: channel.mediaType) {
+            if case .live(let channel) = tuner.source, player.state == .playing,
+               let song = NowPlaying.caption(song: tuner.song, mediaType: channel.mediaType) {
                 Text(song).kjSmall(faint: tuner.song.isEmpty).lineLimit(2)
             } else if case .transmission = tuner.source, !tuner.song.isEmpty {
                 Text("Now playing: " + tuner.song).kjSmall().lineLimit(2)
@@ -397,7 +398,9 @@ struct ReceiverDevice: View {
     private var place: String? {
         if case .live(let channel) = tuner.source { return channel.place }
         // Transmission: the programme's own country (owner, 2026-11-05).
-        if case .onAir(let air) = model.transmission.phase { return air.programme?.country }
+        // Not until the store has tuned the channel asked for (see ReceiverTuner.watchHouseSong).
+        if case .transmission(let number) = tuner.source, model.transmission.channelNumber == number,
+           case .onAir(let air) = model.transmission.phase { return air.programme?.country }
         return nil
     }
 

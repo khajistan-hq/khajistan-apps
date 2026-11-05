@@ -4302,11 +4302,31 @@ func houseSongsFindTheSpan() throws {
     try expectEqual(HouseSongs.song(in: spans, at: 79.9), "")
     try expectEqual(HouseSongs.song(in: spans, at: 350), "Untitled")
     try expectEqual(HouseSongs.decode(Data("not json".utf8)), nil)
+    // A null artist is no artist; a span that does not read is dropped alone, never the file.
+    let rough = #"{"songs":{"a":[[1,9,null,"T"],["x",2,"A","B"]],"b":[[0,5,"A","B"]]}}"#
+    let read = try require(HouseSongs.decode(Data(rough.utf8)))
+    try expectEqual(read["a"], [SongSpan(start: 1, end: 9, artist: "", title: "T")])
+    try expectEqual(read["b"]?.count, 1)
+}
+
+func nowPlayingKeepsThroughMisses() throws {
+    var s = NowPlaying.step(kept: "", failures: 0, answer: "A \u{2013} B")
+    try expectEqual(s.kept, "A \u{2013} B")
+    // Two failed calls keep the song; the third drops it.
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "A \u{2013} B")
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "")
+    // An answer of nothing clears at once, and any answer resets the count.
+    try expectEqual(NowPlaying.step(kept: "X", failures: 0, answer: "").kept, "")
+    try expectEqual(NowPlaying.step(kept: "X", failures: 2, answer: "Y").failures, 0)
 }
 
 let tests: [(String, () throws -> Void)] = [
     ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
     ("houseSongsFindTheSpan", houseSongsFindTheSpan),
+    ("nowPlayingKeepsThroughMisses", nowPlayingKeepsThroughMisses),
     ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
     ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),

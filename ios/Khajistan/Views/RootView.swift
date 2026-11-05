@@ -149,7 +149,7 @@ struct NowPlayingBar: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(name.title).font(.system(.subheadline, weight: .bold)).lineLimit(1)
                         // On air with a song named, the song stands in for "On air".
-                        let word = state == .playing && !model.tuner.song.isEmpty && model.tuner.channel != nil ? model.tuner.song : stateWord
+                        let word = state == .playing && !model.tuner.song.isEmpty ? model.tuner.song : stateWord
                         Text("\(name.detail) \u{00B7} \(word)").font(.caption).opacity(0.85).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

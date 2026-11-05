@@ -207,7 +207,7 @@ struct ReceiverPlayerView: View {
         .task(id: current.id) {
             song = ""
             guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
-            await NowPlaying.watch(current.id) { song = $0 }
+            await NowPlaying.watch(current.id, active: { controller.state == .playing }) { song = $0 }
         }
         .onDisappear { stopEverything() }
     }
@@ -776,6 +776,8 @@ struct RadioBar: View {
     let open: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    /// The song while the radio plays on under the screens (NowPlaying).
+    @State private var song = ""
 
     var body: some View {
         let state = away.controller.state
@@ -789,7 +791,10 @@ struct RadioBar: View {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(away.channel.name).kjName(30).lineLimit(1)
-                    Text("Radio \u{00B7} " + Self.word(state)).kjSmall().lineLimit(1)
+                    // Where it is from, and the song while one is named (owner, 2026-11-05).
+                    let country = away.channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let tail = state == .playing && !song.isEmpty ? song : Self.word(state)
+                    Text((["Radio", country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -825,6 +830,10 @@ struct RadioBar: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("radioBar")
+        .task(id: away.channel.id) {
+            song = ""
+            await NowPlaying.watch(away.channel.id, active: { away.controller.state == .playing }) { song = $0 }
+        }
     }
 
     private static func word(_ state: PlayerController.State) -> String {

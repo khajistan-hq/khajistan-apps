@@ -135,9 +135,9 @@ struct RadioNowPlaying: View {
             let broadcaster = channel.broadcaster == channel.name ? nil : channel.broadcaster
             let line = [channel.place, broadcaster].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
             if !line.isEmpty { Text(line).kjBody().multilineTextAlignment(.center) }
-            if let caption = NowPlaying.caption(song: song, mediaType: "radio") {
-                Text(caption).kjSmall(faint: song.isEmpty).multilineTextAlignment(.center)
-            }
+            // The kicker above already says "Now playing"; the line is the song alone.
+            Text(song.isEmpty ? NowPlaying.unavailable : song)
+                .kjSmall(faint: song.isEmpty).multilineTextAlignment(.center)
         }
         .padding(.horizontal, KJLayout.inset)
     }

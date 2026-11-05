@@ -370,7 +370,8 @@ final class ReceiverTuner {
         song = ""
         if target.mediaType == "radio" || target.mediaType == "tv" {
             songTask = Task { [weak self] in
-                await NowPlaying.watch(target.id) { line in
+                // Not asked while paused or tuning: the worker would listen for nobody.
+                await NowPlaying.watch(target.id, active: { self?.controller.state == .playing }) { line in
                     // Left for Transmission or another channel: the line is not this one's.
                     guard let self else { return }
                     self.song = self.channel?.id == target.id ? line : ""
@@ -397,9 +398,11 @@ final class ReceiverTuner {
         songTask = Task { [weak self] in
             var heldFor = "", spans: [SongSpan] = []
             while !Task.isCancelled {
-                guard let self, case .transmission = self.source else { return }
+                guard let self, case .transmission(let number) = self.source else { return }
                 var line = ""
-                if case .onAir(let air) = self.transmission.phase {
+                // Until the store has tuned the channel asked for, its phase is the programme
+                // being left, whose song must not print under the new channel's name.
+                if self.transmission.channelNumber == number, case .onAir(let air) = self.transmission.phase {
                     if air.programmeId != heldFor {
                         heldFor = air.programmeId
                         spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)

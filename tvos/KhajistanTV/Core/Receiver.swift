@@ -313,6 +313,8 @@ enum NowPlaying {
     static let pollSeconds = 20
     /// Failed calls in a row before a kept song is dropped (60 s), as on the website.
     static let misses = 3
+    /// Seconds not playing before the song is cleared (a stall shorter than this keeps it).
+    static let stallTicks = 3
 
     /// "Artist – Title", or the title alone.
     static func line(artist: String?, title: String) -> String {
@@ -369,9 +371,11 @@ enum NowPlaying {
                       update: @MainActor @escaping (String) -> Void) async {
         var state = (kept: "", failures: 0)
         var wasActive = false
+        var idleTicks = 0
         var due = Date.distantPast
         while !Task.isCancelled {
             if await active() {
+                idleTicks = 0
                 if !wasActive || Date() >= due {
                     state = step(kept: state.kept, failures: state.failures, answer: await fetch(channelId))
                     if Task.isCancelled { return }
@@ -381,9 +385,15 @@ enum NowPlaying {
                 }
                 wasActive = true
             } else if wasActive {
-                wasActive = false
-                state = ("", 0)
-                await update("")
+                // A buffer stall of a second or two keeps the song and its 20 s cadence; only a
+                // pause or a stop that lasts clears it.
+                idleTicks += 1
+                if idleTicks >= stallTicks {
+                    wasActive = false
+                    state = ("", 0)
+                    if Task.isCancelled { return }
+                    await update("")
+                }
             }
             try? await Task.sleep(for: .seconds(1))
         }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The five doors and the house bar under them. There is no system tab bar: its tint, its glass
+/// The doors and the house bar under them (five on iPad and Mac, four on a phone: `AppTab.inBar`). There is no system tab bar: its tint, its glass
 /// and its selection pill are not the house's. A door is mounted the first time it is opened and
 /// then kept, so going back to it finds it where it was left.
 struct RootView: View {

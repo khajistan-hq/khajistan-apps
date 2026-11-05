@@ -4,7 +4,8 @@ import StoreKit
 
 /// The bottom bar's doors (owner brief, 2026-10-27): HOME, ROOMS (every room of the website's
 /// menu, the native ones drawn here), the RECEIVER, the LIBRARY (account, saved work, what is on
-/// this device) and SEARCH.
+/// this device) and SEARCH. All five on iPad and Mac; a phone's bar has four (`inBar`, owner
+/// 2026-11-04), so `allCases` is every door, not the bar.
 enum AppTab: String, CaseIterable, Identifiable {
     case home, rooms, receiver, library, search
 
@@ -82,6 +83,8 @@ final class AppModel {
     var room: NativeRoom?
     /// The door a room was opened from when the bar has no ROOMS door (a phone): Back out of the
     /// room goes there rather than to the hidden list, and the bar keeps it lit meanwhile.
+    /// Set only by `open(_ room:)`; cleared by HOME's "Every room" and by Back. Anything else that
+    /// switches to `.rooms` must clear it too, or Back revives an old door.
     var roomReturn: AppTab?
     /// Each room's own stack of pushed screens, kept per room for the same reason.
     var roomPaths: [NativeRoom: [RoomRoute]] = [:]

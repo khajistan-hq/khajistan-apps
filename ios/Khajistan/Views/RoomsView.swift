@@ -31,7 +31,9 @@ struct RoomsView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
-        if sizeClass == .regular {
+        // A phone is always one stack, sideways included: a Max phone is regular-width in
+        // landscape, and the list beside the room would bring back the ROOMS its bar leaves out.
+        if sizeClass == .regular, AppTab.inBar.contains(.rooms) {
             WideRooms()
         } else {
             NarrowRooms()
@@ -61,7 +63,13 @@ private struct NarrowRooms: View {
             guard case .room(let room)? = path.first else {
                 model.room = nil
                 // Opened from another door on a phone (no ROOMS on its bar): Back goes back there.
-                if let back = model.roomReturn { model.roomReturn = nil; model.tab = back }
+                if let back = model.roomReturn {
+                    model.roomReturn = nil
+                    // At once, as a bar tap switches (owner, 2026-10-07: no fade between pages).
+                    var instant = Transaction()
+                    instant.disablesAnimations = true
+                    withTransaction(instant) { model.tab = back }
+                }
                 return
             }
             model.room = room

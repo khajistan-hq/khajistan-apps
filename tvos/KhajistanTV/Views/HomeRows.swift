@@ -94,6 +94,7 @@ struct HomeRows: View {
                     }
                 }
                 .buttonStyle(HouseCardStyle())
+                .onPlayPauseCommand { model.open(DeepLink.channel(number).url) }
                 .accessibilityIdentifier("home-transmission-\(number)")
             }
         }

@@ -44,6 +44,14 @@ struct TVScreeningRoom: View {
     @Environment(AppModel.self) private var model
     /// The places as last drawn: a film stopped or finished in the player redraws Up Next.
     @State private var places = FilmPlaces.all
+    /// The film page and the film played straight from a card, held here rather than on a
+    /// shelf: Up Next empties when a film ends, and its shelf took the open page with it.
+    @State private var page: Film?
+    @State private var direct: Film?
+
+    private func present(_ film: Film, direct play: Bool) {
+        if play { direct = film } else { page = film }
+    }
 
     var body: some View {
         TVPage("Screening Room", line: model.films.state == .ready
@@ -57,6 +65,8 @@ struct TVScreeningRoom: View {
         }
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .task(id: model.auth.email) { await model.saves.load() }
+        .fullScreenCover(item: $page) { film in TVFilmPage(film: film) }
+        .fullScreenCover(item: $direct) { film in FilmPlayerView(film: film, startsFull: true) }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = FilmPlaces.all
             if now != places { places = now }
@@ -68,19 +78,19 @@ struct TVScreeningRoom: View {
         let films = model.films.films
         let stopped = films.filter { places[$0.handle] != nil && FilmPlaces.position($0.handle) != nil }
         if !stopped.isEmpty {
-            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true)
+            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present)
         }
         let listed = model.saves.watchlist.compactMap { handle in films.first { $0.handle == handle } }
         if model.auth.isSignedIn && !listed.isEmpty {
-            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true)
+            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present)
         }
         let byCountry = Dictionary(grouping: films) { ($0.country ?? "").trimmingCharacters(in: .whitespaces) }
         let countries = byCountry.keys.filter { !$0.isEmpty }.sorted { (byCountry[$0]!.count, $1) > (byCountry[$1]!.count, $0) }
         ForEach(countries, id: \.self) { country in
-            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true)
+            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present)
         }
         if let unfiled = byCountry[""] {
-            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true)
+            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present)
         }
     }
 }

@@ -292,6 +292,12 @@ struct ReceiverControlsVisibility {
         deadline = canHide ? now + Self.idleSeconds : nil
     }
 
+    /// Back over a playing picture: the strip goes at once, as Apple's info panel does.
+    mutating func hide() {
+        isVisible = false
+        deadline = nil
+    }
+
     @discardableResult
     mutating func expire(at now: TimeInterval, canHide: Bool) -> Bool {
         guard canHide, let deadline, now >= deadline else { return false }

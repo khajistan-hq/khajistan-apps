@@ -34,12 +34,25 @@ struct RootView: View {
                 .focusSection()
             // The radio left playing, under every section (owner gap: "while browsing other tabs"),
             // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
-            if let away = model.radioAway {
+            if let away = model.radioAway, away.pip == nil {
                 RadioBar(away: away) {
                     model.silenceRadio()
                     reopened = away
                 }
             }
+        }
+        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
+        // as a radio from the small player does.
+        .onChange(of: model.restoring?.id) {
+            guard let away = model.restoring else { return }
+            model.restoring = nil
+            // Not silenced here: the player that opens silences it as it starts. If a page's cover
+            // is open and the screen cannot open over it, the channel plays on in the small bar
+            // rather than stopping with nothing on screen.
+            var bar = away
+            bar.pip = nil
+            model.radioAway = bar
+            reopened = away
         }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
@@ -84,6 +97,18 @@ struct RootView: View {
             if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
             goingBack = false
         }
+        // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
+        // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
+        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
+            guard let away = model.radioAway else { return }
+            if away.controller.state == .playing || away.controller.state == .tuning {
+                away.controller.pause()
+            } else {
+                // Play tunes the station afresh, full screen, as the bar's own Play does.
+                model.silenceRadio()
+                reopened = away
+            }
+        })
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {
                 model.receiverPath.removeLast()

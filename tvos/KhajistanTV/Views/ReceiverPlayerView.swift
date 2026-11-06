@@ -60,7 +60,9 @@ struct ReceiverPlayerView: View {
     /// Set as the screen closes: the remote's recognisers stay on the window until the cover's
     /// animation ends, and a click then must not tune a player already stopped.
     @State private var leaving = false
-    private enum Chip { case captions, like, guide }
+    /// Picture in picture for the two layers (PictureInPicture.swift).
+    @State private var pip = PictureInPicture()
+    private enum Chip { case captions, like, guide, pip }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -86,10 +88,10 @@ struct ReceiverPlayerView: View {
             // A picture that does not fill the screen sits on black, whatever the skin (owner,
             // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: playerA.player)
+            PlayerLayerView(player: playerA.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 1 : 0)
-            PlayerLayerView(player: playerB.player)
+            PlayerLayerView(player: playerB.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
@@ -120,6 +122,7 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: captionsActionName) { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
+            .accessibilityAction(named: "Picture in picture") { startPictureInPicture() }
             overlay(palette)
             if let guideRow {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
@@ -135,6 +138,8 @@ struct ReceiverPlayerView: View {
         // A click and a swipe alike: up and down change channel, left and right open the guide.
         // Inside the guide up and down walk the rows and left and right turn the region.
         .onMoveCommand { direction in
+            // The screen is closing: a press now must not act on a signal already handed on.
+            guard !leaving else { return }
             wake()
             if let row = guideRow {
                 let count = guideList.count
@@ -156,6 +161,8 @@ struct ReceiverPlayerView: View {
             }
         }
         .onPlayPauseCommand {
+            // A radio handed to the small player, or a picture sent to PiP, keeps playing.
+            guard !leaving else { return }
             switch controller.state {
             case .playing, .tuning:
                 pauseReceiver()
@@ -170,9 +177,18 @@ struct ReceiverPlayerView: View {
                 closeGuide()
                 return
             }
+            let hidesStrip = stripShown && showsPicture && controller.state == .playing && destination == nil && OverlayTiming.hidesItself
             if armed != nil {
                 armed = nil
-                wake()
+                // Over a playing picture the strip goes with it, so two Backs leave, as on Apple's app.
+                if hidesStrip { hideTask?.cancel(); controls.hide() } else { wake() }
+                return
+            }
+            // Then hides the strip over a playing picture, as Apple's info panel goes; the next
+            // Back leaves. Radio has no picture to uncover, so its first Back leaves.
+            if hidesStrip {
+                hideTask?.cancel()
+                controls.hide()
                 return
             }
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
@@ -186,6 +202,9 @@ struct ReceiverPlayerView: View {
         }
         .onChange(of: controller.state) { wake() }
         .onChange(of: focus) { wake() }
+        // A control cannot stay lit on a strip nobody can see: Select would work it blind.
+        .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
+        .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
@@ -257,6 +276,7 @@ struct ReceiverPlayerView: View {
 
     /// Select on the picture: tunes the lit guide row, works the lit strip control, or wakes.
     private func selectOnSurface() {
+        guard !leaving else { return }
         if let guideRow {
             if guideList.indices.contains(guideRow) { pick(guideList[guideRow]) }
             return
@@ -269,6 +289,7 @@ struct ReceiverPlayerView: View {
             like()
             wake()
         case .guide: openGuide()
+        case .pip: startPictureInPicture()
         case nil:
             // With the strip showing, Select lights its first control; left and right
             // then walk the controls (right on the bare picture opens the guide).
@@ -338,7 +359,52 @@ struct ReceiverPlayerView: View {
             captionsControl
             likeControl
             if guideOffered { guideControl }
+            if pipOffered { pipControl }
         }
+    }
+
+    /// Picture in picture: a picture playing on AVPlayer, with no change under way. Radio has no
+    /// picture, and keeps playing in the small player when its screen closes.
+    private var pipOffered: Bool {
+        PictureInPicture.isSupported && current.mediaType != "radio" && destination == nil && controller.state == .playing
+    }
+
+    private var pipControl: some View {
+        StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Picture in picture")
+            .accessibilityIdentifier("pipControl")
+            .accessibilityAction { startPictureInPicture() }
+            .accessibilityAddTraits(armed == .pip ? .isSelected : [])
+    }
+
+    /// The picture goes to a corner and the screen closes behind it; the channel stays in
+    /// `model.radioAway`, which keeps it playing as it keeps a radio (one signal at a time: the
+    /// next player to start closes the window). Full screen from the window opens the channel
+    /// again; closing the window stops it.
+    private func startPictureInPicture() {
+        guard pipOffered else { return }
+        armed = nil
+        let player = controller
+        let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
+                             listRegion: listRegion, listTitle: listTitle, pip: pip)
+        pip.onStart = { [pip] in
+            // A channel step between Select and the window opening stopped this player.
+            guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
+            model.radioAway = away
+            stopEverything()
+            dismiss()
+        }
+        pip.onFail = { say($0) }
+        pip.onRestore = { [model] in model.restoring = away }
+        pip.onEnd = { [model] in
+            if model.radioAway?.controller === player { model.silenceRadio() } else { player.stop() }
+        }
+        if !pip.start(player.player) {
+            pip.letGo()
+            say("Picture in picture is not ready yet. Try again in a moment.")
+        }
+        wake()
     }
 
     /// The guide, as a live TV app offers one: every channel of the shelf the viewer came from,
@@ -485,13 +551,15 @@ struct ReceiverPlayerView: View {
         switch armed {
         case nil: return openGuide()
         case .captions: armed = .like
-        case .like: if guideOffered { armed = .guide }
-        case .guide: break
+        case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .guide: if pipOffered { armed = .pip }
+        case .pip: break
         }
     }
 
     private func moveLeft() {
         switch armed {
+        case .pip: armed = guideOffered ? .guide : .like
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
@@ -765,6 +833,8 @@ struct RadioAway: Identifiable {
     /// What the guide titles its first page by when the station is opened again.
     let listRegion: String?
     let listTitle: String?
+    /// Set when the channel is a picture playing in the corner window, not a radio in the bar.
+    var pip: PictureInPicture? = nil
     var id: String { channel.id }
 }
 
@@ -782,8 +852,11 @@ struct RadioBar: View {
     var body: some View {
         let state = away.controller.state
         let playing = state == .playing || state == .tuning
+        // A picture (TV or camera) lands here when full screen from the corner cannot open over a page.
+        let medium = away.channel.mediaType.lowercased()
+        let word = medium == "radio" ? "Radio" : medium == "camera" ? "Camera" : "TV"
         HStack(spacing: 20) {
-            Image(systemName: "radio")
+            Image(systemName: medium == "radio" ? "radio" : medium == "camera" ? "video" : "tv")
                 .font(.system(size: 34, weight: .semibold))
                 .frame(width: 72, height: 72)
                 .background(palette.onBand.opacity(0.16))
@@ -794,7 +867,7 @@ struct RadioBar: View {
                     // Where it is from, and the song while one is named (owner, 2026-11-05).
                     let country = away.channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
                     let tail = state == .playing && !song.isEmpty ? song : Self.word(state)
-                    Text((["Radio", country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
+                    Text(([word, country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

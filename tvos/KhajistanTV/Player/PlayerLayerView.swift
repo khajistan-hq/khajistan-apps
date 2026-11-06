@@ -11,6 +11,8 @@ struct PlayerLayerView: UIViewRepresentable {
     /// sound carries on. The player is told so (`audiovisualBackgroundPlaybackPolicy`) and keeps
     /// its layer; the picture is redrawn on return if it has not come back by itself.
     var soundCarriesInBackground = false
+    /// Handed the layer as it is drawn: the Apple TV's picture in picture is opened on it.
+    var onLayer: (@MainActor (AVPlayerLayer) -> Void)? = nil
 
     func makeUIView(context: Context) -> PlayerUIView {
         let view = PlayerUIView()
@@ -24,6 +26,7 @@ struct PlayerLayerView: UIViewRepresentable {
         if soundCarriesInBackground { player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible }
         let layer = uiView.layer as! AVPlayerLayer
         if layer.player !== player { layer.player = player }
+        onLayer?(layer)
     }
 }
 

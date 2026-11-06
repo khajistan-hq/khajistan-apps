@@ -273,8 +273,10 @@ final class PlayerController {
         await task.value
     }
 
+    /// Play/Pause. A signal still buffering is paused too, as Apple's player does; a press during
+    /// a stall used to resume instead and was lost.
     func toggle() {
-        if state == .playing { pause() } else { resume() }
+        if state == .playing || state == .tuning { pause() } else { resume() }
     }
 
     func stop() {

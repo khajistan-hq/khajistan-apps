@@ -50,15 +50,18 @@ final class ShelfUITests: XCTestCase {
     /// Down from the strip: the genre shelves first, News leading (2026-11-04), as many as the
     /// live lists fill, then the parts of Khajistan. Returns how many genre shelves were crossed.
     private func downPastGenres(_ skin: String, _ app: XCUIApplication) -> Int {
+        // The genre shelves arrive after every region list has been read: wait for them, or the
+        // walk below would pass on a front that has none.
+        let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-'"))
+        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "\(skin): the front carries a News shelf")
         press(.down, app: app)
-        if focusedID(app).hasPrefix("genre-") {
-            XCTAssertTrue(focusedID(app).hasPrefix("genre-news-"), "\(skin): the first shelf under the strip is News, got \(focusedID(app))")
-        }
+        XCTAssertTrue(focusedID(app).hasPrefix("genre-news-"), "\(skin): the first shelf under the strip is News, got \(focusedID(app))")
         var crossed = 0
         while crossed < 10, focusedID(app).hasPrefix("genre-") {
             crossed += 1
             press(.down, app: app)
         }
+        XCTAssertGreaterThan(crossed, 0, "\(skin): at least the News shelf sits between the strip and the parts of Khajistan")
         return crossed
     }
 

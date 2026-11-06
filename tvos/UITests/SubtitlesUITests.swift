@@ -117,7 +117,7 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
-        _ = waitFor(45) { state.label == "Playing" }
+        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "ABN News must be playing for the strip to offer its controls: \(state.label)")
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)
@@ -142,10 +142,10 @@ final class SubtitlesUITests: XCTestCase {
         kjPause(0.6)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
         XCUIRemote.shared.press(.left)
-        // Back lets go of the lit control first, and over a playing picture may hide the strip
-        // before it leaves: press until the player is gone, never more than three times. (The
-        // region page's cards stay in the tree under the player, so they cannot tell.)
-        for _ in 0..<3 where state.exists {
+        // Back over a playing picture may hide the strip
+        // before it leaves: press until the player is gone, never more than twice. (The region
+        // page's cards stay in the tree under the player, so they cannot tell.)
+        for _ in 0..<2 where state.exists {
             XCUIRemote.shared.press(.menu)
             kjPause(1)
         }

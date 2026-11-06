@@ -146,16 +146,20 @@ final class DancerUITests: XCTestCase {
     /// Saut-ul-Quran: recitation. The dancer must never appear, and no tap is made at all.
     func testReverentChannelHasNoDancer() throws {
         let app = XCUIApplication()
-        let id = openRadio(["pbc-saut-ul-quran"], skin: "day", app)
+        let id = try XCTUnwrap(openRadio(["pbc-saut-ul-quran"], skin: "day", app), "the recitation channel must open")
         XCTAssertEqual(id, "pbc-saut-ul-quran", "the recitation channel must open")
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30))
         // The negative case means something only while the recitation is actually playing. It is
         // the Indus list's only reverent channel, so when its live carrier is off air there is no
-        // other to tune: skip, because "no dancer" over silence proves nothing.
+        // other to tune: skip, because "no dancer" over silence proves nothing. Only a failed
+        // carrier skips; a player stuck connecting, paused or never opened is a failure.
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
-        if state.label != "Playing" {
+        let notFailed: Set<String> = ["Playing", "Connecting…", "Paused", ""]
+        XCTAssertFalse(state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty,
+                       "the recitation channel neither plays nor fails: \(state.label)")
+        if !notFailed.contains(state.label) {
             shot("reverent-not-playing", app)
             app.terminate()
             throw XCTSkip("Saut-ul-Quran's live carrier is not playing (\(state.label)); the no-dancer check is meaningless without playback")

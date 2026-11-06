@@ -100,7 +100,7 @@ struct ChannelsView: View {
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
         }
         .fullScreenCover(item: $playing) { choice in
-            ReceiverPlayerView(channel: choice.channel, list: choice.list)
+            ReceiverPlayerView(channel: choice.channel, list: choice.list, regionId: region.id)
         }
     }
 

@@ -6,6 +6,10 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     /// The radio from the small player, opened full screen again.
     @State private var reopened: RadioAway?
+    /// The sections visited before this one, so Back goes one step back (owner, 2026-11-04).
+    @State private var visited: [Section] = []
+    /// Set while Back changes the section, so the change is not recorded as a visit.
+    @State private var goingBack = false
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -38,7 +42,8 @@ struct RootView: View {
             }
         }
         .fullScreenCover(item: $reopened) { away in
-            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice)
+            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
+                               regionId: away.listRegion, listTitle: away.listTitle)
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG
@@ -69,12 +74,23 @@ struct RootView: View {
                 scene.windows.forEach { $0.overrideUserInterfaceStyle = style }
             }
         }
-        // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
-        // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
-        // what tvOS does: a region pops back to the map, and the map leaves the app. The pop is
-        // done here as well, because Back pressed in the top bar never reaches the Receiver's stack.
+        // Back (Menu) goes one step back (owner, 2026-11-04: "Back click goes one step back"): a
+        // region pops back to the map, another section returns to the section visited before it,
+        // and with nothing visited to the atlas (owner, 2026-10-05). The map with nothing behind it
+        // leaves the app, as tvOS does. The pop is done here as well, because Back pressed in the
+        // top bar never reaches the Receiver's stack.
+        .onChange(of: model.section) { old, new in
+            // The atlas is the root: reaching it, by Back or the top bar, ends the history.
+            if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
+            goingBack = false
+        }
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
-            if model.section != .receiver { model.section = .receiver } else { model.receiverPath.removeLast() }
+            if model.section == .receiver, !model.receiverPath.isEmpty {
+                model.receiverPath.removeLast()
+            } else {
+                goingBack = true
+                model.section = visited.popLast() ?? .receiver
+            }
         })
     }
 
@@ -97,12 +113,11 @@ private struct BackToAtlas: ViewModifier {
     let active: Bool
     let back: () -> Void
 
+    // Always attached, handing Back to tvOS (nil) when there is nothing to go back to. An if/else
+    // here rebuilt the whole screen on every move to or from the Receiver, and the rebuild lost
+    // the section change it happened on, so the history never recorded leaving the atlas.
     func body(content: Content) -> some View {
-        if active {
-            content.onExitCommand(perform: back)
-        } else {
-            content
-        }
+        content.onExitCommand(perform: active ? back : nil)
     }
 }
 

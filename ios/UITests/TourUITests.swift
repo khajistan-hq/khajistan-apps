@@ -38,7 +38,16 @@ final class TourUITests: XCTestCase {
         }
         app.buttons["part-live"].tap(); sleep(1)
         // A room that opens the website, and the way back.
-        app.buttons["tab-rooms"].tap(); sleep(2)
+        if app.buttons["tab-rooms"].exists {
+            app.buttons["tab-rooms"].tap()
+        } else {   // a phone's bar has no ROOMS: HOME's "Every room" opens it
+            app.buttons["tab-home"].tap()
+            let link = app.buttons["homeAllRooms"]
+            let floor = app.buttons["tab-home"].frame.minY - 4
+            for _ in 0..<16 where !(link.exists && !link.frame.isEmpty && link.frame.maxY < floor) { app.swipeUp(); sleep(1) }
+            link.tap()
+        }
+        sleep(2)
         let web = app.buttons["destination-about"]
         for _ in 0..<6 where !(web.exists && web.isHittable) { app.swipeUp(); sleep(1) }
         if web.exists && web.isHittable { web.tap(); sleep(8); shot("tour-7-rooms-website", app) }

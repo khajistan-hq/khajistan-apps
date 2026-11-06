@@ -1,0 +1,327 @@
+{
+ "_meta": {
+  "channels": [
+   {
+    "id": "cinema",
+    "number": 1,
+    "name": "Channel 1 · Cinema",
+    "line": "Test line for channel 1."
+   },
+   {
+    "id": "state-tv",
+    "number": 2,
+    "name": "Channel 2 · State Television",
+    "line": "Test line for channel 2."
+   },
+   {
+    "id": "music",
+    "number": 3,
+    "name": "Channel 3 · Music",
+    "line": "Test line for channel 3."
+   },
+   {
+    "id": "family",
+    "number": 4,
+    "name": "Channel 4 · Family Tapes",
+    "line": "Test line for channel 4."
+   },
+   {
+    "id": "mehfil",
+    "number": 5,
+    "name": "Channel 5 · Mehfil",
+    "line": "Test line for channel 5."
+   },
+   {
+    "id": "trailers",
+    "number": 6,
+    "name": "Channel 6 · Trailers",
+    "line": "Test line for channel 6."
+   },
+   {
+    "id": "macabre",
+    "number": 7,
+    "name": "Channel 7 · Macabre",
+    "line": "Test line for channel 7."
+   }
+  ]
+ },
+ "shows": {
+  "show-1": {
+   "slug": "show-1",
+   "name": "Test Show 1",
+   "line": null,
+   "channel": "cinema"
+  },
+  "show-2": {
+   "slug": "show-2",
+   "name": "Test Show 2",
+   "line": null,
+   "channel": "state-tv"
+  },
+  "show-3": {
+   "slug": "show-3",
+   "name": "Test Show 3",
+   "line": null,
+   "channel": "music"
+  },
+  "show-4": {
+   "slug": "show-4",
+   "name": "Test Show 4",
+   "line": null,
+   "channel": "family"
+  },
+  "show-5": {
+   "slug": "show-5",
+   "name": "Test Show 5",
+   "line": null,
+   "channel": "mehfil"
+  },
+  "show-6": {
+   "slug": "show-6",
+   "name": "Test Show 6",
+   "line": null,
+   "channel": "trailers"
+  },
+  "show-7": {
+   "slug": "show-7",
+   "name": "Test Show 7",
+   "line": null,
+   "channel": "macabre"
+  }
+ },
+ "programme_order": [
+  "p1",
+  "p2",
+  "p3",
+  "p4",
+  "p5",
+  "p6",
+  "p7"
+ ],
+ "programmes": {
+  "p1": {
+   "id": "p1",
+   "title": "Test Programme 1",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-1",
+   "channel": 1
+  },
+  "p2": {
+   "id": "p2",
+   "title": "Test Programme 2",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-2",
+   "channel": 2
+  },
+  "p3": {
+   "id": "p3",
+   "title": "Test Programme 3",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-3",
+   "channel": 3
+  },
+  "p4": {
+   "id": "p4",
+   "title": "Test Programme 4",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-4",
+   "channel": 4
+  },
+  "p5": {
+   "id": "p5",
+   "title": "Test Programme 5",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-5",
+   "channel": 5
+  },
+  "p6": {
+   "id": "p6",
+   "title": "Test Programme 6",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-6",
+   "channel": 6
+  },
+  "p7": {
+   "id": "p7",
+   "title": "Test Programme 7",
+   "seconds": 3600,
+   "nominal_minutes": 60,
+   "show": "show-7",
+   "channel": 7
+  }
+ },
+ "days": [
+  {
+   "date": "2026-11-04",
+   "weekday": "Wednesday",
+   "channels": {
+    "cinema": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-1",
+      "programmes": [
+       0
+      ]
+     }
+    ],
+    "state-tv": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-2",
+      "programmes": [
+       1
+      ]
+     }
+    ],
+    "music": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-3",
+      "programmes": [
+       2
+      ]
+     }
+    ],
+    "family": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-4",
+      "programmes": [
+       3
+      ]
+     }
+    ],
+    "mehfil": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-5",
+      "programmes": [
+       4
+      ]
+     }
+    ],
+    "trailers": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-6",
+      "programmes": [
+       5
+      ]
+     }
+    ],
+    "macabre": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-7",
+      "programmes": [
+       6
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "date": "2026-11-05",
+   "weekday": "Thursday",
+   "channels": {
+    "cinema": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-1",
+      "programmes": [
+       0
+      ]
+     }
+    ],
+    "state-tv": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-2",
+      "programmes": [
+       1
+      ]
+     }
+    ],
+    "music": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-3",
+      "programmes": [
+       2
+      ]
+     }
+    ],
+    "family": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-4",
+      "programmes": [
+       3
+      ]
+     }
+    ],
+    "mehfil": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-5",
+      "programmes": [
+       4
+      ]
+     }
+    ],
+    "trailers": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-6",
+      "programmes": [
+       5
+      ]
+     }
+    ],
+    "macabre": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-7",
+      "programmes": [
+       6
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

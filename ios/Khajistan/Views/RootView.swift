@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The five doors and the house bar under them. There is no system tab bar: its tint, its glass
+/// The doors and the house bar under them (five on iPad and Mac, four on a phone: `AppTab.inBar`). There is no system tab bar: its tint, its glass
 /// and its selection pill are not the house's. A door is mounted the first time it is opened and
 /// then kept, so going back to it finds it where it was left.
 struct RootView: View {
@@ -29,7 +29,8 @@ struct RootView: View {
             if model.tab != .receiver, model.tuner.source != nil {
                 NowPlayingBar()
             }
-            HouseTabBar(current: model.tab) { tab in
+            // ROOMS off the bar (a phone): the door it was opened from stays lit, HOME for the list.
+            HouseTabBar(current: AppTab.inBar.contains(model.tab) ? model.tab : (model.roomReturn ?? .home)) { tab in
                 // At once, as the system tab bar switches: no fade between pages (owner, 2026-10-07).
                 var instant = Transaction()
                 instant.disablesAnimations = true
@@ -100,7 +101,11 @@ struct NowPlayingBar: View {
 
     private var name: (title: String, detail: String) {
         switch model.tuner.source {
-        case .live(let channel): return (channel.name, channel.mediaType.lowercased() == "radio" ? "Radio" : "Television")
+        case .live(let channel):
+            // Where it is from, on every surface that names a channel (owner, 2026-11-05).
+            let medium = channel.mediaType.lowercased() == "radio" ? "Radio" : "Television"
+            let country = channel.country?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (channel.name, country.isEmpty ? medium : "\(medium) \u{00B7} \(country)")
         case .transmission(let number): return (model.transmission.channelName(number), "Khajistan Transmission")
         case nil: return ("", "")
         }
@@ -143,7 +148,9 @@ struct NowPlayingBar: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(name.title).font(.system(.subheadline, weight: .bold)).lineLimit(1)
-                        Text("\(name.detail) \u{00B7} \(stateWord)").font(.caption).opacity(0.85).lineLimit(1)
+                        // On air with a song named, the song stands in for "On air".
+                        let word = state == .playing && !model.tuner.song.isEmpty ? model.tuner.song : stateWord
+                        Text("\(name.detail) \u{00B7} \(word)").font(.caption).opacity(0.85).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -189,7 +196,7 @@ struct HouseTabBar: View {
         VStack(spacing: 0) {
             HouseRule()
             HStack(spacing: 0) {
-                ForEach(AppTab.allCases) { tab in
+                ForEach(AppTab.inBar) { tab in
                     Button {
                         select(tab)
                     } label: {

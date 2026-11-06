@@ -67,6 +67,21 @@ enum StationClock {
         p._meta.channels.first { $0.number == number }?.id
     }
 
+    /// The channel numbers the schedule names, lowest first. The schedule is the only list.
+    static func channelNumbers(_ p: Programming) -> [Int] {
+        p._meta.channels.map(\.number).sorted()
+    }
+
+    /// The channel `step` places on from `number`, round the dial: Channel Up from the last
+    /// channel is the first, Channel Down from the first is the last. From a number the schedule
+    /// does not name, the first channel.
+    static func channel(_ p: Programming, from number: Int, step: Int) -> Int {
+        let numbers = channelNumbers(p)
+        guard let index = numbers.firstIndex(of: number) else { return numbers.first ?? number }
+        let count = numbers.count
+        return numbers[((index + step) % count + count) % count]
+    }
+
     static func day(_ p: Programming, iso: String) -> Programming.Day? {
         p.days.first { $0.date == iso }
     }

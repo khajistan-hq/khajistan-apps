@@ -28,6 +28,9 @@ final class LiveStills {
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private var plan = StillPlan()
     @ObservationIgnored private var wanted: [Channel] = []
+    /// Wanted after the first list and before the second: the first cards of the Receiver's News
+    /// and Music shelves, which sit between its regions and its cameras.
+    @ObservationIgnored private var wantedNext: [Channel] = []
     /// A second list, wanted after the first: the Receiver's camera cards, beside its regions.
     @ObservationIgnored private var wantedToo: [Channel] = []
     @ObservationIgnored private var onScreen: [Channel] = []
@@ -75,6 +78,7 @@ final class LiveStills {
         driver?.cancel()
         driver = nil
         wanted = []
+        wantedNext = []
         wantedToo = []
         onScreen = []
         visit += 1
@@ -85,6 +89,12 @@ final class LiveStills {
     /// skipped here, so a page may pass its whole list.
     func want(_ channels: [Channel]) {
         wanted = channels.filter { $0.mediaType != "radio" }
+        drive()
+    }
+
+    /// Wanted after `want`'s list and before `wantToo`'s, and kept when either changes.
+    func wantNext(_ channels: [Channel]) {
+        wantedNext = channels.filter { $0.mediaType != "radio" }
         drive()
     }
 
@@ -132,7 +142,7 @@ final class LiveStills {
                     continue
                 }
                 let now = Date().timeIntervalSince1970
-                let all = self.wanted + self.wantedToo
+                let all = self.wanted + self.wantedNext + self.wantedToo
                 guard let id = self.plan.next(wanted: all.map(\.id), has: { self.image(for: $0) != nil }, now: now) else {
                     let wait = self.plan.wait(now: now)
                     if wait == 0 { break }

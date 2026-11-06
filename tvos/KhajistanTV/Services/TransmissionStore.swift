@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Khajistan Transmission: one station, two channels. A channel is tuned and the clock says what is
+/// Khajistan Transmission: one station, the channels its schedule names. A channel is tuned and the clock says what is
 /// on it; a programme is never chosen. The store holds the month's schedule for the station page
 /// and, for the full-screen player, the tuning and the handover from one file to the next.
 @MainActor @Observable
@@ -46,7 +46,7 @@ final class TransmissionStore {
     private static let pinnedStart: Date? = UserDefaults.standard.string(forKey: "kjnow").flatMap { ISO8601DateFormatter().date(from: $0) }
     #endif
 
-    /// Two signals, as in the Receiver: the programme on screen, and the other channel tuning out
+    /// Two signals, as in the Receiver: the programme on screen, and the next channel tuning out
     /// of sight and silent behind it during a change, until the cut (`switchBehind`,
     /// `commitSwitch`). Each keeps its own layer in the player screen.
     let playerA = PlayerController()
@@ -101,6 +101,16 @@ final class TransmissionStore {
     }
 
     // MARK: - What the schedule says
+
+    /// The channels to list, from the schedule; none before a schedule is held.
+    var channelNumbers: [Int] {
+        programming.map(StationClock.channelNumbers) ?? []
+    }
+
+    /// The channel Channel Up (`step` 1) or Channel Down (-1) goes to from the one tuned.
+    func channel(step: Int) -> Int {
+        programming.map { StationClock.channel($0, from: channelNumber, step: step) } ?? channelNumber
+    }
 
     func channelName(_ number: Int) -> String {
         programming?._meta.channels.first(where: { $0.number == number })?.name ?? "Channel \(number)"
@@ -260,17 +270,19 @@ final class TransmissionStore {
         await tune(generation: gen)
     }
 
-    func switchChannel() async {
-        await tune(channel: channelNumber == 1 ? 2 : 1)
+    /// Channel Up (`step` 1) or Channel Down (-1), round the dial.
+    func switchChannel(step: Int) async {
+        await loadSchedule()
+        await tune(channel: channel(step: step))
     }
 
-    /// Starts the other channel on the player behind the one on screen, silent, leaving the
-    /// programme on screen, the phase and the channel number as they are. Nil when the other
-    /// channel is off air, has no playable source, or needs a sign-in: the caller tunes it the
+    /// Starts the channel `step` places on (Channel Up 1, Channel Down -1) on the player behind
+    /// the one on screen, silent, leaving the programme on screen, the phase and the channel
+    /// number as they are. Nil when that channel is off air, has no playable source, or needs a sign-in: the caller tunes it the
     /// ordinary way and the phase says why.
-    func switchBehind() async -> PendingSwitch? {
-        let target = channelNumber == 1 ? 2 : 1
+    func switchBehind(step: Int) async -> PendingSwitch? {
         await loadSchedule()
+        let target = channel(step: step)
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return nil }
@@ -302,7 +314,7 @@ final class TransmissionStore {
         player.releaseSound()
         phase = .onAir(pending.air)
         watchSlotEnd(pending.air, generation: gen)
-        warmOtherChannel()
+        warmNeighbours()
     }
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
@@ -356,27 +368,35 @@ final class TransmissionStore {
                       listen: Self.dancerMayListen(air, channel: channelNumber))
         phase = .onAir(air)
         watchSlotEnd(air, generation: gen)
-        warmOtherChannel()
+        warmNeighbours()
     }
 
-    /// Signs the other channel's programme in the background, so a switch to it starts with its
-    /// address in hand. Quiet: a failure here changes nothing on screen.
-    func warmOtherChannel() {
-        let target = channelNumber == 1 ? 2 : 1
+    /// Signs the programmes on the channels either side of this one in the background, so
+    /// Channel Up or Down starts with its address in hand. One after the other, so two warms
+    /// never refresh the same expired token at once.
+    func warmNeighbours() {
+        let targets = [channel(step: 1), channel(step: -1)].reduce(into: [Int]()) { list, n in
+            if n != channelNumber, !list.contains(n) { list.append(n) }
+        }
+        Task {
+            for target in targets { await warm(channel: target) }
+        }
+    }
+
+    /// Signs one channel's programme. Quiet: a failure here changes nothing on screen.
+    private func warm(channel target: Int) async {
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return }
         if case .direct = route { return }
-        Task {
-            guard let token = try? await auth.validAccessToken(), let viewer = auth.session?.userId else { return }
-            let key = "\(route)|\(viewer)"
-            if let held = signed[key], held.until > Date() { return }
-            guard let request = Transmission.request(for: route, accessToken: token),
-                  let reply = try? await send(request, refusingRedirects: true), reply.status == 200,
-                  let url = try? Transmission.carrier(from: reply.data, route: route),
-                  auth.session?.userId == viewer else { return }
-            signed[key] = (url, Date().addingTimeInterval(Self.signedLife))
-        }
+        guard let token = try? await auth.validAccessToken(), let viewer = auth.session?.userId else { return }
+        let key = "\(route)|\(viewer)"
+        if let held = signed[key], held.until > Date() { return }
+        guard let request = Transmission.request(for: route, accessToken: token),
+              let reply = try? await send(request, refusingRedirects: true), reply.status == 200,
+              let url = try? Transmission.carrier(from: reply.data, route: route),
+              auth.session?.userId == viewer else { return }
+        signed[key] = (url, Date().addingTimeInterval(Self.signedLife))
     }
 
     /// The file ended: the next programme of the same channel starts at its own beginning,
@@ -525,8 +545,8 @@ final class TransmissionStore {
         return url
     }
 
-    /// The dancer listens to a programme that is sound with no picture — every programme on
-    /// channel 2, and channel 1's records — unless it is reverent. The site's house channel is
+    /// The dancer listens to a programme that is sound with no picture (most of Channel 3, the
+    /// music channel) unless it is reverent. The site's house channel is
     /// named by its show (open-frequencies.js houseChannel()), so the show name is what the
     /// reverent rule reads. Whether the samples can be read is the carrier's to say: a Supabase
     /// storage file or a Dropbox link can be tapped, a Cloudflare Stream manifest cannot.

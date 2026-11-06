@@ -216,12 +216,18 @@ func deepLinksParse() throws {
         ("khajistan://transmission", .transmission),
         ("khajistan://transmission/1", .channel(1)),
         ("khajistan://transmission/2", .channel(2)),
+        ("khajistan://transmission/3", .channel(3)),
+        ("khajistan://transmission/4", .channel(4)),
+        ("khajistan://transmission/5", .channel(5)),
+        ("khajistan://transmission/6", .channel(6)),
+        ("khajistan://transmission/7", .channel(7)),
+        ("khajistan://transmission/99", .channel(99)),   // a number's shape; the schedule says if it exists
     ]
     for (text, link) in cases {
         try expectEqual(DeepLink(url: try require(URL(string: text))), link, text)
     }
     // Every link the extension builds reads back as itself.
-    for link in [DeepLink.receiver, .region("indus"), .region("central-asia"), .transmission, .channel(1), .channel(2)] {
+    for link in [DeepLink.receiver, .region("indus"), .region("central-asia"), .transmission] + (1...7).map(DeepLink.channel) {
         try expectEqual(DeepLink(url: link.url), link, link.url.absoluteString)
     }
     // A region id that is not one does not become a link to it.
@@ -247,7 +253,9 @@ func deepLinksRefuse() throws {
         "khajistan://receiver/-indus",
         "khajistan://receiver/in--dus",
         "khajistan://receiver/in%20dus",
-        "khajistan://transmission/3",             // two channels
+        "khajistan://transmission/100",           // past any channel number
+        "khajistan://transmission/07",
+        "khajistan://transmission/-7",
         "khajistan://transmission/0",
         "khajistan://transmission/01",
         "khajistan://transmission/+1",
@@ -917,6 +925,47 @@ let syntheticJSON = #"""
 
 func syntheticSchedule() throws -> Programming { try decode(Programming.self, syntheticJSON) }
 
+/// The seven channels of 2026-11-04, listed out of order: the dial is the numbers, not the
+/// order of the list.
+let sevenChannelJSON = #"""
+{"_meta":{"channels":[
+  {"id":"family","number":4,"name":"Channel 4 · Family Tapes"},
+  {"id":"cinema","number":1,"name":"Channel 1 · Cinema","line":"Feature films"},
+  {"id":"state-tv","number":2,"name":"Channel 2 · State Television"},
+  {"id":"music","number":3,"name":"Channel 3 · Music"},
+  {"id":"mehfil","number":5,"name":"Channel 5 · Mehfil"},
+  {"id":"trailers","number":6,"name":"Channel 6 · Trailers"},
+  {"id":"macabre","number":7,"name":"Channel 7 · Macabre"}]},
+ "shows":{},"programme_order":[],"programmes":{},"days":[]}
+"""#
+
+func channelUpAndDownGoRoundTheDial() throws {
+    let seven = try decode(Programming.self, sevenChannelJSON)
+    try expectEqual(StationClock.channelNumbers(seven), [1, 2, 3, 4, 5, 6, 7])
+    try expectEqual(StationClock.channelId(seven, number: 7), "macabre")
+    // Channel Up seven times from Channel 1 visits every channel once and comes back to 1.
+    var number = 1, visited: [Int] = []
+    for _ in 0..<7 { number = StationClock.channel(seven, from: number, step: 1); visited.append(number) }
+    try expectEqual(visited, [2, 3, 4, 5, 6, 7, 1])
+    // Channel Down goes the other way round, and from 1 it is 7.
+    visited = []
+    for _ in 0..<7 { number = StationClock.channel(seven, from: number, step: -1); visited.append(number) }
+    try expectEqual(visited, [7, 6, 5, 4, 3, 2, 1])
+    try expectEqual(StationClock.channel(seven, from: 7, step: 1), 1)
+    try expectEqual(StationClock.channel(seven, from: 4, step: -1), 3)
+    // A number the schedule does not name goes to the first channel, either way.
+    try expectEqual(StationClock.channel(seven, from: 9, step: 1), 1)
+    try expectEqual(StationClock.channel(seven, from: 0, step: -1), 1)
+    // Two channels toggle, as the app always did; one channel stays where it is.
+    let two = try syntheticSchedule()
+    try expectEqual(StationClock.channel(two, from: 1, step: 1), 2)
+    try expectEqual(StationClock.channel(two, from: 1, step: -1), 2)
+    try expectEqual(StationClock.channel(two, from: 2, step: 1), 1)
+    let one = try decode(Programming.self, #"{"_meta":{"channels":[{"id":"a","number":1,"name":"A"}]},"shows":{},"programme_order":[],"programmes":{},"days":[]}"#)
+    try expectEqual(StationClock.channel(one, from: 1, step: 1), 1)
+    try expectEqual(StationClock.channel(one, from: 1, step: -1), 1)
+}
+
 func programmeWithoutATitleDecodes() throws {
     let p = try syntheticSchedule()
     try expectEqual(p.programmes["p2"]?.title, "")   // "title": null
@@ -1140,7 +1189,7 @@ func secondsLeftCountsDownToTheSlotEnd() throws {
 func realUpcomingAgreesWithOnAir() throws {
     let p = try realProgramming("2026-10")
     var checked = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         var t = pkt(2026, 10, 1, 0, 0, 0)
         while t <= pkt(2026, 10, 31, 23, 59, 59) {
@@ -1241,7 +1290,7 @@ func stationClockMatchesTheJS() throws {
     try expect(onAir >= 300, "only \(onAir) on-air cases")
     try expect(offAir >= 6, "only \(offAir) off-air cases")
     try expect(trimmed >= 1, "no case exercises clean_start")
-    try expect(Set(cases.map(\.channel)) == [1, 2], "both channels must be present")
+    try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
 }
@@ -1287,7 +1336,7 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
     let f = try fixture()
     let p = f.programming
     // 10-10 is the first kept day; before 06:00 it is the late strip filed from the same day.
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.startLabel, "06:00")
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.into, 0)
@@ -1470,8 +1519,14 @@ func realProgrammingDecodesInEveryMonth() throws {
         let rawProgrammes = try require(raw["programmes"] as? [String: [String: Any]])
         try expectEqual(p.programmes.count, rawProgrammes.count, month)
         try expectEqual(p.programme_order.count, p.programmes.count, month)
-        try expectEqual(p._meta.channels.map(\.number), [1, 2], month)
-        try expectEqual(p._meta.channels.map(\.id), ["transfers", "audio"], month)
+        // Channels are numbered from 1 with no gap, and each id names one channel. Two before
+        // 2026-11-04, seven after; the app reads whichever the month carries.
+        let numbers = StationClock.channelNumbers(p)
+        try expect(!numbers.isEmpty, "\(month): no channels")
+        try expectEqual(numbers, Array(1...numbers.count), month)
+        let ids = Set(p._meta.channels.map(\.id))
+        try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
+        print("      \(month): channels " + p._meta.channels.sorted { $0.number < $1.number }.map(\.id).joined(separator: ", "))
         for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }
         for (key, value) in p.programmes { try expectEqual(key, value.id, month) }
         // The titleless programmes are exactly the ones whose raw record has no usable title.
@@ -1480,7 +1535,7 @@ func realProgrammingDecodesInEveryMonth() throws {
         var slots = 0
         for day in p.days {
             for (channel, strips) in day.channels {
-                try expect(channel == "transfers" || channel == "audio", "\(month): channel \(channel)")
+                try expect(ids.contains(channel), "\(month): channel \(channel) is not in _meta.channels")
                 for slot in strips {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
@@ -1508,7 +1563,7 @@ func realProgrammingDecodesInEveryMonth() throws {
 func realProgrammingClockInvariants() throws {
     let p = try realProgramming("2026-10")
     var checked = 0, offAir = 0, joinedPastLeader = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         var t = pkt(2026, 10, 1, 0, 0, 0)
         let end = pkt(2026, 10, 31, 23, 59, 59)
         while t <= end {
@@ -1534,7 +1589,7 @@ func realProgrammingClockInvariants() throws {
             if iso != "2026-10-31" { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
         }
     }
-    print("      \(checked) instants across October on both channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
+    print("      \(checked) instants across October on \(StationClock.channelNumbers(p).count) channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
     try expect(checked > 2500, "only \(checked) instants were on air")
 }
 
@@ -4222,7 +4277,59 @@ func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
     try expectEqual(Set(taken).count, taken.count, "no channel twice")
 }
 
+// MARK: - The song on air
+
+func nowPlayingReadsTheRPC() throws {
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"TLC","title":"No Scrubs","heard_at":"x"}]"#.utf8)), "TLC \u{2013} No Scrubs")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":null,"title":"Ya Am Al Shal"}]"#.utf8)), "Ya Am Al Shal")
+    // Nothing on air is "", which clears the line; an unreadable answer is nil, which keeps it.
+    try expectEqual(NowPlaying.parse(Data("[]".utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"A","title":"  "}]"#.utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"{"message":"No API key"}"#.utf8)), nil)
+    try expectEqual(NowPlaying.caption(song: "A \u{2013} B", mediaType: "tv"), "Now playing: A \u{2013} B")
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "radio"), NowPlaying.unavailable)
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "tv"), nil)
+}
+
+func houseSongsFindTheSpan() throws {
+    let file = #"{"_meta":{},"songs":{"tvx-1":[[80,252,"Walid Sarkis","Ya Am Al Shal"],[300,400,"","Untitled"]]}}"#
+    let spans = try require(HouseSongs.decode(Data(file.utf8))?["tvx-1"])
+    try expectEqual(spans.count, 2)
+    try expectEqual(HouseSongs.song(in: spans, at: 80), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    try expectEqual(HouseSongs.song(in: spans, at: 251.9), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    // The end is exclusive, the gap between songs is silent, and a span with no artist is the title.
+    try expectEqual(HouseSongs.song(in: spans, at: 252), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 79.9), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 350), "Untitled")
+    try expectEqual(HouseSongs.decode(Data("not json".utf8)), nil)
+    // A null artist is no artist; a span that does not read is dropped alone, never the file.
+    let rough = #"{"songs":{"a":[[1,9,null,"T"],["x",2,"A","B"]],"b":[[0,5,"A","B"]]}}"#
+    let read = try require(HouseSongs.decode(Data(rough.utf8)))
+    try expectEqual(read["a"], [SongSpan(start: 1, end: 9, artist: "", title: "T")])
+    try expectEqual(read["b"]?.count, 1)
+    let oops = try require(HouseSongs.decode(Data(#"{"songs":{"a":"oops","b":[[0,5,"A","B"]]}}"#.utf8)))
+    try expectEqual(oops["a"], [])
+    try expectEqual(oops["b"]?.count, 1)
+}
+
+func nowPlayingKeepsThroughMisses() throws {
+    var s = NowPlaying.step(kept: "", failures: 0, answer: "A \u{2013} B")
+    try expectEqual(s.kept, "A \u{2013} B")
+    // Two failed calls keep the song; the third drops it.
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "A \u{2013} B")
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "")
+    // An answer of nothing clears at once, and any answer resets the count.
+    try expectEqual(NowPlaying.step(kept: "X", failures: 0, answer: "").kept, "")
+    try expectEqual(NowPlaying.step(kept: "X", failures: 2, answer: "Y").failures, 0)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
+    ("houseSongsFindTheSpan", houseSongsFindTheSpan),
+    ("nowPlayingKeepsThroughMisses", nowPlayingKeepsThroughMisses),
     ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
     ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
@@ -4266,6 +4373,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
+    ("Channel Up and Down go round all seven channels", channelUpAndDownGoRoundTheDial),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
@@ -4382,7 +4490,7 @@ let tests: [(String, () throws -> Void)] = [
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),
-    ("Surf: Any, Songs, Film, Local", surfGenreChoices),
+    ("Surf: Any, Music, Film, Local", surfGenreChoices),
     ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
@@ -4567,6 +4675,8 @@ func surfGenreChoices() throws {
                "an untagged or general channel is not a song channel")
     try expectEqual(SurfGenre.stored(nil), .any, "a new device surfs every genre")
     try expectEqual(SurfGenre.stored("songs"), .songs)
+    try expectEqual(SurfGenre.allCases.map(\.label), ["Any", "Music", "Film", "Local"],
+                    "the music filter reads Music (owner, 2026-11-04); its stored value stays songs")
     try expect(SurfChoice(medium: .all, scope: .main) != SurfChoice(medium: .all, scope: .main, genre: .songs),
                "each genre keeps its own surf history")
 }

@@ -24,6 +24,8 @@ struct TransmissionPlayerView: View {
     @State private var subtitles = RecordedSubtitles()
     @State private var captionArmed = false
     @State private var stripHeight: CGFloat = 0
+    /// The song playing inside the programme, from songs.json (HouseSongs), or "".
+    @State private var song = ""
     @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
@@ -77,6 +79,7 @@ struct TransmissionPlayerView: View {
         }
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
+        .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
@@ -168,6 +171,12 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
+            if !song.isEmpty {
+                Text("Now playing: " + song).kjBody().multilineTextAlignment(.center)
+            }
+            if let country = nonEmpty(air.programme?.country) {
+                Text(country).kjSmall(faint: true)
+            }
             if let custodian = nonEmpty(air.programme?.custodian) {
                 Text(custodian).kjSmall(faint: true)
             }
@@ -193,7 +202,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
-                    detail: stateText(air),
+                    detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     trailing: ["\u{25CF} Channel \(store.channelNumber)"],
                     upNext: next.map { ($0.startLabel, $0.show?.name ?? "") },
@@ -210,6 +219,13 @@ struct TransmissionPlayerView: View {
                 .font(.system(size: 1))
                 .opacity(0.01)
                 .accessibilityIdentifier("playerState")
+        }
+        // The channel tuned, for the UI tests; nothing on screen.
+        .overlay(alignment: .bottomTrailing) {
+            Text("\(store.channelNumber)")
+                .font(.system(size: 1))
+                .opacity(0.01)
+                .accessibilityIdentifier("transmissionChannel")
         }
     }
 
@@ -236,6 +252,36 @@ struct TransmissionPlayerView: View {
     /// the receiver's two channel rows: "just programming block names").
     private func headline(_ air: OnAir) -> String {
         nonEmpty(air.show?.name) ?? nonEmpty(air.programme?.title) ?? store.channelName(store.channelNumber)
+    }
+
+    /// The slot, then where the programme is from and, on a picture, the song inside it. A sound
+    /// programme already carries both on the ground.
+    private func stripDetail(_ air: OnAir, soundOnly: Bool) -> String {
+        // The country is not a playback state: it stays through a pause. A failure's message stands alone.
+        if case .failed = store.player.state { return stateText(air) }
+        if soundOnly { return stateText(air) }
+        let playing = store.player.state == .playing || store.player.state == .idle
+        return [stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
+            .compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    /// The song at the player's position, checked each second (the website reads `timeupdate`).
+    private func watchSong() async {
+        song = ""
+        guard case .onAir(let air) = store.phase else { return }
+        var spans: [SongSpan] = []
+        // A file that has not arrived yet (or names no song here) is asked again each minute.
+        while !Task.isCancelled {
+            spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: model.auth.previewPassword)
+            if !spans.isEmpty { break }
+            try? await Task.sleep(for: .seconds(60))
+        }
+        while !Task.isCancelled {
+            let time = store.player.player.currentTime().seconds
+            let now = time.isFinite ? HouseSongs.song(in: spans, at: time) : ""
+            if now != song { song = now }
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
 
     /// While the programme plays, the slot it belongs to, as the station page says it.
@@ -344,7 +390,8 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Up and down switch channel behind the pigeon. While it is flying they skip it.
+    /// Up and down switch channel behind the pigeon. While a change is under way they skip it; one
+    /// made while the sign-on flies switches under that bird.
     private func move(_ direction: MoveCommandDirection) {
         wake()
         if direction == .right, !subtitles.tracks.isEmpty, stripShown {
@@ -361,19 +408,21 @@ struct TransmissionPlayerView: View {
         captionArmed = false
         guard holdsFocus, !switching else { return }
         switching = true
+        // Up is Channel Up, to the next number; down is Channel Down. Both go round the dial.
+        let step = direction == .up ? 1 : -1
         Task {
-            await switchUnderThePigeon()
+            await switchUnderThePigeon(step: step)
             switching = false
         }
     }
 
-    /// The other channel tunes behind the programme on screen while the pigeon flies over it, and
-    /// cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the channel
-    /// plays, with the bird flying on over it (2026-10-07).
+    /// The channel `step` places on tunes behind the programme on screen while the pigeon flies
+    /// over it, and cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the
+    /// channel plays, with the bird flying on over it (2026-10-07).
     /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
-    private func switchUnderThePigeon() async {
+    private func switchUnderThePigeon(step: Int) async {
         let pigeon = model.pigeon
-        let key = "transmission-\(store.channelNumber == 1 ? 2 : 1)"
+        let key = "transmission-\(store.channel(step: step))"
         if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
             guard !left else { return }
@@ -381,7 +430,7 @@ struct TransmissionPlayerView: View {
         }
         async let quiet: Void = store.player.fadeOut()
         let started = ContinuousClock.now
-        if let pending = await store.switchBehind(), !left {
+        if let pending = await store.switchBehind(step: step), !left {
             let next = store.incoming
             // The channel's own tune time, signing included, to its first frame; never the bird.
             TuneTimes.recordWhenPlaying(key, player: next, since: started) { !left }
@@ -406,7 +455,7 @@ struct TransmissionPlayerView: View {
                 try? await Task.sleep(for: .milliseconds(30))
             }
         } else if !left {
-            await store.switchChannel()
+            await store.switchChannel(step: step)
         }
         await quiet
     }

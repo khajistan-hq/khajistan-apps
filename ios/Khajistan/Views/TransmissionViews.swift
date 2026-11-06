@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Khajistan Transmission inside the Receiver, as the website carries it: two scheduled channels
+/// Khajistan Transmission inside the Receiver, as the website carries it: its scheduled channels
 /// on Pakistan time, what is on each now and what is up next. A channel is tuned and the clock says
 /// what is on it; there is no list of programmes to choose from. Playback needs an account, as
 /// tv-play does (ported from the Apple TV app's station page).
@@ -36,9 +36,11 @@ struct TransmissionSection: View {
     }
 
     private var metaText: String {
-        let tail = "two scheduled channels \u{00B7} Pakistan time (UTC+5)"
-        guard case .ready = store.schedule, let count = store.programmeCount else { return "Two" + tail.dropFirst(3) }
-        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
+        let channels = store.channelNumbers.count
+        guard case .ready = store.schedule, let count = store.programmeCount, channels > 0 else {
+            return "Scheduled channels \u{00B7} Pakistan time (UTC+5)"
+        }
+        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
     }
 
     @ViewBuilder
@@ -50,7 +52,7 @@ struct TransmissionSection: View {
                 .accessibilityIdentifier("transmissionLoading")
         case .needsPreviewPassword(let message):
             VStack(alignment: .leading, spacing: 14) {
-                Text("Khajistan's own two TV channels open to everyone when Khajistan launches. Testers: type the preview password.").kjBody()
+                Text("Khajistan's own TV channels open to everyone when Khajistan launches. Testers: type the preview password.").kjBody()
                     .accessibilityIdentifier("transmissionPreview")
                 if let message { Text(message).kjBody() }
                 HouseInputField("Preview password") {
@@ -67,10 +69,10 @@ struct TransmissionSection: View {
             VStack(alignment: .leading, spacing: 0) {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach([1, 2], id: \.self) { number in
+                        ForEach(store.channelNumbers, id: \.self) { number in
                             HouseRule()
                             Button { choose(number) } label: {
-                                ChannelCard(number: number, line: store.channelLine(number),
+                                ChannelCard(name: store.channelName(number), line: store.channelLine(number),
                                             onAir: store.nowOn(channel: number, at: context.date),
                                             returns: store.returnTime(channel: number, at: context.date))
                             }
@@ -133,7 +135,7 @@ struct TransmissionSection: View {
 
 /// One channel: its number, on air or not, its own line, what is on now and what is up next.
 private struct ChannelCard: View {
-    let number: Int
+    let name: String
     let line: String?
     let onAir: OnAir?
     let returns: String?
@@ -141,7 +143,7 @@ private struct ChannelCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
-                Kicker("Channel \(number)")
+                Kicker(name)
                 Kicker(onAir == nil ? "Off air" : "\u{25CF} On air")
                 Spacer(minLength: 0)
                 Text("\u{2192}").kjName().accessibilityHidden(true)
@@ -200,7 +202,8 @@ struct TransmissionPlayerView: View {
         .sheet(isPresented: $showSignIn) {
             SignInView(model: model, onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
-        .accessibilityAction(named: "Switch channel") { switchChannel() }
+        .accessibilityAction(named: "Next channel") { switchChannel(1) }
+        .accessibilityAction(named: "Previous channel") { switchChannel(-1) }
     }
 
     private var isTransmission: Bool {
@@ -226,7 +229,7 @@ struct TransmissionPlayerView: View {
             message(returns.map { "\(name) returns at \($0) \(StationClock.tzLabel)." } ?? "\(name) is off air.", title: "Off air") {
                 Text("Swipe up or down to switch channel.").kjSmall(faint: true)
             }
-            .channelGestures(step: { _ in switchChannel() }, tap: {})
+            .channelGestures(step: switchChannel, tap: {})
         case .onAir(let air):
             onAir(air, palette)
         case .failed(let text):
@@ -238,7 +241,7 @@ struct TransmissionPlayerView: View {
     }
 
     private func topBar(_ trailing: [String], air: OnAir? = nil) -> some View {
-        var leading = ["Khajistan Transmission", "Channel \(store.channelNumber)"]
+        var leading = ["Khajistan Transmission", store.channelName(store.channelNumber)]
         if let air { leading.append("\(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)") }
         return PlayerTopBar(leading: leading, trailing: trailing) { dismiss() }
     }
@@ -261,7 +264,7 @@ struct TransmissionPlayerView: View {
         ZStack {
             if air.programme?.audio_only == true {
                 VStack(spacing: 12) {
-                    Kicker("Channel \(store.channelNumber) \u{00B7} sound only")
+                    Kicker("\(store.channelName(store.channelNumber)) \u{00B7} sound only")
                     Text(headline(air)).kjDisplay().multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, KJLayout.inset)
@@ -270,7 +273,7 @@ struct TransmissionPlayerView: View {
                 PlayerLayerView(player: store.player.player, soundCarriesInBackground: true).ignoresSafeArea()
             }
             if store.player.state == .tuning { palette.ground.ignoresSafeArea() }
-            Color.clear.channelGestures(step: { _ in switchChannel() }, tap: { overlay.toggle(settled: store.player.state == .playing) })
+            Color.clear.channelGestures(step: switchChannel, tap: { overlay.toggle(settled: store.player.state == .playing) })
             VStack(spacing: 0) {
                 topBar(air.nextStart.map { ["Up next \($0)" + (air.nextShow.map { " \($0.name)" } ?? "")] } ?? [], air: air)
                 Spacer(minLength: 0)
@@ -290,6 +293,7 @@ struct TransmissionPlayerView: View {
             if let line = nonEmpty(air.show?.line) { Text(line).kjSmall(faint: true).lineLimit(3) }
             let facts = [nonEmpty(air.programme?.work_kind), nonEmpty(air.programme?.country)].compactMap { $0 }
             if !facts.isEmpty { Text(facts.joined(separator: " \u{00B7} ")).kjSmall() }
+            if !model.tuner.song.isEmpty { Text("Now playing: " + model.tuner.song).kjBody().lineLimit(2) }
             if let custodian = nonEmpty(air.programme?.custodian) { Text(custodian).kjSmall(faint: true) }
             if let transfer = nonEmpty(air.programme?.transfer) { Text(transfer).kjSmall(faint: true) }
             TransportRow(isPlaying: store.player.state == .playing, toggle: playPause)
@@ -322,9 +326,9 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Controls
 
-    private func switchChannel() {
+    private func switchChannel(_ delta: Int) {
         overlay.wake(settled: false)
-        model.tuner.step(1)
+        model.tuner.step(delta)
     }
 
     private func playPause() { model.tuner.playPause() }

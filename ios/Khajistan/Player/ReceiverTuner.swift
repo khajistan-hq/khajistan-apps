@@ -27,6 +27,9 @@ final class ReceiverTuner {
     private(set) var list: [Channel] = []
     /// The live channels' player. Transmission plays on its store's own.
     let controller = PlayerController()
+    /// The song on the live channel (NowPlaying), or "". Every surface showing the channel reads it.
+    private(set) var song = ""
+    @ObservationIgnored private var songTask: Task<Void, Never>?
 
     let captions: LiveCaptionSession
     @ObservationIgnored private var initialOpenAttempted = false
@@ -176,11 +179,12 @@ final class ReceiverTuner {
     func playTransmission(_ number: Int) {
         stop()
         source = .transmission(number)
+        watchHouseSong()
         transmission.player.state = .tuning
         changeTask = Task { await openTransmission(number) }
     }
 
-    /// The next channel (1) or the one before (-1). Transmission has two, so either way switches.
+    /// The next channel (1) or the one before (-1), round the list or the dial.
     func step(_ delta: Int) {
         intentRevision += 1
         switch source {
@@ -193,7 +197,7 @@ final class ReceiverTuner {
             changeTask = Task { await change(to: target) }
         case .transmission:
             changeTask?.cancel()
-            changeTask = Task { await switchTransmission() }
+            changeTask = Task { await switchTransmission(step: delta) }
         case nil:
             return
         }
@@ -298,6 +302,8 @@ final class ReceiverTuner {
         captions.detach()
         tuneTask?.cancel()
         changeTask?.cancel()
+        songTask?.cancel()
+        song = ""
         controller.stop()
         if case .transmission = source { transmission.stop() }
         clips.clear()
@@ -360,6 +366,18 @@ final class ReceiverTuner {
         controller.state = .tuning
         source = .live(target)
         captions.attach(target, player: controller)
+        songTask?.cancel()
+        song = ""
+        if target.mediaType == "radio" || target.mediaType == "tv" {
+            songTask = Task { [weak self] in
+                // Not asked while paused or tuning: the worker would listen for nobody.
+                await NowPlaying.watch(target.id, active: { self?.controller.state == .playing }) { line in
+                    // Left for Transmission or another channel: the line is not this one's.
+                    guard let self else { return }
+                    self.song = self.channel?.id == target.id ? line : ""
+                }
+            }
+        }
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -368,6 +386,39 @@ final class ReceiverTuner {
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Khajistan Transmission's song: the span of songs.json the player's position is in, checked
+    /// each second while the receiver stays on Transmission (the website reads `timeupdate`).
+    private func watchHouseSong() {
+        songTask?.cancel()
+        song = ""
+        songTask = Task { [weak self] in
+            var heldFor = "", spans: [SongSpan] = []
+            var retryAt = Date.distantPast
+            while !Task.isCancelled {
+                guard let self, case .transmission(let number) = self.source else { return }
+                var line = ""
+                // Until the store has tuned the channel asked for, its phase is the programme
+                // being left, whose song must not print under the new channel's name.
+                if self.transmission.channelNumber == number, case .onAir(let air) = self.transmission.phase {
+                    // A programme with no spans yet (a failed or gated read) is asked again each
+                    // minute, as tvOS does.
+                    if air.programmeId != heldFor || (spans.isEmpty && Date() >= retryAt) {
+                        heldFor = air.programmeId
+                        spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)
+                        retryAt = Date().addingTimeInterval(60)
+                        // Stopped or retuned while the file was on its way: this line is not theirs.
+                        guard !Task.isCancelled, case .transmission(number) = self.source,
+                              self.transmission.channelNumber == number else { return }
+                    }
+                    let time = self.transmission.player.player.currentTime().seconds
+                    if time.isFinite { line = HouseSongs.song(in: spans, at: time) }
+                }
+                if line != self.song { self.song = line }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
@@ -423,12 +474,17 @@ final class ReceiverTuner {
         settledAt = Date()
     }
 
-    private func switchTransmission() async {
+    private func switchTransmission(step: Int) async {
         guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
-        let next = transmission.channelNumber == 1 ? 2 : 1
+        // From the channel this tuner last asked for, not the one the store has reached: a second
+        // swipe lands before the first has tuned, and stepping from the store would lose it.
+        let from: Int
+        if case .transmission(let number) = source { from = number } else { from = transmission.channelNumber }
+        let next = transmission.channel(from: from, step: step)
         source = .transmission(next)
+        watchHouseSong()
         async let quiet: Void = transmission.player.fadeOut()
         clips.cover(caption: transmission.channelName(next), animated: false)
         await quiet

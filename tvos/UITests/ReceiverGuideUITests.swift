@@ -128,8 +128,10 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         let bar = app.descendants(matching: .any)["radioBar"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "the radio plays on in the small player")
-        XCTAssertTrue(app.buttons["radioBarName"].label.contains("On air") || app.buttons["radioBarName"].label.contains("Tuning"),
-                      "the bar says the station is on: \(app.buttons["radioBarName"].label)")
+        // The bar names the song in place of "On air" while the station names one (PR 33), so read
+        // the state off its Play/Pause control: Pause means playing or tuning.
+        XCTAssertEqual(app.buttons["radioBarToggle"].label, "Pause",
+                       "the bar says the station is on: \(app.buttons["radioBarName"].label)")
         kjPause(1)
         kjScreenshot("\(skin)-g5-radio-bar", app: app)
         let off = app.buttons["radioBarOff"]

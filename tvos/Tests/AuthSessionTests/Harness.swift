@@ -18,6 +18,11 @@ enum SupabaseRoute {
         if request.url!.path.hasSuffix("logout") {
             return (Data("{}".utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
         }
+        // The authenticator lookup a sign-in now makes (tv/mfa-code): no factor, answered at once,
+        // so the race scenarios below still release only the requests they are about.
+        if request.httpMethod == "GET" && request.url!.path.hasSuffix("/auth/v1/user") {
+            return (Data(#"{"factors":[]}"#.utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
+        }
         return try await withCheckedThrowingContinuation { Self.pending.append((request,$0)) }
     }
     static func release(_ user: String, code: Int = 200) {

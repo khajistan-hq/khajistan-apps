@@ -397,15 +397,22 @@ final class ReceiverTuner {
         song = ""
         songTask = Task { [weak self] in
             var heldFor = "", spans: [SongSpan] = []
+            var retryAt = Date.distantPast
             while !Task.isCancelled {
                 guard let self, case .transmission(let number) = self.source else { return }
                 var line = ""
                 // Until the store has tuned the channel asked for, its phase is the programme
                 // being left, whose song must not print under the new channel's name.
                 if self.transmission.channelNumber == number, case .onAir(let air) = self.transmission.phase {
-                    if air.programmeId != heldFor {
+                    // A programme with no spans yet (a failed or gated read) is asked again each
+                    // minute, as tvOS does.
+                    if air.programmeId != heldFor || (spans.isEmpty && Date() >= retryAt) {
                         heldFor = air.programmeId
                         spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)
+                        retryAt = Date().addingTimeInterval(60)
+                        // Stopped or retuned while the file was on its way: this line is not theirs.
+                        guard !Task.isCancelled, case .transmission(number) = self.source,
+                              self.transmission.channelNumber == number else { return }
                     }
                     let time = self.transmission.player.player.currentTime().seconds
                     if time.isFinite { line = HouseSongs.song(in: spans, at: time) }

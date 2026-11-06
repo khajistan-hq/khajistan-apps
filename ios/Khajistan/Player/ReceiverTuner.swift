@@ -410,6 +410,9 @@ final class ReceiverTuner {
                     // A programme with no spans yet (a failed or gated read) is asked again each
                     // minute, as tvOS does.
                     if air.programmeId != heldFor || (spans.isEmpty && Date() >= retryAt) {
+                        // A new programme's song is not known until its spans arrive: say none,
+                        // here and on the lock screen alike, rather than the last programme's.
+                        if air.programmeId != heldFor { spans = []; if !self.song.isEmpty { self.song = "" } }
                         heldFor = air.programmeId
                         spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)
                         retryAt = Date().addingTimeInterval(60)

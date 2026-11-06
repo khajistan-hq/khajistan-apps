@@ -516,21 +516,22 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(state.label, "Standing by", "Navigation does not undo an explicit Stop")
     }
 
+    /// `-kjholdfirstopening` keeps the first automatic selection waiting until the Receiver is left, so
+    /// the test does not race a slow launch. What is checked is the property itself: nothing plays
+    /// under Home (no small player), and coming back picks a channel.
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
         // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
         // it off, for whom leaving the Receiver still cancels what it was opening.
         let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
-        waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
+        waitFor(app.buttons["tab-home"], 10, "The tab bar appears while the selection is held")
         app.buttons["tab-home"].tap()
         waitForHome(app, 3, "Home opens with one tap")
         sleep(6)
+        XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].exists, "Leaving canceled the first selection; nothing started under Home")
         app.buttons["tab-receiver"].tap()
-        let state = app.staticTexts["screenState"]
-        waitFor(state, 2, "Receiver reopens")
-        XCTAssertEqual(state.label, "Standing by", "Leaving canceled the first selection; nothing started under Home")
         waitFor(app.buttons["screenPlayPause"], 60, "Canceled opening can retry when Receiver opens again")
         app.buttons["receiverOff"].tap()
-        XCTAssertEqual(state.label, "Standing by")
+        XCTAssertEqual(app.staticTexts["screenState"].label, "Standing by")
     }
 
     /// A signed-out viewer receives a visible reason on the first CC tap; this never spends allowance.

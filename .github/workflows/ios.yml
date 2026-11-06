@@ -73,6 +73,9 @@ jobs:
             sleep 15
           done
           echo 'simulator did not boot in two attempts' >&2; exit 1
+      - name: Network retry regressions
+        # A dropped connection is asked again (Pics/Vids shelf, Receiver list); a refusal is not.
+        run: sh ios/Tests/PnvRetry/run.sh '${{ steps.simulator.outputs.udid }}' "$GITHUB_WORKSPACE"
       - name: Build and test iOS app
         run: |
           set -euo pipefail

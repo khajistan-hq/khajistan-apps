@@ -79,7 +79,7 @@ struct StallHarness {
         let other = PlayerController()
         other.showSong("Somebody Else – Not This")
         let untouched = cardLine() == "Türkiye"
-        for (ok, what) in [(shown, "the song shows on the lock screen"), (reset && back, "a handover's attach resets it and the next tick puts it back"),
+        for (ok, what) in [(shown, "the song shows on the lock screen"), (reset && back, "attach resets the card to the place and showSong puts the song back"),
                            (cleared, "no song puts the place back"), (untouched, "a player that is not active writes nothing")] {
             print((ok ? "PASS " : "FAIL ") + what)
             if !ok { failures += 1 }

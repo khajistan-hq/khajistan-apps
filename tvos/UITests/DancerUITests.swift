@@ -152,14 +152,18 @@ final class DancerUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 30))
         // The negative case means something only while the recitation is actually playing. It is
         // the Indus list's only reverent channel, so when its live carrier is off air there is no
-        // other to tune: skip, because "no dancer" over silence proves nothing. Only a failed
-        // carrier skips; a player stuck connecting, paused or never opened is a failure.
+        // other to tune: skip, because "no dancer" over silence proves nothing. Only a player in
+        // its failed state skips (a dead carrier, or the simulator offline); one stuck connecting,
+        // paused or never opened is a failure.
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
-        let notFailed: Set<String> = ["Playing", "Connecting…", "Paused", ""]
-        XCTAssertFalse(state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty,
-                       "the recitation channel neither plays nor fails: \(state.label)")
-        if !notFailed.contains(state.label) {
+        let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
+        if stuck {
+            XCTFail("the recitation channel neither plays nor fails: \(state.label)")
+            app.terminate()
+            return
+        }
+        if state.label != "Playing" {
             shot("reverent-not-playing", app)
             app.terminate()
             throw XCTSkip("Saut-ul-Quran's live carrier is not playing (\(state.label)); the no-dancer check is meaningless without playback")

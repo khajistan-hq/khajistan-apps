@@ -96,9 +96,13 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of its control")
 
-        // Radio: Menu back to the region; television is the first shelf and radio the next, so one
-        // press down from the channel just left reaches a station.
+        // Radio: Back to the region; television is the first shelf and radio the next, so one
+        // press down from the channel just left reaches a station. Over a playing picture the
+        // first Back hides the strip, as Apple's TV app does, and the second leaves.
         XCUIRemote.shared.press(.menu)
+        kjPause(0.6)
+        if current.exists { XCUIRemote.shared.press(.menu) }
+        XCTAssertTrue(current.waitForNonExistence(timeout: 10), "Back, then Back, leaves the channel")
         XCTAssertTrue(app.descendants(matching: .any)["shelf-radio"].waitForExistence(timeout: 10), "Indus has a radio shelf")
         kjPause(1)
         XCUIRemote.shared.press(.down)

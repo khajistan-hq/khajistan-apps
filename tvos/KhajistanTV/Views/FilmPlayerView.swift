@@ -31,7 +31,10 @@ struct FilmPlayerView: View {
     @State private var subtitles = RecordedSubtitles()
     @State private var panelHeight: CGFloat = 0
 
-    private static let jump: Double = 30
+    /// Left and right skip ten seconds, as Apple's player does.
+    private static let jump: Double = 10
+    /// The picture holds focus under the overlay, so a press always has somewhere to land.
+    @FocusState private var surfaceFocused: Bool
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -42,21 +45,23 @@ struct FilmPlayerView: View {
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: overlayVisible ? panelHeight : 0)
+            // Always there, under the overlay: with the full film playing the overlay has no
+            // button of its own, and focus had nowhere to go, so Play and Back were lost.
+            Button { wake() } label: { Color.clear }
+                .buttonStyle(SurfaceButtonStyle())
+                .focused($surfaceFocused)
             if overlayVisible {
                 overlay(palette)
-            } else {
-                // While the picture plays alone, this holds focus so a press wakes the overlay.
-                Button { wake() } label: { Color.clear }
-                    .buttonStyle(SurfaceButtonStyle())
             }
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
-            let hidden = !overlayVisible
             wake()
-            guard hidden, full != nil else { return }
+            // Left and right skip in the full film whenever the picture holds focus, overlay or
+            // not; on a lit button they move focus instead.
+            guard surfaceFocused, full != nil else { return }
             switch direction {
             case .left: seek(by: -Self.jump)
             case .right: seek(by: Self.jump)
@@ -66,12 +71,18 @@ struct FilmPlayerView: View {
         .onPlayPauseCommand {
             wake()
             switch controller.state {
-            case .playing, .paused: controller.toggle()
-            case .idle, .failed: if full == nil { playPreview() }
-            case .tuning: break
+            case .playing, .paused, .tuning: controller.toggle()
+            // After the full film ends, Play plays it again from the start.
+            case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
             }
         }
         .onExitCommand {
+            // Back first hides the overlay over a playing picture, as Apple's player does.
+            if overlayVisible, controller.state == .playing, refusal == nil, !checking, !showSignIn {
+                hideTask?.cancel()
+                withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
+                return
+            }
             stopEverything()
             dismiss()
         }
@@ -222,9 +233,11 @@ struct FilmPlayerView: View {
         model.silenceRadio()
         if startsFull {
             await watchFull()
-            if full == nil { watchFocused = true }
+            if full == nil { watchFocused = true } else { surfaceFocused = true }
             return
         }
+        // The offer's button first, not the picture under it.
+        watchFocused = true
         guard Films.previewURL(film) != nil else {
             watchFocused = true
             return
@@ -324,7 +337,7 @@ struct FilmPlayerView: View {
     private func wake() {
         if !overlayVisible {
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = true }
-            if full == nil { watchFocused = true }
+            if full == nil { watchFocused = true } else { surfaceFocused = true }
         }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }

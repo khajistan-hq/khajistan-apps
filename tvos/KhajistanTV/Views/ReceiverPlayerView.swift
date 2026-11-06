@@ -138,6 +138,8 @@ struct ReceiverPlayerView: View {
         // A click and a swipe alike: up and down change channel, left and right open the guide.
         // Inside the guide up and down walk the rows and left and right turn the region.
         .onMoveCommand { direction in
+            // The screen is closing: a press now must not act on a signal already handed on.
+            guard !leaving else { return }
             wake()
             if let row = guideRow {
                 let count = guideList.count
@@ -159,6 +161,8 @@ struct ReceiverPlayerView: View {
             }
         }
         .onPlayPauseCommand {
+            // A radio handed to the small player, or a picture sent to PiP, keeps playing.
+            guard !leaving else { return }
             switch controller.state {
             case .playing, .tuning:
                 pauseReceiver()
@@ -178,6 +182,13 @@ struct ReceiverPlayerView: View {
                 wake()
                 return
             }
+            // Then hides the strip over a playing picture, as Apple's info panel goes; the next
+            // Back leaves. Radio has no picture to uncover, so its first Back leaves.
+            if stripShown, showsPicture, controller.state == .playing, destination == nil, OverlayTiming.hidesItself {
+                hideTask?.cancel()
+                controls.hide()
+                return
+            }
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
             // while you browse; a picture stops with its screen.
             if current.mediaType == "radio", destination == nil, controller.state == .playing {
@@ -189,6 +200,9 @@ struct ReceiverPlayerView: View {
         }
         .onChange(of: controller.state) { wake() }
         .onChange(of: focus) { wake() }
+        // A control cannot stay lit on a strip nobody can see: Select would work it blind.
+        .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
+        .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
@@ -260,6 +274,7 @@ struct ReceiverPlayerView: View {
 
     /// Select on the picture: tunes the lit guide row, works the lit strip control, or wakes.
     private func selectOnSurface() {
+        guard !leaving else { return }
         if let guideRow {
             if guideList.indices.contains(guideRow) { pick(guideList[guideRow]) }
             return

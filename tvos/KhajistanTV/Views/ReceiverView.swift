@@ -21,7 +21,6 @@ struct ReceiverView: View {
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
     /// Once per launch: coming back from a region keeps the focus on the region.
-    @State private var surfFocusedAtLaunch = false
 
     var body: some View {
         @Bindable var model = model
@@ -174,8 +173,8 @@ struct ReceiverView: View {
             .focused($surfFocused)
             // The top bar and the strip each claim the first focus; this one is placed last.
             .task {
-                guard !surfFocusedAtLaunch, model.receiverPath.isEmpty else { return }
-                surfFocusedAtLaunch = true
+                guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+                model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true
             }
@@ -611,6 +610,8 @@ private struct GenreShelves: View {
                             PictureCard(channel: channel, still: still, liked: liked)
                         }
                         .buttonStyle(HouseCardStyle())
+                        // Play/Pause on a card plays it, as on Apple's TV app.
+                        .onPlayPauseCommand { playing = Pick(channel: channel, list: row.channels, title: row.kind.label) }
                         .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
                         .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
                     }

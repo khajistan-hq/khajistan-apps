@@ -49,6 +49,18 @@ struct TransmissionPlayerView: View {
             playPause()
         }
         .onExitCommand {
+            // Back lets go of a lit control first, as the Receiver does.
+            if captionArmed {
+                captionArmed = false
+                wake()
+                return
+            }
+            // Then hides the strip over a playing picture, as Apple's info panel goes.
+            if stripShown, store.player.state == .playing, !switching, OverlayTiming.hidesItself {
+                hideTask?.cancel()
+                overlayVisible = false
+                return
+            }
             leave()
             dismiss()
         }
@@ -464,7 +476,10 @@ struct TransmissionPlayerView: View {
     /// transmission is not the transmission any more.
     private func playPause() {
         wake()
-        if store.player.state == .playing {
+        // Mid-switch the picture on screen is about to be replaced: a pause now would be undone
+        // by the cut, so the press waits for the new channel.
+        guard !switching else { return }
+        if store.player.state == .playing || store.player.state == .tuning {
             store.player.pause()
         } else {
             Task { await store.rejoinLive() }

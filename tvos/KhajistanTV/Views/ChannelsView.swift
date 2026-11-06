@@ -213,6 +213,7 @@ struct ChannelsView: View {
                     }
                 }
                 .buttonStyle(HouseCardStyle())
+                .onPlayPauseCommand { playing = Playing(channel: channel, list: list) }
                 .focused($focusedId, equals: channel.id)
                 // No hold-for-Like menu: tvOS draws its focused item white. Like is on the player strip.
                 .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))

@@ -180,6 +180,7 @@ struct TransmissionView: View {
                 upcoming: store.upcoming(channel: number, at: date)
             )
         }
+        .onPlayPauseCommand { choose(number) }
         .buttonStyle(HouseCardStyle())
         .focused($focusedCard, equals: number)
         .accessibilityIdentifier("transmission-channel-\(number)")

@@ -92,6 +92,18 @@ struct RootView: View {
             if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
             goingBack = false
         }
+        // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
+        // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
+        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
+            guard let away = model.radioAway else { return }
+            if away.controller.state == .playing || away.controller.state == .tuning {
+                away.controller.pause()
+            } else {
+                // Play tunes the station afresh, full screen, as the bar's own Play does.
+                model.silenceRadio()
+                reopened = away
+            }
+        })
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {
                 model.receiverPath.removeLast()

@@ -421,6 +421,9 @@ final class ReceiverTuner {
                     if time.isFinite { line = HouseSongs.song(in: spans, at: time) }
                 }
                 if line != self.song { self.song = line }
+                // Each tick, not only on a change: a programme handover's attach() puts the
+                // place back on the lock screen while the song is unchanged.
+                self.transmission.player.showSong(line)
                 try? await Task.sleep(for: .seconds(1))
             }
         }

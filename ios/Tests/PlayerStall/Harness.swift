@@ -4,6 +4,12 @@ import Foundation
 // Drives the app's own PlayerController against server.py's carrier that stops sending (run.sh).
 // Prints one PASS or FAIL line per case and exits non-zero on any FAIL.
 
+#if os(iOS)
+import MediaPlayer
+/// The line under the title on the system's Now Playing card (lock screen, Control Centre).
+@MainActor func cardLine() -> String? { MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtist] as? String }
+#endif
+
 @MainActor func isFailed(_ state: PlayerController.State) -> Bool {
     if case .failed = state { return true }
     return false
@@ -56,6 +62,30 @@ struct StallHarness {
             exit(2)
         }
         paused.stop()
+
+        #if os(iOS)
+        // The song on the lock screen: shown, put back after attach() resets it, cleared to the
+        // place, and never written by a player that is not the active one.
+        let song = PlayerController()
+        song.attach(url: URL(string: base + "/tone.mp3?cut=720000")!, seekTo: nil, title: "Barış FM", subtitle: "Türkiye")
+        song.showSong("BLOK3 – Sevmeyi Denemedin")
+        let shown = cardLine() == "BLOK3 – Sevmeyi Denemedin"
+        song.attach(url: URL(string: base + "/tone.mp3?cut=720000")!, seekTo: nil, title: "Barış FM", subtitle: "Türkiye")
+        let reset = cardLine() == "Türkiye"
+        song.showSong("BLOK3 – Sevmeyi Denemedin")
+        let back = cardLine() == "BLOK3 – Sevmeyi Denemedin"
+        song.showSong("")
+        let cleared = cardLine() == "Türkiye"
+        let other = PlayerController()
+        other.showSong("Somebody Else – Not This")
+        let untouched = cardLine() == "Türkiye"
+        for (ok, what) in [(shown, "the song shows on the lock screen"), (reset && back, "a handover's attach resets it and the next tick puts it back"),
+                           (cleared, "no song puts the place back"), (untouched, "a player that is not active writes nothing")] {
+            print((ok ? "PASS " : "FAIL ") + what)
+            if !ok { failures += 1 }
+        }
+        song.stop()
+        #endif
         exit(failures == 0 ? 0 : 1)
     }
 }

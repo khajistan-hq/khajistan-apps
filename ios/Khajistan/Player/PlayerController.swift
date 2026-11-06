@@ -66,7 +66,7 @@ final class PlayerController {
     }
 
     /// What the lock screen names under the channel when no song is: the place, or "Khajistan".
-    private var nowPlayingSubtitle: String?
+    @ObservationIgnored private var nowPlayingSubtitle: String?
 
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
@@ -331,9 +331,13 @@ final class PlayerController {
 
     /// The song on air, under the channel name on the lock screen and in Control Centre;
     /// "" puts the place back (owner, 2026-11-06: the song name everywhere a channel is named).
+    /// Safe to call every tick: it writes only when the line differs, which also puts the song
+    /// back after an `attach()` (a programme handover) reset the line to the place.
     func showSong(_ song: String) {
         guard Self.active === self, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
-        info[MPMediaItemPropertyArtist] = song.isEmpty ? (nowPlayingSubtitle ?? "Khajistan") : song
+        let line = song.isEmpty ? (nowPlayingSubtitle ?? "Khajistan") : song
+        guard info[MPMediaItemPropertyArtist] as? String != line else { return }
+        info[MPMediaItemPropertyArtist] = line
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 

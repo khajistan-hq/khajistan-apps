@@ -28,7 +28,10 @@ final class ReceiverTuner {
     /// The live channels' player. Transmission plays on its store's own.
     let controller = PlayerController()
     /// The song on the live channel (NowPlaying), or "". Every surface showing the channel reads it.
-    private(set) var song = ""
+    private(set) var song = "" {
+        // The lock screen and Control Centre carry the song too.
+        didSet { if song != oldValue { player.showSong(song) } }
+    }
     @ObservationIgnored private var songTask: Task<Void, Never>?
 
     let captions: LiveCaptionSession

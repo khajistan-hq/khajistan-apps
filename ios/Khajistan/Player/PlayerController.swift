@@ -65,12 +65,16 @@ final class PlayerController {
         }
     }
 
+    /// What the lock screen names under the channel when no song is: the place, or "Khajistan".
+    private var nowPlayingSubtitle: String?
+
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
     /// card says; a recording (a mix, a clip) passes false.
     /// `fadeIn` false starts at full volume: the 0.9 s ramp is the Receiver's channel change, and
     /// on a six-second reel it is a third of the clip spoken too quietly.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, fadeIn: Bool = true) {
+        nowPlayingSubtitle = subtitle
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         generation += 1
@@ -324,6 +328,14 @@ final class PlayerController {
         }
     }
 
+
+    /// The song on air, under the channel name on the lock screen and in Control Centre;
+    /// "" puts the place back (owner, 2026-11-06: the song name everywhere a channel is named).
+    func showSong(_ song: String) {
+        guard Self.active === self, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+        info[MPMediaItemPropertyArtist] = song.isEmpty ? (nowPlayingSubtitle ?? "Khajistan") : song
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
 
     private func updateNowPlayingRate(_ rate: Double) {
         guard Self.active === self, var info = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }

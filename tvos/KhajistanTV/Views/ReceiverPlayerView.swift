@@ -400,7 +400,10 @@ struct ReceiverPlayerView: View {
         pip.onEnd = { [model] in
             if model.radioAway?.controller === player { model.silenceRadio() } else { player.stop() }
         }
-        if !pip.start(player.player) { say("Picture in picture is not ready yet. Try again in a moment.") }
+        if !pip.start(player.player) {
+            pip.letGo()
+            say("Picture in picture is not ready yet. Try again in a moment.")
+        }
         wake()
     }
 
@@ -849,8 +852,10 @@ struct RadioBar: View {
     var body: some View {
         let state = away.controller.state
         let playing = state == .playing || state == .tuning
+        // A TV channel lands here when full screen from the corner cannot open over a page.
+        let isTV = away.channel.mediaType == "tv"
         HStack(spacing: 20) {
-            Image(systemName: "radio")
+            Image(systemName: isTV ? "tv" : "radio")
                 .font(.system(size: 34, weight: .semibold))
                 .frame(width: 72, height: 72)
                 .background(palette.onBand.opacity(0.16))
@@ -861,7 +866,7 @@ struct RadioBar: View {
                     // Where it is from, and the song while one is named (owner, 2026-11-05).
                     let country = away.channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
                     let tail = state == .playing && !song.isEmpty ? song : Self.word(state)
-                    Text((["Radio", country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
+                    Text(([isTV ? "TV" : "Radio", country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

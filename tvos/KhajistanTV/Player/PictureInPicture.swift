@@ -94,7 +94,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
 
     /// The closures hold the player screen's state, which holds this object: let go once the
     /// window is done with them, or each session keeps two players alive.
-    private func letGo() {
+    func letGo() {
         onStart = nil
         onFail = nil
         onRestore = nil

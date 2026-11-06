@@ -852,10 +852,11 @@ struct RadioBar: View {
     var body: some View {
         let state = away.controller.state
         let playing = state == .playing || state == .tuning
-        // A TV channel lands here when full screen from the corner cannot open over a page.
-        let isTV = away.channel.mediaType == "tv"
+        // A picture (TV or camera) lands here when full screen from the corner cannot open over a page.
+        let medium = away.channel.mediaType.lowercased()
+        let word = medium == "radio" ? "Radio" : medium == "camera" ? "Camera" : "TV"
         HStack(spacing: 20) {
-            Image(systemName: isTV ? "tv" : "radio")
+            Image(systemName: medium == "radio" ? "radio" : medium == "camera" ? "video" : "tv")
                 .font(.system(size: 34, weight: .semibold))
                 .frame(width: 72, height: 72)
                 .background(palette.onBand.opacity(0.16))
@@ -866,7 +867,7 @@ struct RadioBar: View {
                     // Where it is from, and the song while one is named (owner, 2026-11-05).
                     let country = away.channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
                     let tail = state == .playing && !song.isEmpty ? song : Self.word(state)
-                    Text(([isTV ? "TV" : "Radio", country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
+                    Text(([word, country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }

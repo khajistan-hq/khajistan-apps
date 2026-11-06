@@ -66,7 +66,7 @@ struct TVScreeningRoom: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $page) { film in TVFilmPage(film: film) }
-        .fullScreenCover(item: $direct) { film in FilmPlayerView(film: film) }
+        .fullScreenCover(item: $direct) { film in FilmPlayerView(film: film, startsFull: true) }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = FilmPlaces.all
             if now != places { places = now }

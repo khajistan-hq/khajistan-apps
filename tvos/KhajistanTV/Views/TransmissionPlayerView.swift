@@ -50,13 +50,17 @@ struct TransmissionPlayerView: View {
         }
         .onExitCommand {
             // Back lets go of a lit control first, as the Receiver does.
+            var soundOnly = false
+            if case .onAir(let air) = store.phase { soundOnly = air.programme?.audio_only == true }
+            let hidesStrip = stripShown && !soundOnly && store.player.state == .playing && !switching && OverlayTiming.hidesItself
             if captionArmed {
                 captionArmed = false
-                wake()
+                if hidesStrip { hideTask?.cancel(); overlayVisible = false } else { wake() }
                 return
             }
-            // Then hides the strip over a playing picture, as Apple's info panel goes.
-            if stripShown, store.player.state == .playing, !switching, OverlayTiming.hidesItself {
+            // Then hides the strip over a playing picture, as Apple's info panel goes. A sound-only
+            // programme has no picture to uncover, so its first Back leaves.
+            if hidesStrip {
                 hideTask?.cancel()
                 overlayVisible = false
                 return

@@ -38,7 +38,7 @@ struct FilmShelf: View {
         .fullScreenCover(item: $playing) { film in
             if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
-        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film) }
+        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
     }
 }
 

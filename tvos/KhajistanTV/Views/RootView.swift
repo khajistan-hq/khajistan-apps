@@ -46,7 +46,12 @@ struct RootView: View {
         .onChange(of: model.restoring?.id) {
             guard let away = model.restoring else { return }
             model.restoring = nil
-            model.silenceRadio()
+            // Not silenced here: the player that opens silences it as it starts. If a page's cover
+            // is open and the screen cannot open over it, the channel plays on in the small bar
+            // rather than stopping with nothing on screen.
+            var bar = away
+            bar.pip = nil
+            model.radioAway = bar
             reopened = away
         }
         .fullScreenCover(item: $reopened) { away in

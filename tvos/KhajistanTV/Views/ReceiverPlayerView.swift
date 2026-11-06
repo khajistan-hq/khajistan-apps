@@ -177,14 +177,16 @@ struct ReceiverPlayerView: View {
                 closeGuide()
                 return
             }
+            let hidesStrip = stripShown && showsPicture && controller.state == .playing && destination == nil && OverlayTiming.hidesItself
             if armed != nil {
                 armed = nil
-                wake()
+                // Over a playing picture the strip goes with it, so two Backs leave, as on Apple's app.
+                if hidesStrip { hideTask?.cancel(); controls.hide() } else { wake() }
                 return
             }
             // Then hides the strip over a playing picture, as Apple's info panel goes; the next
             // Back leaves. Radio has no picture to uncover, so its first Back leaves.
-            if stripShown, showsPicture, controller.state == .playing, destination == nil, OverlayTiming.hidesItself {
+            if hidesStrip {
                 hideTask?.cancel()
                 controls.hide()
                 return
@@ -386,7 +388,9 @@ struct ReceiverPlayerView: View {
         let player = controller
         let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
                              listRegion: listRegion, listTitle: listTitle, pip: pip)
-        pip.onStart = {
+        pip.onStart = { [pip] in
+            // A channel step between Select and the window opening stopped this player.
+            guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             model.radioAway = away
             stopEverything()
             dismiss()

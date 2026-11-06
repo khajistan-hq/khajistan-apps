@@ -45,11 +45,14 @@ struct FilmPlayerView: View {
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: overlayVisible ? panelHeight : 0)
-            // Always there, under the overlay: with the full film playing the overlay has no
-            // button of its own, and focus had nowhere to go, so Play and Back were lost.
-            Button { wake() } label: { Color.clear }
-                .buttonStyle(SurfaceButtonStyle())
-                .focused($surfaceFocused)
+            // Under the overlay in the full film, which has no button of its own there, so focus
+            // always has somewhere to go and Play and Back are not lost. Over the preview the
+            // offer's buttons hold focus, and the surface waits until the overlay hides.
+            if full != nil || !overlayVisible {
+                Button { wake() } label: { Color.clear }
+                    .buttonStyle(SurfaceButtonStyle())
+                    .focused($surfaceFocused)
+            }
             if overlayVisible {
                 overlay(palette)
             }
@@ -71,14 +74,18 @@ struct FilmPlayerView: View {
         .onPlayPauseCommand {
             wake()
             switch controller.state {
-            case .playing, .paused, .tuning: controller.toggle()
+            case .playing, .paused: controller.toggle()
+            // Not while connecting: a pause then drops the seek to the place the film resumes from.
+            case .tuning: break
             // After the full film ends, Play plays it again from the start.
             case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
             }
         }
         .onExitCommand {
             // Back first hides the overlay over a playing picture, as Apple's player does.
-            if overlayVisible, controller.state == .playing, refusal == nil, !checking, !showSignIn {
+            // The preview keeps its overlay: the offer is on it. VoiceOver keeps it too.
+            if overlayVisible, full != nil, controller.state == .playing, refusal == nil, !checking, !showSignIn,
+               OverlayTiming.hidesItself {
                 hideTask?.cancel()
                 withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
                 return

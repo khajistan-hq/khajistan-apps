@@ -24,6 +24,8 @@ final class PictureInPicture: NSObject {
 
     @ObservationIgnored private var controllers: [ObjectIdentifier: AVPictureInPictureController] = [:]
     @ObservationIgnored private var restoring = false
+    /// `stop()` closed the window: AVKit still asks to restore, and that is not the viewer asking.
+    @ObservationIgnored private var stopping = false
 
     /// A layer as it is drawn. Called on every redraw; a layer already held is left alone.
     func bind(_ layer: AVPlayerLayer) {
@@ -41,6 +43,7 @@ final class PictureInPicture: NSObject {
         // The window keeps playing outside the app only on a playback session.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         restoring = false
+        stopping = false
         pip.startPictureInPicture()
         return true
     }
@@ -48,6 +51,7 @@ final class PictureInPicture: NSObject {
     /// Closes the window, if it is up. A restore already closing it is left to finish.
     func stop() {
         guard isActive, !restoring else { return }
+        stopping = true
         controllers.values.first { $0.isPictureInPictureActive }?.stopPictureInPicture()
     }
 }
@@ -64,12 +68,14 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         MainActor.assumeIsolated {
             isActive = false
             onFail?("Picture in picture did not open. Try again.")
+            letGo()
         }
     }
 
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
                                                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
         MainActor.assumeIsolated {
+            guard !stopping else { return }
             restoring = true
             onRestore?()
         }
@@ -79,8 +85,19 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
         MainActor.assumeIsolated {
             isActive = false
-            if !restoring { onEnd?() }
+            if !restoring, !stopping { onEnd?() }
             restoring = false
+            stopping = false
+            letGo()
         }
+    }
+
+    /// The closures hold the player screen's state, which holds this object: let go once the
+    /// window is done with them, or each session keeps two players alive.
+    private func letGo() {
+        onStart = nil
+        onFail = nil
+        onRestore = nil
+        onEnd = nil
     }
 }

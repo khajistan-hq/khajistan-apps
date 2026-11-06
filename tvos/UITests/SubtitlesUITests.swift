@@ -84,6 +84,18 @@ final class SubtitlesUITests: XCTestCase {
         }
     }
 
+    /// Lights the strip's Captions control the way the remote does since 2026-11-04: right on the
+    /// bare picture opens the guide, so Select lights it. A first Select only wakes the strip when
+    /// it had hidden; a second then lights Captions. Never a third, which would work the control.
+    private func lightCaptions(_ control: XCUIElement) {
+        XCUIRemote.shared.press(.select)
+        kjPause(0.8)
+        if !(control.exists && control.isSelected) {
+            XCUIRemote.shared.press(.select)
+            kjPause(0.8)
+        }
+    }
+
     func testReceiverCaptionsSignedOut() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
@@ -107,11 +119,10 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 20))
         _ = waitFor(45) { state.label == "Playing" }
         kjPause(8)
-        XCUIRemote.shared.press(.right)
-        kjPause(0.8)
         let control = app.buttons["captionsControl"]
+        lightCaptions(control)
         XCTAssertTrue(control.exists, "a live channel in a language the recogniser takes offers captions")
-        XCTAssertTrue(control.isSelected, "right lights the Captions control")
+        XCTAssertTrue(control.isSelected, "Select lights the Captions control")
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)
@@ -123,9 +134,12 @@ final class SubtitlesUITests: XCTestCase {
         // Five seconds after the choice the strip hides; captions and the saved setting remain.
         XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
-        // Left here would open the guide (owner, 2026-11-04); Right comes straight back to CC.
-        XCUIRemote.shared.press(.right)
+        // Left or right on the bare picture opens the guide (owner, 2026-11-04); Select wakes the
+        // strip and lights CC, and one more Select works it.
+        lightCaptions(control)
+        XCTAssertTrue(control.isSelected, "Select lights the Captions control again")
         XCUIRemote.shared.press(.select)
+        kjPause(0.6)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
         XCUIRemote.shared.press(.left)
         XCUIRemote.shared.press(.menu)
@@ -138,11 +152,12 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 20))
         _ = waitFor(45) { state.label == "Playing" }
         kjPause(8)
+        let kashirControl = app.buttons["captionsControl"]
+        lightCaptions(kashirControl)
+        XCTAssertTrue(kashirControl.exists, "CC remains discoverable for unsupported channels")
+        XCTAssertTrue(kashirControl.isSelected, "Select lights the Captions control")
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
-        XCTAssertTrue(app.buttons["captionsControl"].exists, "CC remains discoverable for unsupported channels")
-        XCUIRemote.shared.press(.right)
-        XCUIRemote.shared.press(.select)
         XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")
         XCTAssertTrue(app.staticTexts["No captions: Kashmiri is not on the live recogniser."].exists, "the line says why")
         kjScreenshot("live-3-kashmiri-no-control", app: app)

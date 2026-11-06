@@ -24,6 +24,8 @@ struct TransmissionPlayerView: View {
     @State private var subtitles = RecordedSubtitles()
     @State private var captionArmed = false
     @State private var stripHeight: CGFloat = 0
+    /// The song playing inside the programme, from songs.json (HouseSongs), or "".
+    @State private var song = ""
     @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
@@ -77,6 +79,7 @@ struct TransmissionPlayerView: View {
         }
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
+        .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
@@ -168,6 +171,12 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
+            if !song.isEmpty {
+                Text("Now playing: " + song).kjBody().multilineTextAlignment(.center)
+            }
+            if let country = nonEmpty(air.programme?.country) {
+                Text(country).kjSmall(faint: true)
+            }
             if let custodian = nonEmpty(air.programme?.custodian) {
                 Text(custodian).kjSmall(faint: true)
             }
@@ -193,7 +202,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
-                    detail: stateText(air),
+                    detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     trailing: ["\u{25CF} Channel \(store.channelNumber)"],
                     upNext: next.map { ($0.startLabel, $0.show?.name ?? "") },
@@ -243,6 +252,36 @@ struct TransmissionPlayerView: View {
     /// the receiver's two channel rows: "just programming block names").
     private func headline(_ air: OnAir) -> String {
         nonEmpty(air.show?.name) ?? nonEmpty(air.programme?.title) ?? store.channelName(store.channelNumber)
+    }
+
+    /// The slot, then where the programme is from and, on a picture, the song inside it. A sound
+    /// programme already carries both on the ground.
+    private func stripDetail(_ air: OnAir, soundOnly: Bool) -> String {
+        // The country is not a playback state: it stays through a pause. A failure's message stands alone.
+        if case .failed = store.player.state { return stateText(air) }
+        if soundOnly { return stateText(air) }
+        let playing = store.player.state == .playing || store.player.state == .idle
+        return [stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
+            .compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    /// The song at the player's position, checked each second (the website reads `timeupdate`).
+    private func watchSong() async {
+        song = ""
+        guard case .onAir(let air) = store.phase else { return }
+        var spans: [SongSpan] = []
+        // A file that has not arrived yet (or names no song here) is asked again each minute.
+        while !Task.isCancelled {
+            spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: model.auth.previewPassword)
+            if !spans.isEmpty { break }
+            try? await Task.sleep(for: .seconds(60))
+        }
+        while !Task.isCancelled {
+            let time = store.player.player.currentTime().seconds
+            let now = time.isFinite ? HouseSongs.song(in: spans, at: time) : ""
+            if now != song { song = now }
+            try? await Task.sleep(for: .seconds(1))
+        }
     }
 
     /// While the programme plays, the slot it belongs to, as the station page says it.

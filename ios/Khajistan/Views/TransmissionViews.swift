@@ -293,6 +293,7 @@ struct TransmissionPlayerView: View {
             if let line = nonEmpty(air.show?.line) { Text(line).kjSmall(faint: true).lineLimit(3) }
             let facts = [nonEmpty(air.programme?.work_kind), nonEmpty(air.programme?.country)].compactMap { $0 }
             if !facts.isEmpty { Text(facts.joined(separator: " \u{00B7} ")).kjSmall() }
+            if !model.tuner.song.isEmpty { Text("Now playing: " + model.tuner.song).kjBody().lineLimit(2) }
             if let custodian = nonEmpty(air.programme?.custodian) { Text(custodian).kjSmall(faint: true) }
             if let transfer = nonEmpty(air.programme?.transfer) { Text(transfer).kjSmall(faint: true) }
             TransportRow(isPlaying: store.player.state == .playing, toggle: playPause)

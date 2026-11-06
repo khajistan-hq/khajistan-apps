@@ -101,7 +101,11 @@ struct NowPlayingBar: View {
 
     private var name: (title: String, detail: String) {
         switch model.tuner.source {
-        case .live(let channel): return (channel.name, channel.mediaType.lowercased() == "radio" ? "Radio" : "Television")
+        case .live(let channel):
+            // Where it is from, on every surface that names a channel (owner, 2026-11-05).
+            let medium = channel.mediaType.lowercased() == "radio" ? "Radio" : "Television"
+            let country = channel.country?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (channel.name, country.isEmpty ? medium : "\(medium) \u{00B7} \(country)")
         case .transmission(let number): return (model.transmission.channelName(number), "Khajistan Transmission")
         case nil: return ("", "")
         }
@@ -144,7 +148,9 @@ struct NowPlayingBar: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(name.title).font(.system(.subheadline, weight: .bold)).lineLimit(1)
-                        Text("\(name.detail) \u{00B7} \(stateWord)").font(.caption).opacity(0.85).lineLimit(1)
+                        // On air with a song named, the song stands in for "On air".
+                        let word = state == .playing && !model.tuner.song.isEmpty ? model.tuner.song : stateWord
+                        Text("\(name.detail) \u{00B7} \(word)").font(.caption).opacity(0.85).lineLimit(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

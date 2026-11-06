@@ -300,3 +300,4 @@ struct ReceiverControlsVisibility {
         return true
     }
 }
+

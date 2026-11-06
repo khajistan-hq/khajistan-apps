@@ -142,11 +142,24 @@ final class SubtitlesUITests: XCTestCase {
         kjPause(0.6)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
         XCUIRemote.shared.press(.left)
-        XCUIRemote.shared.press(.menu)
+        // Back lets go of the lit control first, and over a playing picture may hide the strip
+        // before it leaves: press until the player is gone, never more than three times. (The
+        // region page's cards stay in the tree under the player, so they cannot tell.)
+        for _ in 0..<3 where state.exists {
+            XCUIRemote.shared.press(.menu)
+            kjPause(1)
+        }
+        XCTAssertTrue(state.waitForNonExistence(timeout: 10), "Back leaves the player")
 
-        // DD Kashir: Kashmiri is not on the live recogniser, so one line and no control.
+        // DD Kashir: Kashmiri is not on the live recogniser, so one line and no control. Its card
+        // is drawn only once the shelf scrolls near it.
         let kashir = app.buttons["channel-india-dd-kashir"]
-        XCTAssertTrue(kashir.waitForExistence(timeout: 20))
+        XCTAssertTrue(kjFocus(abn, app: app), "ABN News takes focus again")
+        for _ in 0..<20 where !kashir.exists {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.4)
+        }
+        XCTAssertTrue(kashir.waitForExistence(timeout: 10), "DD Kashir is on the Indus television shelf")
         XCTAssertTrue(kjFocus(kashir, app: app))
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(state.waitForExistence(timeout: 20))

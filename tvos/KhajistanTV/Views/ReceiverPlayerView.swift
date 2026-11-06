@@ -60,7 +60,9 @@ struct ReceiverPlayerView: View {
     /// Set as the screen closes: the remote's recognisers stay on the window until the cover's
     /// animation ends, and a click then must not tune a player already stopped.
     @State private var leaving = false
-    private enum Chip { case captions, like, guide }
+    /// Picture in picture for the two layers (PictureInPicture.swift).
+    @State private var pip = PictureInPicture()
+    private enum Chip { case captions, like, guide, pip }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -86,10 +88,10 @@ struct ReceiverPlayerView: View {
             // A picture that does not fill the screen sits on black, whatever the skin (owner,
             // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: playerA.player)
+            PlayerLayerView(player: playerA.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 1 : 0)
-            PlayerLayerView(player: playerB.player)
+            PlayerLayerView(player: playerB.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
@@ -120,6 +122,7 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: captionsActionName) { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
+            .accessibilityAction(named: "Picture in picture") { startPictureInPicture() }
             overlay(palette)
             if let guideRow {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
@@ -269,6 +272,7 @@ struct ReceiverPlayerView: View {
             like()
             wake()
         case .guide: openGuide()
+        case .pip: startPictureInPicture()
         case nil:
             // With the strip showing, Select lights its first control; left and right
             // then walk the controls (right on the bare picture opens the guide).
@@ -338,7 +342,47 @@ struct ReceiverPlayerView: View {
             captionsControl
             likeControl
             if guideOffered { guideControl }
+            if pipOffered { pipControl }
         }
+    }
+
+    /// Picture in picture: a picture playing on AVPlayer, with no change under way. Radio has no
+    /// picture, and keeps playing in the small player when its screen closes.
+    private var pipOffered: Bool {
+        PictureInPicture.isSupported && current.mediaType != "radio" && destination == nil && controller.state == .playing
+    }
+
+    private var pipControl: some View {
+        StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Picture in picture")
+            .accessibilityIdentifier("pipControl")
+            .accessibilityAction { startPictureInPicture() }
+            .accessibilityAddTraits(armed == .pip ? .isSelected : [])
+    }
+
+    /// The picture goes to a corner and the screen closes behind it; the channel stays in
+    /// `model.radioAway`, which keeps it playing as it keeps a radio (one signal at a time: the
+    /// next player to start closes the window). Full screen from the window opens the channel
+    /// again; closing the window stops it.
+    private func startPictureInPicture() {
+        guard pipOffered else { return }
+        armed = nil
+        let player = controller
+        let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
+                             listRegion: listRegion, listTitle: listTitle, pip: pip)
+        pip.onStart = {
+            model.radioAway = away
+            stopEverything()
+            dismiss()
+        }
+        pip.onFail = { say($0) }
+        pip.onRestore = { [model] in model.restoring = away }
+        pip.onEnd = { [model] in
+            if model.radioAway?.controller === player { model.silenceRadio() } else { player.stop() }
+        }
+        if !pip.start(player.player) { say("Picture in picture is not ready yet. Try again in a moment.") }
+        wake()
     }
 
     /// The guide, as a live TV app offers one: every channel of the shelf the viewer came from,
@@ -485,13 +529,15 @@ struct ReceiverPlayerView: View {
         switch armed {
         case nil: return openGuide()
         case .captions: armed = .like
-        case .like: if guideOffered { armed = .guide }
-        case .guide: break
+        case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .guide: if pipOffered { armed = .pip }
+        case .pip: break
         }
     }
 
     private func moveLeft() {
         switch armed {
+        case .pip: armed = guideOffered ? .guide : .like
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
@@ -765,6 +811,8 @@ struct RadioAway: Identifiable {
     /// What the guide titles its first page by when the station is opened again.
     let listRegion: String?
     let listTitle: String?
+    /// Set when the channel is a picture playing in the corner window, not a radio in the bar.
+    var pip: PictureInPicture? = nil
     var id: String { channel.id }
 }
 

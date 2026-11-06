@@ -34,12 +34,20 @@ struct RootView: View {
                 .focusSection()
             // The radio left playing, under every section (owner gap: "while browsing other tabs"),
             // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
-            if let away = model.radioAway {
+            if let away = model.radioAway, away.pip == nil {
                 RadioBar(away: away) {
                     model.silenceRadio()
                     reopened = away
                 }
             }
+        }
+        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
+        // as a radio from the small player does.
+        .onChange(of: model.restoring?.id) {
+            guard let away = model.restoring else { return }
+            model.restoring = nil
+            model.silenceRadio()
+            reopened = away
         }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,

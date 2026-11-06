@@ -18,8 +18,6 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -31,15 +29,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>KJKeychainGroup</key>
 	<string>$(AppIdentifierPrefix)com.khajistan.tv.shared</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Automatic</string>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 </dict>
 </plist>

@@ -286,8 +286,9 @@ struct PnvViewerView: View {
             try Task.checkCancellation()
             guard current.id == key else { return }
             // A clip loops, as a reel does; a Khajistan TV programme plays once.
-            controller.onEnded = { [controller] in
-                guard !row.isKtv else { return }
+            // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
+            controller.onEnded = { [weak controller] in
+                guard !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()
             }

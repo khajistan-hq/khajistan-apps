@@ -42,13 +42,16 @@ struct RRIssueRow: Decodable, Equatable, Sendable {
         if let whole = try? box.decode(Int.self, forKey: .pages) {
             pages = whole
         } else if let fraction = try? box.decode(Double.self, forKey: .pages), fraction.isFinite {
-            pages = Int(fraction)
+            pages = Int(min(max(fraction, 0), Double(Self.maxPages)))
         } else if let text = try? box.decode(String.self, forKey: .pages), let whole = Int(text) {
             pages = whole
         } else {
             pages = 0
         }
+        // A count out of range would trap in Int(_:) or in the page totals; no issue has a million pages.
+        pages = min(max(pages, 0), Self.maxPages)
     }
+    static let maxPages = 1_000_000
 }
 
 /// One row of reading_room_catalogue(): a collection and the issues it serves.

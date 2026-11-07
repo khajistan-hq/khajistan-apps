@@ -260,7 +260,7 @@ struct FilmPlayerView: View {
     private func playPreview() {
         guard let url = Films.previewURL(film) else { return }
         // A preview that reaches its end stops there; the site does not roll on to another film.
-        controller.onEnded = { controller.stop() }
+        controller.onEnded = { [weak controller] in controller?.stop() }
         controller.attach(url: url, seekTo: nil, title: Films.displayTitle(film), subtitle: "Preview", isLive: false)
     }
 
@@ -280,9 +280,9 @@ struct FilmPlayerView: View {
             full = (kind, expiresAt)
             model.clips.cover(caption: Films.displayTitle(film))
             // Watched to the end: it leaves Up Next.
-            controller.onEnded = { [handle = film.handle] in
+            controller.onEnded = { [weak controller, handle = film.handle] in
                 FilmPlaces.forget(handle)
-                controller.stop()
+                controller?.stop()
             }
             let resume = FilmPlaces.position(film.handle)
             controller.attach(url: url, seekTo: resume,

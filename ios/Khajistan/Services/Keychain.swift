@@ -30,9 +30,18 @@ enum Keychain {
         return found as? Data
     }
 
-    /// Replaces whatever is stored under the account: delete first, then add.
+    /// Replaces whatever is stored under the account. An existing item is updated in place, in one
+    /// call, so a failed write leaves the previous value rather than an empty account. (After a
+    /// refresh the previous value carries a refresh token the server has already retired, so that
+    /// case still ends in sign-in; a first sign-in and a code check no longer pass through empty.)
     static func write(_ data: Data, account: String) throws {
-        delete(account)
+        let changes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let updated = SecItemUpdate(identity(account) as CFDictionary, changes as CFDictionary)
+        if updated == errSecSuccess { return }
+        guard updated == errSecItemNotFound else { throw Failure(status: updated) }
         var item = identity(account)
         item[kSecValueData as String] = data
         item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly

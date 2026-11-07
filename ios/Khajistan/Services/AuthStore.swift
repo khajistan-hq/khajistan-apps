@@ -125,6 +125,20 @@ final class AuthStore {
             throw AuthError.server("Sign in to watch Khajistan TV.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
+        // One refresh at a time: every caller waits on the same request. Parallel refreshes sent
+        // the one refresh token several times; the losers failed, and a refusal that came back
+        // first signed the viewer out. A cancelled caller still waits for the shared request
+        // (25 s at most); every caller checks cancellation or a generation after it.
+        if let refreshTask { return try await refreshTask.value }
+        let task = Task { try await refresh(current) }
+        refreshTask = task
+        defer { if refreshTask == task { refreshTask = nil } }
+        return try await task.value
+    }
+
+    @ObservationIgnored private var refreshTask: Task<String, Error>?
+
+    private func refresh(_ current: Session) async throws -> String {
         // A network failure or a server fault leaves the session in place for the next try;
         // only a refusal of the refresh token ends it.
         let access = accessGeneration

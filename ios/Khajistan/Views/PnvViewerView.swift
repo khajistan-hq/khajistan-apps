@@ -248,8 +248,9 @@ struct PnvViewerView: View {
             let url = try await store.playableURL(for: row)
             try Task.checkCancellation()
             guard current.id == key else { return }
-            controller.onEnded = { [controller] in
-                guard !row.isKtv else { return }
+            // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
+            controller.onEnded = { [weak controller] in
+                guard !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()
             }

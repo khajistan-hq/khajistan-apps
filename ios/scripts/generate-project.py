@@ -47,7 +47,7 @@ def configs(key,settings):
         if name=='Debug': local['SWIFT_ACTIVE_COMPILATION_CONDITIONS']=quote('DEBUG $(inherited)'); local['ENABLE_TESTABILITY']='YES'
         refs.append(add(key+'/'+name,obj(isa='XCBuildConfiguration',buildSettings=obj(**local),name=name)))
     return add(key,obj(isa='XCConfigurationList',buildConfigurations=array(refs),defaultConfigurationIsVisible='0',defaultConfigurationName='Release'))
-common={'IPHONEOS_DEPLOYMENT_TARGET':'17.0','SDKROOT':'iphoneos','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','TARGETED_DEVICE_FAMILY':quote('1,2')}
+common={'IPHONEOS_DEPLOYMENT_TARGET':'17.0','SDKROOT':'iphoneos','DEAD_CODE_STRIPPING':'YES','SWIFT_VERSION':'5.0','CLANG_ENABLE_MODULES':'YES','CLANG_ENABLE_OBJC_ARC':'YES','ENABLE_USER_SCRIPT_SANDBOXING':'YES','TARGETED_DEVICE_FAMILY':quote('1,2')}
 project_configs=configs('project-config',common)
 app_settings={'PRODUCT_BUNDLE_IDENTIFIER':'com.khajistan.archive','PRODUCT_NAME':quote('$(TARGET_NAME)'),'INFOPLIST_FILE':'Khajistan/Resources/Info.plist','CODE_SIGN_STYLE':'Automatic','ASSETCATALOG_COMPILER_APPICON_NAME':'AppIcon','CURRENT_PROJECT_VERSION':'1','MARKETING_VERSION':'1.0','GENERATE_INFOPLIST_FILE':'NO','SUPPORTED_PLATFORMS':quote('iphoneos iphonesimulator'),'SUPPORTS_MACCATALYST':'YES','DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER':'NO','"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]"':'Khajistan/Resources/Khajistan-Mac.entitlements','"ENABLE_APP_SANDBOX[sdk=macosx*]"':'YES','"ENABLE_HARDENED_RUNTIME[sdk=macosx*]"':'YES','LD_RUNPATH_SEARCH_PATHS':quote('$(inherited) @executable_path/Frameworks')}
 app_configs=configs('app-config',app_settings)
@@ -56,7 +56,7 @@ app_target=add('app-target',obj(isa='PBXNativeTarget',buildConfigurationList=app
 proxy=add('test-proxy',obj(isa='PBXContainerItemProxy',containerPortal=uid('project'),proxyType='1',remoteGlobalIDString=app_target,remoteInfo='Khajistan'))
 dependency=add('test-dependency',obj(isa='PBXTargetDependency',target=app_target,targetProxy=proxy))
 test_target=add('test-target',obj(isa='PBXNativeTarget',buildConfigurationList=test_configs,buildPhases=array(test_phases),buildRules='()',dependencies=array([dependency]),name='KhajistanUITests',productName='KhajistanUITests',productReference=test,productType=quote('com.apple.product-type.bundle.ui-testing')))
-project=add('project',obj(isa='PBXProject',attributes=obj(BuildIndependentTargetsInParallel='YES',LastUpgradeCheck='1600'),buildConfigurationList=project_configs,compatibilityVersion=quote('Xcode 14.0'),developmentRegion='en',hasScannedForEncodings='0',knownRegions=array(['en','Base']),mainGroup=main,productRefGroup=products,projectDirPath=quote(''),projectRoot=quote(''),targets=array([app_target,test_target])))
+project=add('project',obj(isa='PBXProject',attributes=obj(BuildIndependentTargetsInParallel='YES',LastUpgradeCheck='2700'),buildConfigurationList=project_configs,compatibilityVersion=quote('Xcode 14.0'),developmentRegion='en',hasScannedForEncodings='0',knownRegions=array(['en','Base']),mainGroup=main,productRefGroup=products,projectDirPath=quote(''),projectRoot=quote(''),targets=array([app_target,test_target])))
 project_dir=root/'Khajistan.xcodeproj'
 project_dir.mkdir(exist_ok=True)
 text='// !$*UTF8*$!\n{\narchiveVersion = 1;\nclasses = {};\nobjectVersion = 56;\nobjects = {\n'

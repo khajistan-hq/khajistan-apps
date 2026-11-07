@@ -38,10 +38,26 @@ enum Keychain {
         return group
     }
 
-    /// Replaces whatever is stored under the account: delete first, then add. `shared` puts the
-    /// item in the group the Top Shelf extension can read; a build signed without that
-    /// entitlement (the simulator under CODE_SIGNING_ALLOWED=NO) keeps it in the app's own.
+    /// Replaces whatever is stored under the account. `shared` puts the item in the group the Top
+    /// Shelf extension can read; a build signed without that entitlement (the simulator under
+    /// CODE_SIGNING_ALLOWED=NO) keeps it in the app's own. An item already where it belongs is
+    /// updated in place, in one call, so a failed write leaves the previous value. An item that is
+    /// not there yet (new, or stored before the shared group existed) is deleted wherever it is
+    /// and added in the right group, which is how the launch migration moves the preview password.
     static func write(_ data: Data, account: String, shared: Bool = false) throws {
+        var query = identity(account)
+        if shared, let group = sharedGroup { query[kSecAttrAccessGroup as String] = group }
+        let changes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        ]
+        let updated = SecItemUpdate(query as CFDictionary, changes as CFDictionary)
+        if updated == errSecSuccess { return }
+        // A signed build whose profile lacks the shared group answers -34018 for the grouped query;
+        // fall through so the add path below can keep the item in the app's own group.
+        guard updated == errSecItemNotFound || (shared && updated == errSecMissingEntitlement) else {
+            throw Failure(status: updated)
+        }
         delete(account)
         var item = identity(account)
         item[kSecValueData as String] = data

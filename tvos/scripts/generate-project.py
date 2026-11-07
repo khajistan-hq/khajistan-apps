@@ -88,7 +88,7 @@ app_target = add('app-target', obj(isa='PBXNativeTarget', buildConfigurationList
 proxy = add('test-proxy', obj(isa='PBXContainerItemProxy', containerPortal=uid('project'), proxyType='1', remoteGlobalIDString=app_target, remoteInfo=APP))
 dependency = add('test-dependency', obj(isa='PBXTargetDependency', target=app_target, targetProxy=proxy))
 test_target = add('test-target', obj(isa='PBXNativeTarget', buildConfigurationList=test_configs, buildPhases=array(test_phases), buildRules='()', dependencies=array([dependency]), name=TESTS, productName=TESTS, productReference=test, productType=quote('com.apple.product-type.bundle.ui-testing')))
-attributes = obj(BuildIndependentTargetsInParallel='YES', LastUpgradeCheck='2600', TargetAttributes=obj(**{test_target: obj(TestTargetID=app_target)}))
+attributes = obj(BuildIndependentTargetsInParallel='YES', LastUpgradeCheck='2700', TargetAttributes=obj(**{test_target: obj(TestTargetID=app_target)}))
 project = add('project', obj(isa='PBXProject', attributes=attributes, buildConfigurationList=project_configs, compatibilityVersion=quote('Xcode 14.0'), developmentRegion='en', hasScannedForEncodings='0', knownRegions=array(['en', 'Base']), mainGroup=main, productRefGroup=products, projectDirPath=quote(''), projectRoot=quote(''), targets=array([app_target, shelf_target, test_target])))
 project_dir = root / f'{APP}.xcodeproj'
 project_dir.mkdir(exist_ok=True)

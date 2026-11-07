@@ -33,6 +33,16 @@ final class LibraryStateTests: XCTestCase {
         XCTAssertEqual(state.resume.first?.ref, "f59")
     }
 
+    func testPageMarksAreBounded() throws {
+        var state = LibraryState()
+        for n in 0..<(LibraryState.maxPageMarks + 20) { state.togglePageMark(title: "t", issue: "i", page: n) }
+        XCTAssertEqual(state.pageMarks.count, LibraryState.maxPageMarks)
+        XCTAssertEqual(state.pageMarks.first?.page, LibraryState.maxPageMarks + 19, "the newest mark stays")
+        let marks = (0..<(LibraryState.maxPageMarks + 5)).map { #"{"title":"t","issue":"i","page":\#($0),"date":0}"# }
+        let file = try JSONDecoder().decode(LibraryState.self, from: Data(("{\"pageMarks\":[" + marks.joined(separator: ",") + "]}").utf8))
+        XCTAssertEqual(file.pageMarks.count, LibraryState.maxPageMarks, "an older, larger file is trimmed on read")
+    }
+
     func testPageMarksToggleAndSurviveAnOlderFile() throws {
         var state = try JSONDecoder().decode(LibraryState.self, from: Data(#"{"bookmarks":[],"history":[]}"#.utf8))
         XCTAssertEqual(state.pageMarks, [], "a file from before page marks opens with none")

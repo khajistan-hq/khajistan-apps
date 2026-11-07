@@ -3503,6 +3503,11 @@ func readingFeedRowsDecodeLeniently() throws {
     let rows = try require(RRAPI.titles(fromFeed: data))
     try expectEqual(rows.map(\.collection_slug), ["a", "b"], "a row that does not decode is dropped, not the feed")
     try expectEqual(rows[0].issues?.map(\.pages), [12, 7, 0])
+    // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
+    let wild = try require(RRAPI.titles(fromFeed: Data("""
+    [{"collection_slug":"w","issues":[{"id":"a","pages":1e30},{"id":"b","pages":9223372036854775807},{"id":"c","pages":-4}]}]
+    """.utf8)))
+    try expectEqual(wild[0].issues?.map(\.pages), [RRIssueRow.maxPages, RRIssueRow.maxPages, 0])
     try expect(RRAPI.titles(fromFeed: Data("{}".utf8)) == nil, "an object is not a feed")
 }
 

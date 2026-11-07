@@ -2223,6 +2223,14 @@ func realMixesDecodeAndAllPlay() throws {
     try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
 }
 
+func readingPageCountsClamp() throws {
+    // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
+    let wild = try require(RRAPI.titles(fromFeed: Data("""
+    [{"collection_slug":"w","issues":[{"id":"a","pages":1e30},{"id":"b","pages":9223372036854775807},{"id":"c","pages":-4},{"id":"d","pages":"12"}]}]
+    """.utf8)))
+    try expectEqual(wild[0].issues?.map(\.pages), [RRIssueRow.maxPages, RRIssueRow.maxPages, 0, 12])
+}
+
 func mixPresentationRules() throws {
     let both = try decode(Mix.self, #"{"id":"a","title":"  ","play_url":"https://x.example/a.mp3","country":"Pakistan","territory":"Punjab","mixed_by":" DJ Z "}"#)
     try expectEqual(both.name, "Khajistan Radio mix")
@@ -2344,6 +2352,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Adult notice: the profile request", adultNoticeProfileRequest),
     ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
     ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
+    ("Reading Room: a page count out of range clamps", readingPageCountsClamp),
     ("Mix presentation rules", mixPresentationRules),
     ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
     ("Mix clock format", mixClockFormat),

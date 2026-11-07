@@ -14,7 +14,7 @@ port=8788
 case "$platform" in
   ios)
     sdk=iphonesimulator; target=arm64-apple-ios17.0-simulator
-    files="$root/ios/Khajistan/Player/PlayerController.swift $root/ios/Khajistan/Core/Config.swift" ;;
+    files="$root/ios/Khajistan/Player/PlayerController.swift $root/ios/Khajistan/Core/Config.swift $root/ios/Khajistan/Core/SupabaseRoute.swift" ;;
   tvos)
     sdk=appletvsimulator; target=arm64-apple-tvos17.0-simulator
     files="$root/tvos/KhajistanTV/Player/PlayerController.swift $root/tvos/KhajistanTV/Player/LiveRadio.swift $root/tvos/KhajistanTV/Player/SignalTap.swift $root/tvos/KhajistanTV/Core/Config.swift" ;;

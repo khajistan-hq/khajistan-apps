@@ -140,6 +140,9 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             // The screen is closing: a press now must not act on a signal already handed on.
             guard !leaving else { return }
+            // Read before wake(), which brings the strip up: a press on the bare picture opens
+            // the guide, a press with the strip up walks its controls (owner, 2026-11-07).
+            let onStrip = stripShown
             wake()
             if let row = guideRow {
                 let count = guideList.count
@@ -155,8 +158,8 @@ struct ReceiverPlayerView: View {
             switch direction {
             case .up: click(by: -1)
             case .down: click(by: 1)
-            case .right: moveRight()
-            case .left: moveLeft()
+            case .right: moveRight(onStrip: onStrip)
+            case .left: moveLeft(onStrip: onStrip)
             @unknown default: break
             }
         }
@@ -547,9 +550,15 @@ struct ReceiverPlayerView: View {
         step(by: delta)
     }
 
-    private func moveRight() {
+    /// Owner, 2026-11-07: "i cant seem to navigate between the GUIDE PIP CC without the guide
+    /// showing up". With the strip up, right lights CC (the strip's "→" cue says so) and left and
+    /// right walk the controls; only on the bare picture do left and right open the guide.
+    private func moveRight(onStrip: Bool) {
         switch armed {
-        case nil: return openGuide()
+        case nil:
+            guard onStrip else { return openGuide() }
+            if case .failed = controller.state { return }
+            armed = .captions
         case .captions: armed = .like
         case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .guide: if pipOffered { armed = .pip }
@@ -557,14 +566,15 @@ struct ReceiverPlayerView: View {
         }
     }
 
-    private func moveLeft() {
+    private func moveLeft(onStrip: Bool) {
         switch armed {
         case .pip: armed = guideOffered ? .guide : .like
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
-        // Left or right on the picture opens the guide, as a live TV app does (owner, 2026-11-04).
-        case nil: return openGuide()
+        // Left or right on the bare picture opens the guide, as a live TV app does (owner,
+        // 2026-11-04). With the strip up, left past CC stops there.
+        case nil: if !onStrip { return openGuide() }
         }
         if armed == nil { wake() }
     }

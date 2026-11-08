@@ -204,7 +204,7 @@ struct ChatRoomView: View {
             .frame(maxHeight: .infinity)
             .scrollDismissesKeyboard(.interactively)
             .fullScreenCover(item: $viewing) { row in
-                PnvViewerView(row: row, steps: false)
+                PnvReelsView(start: row, source: .rows([row]))
                     .blocksMacNavigation(model)
             }
             .overlay(alignment: .bottom) {

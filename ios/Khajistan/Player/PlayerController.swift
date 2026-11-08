@@ -68,7 +68,9 @@ final class PlayerController {
     /// Starts a signal. `seekTo` is where in the file to begin (seconds), for a transmission
     /// joined part-way through; a live stream passes nil. `isLive` is what the system's now-playing
     /// card says; a recording (a mix, a clip) passes false.
-    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true) {
+    /// `fadeIn` false starts at full volume: the 0.9 s ramp is the Receiver's channel change, and
+    /// on a six-second reel it is a third of the clip spoken too quietly.
+    func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, fadeIn: Bool = true) {
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         generation += 1
@@ -130,8 +132,8 @@ final class PlayerController {
         Self.active = self
 
         fadeTask?.cancel()
-        player.volume = 0
-        fadeInPending = true
+        player.volume = fadeIn ? 0 : 1
+        fadeInPending = fadeIn
         player.replaceCurrentItem(with: item)
         if start == nil { player.play() }
 

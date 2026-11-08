@@ -176,9 +176,17 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   time (UTC+5)*, then one card per channel, as the website's channel card: CHANNEL 1 · ● ON AIR,
   the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
   next three strips, time then show, the first set large. Off air the headline is *Off air*,
-  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. Show names only:
-  programme titles are file names (owner, 2026-09-06). One card per channel the schedule's `_meta.channels` names (seven since 2026-11-04), text cards 560pt wide (a lift plate, band under focus), 64pt apart for their lift, in one row that scrolls sideways past the third. Channel Up and Down on the remote step through them in number order and go round: up from Channel 7 is Channel 1. The cards redraw on the minute. Select
+  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. The
+  programme by its standardized name since 2026-11-08 (owner: "add now playing and up next ...
+  names need to be standardized"); where a title cannot be cleaned (`display_title` absent) the
+  show stands in, which was the whole rule from 2026-09-06 ("programme titles are file names"). One card per channel the schedule's `_meta.channels` names (seven since 2026-11-04), text cards 560pt wide (a lift plate, band under focus), 64pt apart for their lift, in one row that scrolls sideways past the third. Channel Up and Down on the remote step through them in number order and go round: up from Channel 7 is Channel 1. The cards redraw on the minute. Select
   tunes. The preview-password and sign-in steps live on this page.
+- **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
+  else the show; the line under it starts with the show (left out when the show is the channel,
+  as Jordan Television is), then NOW and the slot, then the country. At right, ● CHANNEL 5 ·
+  MEHFIL, the channel's own name, so a show is never read as the channel. UP NEXT is the next
+  programme and when it starts, wrapping to two lines; hidden when it would repeat the headline.
+  A title too long to share its line with the detail takes a line, and up to two, of its own.
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
   channel's name. Up and down switch channel as under Motion. The

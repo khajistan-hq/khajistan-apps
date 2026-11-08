@@ -15,9 +15,19 @@ enum StoreBuild {
     static let isOn = false
 #endif
 
+    /// The TestFlight build for the Friends and Owner Preview groups carries Pics/Vids (owner,
+    /// 2026-11-08, asked with the 10-06 reason in front of them: "Include it for Friends"). Set
+    /// only on that archive, beside KJ_APP_STORE; an App Store submission leaves it off, and the
+    /// 10-06 exclusion holds there unchanged.
+#if KJ_FRIENDS
+    static let carriesPicsVids = true
+#else
+    static let carriesPicsVids = false
+#endif
+
     /// Whether a room the app draws itself is in this build. Website rooms (nil) always are.
     static func includes(_ room: NativeRoom?) -> Bool {
-        !(isOn && room == .picsVids)
+        !(isOn && room == .picsVids && !carriesPicsVids)
     }
 
     /// Whether a door of the website's menu is in this build.

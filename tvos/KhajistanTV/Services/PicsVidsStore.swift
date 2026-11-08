@@ -46,6 +46,8 @@ final class PicsVidsStore {
     /// Region tokens that have accounts, west to east.
     private(set) var regions: [String] = []
     private(set) var summary: String?
+    /// The same line without the number of objects (the phone states that on its count line).
+    private(set) var summaryWithoutCount: String?
     /// Each region's shelf, by region token. A shelf with no entry has not been asked for.
     private(set) var feeds: [String: PnvFeed] = [:]
     private(set) var kind: PnvKind?
@@ -102,6 +104,7 @@ final class PicsVidsStore {
         accountsByKey = Dictionary(roster.map { ($0.account_key, $0) }, uniquingKeysWith: { first, _ in first })
         regions = PnvRegions.ordered(Set(PnvRegions.accountKeysByRegion(roster).keys))
         summary = PnvAPI.summary(roster: roster, facets: nil)
+        summaryWithoutCount = summary
         noticeVisible = await shouldShowNotice()
         phase = .ready
         // The counts are a nicety; the stream stands without them. Each shelf asks for its own
@@ -112,6 +115,7 @@ final class PicsVidsStore {
     private func loadFacets() async {
         guard let facets = try? await fetch(PnvFacets.self, PnvAPI.facetsRequest()) else { return }
         summary = PnvAPI.summary(roster: roster, facets: facets)
+        summaryWithoutCount = PnvAPI.summary(roster: roster, facets: facets, withCount: false)
     }
 
     // MARK: - Filters

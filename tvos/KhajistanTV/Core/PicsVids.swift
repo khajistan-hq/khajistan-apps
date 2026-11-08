@@ -294,7 +294,8 @@ enum PnvAPI {
 
     /// "99,474 pictures and videos · 81 accounts · 6 regions", or "81 accounts" when the counts
     /// did not load (fillLists() in the page). An account counts unless the facets give it zero.
-    static func summary(roster: [PnvAccount], facets: PnvFacets?) -> String {
+    /// `withCount` false leaves the number of objects off, for a screen that states it elsewhere.
+    static func summary(roster: [PnvAccount], facets: PnvFacets?, withCount: Bool = true) -> String {
         let byAccount = Dictionary((facets?.accounts ?? []).map { ($0.slug, $0.media) }, uniquingKeysWith: { first, _ in first })
         let active = roster.filter { account in
             guard let n = byAccount[account.account_key] else { return true }
@@ -302,7 +303,8 @@ enum PnvAPI {
         }.count
         let regions = PnvRegions.accountKeysByRegion(roster).count
         if let total = facets?.totals?.media {
-            return "\(total.formatted()) pictures and videos \u{00B7} \(active) accounts \u{00B7} \(regions) regions"
+            let tail = "\(active) accounts \u{00B7} \(regions) regions"
+            return withCount ? "\(total.formatted()) pictures and videos \u{00B7} " + tail : tail
         }
         return "\(roster.count) accounts"
     }
@@ -357,11 +359,12 @@ enum PnvAPI {
     // MARK: Viewer metadata
 
     /// "Picture · Mashriq · Aug 27, 2026 · 1170×2080", the viewer's one line (adapt() in the page).
-    static func metaLine(for row: PnvRow, regionToken: String?, date: (String) -> String?) -> String {
+    /// `showsSize` false leaves the pixel size off: a reel's reader does not need the file's size.
+    static func metaLine(for row: PnvRow, regionToken: String?, date: (String) -> String?, showsSize: Bool = true) -> String {
         var pieces = [row.isVideo ? "Video" : "Picture"]
         if let regionToken, !regionToken.isEmpty { pieces.append(PnvRegions.label(regionToken)) }
         if let taken = row.taken_at, let text = date(taken) { pieces.append(text) }
-        if let w = row.width, let h = row.height, w > 0 { pieces.append("\(w)\u{00D7}\(h)") }
+        if showsSize, let w = row.width, let h = row.height, w > 0 { pieces.append("\(w)\u{00D7}\(h)") }
         return pieces.joined(separator: " \u{00B7} ")
     }
 }

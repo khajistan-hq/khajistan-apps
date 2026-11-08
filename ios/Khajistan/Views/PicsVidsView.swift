@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// PICS/VIDS: the Born Digital stream at /browse-archive.html, read as the page reads it
-/// (Core/PicsVids.swift, ported from the Apple TV app). Two columns on a phone, more on a wide
-/// screen; each tile the object's own shape, never cropped, the shortest column taking the next.
+/// (Core/PicsVids.swift, ported from the Apple TV app). A grid of three columns on a phone, five
+/// on a wide screen (owner, 2026-11-08: "like reels and grid"); each tile the object's own shape,
+/// never cropped, the shortest column taking the next. A tile opens the stream as reels there.
 struct PicsVidsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -13,24 +14,17 @@ struct PicsVidsView: View {
     private var store: PicsVidsStore { model.pnv }
     /// The feed under the region filter.
     private var feed: PnvFeed { store.feed(model.pnvRegion) }
-    private var columnCount: Int { sizeClass == .regular ? 4 : 2 }
+    private var columnCount: Int { sizeClass == .regular ? 5 : 3 }
+    /// The grid's gutter: tight, so the pictures carry the page rather than the gaps.
+    static let gap: CGFloat = 3
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if store.noticeVisible { notice }
-                HStack(alignment: .top) {
-                    LargeTitle(title: "Pics/Vids", line: store.summary ?? "Born Digital Media")
-                    if model.auth.isSignedIn {
-                        // Cosmos keeps what you collected one tap away, top right.
-                        NavigationLink(value: RoomRoute.pnvSaved) {
-                            Image(systemName: "bookmark").font(.system(.title2, weight: .semibold)).frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Saved")
-                        .accessibilityIdentifier("pnvSavedLink")
-                    }
-                }
+                // The count is on the line under the filters, where it follows them; here it would
+                // say the same number twice on one screen.
+                LargeTitle(title: "Pics/Vids", line: store.summaryWithoutCount ?? "Born Digital Media")
                 if store.phase == .ready { filters }
                 stream
             }
@@ -45,7 +39,7 @@ struct PicsVidsView: View {
             if store.phase == .ready, feed.isUntouched { await store.loadMore(region: model.pnvRegion) }
         }
         .fullScreenCover(item: $viewing) { row in
-            PnvViewerView(row: row)
+            PnvReelsView(start: row)
                 .blocksMacNavigation(model)
         }
     }
@@ -89,10 +83,32 @@ struct PicsVidsView: View {
                             + store.regions.map { Chip(id: $0, title: PnvRegions.label($0), identifier: "pnvregion-\($0)") },
                         selected: model.pnvRegion) { model.pnvRegion = $0 }
             }
-            Text(feed.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
-                .kjSmall(faint: true)
-                .padding(.top, 2)
-                .accessibilityIdentifier("pnvCount")
+            // The count, and the screen's own actions at the end of its line: the app draws its own
+            // Back row with the system bar hidden, and beside the title they pushed its line to two.
+            HStack(spacing: 4) {
+                Text(feed.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
+                    .kjSmall(faint: true)
+                    .accessibilityIdentifier("pnvCount")
+                Spacer(minLength: 8)
+                if let first = feed.items.first {
+                    // The stream as reels from its top, without choosing a tile first.
+                    Button { viewing = first } label: {
+                        Image(systemName: "play.rectangle.on.rectangle").font(.system(.title3, weight: .semibold)).frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Play as reels")
+                    .accessibilityIdentifier("pnvReelsLink")
+                }
+                if model.auth.isSignedIn {
+                    // Cosmos keeps what you collected one tap away.
+                    NavigationLink(value: RoomRoute.pnvSaved) {
+                        Image(systemName: "bookmark").font(.system(.title3, weight: .semibold)).frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Saved")
+                    .accessibilityIdentifier("pnvSavedLink")
+                }
+            }
         }
     }
 
@@ -124,9 +140,9 @@ struct PicsVidsView: View {
     private var columns: some View {
         let layout = PnvLayout.columns(feed.items, count: columnCount)
         let nearEnd = Set(feed.items.suffix(12).map(\.id))
-        return HStack(alignment: .top, spacing: 8) {
+        return HStack(alignment: .top, spacing: Self.gap) {
             ForEach(Array(layout.enumerated()), id: \.offset) { _, column in
-                LazyVStack(alignment: .leading, spacing: 14) {
+                LazyVStack(alignment: .leading, spacing: Self.gap) {
                     ForEach(column) { row in
                         tile(row)
                             .onAppear {
@@ -146,13 +162,14 @@ struct PicsVidsView: View {
         Button {
             viewing = row
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, maxPixel: 700)
-                    .overlay(alignment: .topTrailing) { if row.isVideo { VideoBadge().padding(6) } }
-                Text("@" + store.accountHandle(for: row)).kjSmall(faint: true).lineLimit(1)
-            }
+            // The account moved into the reel: under a tile it made the grid read as a list.
+            PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, maxPixel: 500,
+                       cornerRadius: 3)
+                .overlay(alignment: .topTrailing) { if row.isVideo { VideoBadge(small: true).padding(4) } }
+                // A banner-wide object is still a 44 pt target (HIG); its picture sits centred.
+                .frame(minHeight: 44)
         }
-        .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
+        .buttonStyle(.plain)
         .accessibilityIdentifier("tile-\(row.media_key)")
         .accessibilityLabel("\(row.isVideo ? "Video" : "Picture") from @\(store.accountHandle(for: row))")
     }
@@ -189,6 +206,11 @@ struct PnvPicture: View {
     let urls: [URL]
     let aspect: Double?
     let maxPixel: Int
+    /// 8 on a card, 3 in the grid, 0 on a full-screen reel.
+    var cornerRadius: CGFloat = 8
+    /// A full-screen picture is ~18 MB decoded: a reel scrolled past lets its copy go (the shared
+    /// cache keeps what it can, and the task reloads it if the reel comes back).
+    var releaseOnDisappear = false
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
 
@@ -207,11 +229,12 @@ struct PnvPicture: View {
                     Image(uiImage: image).resizable().aspectRatio(contentMode: .fit).transition(.opacity)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .task(id: urls) {
                 let loaded = await PnvImages.shared.image(urls, maxPixel: maxPixel)
                 withAnimation(.easeOut(duration: 0.22)) { image = loaded }
             }
+            .onDisappear { if releaseOnDisappear { image = nil } }
             .accessibilityHidden(true)
     }
 }
@@ -261,13 +284,13 @@ struct PnvSavedScreen: View {
                             Text("\(rows.count.formatted()) object\(rows.count == 1 ? "" : "s")" + (keys.count > 500 ? " \u{00B7} the newest 500" : "")).kjSmall(faint: true)
                                 .accessibilityIdentifier("pnvSavedCount")
                             // The same shape-true columns as the stream, as Cosmos lays out a collection.
-                            HStack(alignment: .top, spacing: 8) {
-                                ForEach(Array(PnvLayout.columns(rows, count: sizeClass == .regular ? 4 : 2).enumerated()), id: \.offset) { _, column in
-                                    LazyVStack(spacing: 8) {
+                            HStack(alignment: .top, spacing: PicsVidsView.gap) {
+                                ForEach(Array(PnvLayout.columns(rows, count: sizeClass == .regular ? 5 : 3).enumerated()), id: \.offset) { _, column in
+                                    LazyVStack(spacing: PicsVidsView.gap) {
                                         ForEach(column) { row in
                                             Button { viewing = row } label: {
-                                                PnvPicture(urls: PnvMedia.pictureCandidates(row), aspect: row.aspect, maxPixel: 500)
-                                                    .overlay(alignment: .topTrailing) { if row.isVideo { VideoBadge().padding(6) } }
+                                                PnvPicture(urls: PnvMedia.pictureCandidates(row), aspect: row.aspect, maxPixel: 500, cornerRadius: 3)
+                                                    .overlay(alignment: .topTrailing) { if row.isVideo { VideoBadge(small: true).padding(4) } }
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel(row.isVideo ? "Saved video" : "Saved picture")
@@ -285,7 +308,7 @@ struct PnvSavedScreen: View {
             .padding(.vertical, 12)
         }
         .task(id: "\(model.auth.email ?? "")|\(collection ?? "")|\(model.saves.savedPnvKeys.count)") { await hydrate() }
-        .fullScreenCover(item: $viewing) { row in PnvViewerView(row: row, steps: false).blocksMacNavigation(model).environment(model) }
+        .fullScreenCover(item: $viewing) { row in PnvReelsView(start: row, source: .rows(rows)).blocksMacNavigation(model).environment(model) }
     }
 
     /// Keys to rows, in the saved order, a hundred at a time.
@@ -314,13 +337,15 @@ struct PnvSavedScreen: View {
 
 /// A video's mark on its tile: a play glyph on a small ink plate.
 struct VideoBadge: View {
+    /// The grid's tiles are a third of the screen wide; the badge shrinks with them.
+    var small = false
     @Environment(\.palette) private var palette
 
     var body: some View {
         Image(systemName: "play.fill")
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: small ? 8 : 11, weight: .bold))
             .foregroundStyle(palette.ground)
-            .frame(width: 24, height: 24)
+            .frame(width: small ? 18 : 24, height: small ? 18 : 24)
             .background(palette.ink.opacity(0.85), in: Circle())
             .accessibilityHidden(true)
     }

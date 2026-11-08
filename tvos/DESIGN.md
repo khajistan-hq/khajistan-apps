@@ -121,7 +121,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
   accessible"): the first shelf under the map, so a liked channel is one press down from the region
   strip and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
-  player's Like and the website's heart write), newest first, as live cards: picture cards for
+  player's Like and the website's heart write, read at launch and at sign-in; a like made on this
+  TV shows at once), newest first, as live cards: picture cards for
   television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region

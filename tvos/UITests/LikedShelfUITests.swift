@@ -42,6 +42,8 @@ final class LikedShelfUITests: XCTestCase {
         XCTAssertTrue(current.waitForExistence(timeout: 30), "Select opens the player")
         XCTAssertEqual(current.label, firstId, "the player plays the liked channel that had focus")
         kjPause(3)
+        // The player's Like reads the account, which `-kjlikedrefs` stands in for only on the shelf,
+        // so this picture shows Like unlit. A signed-in account shows it lit.
         kjScreenshot("liked-player", app: app)
     }
 

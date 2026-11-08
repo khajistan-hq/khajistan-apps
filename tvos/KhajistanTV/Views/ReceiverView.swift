@@ -88,6 +88,7 @@ struct ReceiverView: View {
                     // Two bands, owner 2026-10-29 ("symmetrically ... make the map bigger"): the
                     // sidebar beside the map, then the region cards across the full width, on
                     // the same grid as the shelves under them.
+                    VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
                                // Focus on the strip: the strip at the foot of the screen and the
@@ -95,7 +96,10 @@ struct ReceiverView: View {
                                // of the map under the top bar.
                                stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
                         .padding(.bottom, 12)
+                    // In a stack of their own with no spacing: a front with no likes has no gap
+                    // where the shelf would be. The shelf brings its own 12 points above it.
                     LikedShelf()
+                    }
                     GenreShelves()
                     HomeSections()
                     camerasRow(index)
@@ -680,6 +684,8 @@ private struct LikedShelf: View {
     @Environment(AppModel.self) private var model
     /// Every ref a channel answers to, mapped to it, for the channels found so far.
     @State private var found: [String: Channel] = [:]
+    /// Liked refs a full walk of the receiver did not find: channels it no longer carries.
+    @State private var missing: Set<String> = []
     @State private var playing: Pick?
     /// Cards that get a live still, from the front.
     private static let pictured = 4
@@ -728,6 +734,7 @@ private struct LikedShelf: View {
                     }
                 }
                 .accessibilityIdentifier("shelf-liked")
+                .padding(.top, 12)
                 .onAppear { wantStills(list) }
             }
         }
@@ -738,23 +745,37 @@ private struct LikedShelf: View {
         }
     }
 
-    /// Finds each liked channel in the region lists, the atlas first, then the wider regions, then
-    /// the cameras, and stops reading as soon as every like is found. The lists are cached by the
-    /// store, so the front's other shelves have usually read the atlas already.
+    /// Finds each liked channel in the region lists: the atlas, then the wider regions, then the
+    /// cameras, each tier read at once (the store caches every list), and stops after the first
+    /// tier that leaves nothing unfound. A like no list carries is remembered as missing, so the
+    /// receiver is walked for it once a launch, not on every change to the likes.
     private func resolve() async {
         guard let index = model.receiver.index else { return }
-        let regions = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
-            + index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
-        let passes: [(ReceiverIndex.Region, Bool)] = regions.map { ($0, false) }
-            + regions.filter { index.cameraFiles?[$0.id] != nil }.map { ($0, true) }
-        for (region, cameras) in passes {
-            if refs.allSatisfy({ found[$0] != nil }) { break }
+        let main = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
+        let wide = index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
+        let cameras = index.listedRegions.filter { index.cameraFiles?[$0.id] != nil }
+        let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (wide, false), (cameras, true)]
+        let wanted = Set(refs)
+        var unfound: Set<String> { wanted.subtracting(found.keys).subtracting(missing) }
+        for (regions, camerasOnly) in tiers {
+            if unfound.isEmpty { break }
+            let lists = await withTaskGroup(of: [Channel].self) { group in
+                for region in regions {
+                    group.addTask { @MainActor in
+                        (try? await model.receiver.channels(regionId: region.id, cameras: camerasOnly)) ?? []
+                    }
+                }
+                var all: [[Channel]] = []
+                for await list in group { all.append(list) }
+                return all
+            }
             guard !Task.isCancelled else { return }
-            for channel in (try? await model.receiver.channels(regionId: region.id, cameras: cameras)) ?? [] {
+            for channel in lists.joined() {
                 for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
-                where found[ref] == nil { found[ref] = channel }
+                where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
             }
         }
+        missing.formUnion(unfound)
         wantStills(channels)
     }
 

@@ -682,10 +682,33 @@ private struct LikedShelf: View {
     }
 
     @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
     /// Every ref a channel answers to, mapped to it, for the channels found so far.
     @State private var found: [String: Channel] = [:]
-    /// Liked refs a full walk of the receiver did not find: channels it no longer carries.
-    @State private var missing: Set<String> = []
+    /// Liked refs a full walk of the receiver did not find (off air, or gone), with when, kept on
+    /// this device so a stale like does not cost a walk of every list at each launch. Looked for
+    /// again after `missingFor`.
+    @AppStorage("kj.likedMissing.v1") private var missingStore = ""
+    private static let missingFor: TimeInterval = 6 * 3600
+
+    private var missing: Set<String> {
+        let now = Date().timeIntervalSince1970
+        return Set(missingStore.split(separator: "\n").compactMap { line -> String? in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let at = TimeInterval(parts[0]), now - at < Self.missingFor else { return nil }
+            return String(parts[1])
+        })
+    }
+
+    private func markMissing(_ refs: Set<String>) {
+        let now = Date().timeIntervalSince1970
+        let kept = missingStore.split(separator: "\n").filter { line in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let at = TimeInterval(parts[0]) else { return false }
+            return now - at < Self.missingFor && !refs.contains(String(parts[1]))
+        }.map(String.init)
+        missingStore = (kept + refs.map { "\(Int(now)) \($0)" }).joined(separator: "\n")
+    }
     @State private var playing: Pick?
     /// Cards that get a live still, from the front.
     private static let pictured = 4
@@ -738,7 +761,9 @@ private struct LikedShelf: View {
                 .onAppear { wantStills(list) }
             }
         }
-        .task(id: model.auth.session?.userId) { await model.saves.load() }
+        // Again each time the app comes forward: a read that failed at launch (an Apple TV waking
+        // before its network) is retried, and a read that worked is not repeated (SavesStore).
+        .task(id: "\(model.auth.session?.userId ?? "")|\(scenePhase)") { await model.saves.load() }
         .task(id: refs) { await resolve() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
@@ -747,8 +772,8 @@ private struct LikedShelf: View {
 
     /// Finds each liked channel in the region lists: the atlas, then the wider regions, then the
     /// cameras, each tier read at once (the store caches every list), and stops after the first
-    /// tier that leaves nothing unfound. A like no list carries is remembered as missing, so the
-    /// receiver is walked for it once a launch, not on every change to the likes.
+    /// tier that leaves nothing unfound. A like no list carries is remembered as missing on this
+    /// device for `missingFor`, so the receiver is not walked for it on every launch or change.
     private func resolve() async {
         guard let index = model.receiver.index else { return }
         let main = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
@@ -778,8 +803,10 @@ private struct LikedShelf: View {
                 for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
                 where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
             }
+            // Asked for as soon as a tier lands, so the shelf's stills do not wait on the wider walk.
+            wantStills(channels)
         }
-        if complete { missing.formUnion(unfound) }
+        if complete, !unfound.isEmpty { markMissing(unfound) }
         wantStills(channels)
     }
 

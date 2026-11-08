@@ -654,6 +654,8 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.
+    /// The stream opens as reels (owner, 2026-11-08: "like reels and grid"): a tile opens a
+    /// vertical pager at that object, a swipe up moves to the next, and close returns to the grid.
     func testPicsVidsViewer() {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
@@ -664,14 +666,30 @@ final class KhajistanUITests: XCTestCase {
             // A tap while the notice is still leaving lands on it, not on the tile under it.
             XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
         }
-        tile.tap()
-        waitFor(app.buttons["closePlayer"], 10, "the viewer opens")
+        XCTAssertTrue(app.buttons["pnvReelsLink"].isHittable, "Play as reels is on screen")
+        shot("pnv-grid", app)
+        // A tile deep in the grid, not the first: the reel must open on the object tapped.
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
+        // The deepest tile the screen shows (one under the tab bar is not tappable).
+        let deep = (0..<min(tiles.count, 9)).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable } ?? tile
+        let key = String(deep.identifier.dropFirst("tile-".count))
+        deep.tap()
+        let reel = app.descendants(matching: .any)["reel-\(key)"]
+        waitFor(reel, 10, "the reels open on the tapped object")
+        XCTAssertLessThan(abs(reel.frame.minY), 20, "the tapped object's reel is the one on screen")
+        XCTAssertTrue(app.buttons["pnvSave"].waitForExistence(timeout: 10), "Save is on the rail without a tap")
+        sleep(3)
+        shot("pnv-reel", app)
+        app.swipeUp()
+        sleep(3)
+        // Gone from the tree, or scrolled up out of the screen: either way not the reel on show.
+        XCTAssertTrue(!reel.exists || reel.frame.maxY < 20, "a swipe up moves to the next object")
+        shot("pnv-reel-next", app)
+        app.swipeDown()
         sleep(2)
-        shot("pnv-viewer", app)
-        app.swipeLeft()
-        sleep(2)
-        shot("pnv-viewer-next", app)
+        XCTAssertTrue(reel.exists && abs(reel.frame.minY) < 20, "a swipe down goes back to the tapped object")
         app.buttons["closePlayer"].tap()
+        XCTAssertTrue(tile.waitForExistence(timeout: 5), "close returns to the grid")
     }
 
     /// The skin control: a pick takes effect and Automatic hands back to the sky.

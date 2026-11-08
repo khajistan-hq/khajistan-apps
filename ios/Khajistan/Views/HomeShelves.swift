@@ -44,7 +44,7 @@ struct HomeShelves: View {
             await model.bazaarSwap.load()
             await model.madrassaPosts.load()
         }
-        .fullScreenCover(item: $viewing) { PnvViewerView(row: $0).blocksMacNavigation(model) }
+        .fullScreenCover(item: $viewing) { PnvReelsView(start: $0).blocksMacNavigation(model) }
     }
 
     // MARK: - Receiver

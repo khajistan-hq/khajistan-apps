@@ -70,6 +70,12 @@ final class SavesStore {
         return rows.filter { $0.object_ref.hasPrefix("pnv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(4)) }
     }
 
+    /// Liked channels, as the refs the account holds (`channel:<slug or id>`), newest first.
+    var likedChannelRefs: [String] {
+        guard known else { return [] }
+        return rows.map(\.object_ref).filter { $0.hasPrefix("channel:") && refs.contains($0) }
+    }
+
     /// Film handles on the account's watchlist, newest first.
     var watchlist: [String] {
         guard known else { return [] }

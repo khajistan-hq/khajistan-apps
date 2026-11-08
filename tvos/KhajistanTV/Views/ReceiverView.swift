@@ -95,6 +95,7 @@ struct ReceiverView: View {
                                // of the map under the top bar.
                                stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
                         .padding(.bottom, 12)
+                    LikedShelf()
                     GenreShelves()
                     HomeSections()
                     camerasRow(index)
@@ -659,6 +660,107 @@ private struct GenreShelves: View {
         let first = Self.pictured.flatMap { id in
             rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
         }
-        if !first.isEmpty { model.stills.wantNext(first) }
+        if !first.isEmpty { model.stills.wantNext(first, place: 1) }
+    }
+}
+
+/// The channels the account liked, newest first, the first shelf under the map, so a liked channel
+/// is one press down and one Select from the front (owner, 2026-11-08: "add liked channels on
+/// homepage for an account so they are easily accessible"). The likes are the account's
+/// `passport_saves`, the same the website's heart and the player's Like write, so a like made on
+/// any device is here. Signed out, or with nothing liked, there is no shelf. Up and down in the
+/// player surf the liked channels.
+private struct LikedShelf: View {
+    private struct Pick: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        var id: String { channel.id }
+    }
+
+    @Environment(AppModel.self) private var model
+    /// Every ref a channel answers to, mapped to it, for the channels found so far.
+    @State private var found: [String: Channel] = [:]
+    @State private var playing: Pick?
+    /// Cards that get a live still, from the front.
+    private static let pictured = 4
+
+    /// The account's likes, newest first. A Debug build takes `-kjlikedrefs channel:a,channel:b`
+    /// in their place, so the shelf can be seen and tested with no account signed in.
+    private var refs: [String] {
+        #if DEBUG
+        if let given = UserDefaults.standard.string(forKey: "kjlikedrefs") {
+            return given.split(separator: ",").map(String.init)
+        }
+        #endif
+        return model.saves.likedChannelRefs
+    }
+
+    /// The liked channels the region lists still carry, newest like first, each once. A like of a
+    /// channel taken off the receiver is not drawn.
+    private var channels: [Channel] {
+        var seen = Set<String>()
+        return refs.compactMap { found[$0] }.filter { seen.insert($0.id).inserted }
+    }
+
+    var body: some View {
+        let list = channels
+        // A stack, not a Group: a Group hands its modifiers to its children, and with no likes yet
+        // there is no child, so the task that reads the likes would never run.
+        VStack(alignment: .leading, spacing: 0) {
+            if !list.isEmpty {
+                Shelf("Liked", count: "\(list.count) \(list.count == 1 ? "channel" : "channels")") {
+                    // No heart on these cards: the shelf's name already says they are liked.
+                    ForEach(list) { channel in
+                        let still = channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
+                        Button {
+                            playing = Pick(channel: channel, list: list)
+                        } label: {
+                            if channel.mediaType == "radio" {
+                                RadioCard(channel: channel)
+                            } else {
+                                PictureCard(channel: channel, still: still)
+                            }
+                        }
+                        .buttonStyle(HouseCardStyle())
+                        .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
+                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: false))
+                        .accessibilityIdentifier("liked-\(channel.id)")
+                    }
+                }
+                .accessibilityIdentifier("shelf-liked")
+                .onAppear { wantStills(list) }
+            }
+        }
+        .task(id: model.auth.session?.userId) { await model.saves.load() }
+        .task(id: refs) { await resolve() }
+        .fullScreenCover(item: $playing) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
+        }
+    }
+
+    /// Finds each liked channel in the region lists, the atlas first, then the wider regions, then
+    /// the cameras, and stops reading as soon as every like is found. The lists are cached by the
+    /// store, so the front's other shelves have usually read the atlas already.
+    private func resolve() async {
+        guard let index = model.receiver.index else { return }
+        let regions = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
+            + index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
+        let passes: [(ReceiverIndex.Region, Bool)] = regions.map { ($0, false) }
+            + regions.filter { index.cameraFiles?[$0.id] != nil }.map { ($0, true) }
+        for (region, cameras) in passes {
+            if refs.allSatisfy({ found[$0] != nil }) { break }
+            guard !Task.isCancelled else { return }
+            for channel in (try? await model.receiver.channels(regionId: region.id, cameras: cameras)) ?? [] {
+                for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
+                where found[ref] == nil { found[ref] = channel }
+            }
+        }
+        wantStills(channels)
+    }
+
+    private func wantStills(_ list: [Channel]) {
+        let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
+        // Sent when empty too, so channels no longer liked stop taking stills.
+        model.stills.wantNext(first, place: 0)
     }
 }

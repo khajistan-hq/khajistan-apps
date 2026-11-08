@@ -46,6 +46,11 @@ struct Programming: Decodable, Sendable {
         let description: String?
         /// A prepared WebVTT file on the site, e.g. /assets/tv-subtitles/<id>.en.vtt (video.html).
         let subtitle_url: String?
+        /// The standardized name build_programming.py writes (owner, 2026-11-08: "names need to
+        /// be standardized"). Absent where a title could not be cleaned into one: a surface then
+        /// shows the show's name, as every surface did before. Last, with a default, so the
+        /// memberwise initialiser the tests use is unchanged.
+        var display_title: String? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -75,6 +80,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
+        case display_title
     }
 
     init(from decoder: Decoder) throws {
@@ -95,5 +101,6 @@ extension Programming.Programme {
         country = try values.decodeIfPresent(String.self, forKey: .country)
         description = try values.decodeIfPresent(String.self, forKey: .description)
         subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
+        display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
     }
 }

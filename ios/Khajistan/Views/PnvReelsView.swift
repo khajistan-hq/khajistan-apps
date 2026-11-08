@@ -228,17 +228,24 @@ private struct PnvReelPage: View {
                 .contentShape(Rectangle())
                 .onTapGesture { if ownsPlayer { controller.toggle() } }
                 .accessibilityHidden(true)
-            VStack(spacing: 0) {
-                Spacer(minLength: 0)
-                HStack(alignment: .bottom, spacing: 12) {
-                    details
+            // The rail and the caption belong to the reel on screen only. A neighbour the lazy
+            // stack has built carries no controls, so VoiceOver, a test, or a stray tap can never
+            // reach a Save that is off screen (hiding them was not enough: they stayed in the tree).
+            if isCurrent {
+                VStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    rail
+                    HStack(alignment: .bottom, spacing: 12) {
+                        details
+                        Spacer(minLength: 0)
+                        rail
+                    }
+                    .padding(.horizontal, KJLayout.inset)
+                    .padding(.bottom, insets.bottom + 12)
                 }
-                .padding(.horizontal, KJLayout.inset)
-                .padding(.bottom, insets.bottom + 12)
+                .transition(.opacity)
             }
         }
+        .animation(.kj, value: isCurrent)
         .onChange(of: controller.state) { if ownsPlayer && controller.state == .playing { hasPlayed = true } }
         .onDisappear { hasPlayed = false }
         .task(id: waiting) {

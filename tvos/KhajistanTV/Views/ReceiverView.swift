@@ -714,7 +714,7 @@ private struct LikedShelf: View {
         // there is no child, so the task that reads the likes would never run.
         VStack(alignment: .leading, spacing: 0) {
             if !list.isEmpty {
-                Shelf("Liked", count: "\(list.count) \(list.count == 1 ? "channel" : "channels")") {
+                Shelf("Liked", count: "\(list.count) live") {
                     // No heart on these cards: the shelf's name already says they are liked.
                     ForEach(list) { channel in
                         let still = channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)

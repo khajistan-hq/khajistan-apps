@@ -126,7 +126,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
-  filter. A like of a channel the receiver no longer carries is not drawn.
+  filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
+  is not drawn, and comes back when it is on air again.
 - **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero
   across the top that stays while the shelves scroll under it. At left the crumb kicker RECEIVER →
   INDUS, the name (headline) and native name, then the channel focus rests on: ● LIVE · TELEVISION

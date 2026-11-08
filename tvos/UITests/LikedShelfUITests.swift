@@ -26,7 +26,7 @@ final class LikedShelfUITests: XCTestCase {
         // The row is lazy, so cards past the screen's edge are not built: the heading's count is read.
         let heading = app.staticTexts["shelf-liked"]
         XCTAssertTrue(heading.exists, "the shelf has its heading")
-        XCTAssertEqual(heading.label, "Liked, 5 channels", "five liked channels drawn, the unknown ref left out")
+        XCTAssertEqual(heading.label, "Liked, 5 live", "five liked channels drawn, the unknown ref left out")
         XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix("Al Arabiya"), "newest like first, got \(cards.element(boundBy: 0).label)")
         XCTAssertFalse(cards.element(boundBy: 0).label.contains("Liked"), "no second 'Liked' on a card of the Liked shelf")
 

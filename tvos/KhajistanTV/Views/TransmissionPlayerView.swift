@@ -213,15 +213,17 @@ struct TransmissionPlayerView: View {
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
             // Redrawn on the minute, so what is up next moves on at a handover.
-            TimelineView(.everyMinute) { context in
-                let next = store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(context.date), count: 1).first
+            TimelineView(.everyMinute) { _ in
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
                     detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
-                    trailing: ["\u{25CF} Channel \(store.channelNumber)"],
-                    upNext: next.map { ($0.startLabel, $0.show?.name ?? "") },
+                    // The channel's own name, always: a show name in the headline read as the
+                    // channel's (owner, 2026-11-08: "qawalli as chanel name doesnt make sense").
+                    trailing: ["\u{25CF} " + store.channelName(store.channelNumber)],
+                    // The station clock's answer (StationClock.withNextProgramme, the site's rule).
+                    upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, name) } },
                     accessory: subtitles.tracks.isEmpty ? nil : AnyView(subtitlesControl)
                 )
             }
@@ -264,10 +266,19 @@ struct TransmissionPlayerView: View {
 
     // MARK: - Words
 
-    /// The show, not the programme: programme titles are file names (owner, 2026-09-06, on
-    /// the receiver's two channel rows: "just programming block names").
+    /// Now playing: the programme, by the standardized name the schedule carries (owner,
+    /// 2026-11-08: "add now playing and up next ... names need to be standardized"). Where a
+    /// title could not be cleaned there is none, and the show stands in, as it did for every
+    /// programme under the 2026-09-06 ruling ("no file names").
     private func headline(_ air: OnAir) -> String {
-        nonEmpty(air.show?.name) ?? nonEmpty(air.programme?.title) ?? store.channelName(store.channelNumber)
+        air.nowName ?? store.channelName(store.channelNumber)
+    }
+
+    /// The show, where the headline is the programme: it moves to the head of the detail line.
+    /// Not when the show IS the channel (Jordan Television, Home Movies): the trailing name says it.
+    private func showUnderTitle(_ air: OnAir) -> String? {
+        guard nonEmpty(air.programme?.display_title) != nil, let show = nonEmpty(air.show?.name) else { return nil }
+        return store.channelName(store.channelNumber).hasSuffix("\u{00B7} " + show) ? nil : show
     }
 
     /// The slot, then where the programme is from and, on a picture, the song inside it. A sound
@@ -277,7 +288,7 @@ struct TransmissionPlayerView: View {
         if case .failed = store.player.state { return stateText(air) }
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
-        return [stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [showUnderTitle(air), stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 

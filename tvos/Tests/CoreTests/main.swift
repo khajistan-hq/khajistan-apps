@@ -879,6 +879,91 @@ func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil,
                           work_kind: nil, country: nil, description: nil, subtitle_url: nil)
 }
 
+/// What comes next (owner, 2026-11-08: "now playing and up next"), the same small schedule and
+/// the same four answers as the site's tests/station_clock_next_test.mjs, so the Swift and the
+/// JavaScript clocks are held to one rule. And `display_title` decodes.
+func nextProgrammeRule() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"},"s3":{"slug":"s3","name":"Show Three"}},
+     "programme_order":["A","B","C","D"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "B":{"id":"B","title":"b","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600},
+                   "D":{"id":"D","title":"d","display_title":"Title D","seconds":600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1]},
+       {"start":"12:30","start_minute":750,"minutes":30,"show":"s2","programmes":[2]},
+       {"start":"13:00","start_minute":780,"minutes":660,"show":"s3","programmes":[3]}]}}]}
+    """)
+    try expectEqual(p.programmes["A"]?.display_title, "Title A")
+    try expectEqual(p.programmes["B"]?.display_title, nil)
+    // Inside the slot: the roster's next entry, when this one ends.
+    var air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.programmeId, "A")
+    try expectEqual(air.nextProgrammeId, "B")
+    try expectEqual(air.nextProgrammeStart, "12:10")
+    try expectEqual(air.nextInSlot, true)
+    // A programme that overruns the slot hands over to the next slot's first.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 25)))
+    try expectEqual(air.programmeId, "A")
+    try expectEqual(air.nextProgrammeId, "C")
+    try expectEqual(air.nextProgrammeStart, "12:30")
+    try expectEqual(air.nextInSlot, false)
+    // A roster of one does not name itself; the next slot does.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 31)))
+    try expectEqual(air.programmeId, "C")
+    try expectEqual(air.nextProgrammeId, "D")
+    try expectEqual(air.nextProgrammeStart, "13:00")
+    // Past the month's grid there is no next.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 23, 50)))
+    try expectEqual(air.programmeId, "D")
+    try expectEqual(air.nextProgrammeId, nil)
+    // The roster walk at a file's end carries the rule too: B follows A, and B ends at 12:20,
+    // before the slot does, so the roster runs round and A airs again. That is what plays.
+    let following = try require(StationClock.following(
+        try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3))), in: p, at: pkt(2026, 11, 8, 12, 10)))
+    try expectEqual(following.programmeId, "B")
+    try expectEqual(following.nextProgrammeId, "A")
+    try expectEqual(following.nextProgrammeStart, "12:20")
+    // The names, the same four answers as the site's test.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 31)))
+    try expectEqual(air.nowName, "Title C"); try expectEqual(air.nextName, "Title D"); try expectEqual(air.nextAt, "13:00")
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    // B has no title: walked past, never named by the plate's own show.
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title C"); try expectEqual(air.nextAt, "12:30")
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 13)))
+    try expectEqual(air.nowName, "Show One"); try expectEqual(air.nextName, "Title A")
+    let same = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"}},
+     "programme_order":["A","B","C"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "B":{"id":"B","title":"b","display_title":"Title A","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1]},
+       {"start":"12:30","start_minute":750,"minutes":690,"show":"s2","programmes":[2]}]}}]}
+    """)
+    air = try require(StationClock.onAir(same, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title C"); try expectEqual(air.nextAt, "12:30")
+    // A repeat inside the slot is walked past, keeping the real time (the site's test, same answer).
+    let walk = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"}},
+     "programme_order":["A","A2","D","C"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "A2":{"id":"A2","title":"a2","display_title":"Title A","seconds":600},
+                   "D":{"id":"D","title":"d","display_title":"Title D","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1,2]},
+       {"start":"12:30","start_minute":750,"minutes":690,"show":"s2","programmes":[3]}]}}]}
+    """)
+    air = try require(StationClock.onAir(walk, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title D"); try expectEqual(air.nextAt, "12:20")
+}
+
 func runSecondsRules() throws {
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, nominal: 10)), 600)
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, cleanStart: 20, cleanEnd: 10)), 570)
@@ -4375,6 +4460,7 @@ let tests: [(String, () throws -> Void)] = [
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("Now and next: the next programme", nextProgrammeRule),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),

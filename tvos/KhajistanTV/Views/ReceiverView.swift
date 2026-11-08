@@ -757,25 +757,29 @@ private struct LikedShelf: View {
         let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (wide, false), (cameras, true)]
         let wanted = Set(refs)
         var unfound: Set<String> { wanted.subtracting(found.keys).subtracting(missing) }
+        // Missing is written only after every list has loaded: a like is not given up on a failed read.
+        var complete = true
         for (regions, camerasOnly) in tiers {
             if unfound.isEmpty { break }
-            let lists = await withTaskGroup(of: [Channel].self) { group in
+            // Nil for a list that did not load, so a failed read is never taken for "not there".
+            let lists = await withTaskGroup(of: [Channel]?.self) { group in
                 for region in regions {
                     group.addTask { @MainActor in
-                        (try? await model.receiver.channels(regionId: region.id, cameras: camerasOnly)) ?? []
+                        try? await model.receiver.channels(regionId: region.id, cameras: camerasOnly)
                     }
                 }
-                var all: [[Channel]] = []
+                var all: [[Channel]?] = []
                 for await list in group { all.append(list) }
                 return all
             }
             guard !Task.isCancelled else { return }
-            for channel in lists.joined() {
+            if lists.contains(where: { $0 == nil }) { complete = false }
+            for channel in lists.compactMap({ $0 }).joined() {
                 for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
                 where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
             }
         }
-        missing.formUnion(unfound)
+        if complete { missing.formUnion(unfound) }
         wantStills(channels)
     }
 

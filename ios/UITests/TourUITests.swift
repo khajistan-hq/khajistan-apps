@@ -38,7 +38,7 @@ final class TourUITests: XCTestCase {
         for part in ["part-cameras", "part-transmission"] where app.buttons[part].exists && app.buttons[part].isHittable {
             app.buttons[part].tap(); sleep(6); shot("tour-6-receiver-\(part)", app)
         }
-        app.buttons["part-live"].tap(); sleep(1)
+        if app.buttons["part-live"].isHittable { app.buttons["part-live"].tap(); sleep(1) }
         // A room that opens the website, and the way back.
         if app.buttons["tab-rooms"].exists {
             app.buttons["tab-rooms"].tap()

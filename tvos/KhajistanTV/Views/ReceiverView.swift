@@ -774,14 +774,16 @@ private struct LikedShelf: View {
         // Again each time the app comes forward: a read that failed at launch (an Apple TV waking
         // before its network) is retried, and a read that worked is not repeated (SavesStore).
         .task(id: "\(model.auth.session?.userId ?? "")|\(scenePhase)") { await model.saves.load() }
-        .task(id: refs) { await resolve() }
+        // Again when the app comes forward: a list that failed to load at launch is read again
+        // (the store caches the ones that loaded, so a walk that found everything costs nothing).
+        .task(id: "\(refs.joined(separator: ","))|\(scenePhase)") { await resolve() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
         }
     }
 
-    /// Finds each liked channel in the region lists: the atlas, then the wider regions, then the
-    /// cameras, each tier read at once (the store caches every list), and stops after the first
+    /// Finds each liked channel in the region lists: the atlas, then the cameras, then the wider
+    /// regions (fewest lists first, and the wider ones are not cached with *Beyond the atlas* off), each tier read at once (the store caches every list), and stops after the first
     /// tier that leaves nothing unfound. A like no list carries is remembered as missing on this
     /// device for `missingFor`, so the receiver is not walked for it on every launch or change.
     private func resolve() async {
@@ -789,11 +791,12 @@ private struct LikedShelf: View {
         let main = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
         let wide = index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
         let cameras = index.listedRegions.filter { index.cameraFiles?[$0.id] != nil }
-        let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (wide, false), (cameras, true)]
+        let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (cameras, true), (wide, false)]
         let wanted = Set(refs)
         // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes
         // that arrive next are not taken for new ones.
-        guard !wanted.isEmpty else { wantStills([]); return }
+        // An account that unliked everything has no likes: its next like is new, so it is fresh.
+        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; wantStills([]); return }
         // A like just made is worth a walk, even of a channel off air a moment ago.
         let fresh = lastRefs.map { wanted.subtracting($0) } ?? []
         lastRefs = wanted

@@ -50,7 +50,15 @@ final class HomeRowsUITests: XCTestCase {
         print("KJHOME reached: \(reached.joined(separator: " > "))")
         // Transmission's shelf waits for its schedule, which is behind the preview password until
         // launch (a test run has none), so it is not required here.
-        for required in ["news", "music", "doors", "reading", "picsvids"] {
+        // The shelves this build carries (StoreBuild.includes): the store build has no Reading Room,
+        // and Pics/Vids only for Friends; its doors shelf shows only with two doors or more.
+        var required = ["news", "music"]
+        #if !KJ_APP_STORE
+        required += ["doors", "reading", "picsvids"]
+        #elseif KJ_FRIENDS
+        required += ["doors", "picsvids"]
+        #endif
+        for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
         }
 

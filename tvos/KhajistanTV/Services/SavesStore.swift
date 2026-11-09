@@ -70,6 +70,12 @@ final class SavesStore {
         return rows.filter { $0.object_ref.hasPrefix("pnv:") && refs.contains($0.object_ref) }.map { String($0.object_ref.dropFirst(4)) }
     }
 
+    /// Liked channels, as the refs the account holds (`channel:<slug or id>`), newest first.
+    var likedChannelRefs: [String] {
+        guard known else { return [] }
+        return rows.map(\.object_ref).filter { $0.hasPrefix("channel:") && refs.contains($0) }
+    }
+
     /// Film handles on the account's watchlist, newest first.
     var watchlist: [String] {
         guard known else { return [] }
@@ -220,10 +226,17 @@ final class SavesStore {
         guard let userId = auth.session?.userId, let token = try? await auth.validAccessToken(),
               let request = PassportSaves.deleteRequest(userId: userId, refs: all, accessToken: token) else { return false }
         let held = refs.intersection(all)
+        // The row goes too, so a save made again later is the newest, not back in its old place.
+        let heldRows = rows
         refs.subtract(all)
+        rows.removeAll { all.contains($0.object_ref) }
         let code = (try? await urlSession.data(for: request)).flatMap { ($0.1 as? HTTPURLResponse)?.statusCode } ?? 0
         if code == 200 || code == 204 { return true }
         refs.formUnion(held)
+        // Back in their places, keeping any save or unsave made by another press meanwhile.
+        let now = Set(rows.map(\.object_ref))
+        let made = rows.filter { row in !heldRows.contains { $0.object_ref == row.object_ref } }
+        rows = made + heldRows.filter { all.contains($0.object_ref) || now.contains($0.object_ref) }
         return false
     }
 }

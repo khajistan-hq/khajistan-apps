@@ -58,9 +58,18 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
         kjPause(0.6)
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of the control that opened it")
-        // Right on the bare picture opens the guide (owner, 2026-11-04).
+        // With the strip still up, right walks onto it, as Select does (owner, 2026-11-08), and
+        // does not open the guide; Back lets go of the control again.
+        let captionsControl = app.descendants(matching: .any)["captionsControl"]
         XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right opens the guide")
+        XCTAssertTrue(captionsControl.waitForExistence(timeout: 5) && captionsControl.isSelected,
+                      "right with the strip up lights its first control")
+        XCTAssertFalse(guide.exists, "right with the strip up does not open the guide")
+        XCUIRemote.shared.press(.menu)
+        kjPause(0.6)
+        // Left on the picture opens the guide (owner, 2026-11-04).
+        XCUIRemote.shared.press(.left)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Left opens the guide")
         let live = app.descendants(matching: .any)["guide-\(start)"]
         XCTAssertTrue(live.exists && live.label.contains("Live"), "LIVE marks the channel playing: \(live.label)")
         XCTAssertTrue(live.isSelected, "the guide opens on the channel playing")

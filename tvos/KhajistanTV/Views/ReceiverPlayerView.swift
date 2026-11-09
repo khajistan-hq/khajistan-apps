@@ -331,9 +331,12 @@ struct ReceiverPlayerView: View {
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
-            if !model.captions.note.isEmpty { return model.captions.note }
             // Radio prints its song on the ground; television carries it after the place.
             let tvSong = current.mediaType == "tv" ? NowPlaying.caption(song: song, mediaType: "tv") : nil
+            // A captions note hides the song only while captions are on. With them off, tuning
+            // writes the channel's parked reason ("No captions: …") on almost every music
+            // channel, and the song never showed on television.
+            if !model.captions.note.isEmpty, tvSong == nil || model.captions.isEnabled { return model.captions.note }
             let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }

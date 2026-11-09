@@ -384,6 +384,12 @@ func channelSourceLineIsTheFirstClause() throws {
     try expectEqual(try channelWith(["attributionText": "Direct broadcast by Al Masar TV; Khajistan does not host or proxy this signal."]).sourceLine,
                     "Direct broadcast by Al Masar TV")
     try expectEqual(try channelWith(["attributionText": "Direct broadcast by PTV"]).sourceLine, "Direct broadcast by PTV")
+    // 1,467 records end the clause with a full stop, then the third-party notice (2026-11-09).
+    try expectEqual(try channelWith(["attributionText": "Regional broadcast by Andijon MTRK. Playback uses a third-party source; caption and language services can process audio."]).sourceLine,
+                    "Regional broadcast by Andijon MTRK")
+    // A full stop inside the name stays: only the notice is cut.
+    try expectEqual(try channelWith(["attributionText": "Direct broadcast by Radio 98.5 FM. Playback uses a third-party source; rest"]).sourceLine,
+                    "Direct broadcast by Radio 98.5 FM")
     try expectEqual(try channelWith(["attributionText": "  ; rest"]).sourceLine, nil)
     try expectEqual(try channelWith(["attributionText": NSNull()]).sourceLine, nil)
 }

@@ -127,8 +127,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
   filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
-  is not drawn, and is looked for again after six hours (the app remembers it on the device so a
-  stale like costs no walk of every list at each launch). Likes are read again when the app comes
+  is not drawn; it is looked for again at the first launch six hours on, or at once when it is
+  liked again (the app remembers it on the device, so a stale like costs no walk of every list at
+  each launch). Likes are read again when the app comes
   forward if the first read failed. Stills: 28 a visit on the TV (24 on the phone), so Liked's four
   do not cost Music its pictures.
 - **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero

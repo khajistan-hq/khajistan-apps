@@ -689,6 +689,9 @@ private struct LikedShelf: View {
     /// this device so a stale like does not cost a walk of every list at each launch. Looked for
     /// again after `missingFor`.
     @AppStorage("kj.likedMissing.v1") private var missingStore = ""
+    /// The refs the last walk was asked for: a ref not among them is a new like, looked for at once.
+    /// Nil until the first walk of a launch, whose refs are the account's, not new likes.
+    @State private var lastRefs: Set<String>?
     private static let missingFor: TimeInterval = 6 * 3600
 
     private var missing: Set<String> {
@@ -698,6 +701,13 @@ private struct LikedShelf: View {
             guard parts.count == 2, let at = TimeInterval(parts[0]), now - at < Self.missingFor else { return nil }
             return String(parts[1])
         })
+    }
+
+    private func unmarkMissing(_ refs: Set<String>) {
+        missingStore = missingStore.split(separator: "\n").filter { line in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            return parts.count == 2 && !refs.contains(String(parts[1]))
+        }.joined(separator: "\n")
     }
 
     private func markMissing(_ refs: Set<String>) {
@@ -781,6 +791,13 @@ private struct LikedShelf: View {
         let cameras = index.listedRegions.filter { index.cameraFiles?[$0.id] != nil }
         let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (wide, false), (cameras, true)]
         let wanted = Set(refs)
+        // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes
+        // that arrive next are not taken for new ones.
+        guard !wanted.isEmpty else { wantStills([]); return }
+        // A like just made is worth a walk, even of a channel off air a moment ago.
+        let fresh = lastRefs.map { wanted.subtracting($0) } ?? []
+        lastRefs = wanted
+        if !fresh.isEmpty, !fresh.isDisjoint(with: missing) { unmarkMissing(fresh) }
         var unfound: Set<String> { wanted.subtracting(found.keys).subtracting(missing) }
         // Missing is written only after every list has loaded: a like is not given up on a failed read.
         var complete = true

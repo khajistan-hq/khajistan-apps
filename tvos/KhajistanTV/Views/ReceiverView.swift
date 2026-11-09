@@ -783,14 +783,16 @@ private struct LikedShelf: View {
     }
 
     /// Finds each liked channel in the region lists: the atlas, then the cameras, then the wider
-    /// regions (fewest lists first, and the wider ones are not cached with *Beyond the atlas* off), each tier read at once (the store caches every list), and stops after the first
-    /// tier that leaves nothing unfound. A like no list carries is remembered as missing on this
+    /// regions (fewest lists first; the wider ones are not cached with *Beyond the atlas* off),
+    /// each tier read at once (the store caches every list), and stops after the first tier that
+    /// leaves nothing unfound. A like no list carries is remembered as missing on this
     /// device for `missingFor`, so the receiver is not walked for it on every launch or change.
     private func resolve() async {
         guard let index = model.receiver.index else { return }
         let main = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
         let wide = index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
-        let cameras = index.listedRegions.filter { index.cameraFiles?[$0.id] != nil }
+        // Every region, as the cameras shelf reads them: one may carry cameras and no list.
+        let cameras = index.regions.filter { index.cameraFiles?[$0.id] != nil }
         let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (cameras, true), (wide, false)]
         let wanted = Set(refs)
         // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes

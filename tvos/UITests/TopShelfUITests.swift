@@ -43,7 +43,7 @@ final class TopShelfUITests: XCTestCase {
         }
         // The extension's slides are cells titled by ShelfFeed; the static image has none.
         let slide = home.cells.matching(NSPredicate(
-            format: "label ENDSWITH ' live now' OR label BEGINSWITH 'Channel ' OR label == 'Two scheduled channels'")).firstMatch
+            format: "label ENDSWITH ' live now' OR label BEGINSWITH 'Channel ' OR label == 'Scheduled channels'")).firstMatch
         XCTAssertTrue(slide.exists, "the Top Shelf must show the extension's carousel, not only the static image")
         print("TOPSHELF " + home.debugDescription)
         XCUIRemote.shared.press(.menu)

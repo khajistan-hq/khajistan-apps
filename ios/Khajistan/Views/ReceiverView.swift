@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// RECEIVER, the website's /open-frequencies on a phone: live television, radio and public cameras
-/// by region on the map, and Khajistan Transmission's two channels. The Khajistan Radio mixes are
-/// not a section here (owner, 2026-10-06): they play on Transmission's channel 2. Everything is read from the public files the
+/// by region on the map, and Khajistan Transmission's channels. The Khajistan Radio mixes are
+/// not a section here (owner, 2026-10-06): they play on Transmission's Music channel. Everything is read from the public files the
 /// website reads (Core/Receiver.swift, Services/ReceiverStore.swift).
 struct ReceiverView: View {
     enum Part: String, CaseIterable, Identifiable {
@@ -72,6 +72,7 @@ struct ReceiverView: View {
             Group {
                 if fullScreenTransmission { TransmissionPlayerView() } else { ReceiverPlayerView() }
             }
+            .blocksMacNavigation(model)
             .environment(model)
         }
     }
@@ -89,8 +90,21 @@ struct ReceiverView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    LargeTitle(title: "Receiver", line: "Live television, live radio and public cameras from the Middle World.")
+                    LargeTitle(title: "Receiver", line: "Live TV, radio and street cameras from the Middle World. Pick a place on the map, then a channel.")
                     figures
+                    if model.tuner.source == nil { device }
+                    // A fixed mark above the section: an id on the section itself moved with the
+                    // swap, and the scroll overshot the new section's first line.
+                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
+                    switch part {
+                    case .live: LiveSection()
+                    case .cameras: CamerasSection()
+                    case .transmission: TransmissionSection()
+                    }
+                    // The settings come after the channels, so the first thing under the set is
+                    // always something to play.
+                    HouseRule()
+                    SurfSettings()
                     HouseSwitch(title: "Keep playing on other pages",
                                 detail: keepsPlaying ? "A small player stays at the bottom while you read or browse"
                                                      : "The channel turns off when you leave the Receiver",
@@ -101,21 +115,15 @@ struct ReceiverView: View {
                                                           : "Pauses when you leave the app",
                                 isOn: $playsInBackground)
                         .accessibilityIdentifier("receiverPlaysInBackground")
-                    if model.tuner.source == nil { device }
-                    // A fixed mark above the section: an id on the section itself moved with the
-                    // swap, and the scroll overshot the new section's first line.
-                    Color.clear.frame(height: 0).id(Self.sectionAnchor)
-                    switch part {
-                    case .live: LiveSection()
-                    case .cameras: CamerasSection()
-                    case .transmission: TransmissionSection()
-                    }
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .kjColumn(KJLayout.wideWidth)
                 .padding(.vertical, 16)
             }
             .accessibilityIdentifier("receiverCatalogue")
+            // The map's dial runs alongside the page's scroll (RegionMapView), so a swipe that
+            // starts on the map scrolls; while the dial turns, the page holds still.
+            .scrollDisabled(model.mapScrubbing)
             // A visit's share of channel stills: twelve while the Receiver is on screen.
             .onAppear { model.stills.beginVisit() }
             .onDisappear { model.stills.endVisit() }
@@ -182,33 +190,51 @@ private struct LiveSection: View {
     private var index: ReceiverIndex? { model.receiver.index }
 
     var body: some View {
-        Group {
-            if sizeClass == .regular {
-                // iPad: the map beside the region's channels, so the list starts at the top of the
-                // page instead of under a full-width map (design review, 2026-10-07).
-                HStack(alignment: .top, spacing: 40) {
-                    atlas.frame(maxWidth: .infinity, alignment: .leading)
-                    regionBlock.frame(width: 400, alignment: .leading)
+        ScrollViewReader { proxy in
+            Group {
+                if sizeClass == .regular {
+                    // iPad: the map beside the region's channels, so the list starts at the top of the
+                    // page instead of under a full-width map (design review, 2026-10-07).
+                    HStack(alignment: .top, spacing: 40) {
+                        atlas.frame(maxWidth: .infinity, alignment: .leading)
+                        regionBlock.frame(width: 400, alignment: .leading)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 16) {
+                        atlas
+                        regionBlock.id(Self.regionAnchor)
+                    }
                 }
-            } else {
-                VStack(alignment: .leading, spacing: 16) {
-                    atlas
-                    regionBlock
-                }
+            }
+            // A region tapped on a phone: its name and its channels come up whole under the set.
+            .onChange(of: taps) {
+                guard sizeClass != .regular else { return }
+                withAnimation(.kj) { proxy.scrollTo(Self.regionAnchor, anchor: .top) }
             }
         }
         .task(id: extended) { await loadMap() }
         .task(id: selected) { await loadRegion() }
+        // The map marks the region of what is playing, so the green place is what you hear.
+        .onChange(of: model.tuner.channel?.id, initial: true) {
+            guard let ids = model.tuner.channel?.regionIds, !ids.contains(selected) else { return }
+            let known = Set(regions.map(\.id))
+            if let region = ids.first(where: known.contains) ?? (known.isEmpty ? ids.first : nil) { selected = region }
+        }
     }
+
+    private static let regionAnchor = "liveRegionBlock"
+    /// Counts taps on the map and the strip, so a tap scrolls and a channel following does not.
+    @State private var taps = 0
 
     // MARK: Map and strip
 
     private var atlas: some View {
         VStack(alignment: .leading, spacing: 16) {
-            SurfSettings()
-            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: $extended)
-                .accessibilityIdentifier("beyondTheAtlas")
+            // The map first: the page says "pick a place on the map". The switch under it changes
+            // what the map holds.
             map
+            HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: $extended)
+                .accessibilityIdentifier("beyondTheAtlas")
             strip
         }
     }
@@ -218,6 +244,7 @@ private struct LiveSection: View {
             if let composed {
                 RegionMapView(map: composed, highlighted: selected, onTap: choose) { passing in
                     hiss.set(passing == nil ? 0 : StaticNoise.tuningLevel)
+                    model.mapScrubbing = passing != nil
                 }
             } else if let message = mapError ?? model.receiver.indexError {
                 problem(message) { Task { await model.receiver.loadIndex(); await loadMap() } }
@@ -273,23 +300,15 @@ private struct LiveSection: View {
     /// lesson). The region on the set moves to its next channel; another region starts on one of
     /// its channels of the Surf medium, drawn at random as Surf draws.
     private func choose(_ id: String) {
+        taps += 1
         tune(region: id)
         guard id != selected else { return }
         selected = id
     }
 
     private func tune(region id: String) {
-        if model.tuner.channel?.regionIds?.contains(id) == true, model.tuner.canStep {
-            model.tuner.step(1)
-            return
-        }
         Task {
-            guard let all = try? await model.receiver.channels(regionId: id, cameras: false) else { return }
-            let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
-            let pool = all.filter { medium.includes($0.mediaType) }
-            let list = pool.isEmpty ? all : pool
-            guard let channel = list.randomElement() else { return }
-            model.tuner.play(channel, in: list)
+            await model.tuner.selectRegion(id, allowSelection: { model.tab == .receiver })
         }
     }
 
@@ -329,7 +348,11 @@ private struct LiveSection: View {
                         Text(native).font(.system(KJType.title, weight: .bold)).foregroundStyle(palette.faint).lineLimit(1)
                     }
                 }
-                if let line = index?.mediumLine(regionId: selected), !line.isEmpty { Text(line).kjSmall(faint: true) }
+                // Until the region's channels arrive, the index's count; then the switch below
+                // counts what can actually be played, and the two never stand side by side.
+                if loadedRegion != selected, let line = index?.mediumLine(regionId: selected), !line.isEmpty {
+                    Text(line).kjSmall(faint: true)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("regionTitle")
@@ -556,12 +579,10 @@ struct ChannelRow: View {
 
 // MARK: - Shuffle
 
-/// What the receiver's Surf key finds: a live channel at random, of this medium, from this part
-/// of the atlas. Kept on the device (owner, 2026-10-07).
+/// What the receiver's Surf key finds: a live channel at random, of this medium, kept on the device
+/// (owner, 2026-10-07). Where it looks follows the Beyond the atlas switch under it.
 private struct SurfSettings: View {
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
-    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
-
     private var medium: ShuffleMedium { .stored(mediumRaw) }
 
     var body: some View {
@@ -571,7 +592,6 @@ private struct SurfSettings: View {
                 Text("A live \(medium == .tv ? "television " : medium == .radio ? "radio " : "")channel at random").kjSmall(faint: true)
             }
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label) }, current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
         }
     }
 

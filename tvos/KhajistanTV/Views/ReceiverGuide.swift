@@ -9,34 +9,37 @@ struct ReceiverGuide: View {
     let list: [Channel]
     let current: Channel
     let lit: Int
+    let medium: String
+    /// The region shown, and whether left and right reach others.
+    let title: String
+    let turns: Bool
+    let loading: Bool
     @Environment(\.palette) private var palette
 
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 16) {
-                Kicker("Guide")
+                Kicker("Guide \u{00B7} " + ReceiverRules.mediumLabel(medium))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(ReceiverRules.mediumLabel(current.mediaType)).kjName(38)
-                    Text("\(list.count)").kjSmall(faint: true)
+                    Text(turns ? "\u{2039} " + title + " \u{203A}" : title).kjName(38)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("guideRegion")
+                    if !loading { Text("\(list.count)").kjSmall(faint: true) }
                 }
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        // Not lazy: the lit row must exist for the first scroll, and a shelf holds
-                        // tens of channels, not thousands.
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(list.enumerated()), id: \.element.id) { index, channel in
-                                GuideRow(number: index + 1, channel: channel, live: channel.id == current.id, lit: index == lit)
-                                    .id(index)
-                                Hairline()
-                            }
-                        }
-                        .padding(.vertical, 8)
+                if loading {
+                    Text("Loading").kjSmall(faint: true)
+                } else if list.isEmpty {
+                    Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall(faint: true)
+                }
+                // Only the rows that fit, around the lit one: a region holds up to ~500 channels,
+                // and drawing them all on every press made the guide slow (owner, 2026-11-04).
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Self.window(count: list.count, lit: lit), id: \.self) { index in
+                        GuideRow(number: index + 1, channel: list[index], live: list[index].id == current.id, lit: index == lit)
+                        Hairline()
                     }
-                    .scrollDisabled(true)
-                    .onAppear { proxy.scrollTo(lit, anchor: .center) }
-                    .onChange(of: lit) { withAnimation(.smooth(duration: 0.2)) { proxy.scrollTo(lit, anchor: .center) } }
                 }
-                Text("Up and down to choose \u{00B7} Select to tune \u{00B7} Left to close").kjSmall(faint: true)
+                .padding(.vertical, 8)
             }
             .padding(.horizontal, KJLayout.inset)
             .padding(.vertical, 56)
@@ -48,6 +51,13 @@ struct ReceiverGuide: View {
         .allowsHitTesting(false)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("receiverGuide")
+    }
+
+    /// The rows on screen: `rows` of them with the lit one in the middle, held against the ends.
+    static func window(count: Int, lit: Int, rows: Int = 9) -> [Int] {
+        guard count > 0 else { return [] }
+        let start = max(0, min(lit - rows / 2, count - rows))
+        return Array(start..<min(count, start + rows))
     }
 }
 
@@ -76,8 +86,6 @@ private struct GuideRow: View {
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
         .background(lit ? palette.focusPlate : .clear)
-        .scaleEffect(lit ? 1.03 : 1)
-        .animation(.easeOut(duration: 0.12), value: lit)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guide-\(channel.id)")
         .accessibilityAddTraits(lit ? .isSelected : [])
@@ -114,6 +122,8 @@ struct MediumMark: View {
 /// station's name large, and where it broadcasts from. The dancer moves it aside while he dances.
 struct RadioNowPlaying: View {
     let channel: Channel
+    /// The song on air (NowPlaying), or "" while there is none.
+    var song: String = ""
 
     var body: some View {
         VStack(spacing: 20) {
@@ -125,6 +135,9 @@ struct RadioNowPlaying: View {
             let broadcaster = channel.broadcaster == channel.name ? nil : channel.broadcaster
             let line = [channel.place, broadcaster].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
             if !line.isEmpty { Text(line).kjBody().multilineTextAlignment(.center) }
+            // The kicker above already says "Now playing"; the line is the song alone.
+            Text(song.isEmpty ? NowPlaying.unavailable : song)
+                .kjSmall(faint: song.isEmpty).multilineTextAlignment(.center)
         }
         .padding(.horizontal, KJLayout.inset)
     }

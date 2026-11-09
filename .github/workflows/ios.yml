@@ -23,7 +23,8 @@ jobs:
     # for an hour on 2026-10-06 and hung in simctl boot on the runs that did start; the tvOS job
     # on macos-26 started within minutes all day.
     runs-on: macos-26
-    timeout-minutes: 35
+    # The unchanged base took 33m40s; allow the full UI suite and artifact export to finish.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,6 +34,10 @@ jobs:
           lfs: false
       - name: Core behavior tests
         run: ios/scripts/test-core.sh
+      - name: Caption session failure regressions
+        run: KJ_CAPTION_TEST_PLATFORMS=ios sh tvos/scripts/test-caption-session.sh
+      - name: Account session race regressions
+        run: KJ_AUTH_TEST_PLATFORMS=ios sh tvos/scripts/test-auth-session.sh
       - name: Select an available iPhone simulator
         id: simulator
         run: |

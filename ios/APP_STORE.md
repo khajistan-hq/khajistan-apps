@@ -15,7 +15,13 @@ App Store, and anything typed into App Store Connect, is the owner's.
 1. **Owner:** sign in to Xcode (Settings > Accounts) with the Apple Developer account.
 2. **Owner:** in App Store Connect, create one app record per bundle id above.
 3. Archive each app with the store flag set (below), signed with that team.
-4. **Owner approves** the upload to TestFlight, then submission.
+4. **Apple TV only, before the next upload: test picture in picture on a real Apple TV**
+   (owner, 2026-11-06). PR 36 added it and the simulator has no PiP, so
+   `PictureInPictureUITests` skips there. Check three things on the device: PiP opens from the
+   strip on a playing channel; a stop the app makes itself does not open the channel again; in
+   the film player, Play and Back work and focus lands where it should. Do not upload a tvOS
+   build until all three pass.
+5. **Owner approves** the upload to TestFlight, then submission.
 
 ## The store build
 
@@ -64,7 +70,8 @@ TV's audited core categories are Email, User ID, Device ID, Other User Content a
 Interaction. Confirm its actual purchase-related data before adding or excluding Purchase
 History. Top Shelf has its own manifest; do not copy full-app collection into it blindly.
 
-The bundled iOS/TV app manifests currently declare four categories, not this full set.
+The bundled iOS manifest declares all ten categories above since 2026-11-07; the TV manifest
+still declares four.
 Their current no-tracking flags are not evidence that every embedded service or broadcaster
 has been checked. Retention, IP/user-agent classification, third-party processing and tracking
 answers remain unresolved. Local-only settings/history/downloads alone are not collection.

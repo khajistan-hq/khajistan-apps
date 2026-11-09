@@ -45,12 +45,22 @@ final class ReceiverGuideUITests: XCTestCase {
         // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
         // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
         kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived
-        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(guideControl.isSelected, "Right lights Guide, after CC and Like")
+        // Select lights the strip's first control (CC); right walks to Like, then Guide.
         XCUIRemote.shared.press(.select)
-
+        kjPause(0.6)
+        for _ in 0..<4 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(guideControl.isSelected, "Select then right lights Guide, after CC and Like")
+        // Select on the lit Guide control opens the guide; Menu closes it and lets go of the control.
+        XCUIRemote.shared.press(.select)
         let guide = app.descendants(matching: .any)["receiverGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Select opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Select on Guide opens the guide")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
+        kjPause(0.6)
+        XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of the control that opened it")
+        // Right on the bare picture opens the guide (owner, 2026-11-04).
+        XCUIRemote.shared.press(.right)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right opens the guide")
         let live = app.descendants(matching: .any)["guide-\(start)"]
         XCTAssertTrue(live.exists && live.label.contains("Live"), "LIVE marks the channel playing: \(live.label)")
         XCTAssertTrue(live.isSelected, "the guide opens on the channel playing")
@@ -67,17 +77,32 @@ final class ReceiverGuideUITests: XCTestCase {
         kjPause(2)
         kjScreenshot("\(skin)-g3-tuned", app: app)
 
-        // Left closes the guide and lets go of its control, so the strip can hide again.
-        for _ in 0..<8 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCUIRemote.shared.press(.select)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "the guide opens again")
+        // Right in the guide turns to the next region; Menu closes the guide and lets go of its
+        // control, so the strip can hide again.
+        kjPause(0.6)
         XCUIRemote.shared.press(.left)
-        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Left closes the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Left on the picture opens the guide")
+        let region = app.staticTexts["guideRegion"]
+        XCTAssertTrue(region.waitForExistence(timeout: 5))
+        let home = region.label
+        XCUIRemote.shared.press(.right)
+        let turned = NSPredicate { _, _ in region.label != home }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: turned, object: nil)], timeout: 5), .completed,
+                       "Right turns the guide to another region: \(home)")
+        let row = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-'")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 30), "the next region's channels load into the guide")
+        kjScreenshot("\(skin)-g4-next-region", app: app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of its control")
 
-        // Radio: Menu back to the region; television is the first shelf and radio the next, so one
-        // press down from the channel just left reaches a station.
+        // Radio: Back to the region; television is the first shelf and radio the next, so one
+        // press down from the channel just left reaches a station. Over a playing picture the
+        // first Back hides the strip, as Apple's TV app does, and the second leaves.
         XCUIRemote.shared.press(.menu)
+        kjPause(0.6)
+        if current.exists { XCUIRemote.shared.press(.menu) }
+        XCTAssertTrue(current.waitForNonExistence(timeout: 10), "Back, then Back, leaves the channel")
         XCTAssertTrue(app.descendants(matching: .any)["shelf-radio"].waitForExistence(timeout: 10), "Indus has a radio shelf")
         kjPause(1)
         XCUIRemote.shared.press(.down)
@@ -109,8 +134,10 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         let bar = app.descendants(matching: .any)["radioBar"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "the radio plays on in the small player")
-        XCTAssertTrue(app.buttons["radioBarName"].label.contains("On air") || app.buttons["radioBarName"].label.contains("Tuning"),
-                      "the bar says the station is on: \(app.buttons["radioBarName"].label)")
+        // The bar names the song in place of "On air" while the station names one (PR 33), so read
+        // the state off its Play/Pause control: Pause means playing or tuning.
+        XCTAssertEqual(app.buttons["radioBarToggle"].label, "Pause",
+                       "the bar says the station is on: \(app.buttons["radioBarName"].label)")
         kjPause(1)
         kjScreenshot("\(skin)-g5-radio-bar", app: app)
         let off = app.buttons["radioBarOff"]

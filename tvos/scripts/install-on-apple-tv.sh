@@ -9,7 +9,8 @@
 #      and Devices; on the Mac, Xcode > Window > Devices and Simulators > Pair, and type the code
 #      the TV shows. Both on the same network.
 #
-# Usage: sh tvos/scripts/install-on-apple-tv.sh            (first paired Apple TV, first team)
+# Usage: sh tvos/scripts/install-on-apple-tv.sh            (first paired Apple TV, first team, store sections)
+#        KJ_FULL=1 sh tvos/scripts/install-on-apple-tv.sh   (every section, Pics/Vids and Chat included)
 #        KJ_TEAM=ABCDE12345 KJ_DEVICE=<udid> sh tvos/scripts/install-on-apple-tv.sh
 set -eu
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
@@ -56,10 +57,15 @@ PY
 fi
 [ -n "$DEVICE" ] || { echo "No paired Apple TV. Pair it in Xcode > Window > Devices and Simulators." >&2; exit 1; }
 
-echo "Team $TEAM, Apple TV $DEVICE"
+# The store's four sections (Receiver, Transmission, Screening Room, Account) unless KJ_FULL=1:
+# the owner's Apple TV carries what the store build carries (owner, 2026-11-04).
+CONDITIONS='$(inherited) KJ_APP_STORE'
+[ "${KJ_FULL:-0}" = 1 ] && CONDITIONS='$(inherited)'
+echo "Team $TEAM, Apple TV $DEVICE, conditions: $CONDITIONS"
 xcodebuild -project "$ROOT/KhajistanTV.xcodeproj" -scheme KhajistanTV -configuration Release \
   -destination "platform=tvOS,id=$DEVICE" -derivedDataPath "$WORK/DerivedData" \
-  -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic build
+  -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
+  SWIFT_ACTIVE_COMPILATION_CONDITIONS="$CONDITIONS" build
 APP="$WORK/DerivedData/Build/Products/Release-appletvos/KhajistanTV.app"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
 xcrun devicectl device process launch --device "$DEVICE" com.khajistan.tv

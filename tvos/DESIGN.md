@@ -77,7 +77,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (the front's camera regions, the two Transmission channels) sit on a `CardPlate`:
+- **Text cards** (the front's camera regions, the Transmission channels) sit on a `CardPlate`:
   the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
   front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
   Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.
@@ -172,13 +172,21 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 ## Khajistan Transmission
 
-- **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · two scheduled channels · Pakistan
+- **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · 7 scheduled channels · Pakistan
   time (UTC+5)*, then one card per channel, as the website's channel card: CHANNEL 1 · ● ON AIR,
   the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
   next three strips, time then show, the first set large. Off air the headline is *Off air*,
-  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. Show names only:
-  programme titles are file names (owner, 2026-09-06). The two cards are text cards (a lift plate, band under focus), 64pt apart for their lift. The cards redraw on the minute. Select
+  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. The
+  programme by its standardized name since 2026-11-08 (owner: "add now playing and up next ...
+  names need to be standardized"); where a title cannot be cleaned (`display_title` absent) the
+  show stands in, which was the whole rule from 2026-09-06 ("programme titles are file names"). One card per channel the schedule's `_meta.channels` names (seven since 2026-11-04), text cards 560pt wide (a lift plate, band under focus), 64pt apart for their lift, in one row that scrolls sideways past the third. Channel Up and Down on the remote step through them in number order and go round: up from Channel 7 is Channel 1. The cards redraw on the minute. Select
   tunes. The preview-password and sign-in steps live on this page.
+- **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
+  else the show; the line under it starts with the show (left out when the show is the channel,
+  as Jordan Television is), then NOW and the slot, then the country. At right, ● CHANNEL 5 ·
+  MEHFIL, the channel's own name, so a show is never read as the channel. UP NEXT is the next
+  programme and when it starts, wrapping to two lines; hidden when it would repeat the headline.
+  A title too long to share its line with the detail takes a line, and up to two, of its own.
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
   channel's name. Up and down switch channel as under Motion. The
@@ -474,7 +482,7 @@ clicked yet you can use higgsfield but it has to be very khajistan in house styl
     password first, then with the preview password, which the app keeps in the keychain group
     `$(AppIdentifierPrefix)com.khajistan.tv.shared` that it shares with the extension. Keychain
     sharing needs only the team prefix, so a free Apple ID's signing carries it.
-  - **Transmission**, in place of the two channels when no schedule can be read: the website's
+  - **Transmission**, in place of the channel slides when no schedule can be read: the website's
     own description of the station, and the pigeon.
   - A slide that cannot be fetched is left out. With nothing at all, tvOS shows the static image.
   - Everything sits above 740 points (the app row covers the slide from 784, and the opened

@@ -35,6 +35,27 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: timeout), message)
     }
 
+    /// ROOMS: the bar's door on iPad and Mac; on a phone, whose bar has none, HOME's "Every room".
+    private func openRooms(_ app: XCUIApplication) {
+        if app.buttons["tab-rooms"].exists { app.buttons["tab-rooms"].tap(); return }
+        tapOnHome(app, "homeAllRooms")
+    }
+
+    /// Scrolls HOME until a control sits clear above the bar and the small player, then taps it.
+    /// Measured by frame, not isHittable: under the small player the activation point can be unreadable.
+    private func tapOnHome(_ app: XCUIApplication, _ id: String) {
+        app.buttons["tab-home"].tap()
+        let target = app.buttons[id]
+        // The top of the bar, or of the small player when one sits over it.
+        let player = app.descendants(matching: .any)["nowPlaying"]
+        let floor = (player.exists ? player.frame.minY : app.buttons["tab-home"].frame.minY) - 4
+        // Its middle, which is where tap() lands; a tall tile need not fit whole.
+        let clear = { target.exists && !target.frame.isEmpty && target.frame.midY > 60 && target.frame.midY < floor - 20 }
+        for _ in 0..<16 where !clear() { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(clear(), "HOME scrolls to \(id)")
+        target.tap()
+    }
+
     /// HOME is on screen. Its first room tile marks it: "Every room" sits below the picture tiles
     /// (2e213d2), and HOME's LazyVStack does not build what is off screen, so it is not there to find.
     private func waitForHome(_ app: XCUIApplication, _ timeout: TimeInterval, _ message: String) {
@@ -74,8 +95,23 @@ final class KhajistanUITests: XCTestCase {
             let app = launch(skin: skin)
             XCTAssertEqual(app.tabBars.count, 0, "The system tab bar must not be drawn")
             waitForHome(app, 10, "HOME leads to every room")
+            XCTAssertTrue(app.buttons["tab-home"].exists, "the bar is drawn")
+            XCTAssertEqual(app.buttons["tab-rooms"].exists, UIDevice.current.userInterfaceIdiom != .phone,
+                           "ROOMS is on the bar of an iPad, never a phone's (owner, 2026-11-04)")
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // A room opened from HOME goes back to HOME, not to the list the bar no longer offers.
+                tapOnHome(app, "home-room-reading")
+                waitFor(app.buttons["stackBack"], 10, "the Reading Room opens from its HOME tile")
+                XCTAssertTrue(app.buttons["tab-home"].isSelected, "HOME stays lit over a room opened from it")
+                app.buttons["stackBack"].tap()
+                waitForHome(app, 10, "Back from a room opened on HOME returns to HOME")
+                // Every door stays mounted under the one on show, so test what can be touched, not what exists.
+                XCTAssertTrue(app.buttons["home-room-reading"].isHittable, "HOME is the page on show after Back")
+                XCTAssertFalse(app.staticTexts["Everything in Khajistan"].isHittable, "Back does not land on the ROOMS list")
+                app.swipeDown(); app.swipeDown()
+            }
             shot("\(skin)-01-home", app)
-            app.buttons["tab-rooms"].tap()
+            openRooms(app)
             waitFor(app.buttons["destination-reading"], 10, "ROOMS lists the website's menu")
             shot("\(skin)-02-rooms", app)
 
@@ -91,14 +127,14 @@ final class KhajistanUITests: XCTestCase {
                 app.buttons["transmission-channel-1"].exists || app.staticTexts["transmissionPreview"].exists
             }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: nil)], timeout: 40), .completed,
-                           "Transmission shows its two channels, or the preview-password step")
+                           "Transmission shows its channels, or the preview-password step")
             shot("\(skin)-05-transmission", app)
 
-            // Khajistan Radio's mixes play on Transmission's channel 2, not in a section of their own
+            // Khajistan Radio's mixes play on Transmission's Music channel, not in a section of their own
             // (owner, 2026-10-06).
             XCTAssertFalse(app.buttons["part-radio"].exists, "there is no Khajistan Radio section")
 
-            app.buttons["tab-rooms"].tap()
+            openRooms(app)
             app.buttons["destination-picsnvids"].tap()
             waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "the Born Digital stream loads")
             shot("\(skin)-07-pics-vids", app)
@@ -116,7 +152,7 @@ final class KhajistanUITests: XCTestCase {
             app.swipeUp()
             shot("\(skin)-09-account-lower", app)
 
-            app.buttons["tab-rooms"].tap()
+            openRooms(app)
             app.buttons["destination-publications"].tap()
             waitFor(app.buttons["closeBrowser"], 10, "the house browser opens")
             let web = app.webViews.firstMatch
@@ -144,7 +180,7 @@ final class KhajistanUITests: XCTestCase {
         for orientation in orientations {
             XCUIDevice.shared.orientation = orientation
             sleep(1)
-            app.buttons["tab-rooms"].tap()
+            openRooms(app)
             waitFor(row, 10, "the door row after rotating")
             let screen = app.windows.firstMatch.frame
             let frame = row.frame
@@ -208,6 +244,9 @@ final class KhajistanUITests: XCTestCase {
         // are still sliding when the next tap is placed, and it lands where Anatolia was (CI,
         // 2026-10-27). Tap once the chip has stopped moving.
         let anatolia = app.buttons["region-anatolia"]
+        // A region chosen brings its name and channels up under the set, so the strip is above
+        // the screen now: scroll back to it.
+        for _ in 0..<6 where !anatolia.isHittable { app.swipeDown(); usleep(500_000) }
         for _ in 0..<20 {
             let before = anatolia.frame
             usleep(250_000)
@@ -254,7 +293,10 @@ final class KhajistanUITests: XCTestCase {
         usleep(900_000)
         shot("player-channel-change", app)
         // The next channel in the list is tuned behind the wing, then plays or says why it cannot.
-        let changed = NSPredicate(format: "value != %@ AND (label == 'Playing' OR label CONTAINS[c] 'could not' OR label CONTAINS[c] 'HTTP' OR label CONTAINS[c] 'not on the dial')", before)
+        // Settled is anything but tuning: a broadcaster's own refusal arrives in its own words
+        // ("You do not have permission to access the requested resource", CI 2026-10-31), so a
+        // list of expected wordings missed a channel that had said exactly why it would not play.
+        let changed = NSPredicate(format: "value != %@ AND label != '' AND label != ' ' AND label != 'Standing by' AND NOT (label CONTAINS[c] 'Connecting') AND NOT (label CONTAINS[c] 'Surfing')", before)
         expectation(for: changed, evaluatedWith: state)
         waitForExpectations(timeout: 60)
         usleep(700_000)
@@ -278,8 +320,16 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(state.value as? String, tuned, "the channel is still tuned after full screen closes")
 
         app.buttons["receiverOff"].tap()
+        // Off returns the idle set to the top of the scrolled catalogue. Reveal it before
+        // reading its accessibility state; a successful stop can put it above the viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        for _ in 0..<8 where !state.exists || !catalogue.frame.contains(state.frame) {
+            catalogue.swipeDown()
+            usleep(400_000)
+        }
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
+        XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
 
@@ -302,7 +352,10 @@ final class KhajistanUITests: XCTestCase {
         let cameras = app.staticTexts["camerasTotal"]
         waitFor(cameras, 20, "Cameras lists its cameras")
         expectation(for: NSPredicate { _, _ in onScreen(cameras) }, evaluatedWith: cameras)
-        waitForExpectations(timeout: 3)
+        // One tap, no second: the time only covers the iOS 26 runner reporting the frame late.
+        // CI run 41241274308's recording shows the count under the set within a second of the
+        // tap while the 3 s wait on its reported frame ran out.
+        waitForExpectations(timeout: 10)
         shot("receiver-part-cameras", app)
 
         app.buttons["part-transmission"].tap()
@@ -314,9 +367,39 @@ final class KhajistanUITests: XCTestCase {
         shot("receiver-part-transmission", app)
 
         app.buttons["part-live"].tap()
-        let surf = app.buttons["shuffle-medium-tv"]
-        expectation(for: NSPredicate { _, _ in onScreen(surf) }, evaluatedWith: surf)
+        // Live opens on its map, the first thing in the part since the Surf settings moved to the foot.
+        let map = app.descendants(matching: .any)["receiverMap"]
+        expectation(for: NSPredicate { _, _ in onScreen(map) }, evaluatedWith: map)
         waitForExpectations(timeout: 5)
+    }
+
+    /// Seven channels, from the Apple TV app's hand-made schedule (one 24-hour strip on each
+    /// channel, 2026-11-04 and 05): the station page counts them and carries a card for each,
+    /// named from the schedule's `_meta.channels`, down to Channel 7.
+    func testTransmissionListsEveryScheduledChannel() {
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../tvos/UITests/Fixtures/programming-seven-channels.json").standardized.path
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjpart", "transmission", "-kjschedulefile", schedule])
+        let count = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "7 scheduled channels")).firstMatch
+        waitFor(count, 40, "the station page counts seven channels")
+        let catalogue = app.scrollViews["receiverCatalogue"]
+        let names = ["Cinema", "State Television", "Music", "Family Tapes", "Mehfil", "Trailers", "Macabre"]
+        for (index, name) in names.enumerated() {
+            let card = app.buttons["transmission-channel-\(index + 1)"]
+            // Short drags with no momentum, towards the card: on an iPhone SE a flick carries a
+            // card past the gap between the docked set and the house bar.
+            for _ in 0..<16 where !(card.exists && card.isHittable) {
+                let start = app.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
+                let move: CGFloat = card.frame.midY < catalogue.frame.midY ? 160 : -160
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
+                usleep(400_000)
+            }
+            XCTAssertTrue(card.exists && card.isHittable, "Channel \(index + 1) has a card")
+            XCTAssertTrue(card.label.contains("Channel \(index + 1) \u{00B7} \(name)"), card.label)
+            if index % 2 == 1 || index == names.count - 1 { shot("transmission-seven-\(index + 1)", app) }
+        }
+        XCTAssertFalse(app.buttons["transmission-channel-8"].exists, "no card the schedule does not name")
     }
 
     /// Share of the pixels in `rect` (points) that are not near black, read off a screenshot.
@@ -436,7 +519,7 @@ final class KhajistanUITests: XCTestCase {
     func testLeavingDuringAutomaticSelectionCancelsAndReopeningRetries() {
         // "Keep playing on other pages" is on by default (DECISIONS 24); this tests the viewer who turned
         // it off, for whom leaving the Receiver still cancels what it was opening.
-        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
+        let app = launch(skin: "day", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES", "-kjholdfirstopening", "YES", "-kjopeningdelayms", "5000", "-kj.receiverKeepsPlaying", "NO"])
         waitFor(app.buttons["tab-home"], 3, "The tab bar appears before the deliberately suspended selection")
         app.buttons["tab-home"].tap()
         waitForHome(app, 3, "Home opens with one tap")
@@ -457,12 +540,12 @@ final class KhajistanUITests: XCTestCase {
         waitFor(cc, 60, "A live signal exposes CC")
         cc.tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "One CC tap explains sign-in")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under You to use live captions.")
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 5, "One fullscreen tap opens the player")
         app.buttons["receiverCC"].tap()
         waitFor(app.staticTexts["receiverCaptionStatus"], 5, "Fullscreen CC also responds to one tap")
-        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under Library to use live captions.")
+        XCTAssertEqual(app.staticTexts["receiverCaptionStatus"].label, "Sign in under You to use live captions.")
         app.buttons["closePlayer"].tap()
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
@@ -482,9 +565,14 @@ final class KhajistanUITests: XCTestCase {
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
 #if KJ_APP_STORE
+        if app.buttons["tab-rooms"].exists {
+            XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
+        } else {
+            waitFor(app.staticTexts["Everything in Khajistan"], 5, "an excluded Pics/Vids launch falls back to the ROOMS list")
+        }
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch.waitForExistence(timeout: 5),
                        "a stored Pics/Vids launch does not open the stream in a store build")
-        app.buttons["tab-rooms"].tap()
+        openRooms(app)
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(marker.exists, "ROOMS scrolled past where the Pics/Vids, Chat and Wall doors stood")
         XCTAssertFalse(pnvDoor.exists, "a store build has no Pics/Vids door")
@@ -495,6 +583,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch, 40, "a Pics/Vids launch opens the stream in ROOMS")
         if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
+        XCTAssertTrue(marker.exists, "ROOMS scrolled past the Chat and Wall doors")
         XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")
@@ -547,7 +636,7 @@ final class KhajistanUITests: XCTestCase {
         let shown = NSPredicate { _, _ in line.exists || none.exists }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 20), .completed,
                        "the room shows its lines or says it has none")
-        XCTAssertTrue(app.staticTexts["Sign in under Library to write in a room."].exists, "a signed-out reader is told how to write")
+        XCTAssertTrue(app.staticTexts["Sign in under You to write in a room."].exists, "a signed-out reader is told how to write")
         shot("chat-room", app)
         app.buttons["chatBack"].tap()
         waitFor(room, 10, "back returns to the rooms")
@@ -589,6 +678,8 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// A Pics/Vids object opens whole, and a swipe moves to the next.
+    /// The stream opens as reels (owner, 2026-11-08: "like reels and grid"): a tile opens a
+    /// vertical pager at that object, a swipe up moves to the next, and close returns to the grid.
     func testPicsVidsViewer() {
         let app = launch(skin: "day", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
@@ -599,14 +690,30 @@ final class KhajistanUITests: XCTestCase {
             // A tap while the notice is still leaving lands on it, not on the tile under it.
             XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
         }
-        tile.tap()
-        waitFor(app.buttons["closePlayer"], 10, "the viewer opens")
+        XCTAssertTrue(app.buttons["pnvReelsLink"].isHittable, "Play as reels is on screen")
+        shot("pnv-grid", app)
+        // A tile deep in the grid, not the first: the reel must open on the object tapped.
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
+        // The deepest tile the screen shows (one under the tab bar is not tappable).
+        let deep = (0..<min(tiles.count, 9)).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable } ?? tile
+        let key = String(deep.identifier.dropFirst("tile-".count))
+        deep.tap()
+        let reel = app.descendants(matching: .any)["reel-\(key)"]
+        waitFor(reel, 10, "the reels open on the tapped object")
+        XCTAssertLessThan(abs(reel.frame.minY), 20, "the tapped object's reel is the one on screen")
+        XCTAssertTrue(app.buttons["pnvSave"].waitForExistence(timeout: 10), "Save is on the rail without a tap")
+        sleep(3)
+        shot("pnv-reel", app)
+        app.swipeUp()
+        sleep(3)
+        // Gone from the tree, or scrolled up out of the screen: either way not the reel on show.
+        XCTAssertTrue(!reel.exists || reel.frame.maxY < 20, "a swipe up moves to the next object")
+        shot("pnv-reel-next", app)
+        app.swipeDown()
         sleep(2)
-        shot("pnv-viewer", app)
-        app.swipeLeft()
-        sleep(2)
-        shot("pnv-viewer-next", app)
+        XCTAssertTrue(reel.exists && abs(reel.frame.minY) < 20, "a swipe down goes back to the tapped object")
         app.buttons["closePlayer"].tap()
+        XCTAssertTrue(tile.waitForExistence(timeout: 5), "close returns to the grid")
     }
 
     /// The skin control: a pick takes effect and Automatic hands back to the sky.
@@ -617,11 +724,11 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["skin-grove"], 10, "the skin control is on the account page")
         app.buttons["skin-grove"].tap()
         let line = app.staticTexts["skinLine"]
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'Grove, until'"), evaluatedWith: line)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Grove for now'"), evaluatedWith: line)
         waitForExpectations(timeout: 5)
         shot("skin-picked-grove", app)
         app.buttons["skin-auto"].tap()
-        expectation(for: NSPredicate(format: "label BEGINSWITH 'Following the sun'"), evaluatedWith: line)
+        expectation(for: NSPredicate(format: "label BEGINSWITH 'Changes with the time of day'"), evaluatedWith: line)
         waitForExpectations(timeout: 5)
     }
 
@@ -648,6 +755,20 @@ final class KhajistanUITests: XCTestCase {
         shot("saved-page", again)
     }
 
+    /// The account sheet must receive the existing model across its presentation boundary.
+    /// No account or network sign-in is needed to catch the missing-environment crash.
+    func testAccountSignInOpensAndCancelsWithoutAStoredSession() {
+        let app = launch(skin: "day", tab: "library", extra: ["-kjtestsignedout", "YES"])
+        let open = app.buttons["accountSignIn"]
+        waitFor(open, 10, "the signed-out account offers Sign in")
+        open.tap()
+        let email = app.textFields["signInEmail"]
+        waitFor(email, 5, "the sheet opens without a missing AppModel crash")
+        app.buttons.matching(NSPredicate(format: "label ==[c] %@", "Cancel")).firstMatch.tap()
+        XCTAssertTrue(email.waitForNonExistence(timeout: 5), "Cancel closes the sheet")
+        waitFor(open, 5, "the account screen remains usable after closing the sheet")
+    }
+
     /// Sign in on a TV from the phone: Library → Sign in on a TV, a code typed as people type it,
     /// what asked for it said before anything is approved, then done. `-kjtvapprovefixture`
     /// answers in place of the tv-sign-in function (not deployed) and needs no account.
@@ -655,7 +776,7 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "grove", tab: "library", extra: ["-kjtvapprovefixture", "YES"])
         let open = app.buttons["accountSignInTV"]
         for _ in 0..<6 where !open.isHittable { app.swipeUp() }
-        waitFor(open, 10, "Library offers Sign in on a TV")
+        waitFor(open, 10, "You offers Sign in on a TV")
         open.tap()
         let field = app.textFields["tvApproveCode"]
         waitFor(field, 10, "the screen asks for the code")
@@ -923,7 +1044,7 @@ final class KhajistanUITests: XCTestCase {
     }
 
     /// Madrassa, the databases and the Bazaar read the site's own files. The live site holds them
-    /// behind its password until launch, so without one the rooms say so and point to Library.
+    /// behind its password until launch, so without one the rooms say so and hold the password field.
     /// With `TEST_RUNNER_KJ_SITE` set to a local checkout (scripts/dev_server.py), the test walks the
     /// real records: an entry, an essay, the dictionary, the censor certificates, and a product into
     /// the bag. It stops before checkout: nothing is sent to the shop's checkout.
@@ -931,8 +1052,8 @@ final class KhajistanUITests: XCTestCase {
         guard let site = ProcessInfo.processInfo.environment["KJ_SITE"] else {
             let app = launch(skin: "day", extra: ["-kjroom", "madrassa"])
             waitFor(app.descendants(matching: .any)["roomLocked"], 30, "a gated room says it is behind the password")
-            app.buttons["lockedToLibrary"].tap()
-            waitFor(app.buttons["skin-day"], 10, "the note leads to Library")
+            XCTAssertTrue(app.secureTextFields.firstMatch.exists, "the note holds the preview password field")
+            XCTAssertEqual((app.buttons["lockedOpen"].value as? String)?.lowercased(), "nothing typed", "Open knows nothing is typed yet")
             return
         }
         let app = launch(skin: "smut", extra: ["-kjroom", "madrassa", "-kjsite", site, "-kjtestsignedout", "YES"])
@@ -1017,9 +1138,9 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(shop.descendants(matching: .any)["searchRoom-Reading Room"].exists, "the Reading Room is searched")
         shot("search-rooms", shop)
 
-        shop.buttons["tab-library"].tap()
-        let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'place-reading|'")).firstMatch
-        waitFor(place, 10, "a reading place kept on this device is listed in Library")
+        shop.buttons["tab-home"].tap()
+        let place = shop.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-continue-' OR identifier BEGINSWITH 'continue-'")).firstMatch
+        waitFor(place, 10, "a reading place kept on this device is under Continue on Home")
         shot("library-places", shop)
     }
 
@@ -1032,7 +1153,7 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 40)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].exists, "no small player on the Receiver itself")
-        app.buttons["tab-rooms"].tap()
+        openRooms(app)
         let bar = app.descendants(matching: .any)["nowPlaying"]
         waitFor(bar, 5, "the small player shows under another door")
         shot("now-playing-bar", app)
@@ -1059,7 +1180,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(state, 40, "the receiver opens")
         expectation(for: NSPredicate(format: "label != 'Standing by'"), evaluatedWith: state)
         waitForExpectations(timeout: 40)
-        app.buttons["tab-rooms"].tap()
+        if app.buttons["tab-rooms"].exists { app.buttons["tab-rooms"].tap() } else { tapOnHome(app, "home-room-reading") }
         let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
         waitFor(titles.firstMatch, 60, "the shelf loads")
         let free = titles.matching(NSPredicate(format: "label CONTAINS[c] 'read in full'")).firstMatch
@@ -1094,7 +1215,7 @@ final class KhajistanUITests: XCTestCase {
         let choice = app.descendants(matching: .any)["receiverKeepsPlaying"]
         waitFor(choice, 10, "the Receiver offers the choice")
         XCTAssertTrue(["Off", "0"].contains(String(describing: choice.value ?? "")), "the choice reads off (\(String(describing: choice.value)))")
-        app.buttons["tab-rooms"].tap()
+        openRooms(app)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
         app.buttons["tab-receiver"].tap()
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
@@ -1107,8 +1228,8 @@ final class KhajistanUITests: XCTestCase {
     func testLeavingDuringTheLaunchSurfPlaysNothingWhenKeepPlayingIsOff() {
         let app = launch(skin: "day", tab: "receiver",
                          extra: ["-kjautoplay", "YES", "-kjtestsignedout", "YES", "-kj.receiverKeepsPlaying", "NO"])
-        waitFor(app.buttons["tab-rooms"], 5, "the house bar is up")
-        app.buttons["tab-rooms"].tap()
+        waitFor(app.buttons["tab-home"], 5, "the house bar is up")
+        openRooms(app)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlayingName"].waitForExistence(timeout: 20),
                        "a Surf that was still choosing does not land under another page")
         app.buttons["tab-receiver"].tap()
@@ -1166,7 +1287,7 @@ final class KhajistanUITests: XCTestCase {
         var overflow: [String] = []
         for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
             let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
-            waitFor(app.buttons["tab-rooms"], 15, "the house bar is up in \(room)")
+            waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
             for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
                 XCUIDevice.shared.orientation = orientation
                 sleep(6)

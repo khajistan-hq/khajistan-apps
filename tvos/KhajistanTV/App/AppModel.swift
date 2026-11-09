@@ -17,6 +17,7 @@ final class AppModel {
     var section: Section
     let auth: AuthStore
     let receiver: ReceiverStore
+    var surfHistory = SurfHistory()
     /// The region page's picture cards: stills this device takes from the live streams, in memory only.
     let stills: LiveStills
     let transmission: TransmissionStore
@@ -40,6 +41,11 @@ final class AppModel {
     /// A radio channel left playing when its player closed: Sonos's small player, under every
     /// screen, until it is turned off or another signal starts.
     var radioAway: RadioAway?
+    /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
+    /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
+    var surfFocusedOnce = false
+    /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
+    var restoring: RadioAway?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -141,7 +147,7 @@ final class AppModel {
         // Read once. Xcode turns the launch arguments "-kjtab transmission" into this default.
         switch UserDefaults.standard.string(forKey: DefaultsKey.startTab) {
         case "transmission": self.section = .transmission
-        case "reading": self.section = .reading
+        case "reading" where StoreBuild.includes(.reading): self.section = .reading
         case "picsvids" where StoreBuild.includes(.picsvids): self.section = .picsvids
         case "chat" where StoreBuild.includes(.chat): self.section = .chat
         case "rooms": self.section = .rooms
@@ -156,8 +162,10 @@ final class AppModel {
     /// Stops the radio left playing under the screens: one signal at a time, so every player
     /// calls this as it starts its own.
     func silenceRadio() {
-        radioAway?.controller.stop()
+        let away = radioAway
         radioAway = nil
+        away?.pip?.stop()
+        away?.controller.stop()
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

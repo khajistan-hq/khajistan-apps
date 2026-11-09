@@ -617,6 +617,39 @@ func authSessionRefusesAnonymousAndMalformed() throws {
     }
 }
 
+func authTwoStep() throws {
+    func totp(_ json: String) -> String? { AuthAPI.verifiedTOTP(from: Data(json.utf8)) }
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"verified"}]}"#), "f1")
+    // Negative cases: an unverified factor, another kind of factor, no factors, not JSON.
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"unverified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"","factor_type":"totp","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"id":"u","email":"a@b.c"}"#), nil)
+    try expectEqual(totp("not json"), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"},{"id":"f2","factor_type":"totp","status":"verified"}]}"#), "f2")
+    try expectEqual(AuthAPI.code("123456"), "123456")
+    try expectEqual(AuthAPI.code(" 123 456 "), "123456")
+    try expectEqual(AuthAPI.code("12345"), nil)
+    try expectEqual(AuthAPI.code("1234567"), nil)
+    try expectEqual(AuthAPI.code("١٢٣٤٥٦"), nil)
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":"c9","type":"totp","expires_at":1}"#.utf8)), "c9")
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":""}"#.utf8)), nil)
+    let verify = AuthAPI.verifyRequest(factorId: "f1", challengeId: "c9", code: "123456", accessToken: "tok")
+    try expectEqual(verify.url?.path, "/auth/v1/factors/f1/verify")
+    try expectEqual(verify.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    try expectEqual(String(data: verify.httpBody ?? Data(), encoding: .utf8), #"{"challenge_id":"c9","code":"123456"}"#)
+    try expectEqual(AuthAPI.userRequest(accessToken: "tok").httpMethod, "GET")
+    // The session's own sign-in level, read off its token: a relaunch re-asks on aal1 only.
+    func aal(_ token: String) -> String? {
+        Session(accessToken: token, refreshToken: "r", expiresAt: Date(), email: nil, userId: "u").assurance
+    }
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMSJ9.sig"), "aal1")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMiJ9.sig"), "aal2")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.sig"), nil)
+    try expectEqual(aal("not-a-jwt"), nil)
+    try expectEqual(aal("a.%%%.c"), nil)
+}
+
 func authErrorMessages() throws {
     func message(_ json: String) -> String? { AuthAPI.errorMessage(from: Data(json.utf8)) }
     try expectEqual(message(#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#), "Invalid login credentials")
@@ -1053,7 +1086,7 @@ func stationClockMatchesTheJS() throws {
     try expect(onAir >= 300, "only \(onAir) on-air cases")
     try expect(offAir >= 6, "only \(offAir) off-air cases")
     try expect(trimmed >= 1, "no case exercises clean_start")
-    try expect(Set(cases.map(\.channel)) == [1, 2], "both channels must be present")
+    try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
 }
@@ -1099,7 +1132,7 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
     let f = try fixture()
     let p = f.programming
     // 10-10 is the first kept day; before 06:00 it is the late strip filed from the same day.
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.startLabel, "06:00")
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.into, 0)
@@ -1282,8 +1315,16 @@ func realProgrammingDecodesInEveryMonth() throws {
         let rawProgrammes = try require(raw["programmes"] as? [String: [String: Any]])
         try expectEqual(p.programmes.count, rawProgrammes.count, month)
         try expectEqual(p.programme_order.count, p.programmes.count, month)
-        try expectEqual(p._meta.channels.map(\.number), [1, 2], month)
-        try expectEqual(p._meta.channels.map(\.id), ["transfers", "audio"], month)
+        // Channels are numbered from 1 with no gap, and each id names one channel: two before
+        // 2026-11-04, seven after.
+        let numbers = StationClock.channelNumbers(p)
+        try expect(!numbers.isEmpty, "\(month): no channels")
+        try expectEqual(numbers, Array(1...numbers.count), month)
+        // The phone's next and previous go round the dial: next from the last is the first.
+        try expectEqual(StationClock.channel(p, from: numbers.count, step: 1), 1, month)
+        try expectEqual(StationClock.channel(p, from: 1, step: -1), numbers.count, month)
+        let ids = Set(p._meta.channels.map(\.id))
+        try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
         for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }
         for (key, value) in p.programmes { try expectEqual(key, value.id, month) }
         // The titleless programmes are exactly the ones whose raw record has no usable title.
@@ -1292,7 +1333,7 @@ func realProgrammingDecodesInEveryMonth() throws {
         var slots = 0
         for day in p.days {
             for (channel, strips) in day.channels {
-                try expect(channel == "transfers" || channel == "audio", "\(month): channel \(channel)")
+                try expect(ids.contains(channel), "\(month): channel \(channel) is not in _meta.channels")
                 for slot in strips {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
@@ -1320,7 +1361,7 @@ func realProgrammingDecodesInEveryMonth() throws {
 func realProgrammingClockInvariants() throws {
     let p = try realProgramming("2026-10")
     var checked = 0, offAir = 0, joinedPastLeader = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         var t = pkt(2026, 10, 1, 0, 0, 0)
         let end = pkt(2026, 10, 31, 23, 59, 59)
         while t <= end {
@@ -2182,6 +2223,14 @@ func realMixesDecodeAndAllPlay() throws {
     try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
 }
 
+func readingPageCountsClamp() throws {
+    // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
+    let wild = try require(RRAPI.titles(fromFeed: Data("""
+    [{"collection_slug":"w","issues":[{"id":"a","pages":1e30},{"id":"b","pages":9223372036854775807},{"id":"c","pages":-4},{"id":"d","pages":"12"}]}]
+    """.utf8)))
+    try expectEqual(wild[0].issues?.map(\.pages), [RRIssueRow.maxPages, RRIssueRow.maxPages, 0, 12])
+}
+
 func mixPresentationRules() throws {
     let both = try decode(Mix.self, #"{"id":"a","title":"  ","play_url":"https://x.example/a.mp3","country":"Pakistan","territory":"Punjab","mixed_by":" DJ Z "}"#)
     try expectEqual(both.name, "Khajistan Radio mix")
@@ -2254,6 +2303,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Auth session from a body", authSessionFromBody),
     ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
     ("Auth error messages", authErrorMessages),
+    ("Auth two-step sign-in", authTwoStep),
     ("Auth requests", authRequests),
     ("Session expiry and storage", sessionExpiryAndStorage),
     ("stationNow agrees with Calendar", stationNowAgreesWithCalendar),
@@ -2302,6 +2352,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Adult notice: the profile request", adultNoticeProfileRequest),
     ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
     ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
+    ("Reading Room: a page count out of range clamps", readingPageCountsClamp),
     ("Mix presentation rules", mixPresentationRules),
     ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
     ("Mix clock format", mixClockFormat),

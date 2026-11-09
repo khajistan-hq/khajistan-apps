@@ -40,6 +40,10 @@ struct RoomsTVView: View {
     @Environment(AppModel.self) private var model
     @State private var open: Room?
     @State private var reopened: OpenedLately.Item?
+    /// The film page and the film played straight from Up Next, held here: Up Next empties when a
+    /// film ends, and a shelf holding the cover took the open page with it.
+    @State private var filmPage: Film?
+    @State private var filmDirect: Film?
     /// This device's places and history as last drawn: a page read or a room opened redraws them.
     @State private var places = ReadingPlaces.all
     @State private var opened = OpenedLately.all
@@ -80,7 +84,8 @@ struct RoomsTVView: View {
                 // door starts no download of its own.
                 let stopped = model.films.state == .ready ? FilmPlaces.stopped(model.films.films) : []
                 if !stopped.isEmpty {
-                    FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true)
+                    FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true,
+                              present: { film, play in if play { filmDirect = film } else { filmPage = film } })
                 }
                 openedRow
             }
@@ -95,6 +100,8 @@ struct RoomsTVView: View {
         .fullScreenCover(item: $reopened) { item in
             TVOpenedScreen(item: item)
         }
+        .fullScreenCover(item: $filmPage) { film in TVFilmPage(film: film) }
+        .fullScreenCover(item: $filmDirect) { film in FilmPlayerView(film: film, startsFull: true) }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all, lately = OpenedLately.all
             if now != places { places = now }
@@ -374,7 +381,7 @@ struct TVFeedNote<Value: Sendable>: View {
         switch feed.state {
         case .idle, .loading: TuningLoader("Loading\u{2026}").frame(maxWidth: .infinity)
         case .locked:
-            Text("\(subject) is behind the site password while the archive is in preview. Set it under Account.").kjBody()
+            Text("\(subject) opens to everyone when Khajistan launches. Testers: set the preview password under Account.").kjBody()
         case .failed(let message):
             VStack(alignment: .leading, spacing: 20) {
                 Text(message).kjBody()

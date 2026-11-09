@@ -44,7 +44,7 @@ final class RoomsUITests: XCTestCase {
         let bazaar = app.buttons["tvroom-bazaar"]
         XCTAssertTrue(kjFocus(bazaar, app: app), "the remote reaches the Bazaar")
         XCUIRemote.shared.press(.select)
-        let locked = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'behind the site password'")).firstMatch
+        let locked = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'opens to everyone when Khajistan launches'")).firstMatch
         let shelf = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tvproduct-'")).firstMatch
         let shown = NSPredicate { _, _ in locked.exists || shelf.exists }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: shown, object: nil)], timeout: 30), .completed,

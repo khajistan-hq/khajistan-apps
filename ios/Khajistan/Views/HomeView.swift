@@ -21,9 +21,17 @@ struct HomeView: View {
                 upNext
                 HomeShelves()
                 rooms
+                // The bar's ROOMS door, where the bar has none (a phone): one way in, never two.
+                if !AppTab.inBar.contains(.rooms) {
+                    Button(kicker: "Every room \u{2192}") {
+                        // The list itself, not the room last left open in it.
+                        model.room = nil
+                        model.roomReturn = nil
+                        model.tab = .rooms
+                    }
+                        .accessibilityIdentifier("homeAllRooms")
+                }
                 if !recent.isEmpty { recentBlock }
-                Button(kicker: "Every room \u{2192}") { model.tab = .rooms }
-                    .accessibilityIdentifier("homeAllRooms")
             }
             .padding(.horizontal, KJLayout.inset)
             .kjColumn(KJLayout.wideWidth)
@@ -112,7 +120,14 @@ struct HomeView: View {
     }
 
     /// The last pages opened here, newest first: the device's own history, never a pick.
-    private var recent: [SavedPage] { Array(model.library.history.prefix(3)) }
+    /// A page that is one of the bar's own doors (the Receiver) is left out: the bar already opens it.
+    private var recent: [SavedPage] {
+        Array(model.library.history.filter { page in
+            !(page.url.query == nil && ArchiveDestination.all.contains {
+                $0.path == page.url.path && $0.nativeRoom.flatMap(AppTab.init) != nil
+            })
+        }.prefix(3))
+    }
 
     private var masthead: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -127,15 +142,20 @@ struct HomeView: View {
         .accessibilityLabel("Khajistan, Media of the Middle World")
     }
 
+    /// Whether `model.openKept(url)` keeps this page in the app (a room it draws) or opens the website.
+    static func opensInApp(_ url: URL) -> Bool {
+        url.query == nil && ArchiveDestination.all.contains { $0.path == url.path && $0.nativeRoom != nil }
+    }
+
     private var recentBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             ShelfHeader(title: "Opened lately")
             ForEach(recent) { page in
-                Button { model.open(page.url) } label: {
+                Button { model.openKept(page.url) } label: {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(page.title.isEmpty ? page.url.path : page.title).font(.system(.body, weight: .semibold)).lineLimit(2)
+                        Text(page.shownTitle).font(.system(.body, weight: .semibold)).lineLimit(2)
                         Spacer(minLength: 0)
-                        Image(systemName: "arrow.up.right").accessibilityHidden(true)
+                        Image(systemName: Self.opensInApp(page.url) ? "chevron.right" : "arrow.up.right").accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }

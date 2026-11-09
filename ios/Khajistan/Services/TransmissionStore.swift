@@ -1,7 +1,8 @@
 import Foundation
 import Observation
 
-/// Khajistan Transmission: one station, two channels. A channel is tuned and the clock says what is
+/// Khajistan Transmission: one station, as many channels as the schedule names (seven since
+/// 2026-11-04). A channel is tuned and the clock says what is
 /// on it; a programme is never chosen. The store holds the month's schedule for the station page
 /// and, for the full-screen player, the tuning and the handover from one file to the next.
 @MainActor @Observable
@@ -44,6 +45,8 @@ final class TransmissionStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var offAirWatch: Task<Void, Never>?
     private unowned let auth: AuthStore
+    /// The preview password, for the gated files a player reads beside the schedule (songs.json).
+    var previewPassword: String? { auth.previewPassword }
     private let urlSession: URLSession
 
     private struct Reply {
@@ -61,6 +64,18 @@ final class TransmissionStore {
     }
 
     // MARK: - What the schedule says
+
+    /// The channel numbers the schedule names, lowest first. Empty until a schedule is held.
+    var channelNumbers: [Int] {
+        programming.map(StationClock.channelNumbers) ?? []
+    }
+
+    /// The channel `step` places on from `number`, round the dial: next from the last is the first.
+    /// With no schedule held there is no dial to go round, and `number` stays.
+    func channel(from number: Int, step: Int) -> Int {
+        guard let p = programming else { return number }
+        return StationClock.channel(p, from: number, step: step)
+    }
 
     func channelName(_ number: Int) -> String {
         programming?._meta.channels.first(where: { $0.number == number })?.name ?? "Channel \(number)"
@@ -115,10 +130,21 @@ final class TransmissionStore {
     private func fetchSchedule(month monthKey: String, generation gen: Int) async {
         let url = Transmission.scheduleURL(month: monthKey)
         var reply: Reply
+        #if DEBUG
+        // A DEBUG build can be handed a schedule file on disk (`-kjschedulefile <path>`), as the
+        // Apple TV app can, so the station page can be photographed without the preview password.
+        let file = UserDefaults.standard.string(forKey: "kjschedulefile").flatMap(FileManager.default.contents(atPath:))
+        #else
+        let file: Data? = nil
+        #endif
         do {
             // Without the preview password first: after the launch switch the schedule is
             // public, and a stored password that no longer matches must not stand in the way.
-            reply = try await send(URLRequest(url: url))
+            if let file {
+                reply = Reply(data: file, status: 200)
+            } else {
+                reply = try await send(URLRequest(url: url))
+            }
             if reply.status == 401, let password = auth.previewPassword {
                 guard gen == scheduleGeneration else { return }
                 var request = URLRequest(url: url)
@@ -188,10 +214,6 @@ final class TransmissionStore {
             return
         }
         await tune(generation: gen)
-    }
-
-    func switchChannel() async {
-        await tune(channel: channelNumber == 1 ? 2 : 1)
     }
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.

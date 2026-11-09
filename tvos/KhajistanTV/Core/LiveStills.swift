@@ -58,7 +58,7 @@ struct StillCache<Value> {
 /// channels it wants, nearest the viewer's focus first.
 struct StillPlan {
     static let spacing: TimeInterval = 1.5
-    static let perVisit = 12
+    static let perVisit = 24
 
     private(set) var started = 0
     private(set) var lastStart: TimeInterval?

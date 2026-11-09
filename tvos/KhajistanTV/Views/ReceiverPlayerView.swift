@@ -1,16 +1,26 @@
 import SwiftUI
 import UIKit
 
-/// A receiver channel, full screen. Up and down tune the neighbouring channel in the list the
-/// viewer came from, behind the pigeon (StationClips); play/pause pauses, and pressing it again tunes the
-/// channel afresh, because a live signal paused for a minute is not the live signal any more.
+/// A receiver channel, full screen. Up or down, a click or a swipe, tunes the neighbouring channel
+/// in the list the viewer came from, behind the pigeon (StationClips); left or right opens the guide
+/// (owner, 2026-11-04: "bring back the down and top as channel changing, right and left shows
+/// guide"); play/pause pauses, and pressing it again tunes the channel afresh, because a live
+/// signal paused for a minute is not the live signal any more.
 ///
-/// Live captions: where the channel offers them the strip ends in the Captions control. Right moves
-/// to it and left comes back; Select on it turns captions on or off. Play/Pause, Select on the
-/// picture and up/down are already the player's, and a control the viewer can see in the strip says
-/// what it does, which a hidden gesture would not.
+/// The strip's controls (Captions, Like, Guide): Select on the picture, with the strip showing,
+/// lights the first; left and right then walk them, Select works one, and Back lets go.
 struct ReceiverPlayerView: View {
-    let list: [Channel]
+    /// The channels up and down step through: the shelf the viewer came from, or the region last
+    /// chosen from in the guide.
+    @State private var list: [Channel]
+    let surfChoice: SurfChoice?
+    /// The region `list` is from: the region page the viewer came from, or the region last chosen
+    /// from in the guide. Nil for a shelf that spans regions (News, Music) and for Surf.
+    @State private var listRegion: String?
+    /// The name of a shelf that spans regions, which titles the guide's first page.
+    @State private var listTitle: String?
+    /// The guide's neighbour-region fetches, cancelled when the guide or the player closes.
+    @State private var prefetches: [Task<Void, Never>] = []
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -24,7 +34,7 @@ struct ReceiverPlayerView: View {
     /// The channel the last up or down press asked for, until the wipe has tuned it. A second
     /// press steps on from here, not from the channel still on screen.
     @State private var destination: Channel?
-    @State private var overlayVisible = true
+    @State private var controls = ReceiverControlsVisibility()
     @State private var hideTask: Task<Void, Never>?
     @State private var tuneTask: Task<Void, Never>?
     @State private var tuneIntent = ReceiverTuneIntent()
@@ -35,11 +45,24 @@ struct ReceiverPlayerView: View {
     /// lets go, Select works it. Focus never leaves the surface (see below).
     @State private var armed: Chip?
     @State private var likeNote: String?
+    /// The song on the channel on screen (NowPlaying), or "".
+    @State private var song = ""
     /// The guide, open over the left of the picture: the row the remote has lit, as an index in
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
     @State private var guideRow: Int?
-    private enum Chip { case captions, like, guide }
+    /// The region the guide shows (nil: the shelf the viewer came from, such as Surf's), and its
+    /// channels of the medium playing. Left and right step through the regions.
+    @State private var guideRegion: String?
+    @State private var guideList: [Channel] = []
+    @State private var guideLoading = false
+    @State private var guideLoad: Task<Void, Never>?
+    /// Set as the screen closes: the remote's recognisers stay on the window until the cover's
+    /// animation ends, and a click then must not tune a player already stopped.
+    @State private var leaving = false
+    /// Picture in picture for the two layers (PictureInPicture.swift).
+    @State private var pip = PictureInPicture()
+    private enum Chip { case captions, like, guide, pip }
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -49,8 +72,11 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel]) {
-        self.list = list
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil) {
+        _list = State(initialValue: list)
+        self.surfChoice = surfChoice
+        _listRegion = State(initialValue: regionId)
+        _listTitle = State(initialValue: listTitle)
         _current = State(initialValue: channel)
     }
 
@@ -62,17 +88,17 @@ struct ReceiverPlayerView: View {
             // A picture that does not fill the screen sits on black, whatever the skin (owner,
             // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: playerA.player)
+            PlayerLayerView(player: playerA.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 1 : 0)
-            PlayerLayerView(player: playerB.player)
+            PlayerLayerView(player: playerB.player, onLayer: pip.bind)
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
             // front of the channel's name. The band says live radio; the centre carries the name.
             DancerLayer(controller: controller) {
                 if current.mediaType == "radio" && controller.state == .playing {
-                    RadioNowPlaying(channel: current)
+                    RadioNowPlaying(channel: current, song: song)
                 }
             }
             // The focus target. It draws nothing; its job is to hold focus so the remote's
@@ -80,22 +106,7 @@ struct ReceiverPlayerView: View {
             // has moved to it, and otherwise wakes the overlay. Focus never leaves it: moving
             // focus onto a control as it appears did not take on a real Apple TV, so Select fell
             // through to here and captions could not be turned on (owner, 2026-10-06).
-            Button {
-                if let guideRow {
-                    pick(list[guideRow])
-                    return
-                }
-                switch armed {
-                case .captions:
-                    model.captions.toggle()
-                    hideAfterChoice()
-                case .like:
-                    like()
-                    hideAfterChoice()
-                case .guide: openGuide()
-                case nil: wake()
-                }
-            } label: {
+            Button(action: selectOnSurface) {
                 Color.clear
             }
             .buttonStyle(SurfaceButtonStyle())
@@ -103,43 +114,55 @@ struct ReceiverPlayerView: View {
             .defaultFocus($focus, .surface)
             // The surface is the only thing VoiceOver lands on, so it says what is on and offers
             // what the arrows and the strip do.
-            .accessibilityLabel([(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", "))
-            .accessibilityHint("Swipe up or down to change channel.")
+            .accessibilityLabel(surfaceLabel)
+            // No swipe in the hint: under VoiceOver a swipe moves VoiceOver; the Guide action is below.
+            .accessibilityHint(surfaceHint)
             .accessibilityAction(named: "Next channel") { step(by: 1) }
-            .accessibilityAction(named: "Previous channel") { step(by: -1) }
-            .accessibilityAction(named: model.captions.isOn ? "Captions off" : "Captions on") { model.captions.toggle() }
+            .accessibilityAction(named: previousActionName) { step(by: -1) }
+            .accessibilityAction(named: captionsActionName) { model.captions.toggle(); wake() }
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
+            .accessibilityAction(named: "Picture in picture") { startPictureInPicture() }
             overlay(palette)
             if let guideRow {
-                ReceiverGuide(list: list, current: current, lit: guideRow)
+                ReceiverGuide(list: guideList, current: current, lit: guideRow,
+                              medium: (destination ?? current).mediaType, title: guideTitle,
+                              turns: guideRegions.count > 1, loading: guideLoading)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            CaptionLayer(text: model.captions.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
+            CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
+        // A click and a swipe alike: up and down change channel, left and right open the guide.
+        // Inside the guide up and down walk the rows and left and right turn the region.
         .onMoveCommand { direction in
+            // The screen is closing: a press now must not act on a signal already handed on.
+            guard !leaving else { return }
             wake()
             if let row = guideRow {
+                let count = guideList.count
                 switch direction {
-                case .up: guideRow = (row - 1 + list.count) % list.count
-                case .down: guideRow = (row + 1) % list.count
-                case .left: closeGuide()
+                case .up: if count > 0 { guideRow = (row - 1 + count) % count }
+                case .down: if count > 0 { guideRow = (row + 1) % count }
+                case .left: turnGuide(by: -1)
+                case .right: turnGuide(by: 1)
                 default: break
                 }
                 return
             }
             switch direction {
-            case .up: armed = nil; step(by: -1)
-            case .down: armed = nil; step(by: 1)
+            case .up: click(by: -1)
+            case .down: click(by: 1)
             case .right: moveRight()
             case .left: moveLeft()
-            default: break
+            @unknown default: break
             }
         }
         .onPlayPauseCommand {
+            // A radio handed to the small player, or a picture sent to PiP, keeps playing.
+            guard !leaving else { return }
             switch controller.state {
             case .playing, .tuning:
                 pauseReceiver()
@@ -154,20 +177,36 @@ struct ReceiverPlayerView: View {
                 closeGuide()
                 return
             }
+            let hidesStrip = stripShown && showsPicture && controller.state == .playing && destination == nil && OverlayTiming.hidesItself
             if armed != nil {
                 armed = nil
-                wake()
+                // Over a playing picture the strip goes with it, so two Backs leave, as on Apple's app.
+                if hidesStrip { hideTask?.cancel(); controls.hide() } else { wake() }
+                return
+            }
+            // Then hides the strip over a playing picture, as Apple's info panel goes; the next
+            // Back leaves. Radio has no picture to uncover, so its first Back leaves.
+            if hidesStrip {
+                hideTask?.cancel()
+                controls.hide()
                 return
             }
             // Radio plays on under the screens, in the small player, as Sonos keeps playing
             // while you browse; a picture stops with its screen.
             if current.mediaType == "radio", destination == nil, controller.state == .playing {
-                model.radioAway = RadioAway(channel: current, list: list, controller: controller)
+                model.radioAway = RadioAway(channel: current, list: list, controller: controller, surfChoice: surfChoice,
+                                           listRegion: listRegion, listTitle: listTitle)
             }
             stopEverything()
             dismiss()
         }
         .onChange(of: controller.state) { wake() }
+        .onChange(of: focus) { wake() }
+        // A control cannot stay lit on a strip nobody can see: Select would work it blind.
+        .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
+        .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
             await open()
             #if DEBUG
@@ -183,6 +222,12 @@ struct ReceiverPlayerView: View {
             #endif
         }
         .task { await model.saves.load() }
+        // A new channel starts with no song; the watch asks every 20 s while it stays on screen.
+        .task(id: current.id) {
+            song = ""
+            guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
+            await NowPlaying.watch(current.id, active: { controller.state == .playing }) { song = $0 }
+        }
         .onDisappear { stopEverything() }
     }
 
@@ -194,17 +239,20 @@ struct ReceiverPlayerView: View {
         let shown = destination ?? current
         return VStack(spacing: 0) {
             Spacer(minLength: 0)
-            PlayerStrip(
-                // Radio carries its name in display type on the ground; the strip leaves it out.
-                name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
-                detail: stripDetail,
-                attribution: shown.sourceLine,
-                trailing: stripTrailing,
-                accessory: AnyView(stripControls)
-            )
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
-            .offset(y: stripShown ? 0 : 40)
-            .opacity(stripShown ? 1 : 0)
+            // Remove the hidden strip so its controls also leave accessibility traversal.
+            // Hiding the container alone leaves its custom accessibility actions exposed on tvOS.
+            if stripShown {
+                PlayerStrip(
+                    // Radio carries its name in display type on the ground; the strip leaves it out.
+                    name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
+                    detail: stripDetail,
+                    attribution: shown.sourceLine,
+                    trailing: stripTrailing,
+                    accessory: AnyView(stripControls)
+                )
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
+                .transition(.opacity.combined(with: .offset(y: 40)))
+            }
         }
         .animation(reduceMotion ? .linear(duration: 0.15) : .smooth(duration: 0.35), value: stripShown)
         #if DEBUG
@@ -226,9 +274,44 @@ struct ReceiverPlayerView: View {
         #endif
     }
 
+    /// Select on the picture: tunes the lit guide row, works the lit strip control, or wakes.
+    private func selectOnSurface() {
+        guard !leaving else { return }
+        if let guideRow {
+            if guideList.indices.contains(guideRow) { pick(guideList[guideRow]) }
+            return
+        }
+        switch armed {
+        case .captions:
+            model.captions.toggle()
+            wake()
+        case .like:
+            like()
+            wake()
+        case .guide: openGuide()
+        case .pip: startPictureInPicture()
+        case nil:
+            // With the strip showing, Select lights its first control; left and right
+            // then walk the controls (right on the bare picture opens the guide).
+            if stripShown { if case .failed = controller.state {} else { armed = .captions } }
+            wake()
+        }
+    }
+
+    // Taken out of the body, which grew past what the type checker reads in time.
+    private var surfaceLabel: String {
+        [(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+    private var surfaceHint: String {
+        surfChoice == nil ? "Up or down changes channel, left or right opens the guide."
+            : "Up or down surfs the whole selected atlas without repeats. Left or right opens the guide."
+    }
+    private var previousActionName: String { surfChoice == nil ? "Previous channel" : "Another unvisited channel" }
+    private var captionsActionName: String { model.captions.isEnabled ? "Captions off" : "Captions on" }
+
     /// While a signal tunes the ground already says so; the strip waits for the picture.
     private var stripShown: Bool {
-        guard overlayVisible else { return false }
+        guard controls.isVisible else { return false }
         switch controller.state {
         case .playing, .paused, .failed: return true
         case .idle, .tuning: return false
@@ -239,34 +322,89 @@ struct ReceiverPlayerView: View {
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
-        case .failed(let message): return message + " Press Down for the next channel."
+        case .failed(let message): return message + " Click down for the next channel."
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
             if !model.captions.note.isEmpty { return model.captions.note }
-            return current.place.isEmpty ? nil : current.place
+            // Radio prints its song on the ground; television carries it after the place.
+            let tvSong = current.mediaType == "tv" ? NowPlaying.caption(song: song, mediaType: "tv") : nil
+            let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
+            return line.isEmpty ? nil : line
         }
     }
 
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + "CC · " + model.captions.label), isOn: model.captions.isOn, selected: captionArmed)
+        StripChipStyle.face(Text(rightCue + captionsFace), isOn: model.captions.isEnabled, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
-            .accessibilityAction { model.captions.toggle() }
+            .accessibilityAction { model.captions.toggle(); wake() }
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(captionArmed ? .isSelected : [])
-            .accessibilityValue(model.captions.isOn ? "On" : "Off")
+            .accessibilityValue(model.captions.isEnabled ? "On" : "Off")
+    }
+
+    /// "CC Off" or "CC On · English", with what is left on the account: the chip says plainly
+    /// that Select turns captions off as well as on (owner, 2026-11-04).
+    private var captionsFace: String {
+        let rest = model.captions.label.replacingOccurrences(of: "Captions", with: "")
+        return "CC " + (model.captions.isEnabled ? "On" : "Off") + rest
     }
 
     private var stripControls: some View {
         HStack(spacing: 14) {
             captionsControl
             likeControl
-            if list.count > 1 { guideControl }
+            if guideOffered { guideControl }
+            if pipOffered { pipControl }
         }
+    }
+
+    /// Picture in picture: a picture playing on AVPlayer, with no change under way. Radio has no
+    /// picture, and keeps playing in the small player when its screen closes.
+    private var pipOffered: Bool {
+        PictureInPicture.isSupported && current.mediaType != "radio" && destination == nil && controller.state == .playing
+    }
+
+    private var pipControl: some View {
+        StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("Picture in picture")
+            .accessibilityIdentifier("pipControl")
+            .accessibilityAction { startPictureInPicture() }
+            .accessibilityAddTraits(armed == .pip ? .isSelected : [])
+    }
+
+    /// The picture goes to a corner and the screen closes behind it; the channel stays in
+    /// `model.radioAway`, which keeps it playing as it keeps a radio (one signal at a time: the
+    /// next player to start closes the window). Full screen from the window opens the channel
+    /// again; closing the window stops it.
+    private func startPictureInPicture() {
+        guard pipOffered else { return }
+        armed = nil
+        let player = controller
+        let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
+                             listRegion: listRegion, listTitle: listTitle, pip: pip)
+        pip.onStart = { [pip] in
+            // A channel step between Select and the window opening stopped this player.
+            guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
+            model.radioAway = away
+            stopEverything()
+            dismiss()
+        }
+        pip.onFail = { say($0) }
+        pip.onRestore = { [model] in model.restoring = away }
+        pip.onEnd = { [model] in
+            if model.radioAway?.controller === player { model.silenceRadio() } else { player.stop() }
+        }
+        if !pip.start(player.player) {
+            pip.letGo()
+            say("Picture in picture is not ready yet. Try again in a moment.")
+        }
+        wake()
     }
 
     /// The guide, as a live TV app offers one: every channel of the shelf the viewer came from,
@@ -281,16 +419,88 @@ struct ReceiverPlayerView: View {
     }
 
     private func openGuide() {
-        guard list.count > 1 else { return }
+        guard guideOffered else { return }
         hideTask?.cancel()
+        guideLoad?.cancel()
+        guideLoading = false
+        // The medium playing only, as on every page the guide turns to.
+        let medium = (destination ?? current).mediaType
+        guideList = list.filter { $0.mediaType == medium }
+        // A region page's list is titled by its region; a cross-region shelf and Surf by name.
+        guideRegion = surfChoice == nil && listTitle == nil ? homeRegion : nil
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-            guideRow = list.firstIndex { $0.id == (destination ?? current).id } ?? 0
+            guideRow = guideList.firstIndex { $0.id == (destination ?? current).id } ?? 0
+        }
+        prefetchGuide(around: guideRegion ?? homeRegion)
+    }
+
+    /// Every region with a list, in the atlas the receiver shows (the switch on its front).
+    private var guideRegions: [ReceiverIndex.Region] {
+        guard let index = model.receiver.index else { return [] }
+        let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
+        return index.listedRegions.filter { scope.includes(tier: $0.tier) }
+    }
+
+    private var guideOffered: Bool { list.count > 1 || guideRegions.count > 1 }
+
+    /// The region the shelf came from, or the first of the channel's own.
+    private var homeRegion: String? {
+        let ids = guideRegions.map(\.id)
+        if let listRegion, ids.contains(listRegion) { return listRegion }
+        return (destination ?? current).regionIds?.first { ids.contains($0) }
+    }
+
+    private var guideTitle: String {
+        guard let guideRegion else { return listTitle ?? "Surf" }
+        return guideRegions.first { $0.id == guideRegion }?.label ?? guideRegion
+    }
+
+    /// Left or right in the guide: the neighbouring region's channels of the medium playing. The
+    /// name changes at once; the rows follow when the region's list has loaded (cached after once).
+    private func turnGuide(by delta: Int) {
+        let regions = guideRegions
+        guard regions.count > 1 else { return }
+        let from = regions.firstIndex { $0.id == (guideRegion ?? homeRegion) } ?? (delta > 0 ? -1 : 0)
+        let target = regions[((from + delta) % regions.count + regions.count) % regions.count]
+        let medium = (destination ?? current).mediaType
+        guideRegion = target.id
+        guideList = []
+        guideRow = 0
+        guideLoading = true
+        guideLoad?.cancel()
+        guideLoad = Task {
+            let channels = (try? await model.receiver.channels(regionId: target.id, cameras: medium == "camera")) ?? []
+            guard !Task.isCancelled, guideRow != nil, guideRegion == target.id else { return }
+            guideList = channels.filter { $0.mediaType == medium }
+            guideRow = guideList.firstIndex { $0.id == (destination ?? current).id } ?? 0
+            guideLoading = false
+        }
+        prefetchGuide(around: target.id)
+    }
+
+    private func cancelPrefetches() {
+        prefetches.forEach { $0.cancel() }
+        prefetches = []
+    }
+
+    /// Fetches the regions either side of this one into the store's cache, so the next left or
+    /// right shows its channels at once instead of "Loading".
+    private func prefetchGuide(around regionId: String?) {
+        let regions = guideRegions
+        guard regions.count > 1, let at = regions.firstIndex(where: { $0.id == regionId }) else { return }
+        let cameras = (destination ?? current).mediaType == "camera"
+        cancelPrefetches()
+        for delta in [1, -1] {
+            let id = regions[((at + delta) % regions.count + regions.count) % regions.count].id
+            prefetches.append(Task { _ = try? await model.receiver.channels(regionId: id, cameras: cameras) })
         }
     }
 
     /// Closing lets go of the Guide control too: the viewer has left it, and an armed control
     /// keeps the strip up and takes the next Menu.
     private func closeGuide() {
+        guideLoad?.cancel()
+        cancelPrefetches()
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         wake()
@@ -300,7 +510,13 @@ struct ReceiverPlayerView: View {
     private func pick(_ target: Channel) {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
+        // Up and down then step through the region chosen from. Surf keeps its own walk.
+        if surfChoice == nil, guideList.count > 1 {
+            list = guideList
+            if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
+        }
         guard target.id != (destination ?? current).id else { return wake() }
+        if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()
         changeTask = Task { await change(to: target) }
@@ -322,24 +538,33 @@ struct ReceiverPlayerView: View {
     /// reached with a press right, and nothing else said so (owner, 2026-10-09).
     private var rightCue: String { armed == nil ? "\u{2192} " : "" }
 
+    /// A click up or down, outside the guide: the neighbouring channel. In the guide the same
+    /// click walks the rows instead, through onMoveCommand.
+    private func click(by delta: Int) {
+        guard guideRow == nil, !leaving else { return }
+        wake()
+        armed = nil
+        step(by: delta)
+    }
+
     private func moveRight() {
-        // A failed channel's strip carries no controls, so there is nothing to the right.
-        guard stripShown else { return }
-        hideTask?.cancel()
         switch armed {
-        case nil: armed = .captions
+        case nil: return openGuide()
         case .captions: armed = .like
-        case .like: if list.count > 1 { armed = .guide }
-        case .guide: break
+        case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .guide: if pipOffered { armed = .pip }
+        case .pip: break
         }
     }
 
     private func moveLeft() {
         switch armed {
+        case .pip: armed = guideOffered ? .guide : .like
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
-        case nil: return
+        // Left or right on the picture opens the guide, as a live TV app does (owner, 2026-11-04).
+        case nil: return openGuide()
         }
         if armed == nil { wake() }
     }
@@ -441,6 +666,16 @@ struct ReceiverPlayerView: View {
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
     /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
+        if let surfChoice {
+            guard let target = model.surfHistory.next(for: surfChoice) else {
+                say("You have visited the available channels. Go back to Surf to load the rest of the atlas.")
+                return
+            }
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
+            return
+        }
         let from = destination ?? current
         guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
         let target = list[(position + delta + list.count) % list.count]
@@ -528,7 +763,7 @@ struct ReceiverPlayerView: View {
     }
 
     /// Pause cancels a pending resolver/change immediately; no late attach can resume it.
-    /// Captions release their lease and resume only after another explicit CC press.
+    /// Captions release their lease. Resuming playback restores the saved CC preference.
     private func pauseReceiver() {
         tuneIntent.cancel()
         tuneTask?.cancel()
@@ -547,7 +782,10 @@ struct ReceiverPlayerView: View {
 
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
     private func stopEverything() {
+        leaving = true
         guideRow = nil
+        guideLoad?.cancel()
+        cancelPrefetches()
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()
@@ -560,33 +798,21 @@ struct ReceiverPlayerView: View {
         model.pigeon.clear()
     }
 
-    /// After Captions or Like is chosen the strip lets go of the control and hides 4 seconds
-    /// later (owner, 2026-10-29: captions "shows the timer but doesnt auto hide the bar, can you
-    /// hide it after 4 secs"). It stayed up for good before: an armed control holds the strip.
-    /// A press in those 4 seconds keeps it, as any press does.
-    private func hideAfterChoice() {
-        hideTask?.cancel()
-        guard OverlayTiming.hidesItself else { return }
-        hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.afterChoice)
-            guard !Task.isCancelled, guideRow == nil, controller.state == .playing else { return }
-            armed = nil
-            overlayVisible = false
-        }
+    private var controlsCanHide: Bool {
+        controller.state == .playing && guideRow == nil && focus == .surface && OverlayTiming.hidesItself
     }
 
-    /// Shows the overlay. Once the signal is playing it hides again after 2.6 seconds without
-    /// a press; while tuning, paused or failed it stays, because that is what there is to read.
+    /// Every remote interaction starts a fresh five seconds. An open guide, a system focus
+    /// change, VoiceOver or Switch Control keeps the controls available. CaptionLayer is separate.
     private func wake() {
-        overlayVisible = true
         hideTask?.cancel()
-        guard controller.state == .playing else { return }
-        guard OverlayTiming.hidesItself else { return }
+        controls.wake(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide)
+        guard controlsCanHide else { return }
         hideTask = Task {
-            try? await Task.sleep(for: OverlayTiming.idle)
-            // The strip stays while the viewer is on its Captions control or in the guide.
-            if !Task.isCancelled, armed == nil, guideRow == nil {
-                overlayVisible = false
+            try? await Task.sleep(for: .seconds(ReceiverControlsVisibility.idleSeconds))
+            guard !Task.isCancelled else { return }
+            if controls.expire(at: ProcessInfo.processInfo.systemUptime, canHide: controlsCanHide) {
+                armed = nil
             }
         }
     }
@@ -603,6 +829,12 @@ struct RadioAway: Identifiable {
     let channel: Channel
     let list: [Channel]
     let controller: PlayerController
+    let surfChoice: SurfChoice?
+    /// What the guide titles its first page by when the station is opened again.
+    let listRegion: String?
+    let listTitle: String?
+    /// Set when the channel is a picture playing in the corner window, not a radio in the bar.
+    var pip: PictureInPicture? = nil
     var id: String { channel.id }
 }
 
@@ -614,12 +846,17 @@ struct RadioBar: View {
     let open: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    /// The song while the radio plays on under the screens (NowPlaying).
+    @State private var song = ""
 
     var body: some View {
         let state = away.controller.state
         let playing = state == .playing || state == .tuning
+        // A picture (TV or camera) lands here when full screen from the corner cannot open over a page.
+        let medium = away.channel.mediaType.lowercased()
+        let word = medium == "radio" ? "Radio" : medium == "camera" ? "Camera" : "TV"
         HStack(spacing: 20) {
-            Image(systemName: "radio")
+            Image(systemName: medium == "radio" ? "radio" : medium == "camera" ? "video" : "tv")
                 .font(.system(size: 34, weight: .semibold))
                 .frame(width: 72, height: 72)
                 .background(palette.onBand.opacity(0.16))
@@ -627,7 +864,10 @@ struct RadioBar: View {
             Button(action: open) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(away.channel.name).kjName(30).lineLimit(1)
-                    Text("Radio \u{00B7} " + Self.word(state)).kjSmall().lineLimit(1)
+                    // Where it is from, and the song while one is named (owner, 2026-11-05).
+                    let country = away.channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
+                    let tail = state == .playing && !song.isEmpty ? song : Self.word(state)
+                    Text(([word, country, tail].filter { !$0.isEmpty }).joined(separator: " \u{00B7} ")).kjSmall().lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -663,6 +903,10 @@ struct RadioBar: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("radioBar")
+        .task(id: away.channel.id) {
+            song = ""
+            await NowPlaying.watch(away.channel.id, active: { away.controller.state == .playing }) { song = $0 }
+        }
     }
 
     private static func word(_ state: PlayerController.State) -> String {

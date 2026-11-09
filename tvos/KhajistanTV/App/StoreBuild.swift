@@ -10,11 +10,26 @@ enum StoreBuild {
     static let isOn = false
     #endif
 
+    /// The TestFlight build for the Friends and Owner Preview groups carries Pics/Vids (owner,
+    /// 2026-11-08, asked with the 10-06 reason in front of them: "Include it for Friends"). Set
+    /// only on that archive, beside KJ_APP_STORE; an App Store submission leaves it off, and the
+    /// 10-06 exclusion holds there unchanged.
+    #if KJ_FRIENDS
+    static let carriesPicsVids = true
+    #else
+    static let carriesPicsVids = false
+    #endif
+
     static func includes(_ section: Section) -> Bool {
         // Chat too, until a server-side word filter and a room block exist (owner, 2026-10-06:
-        // App Review 1.2).
-        !(isOn && (section == .picsvids || section == .chat))
+        // App Review 1.2). And the Reading Room (owner, 2026-10-29: the Apple TV store build is
+        // "reciever transmission screening room account").
+        !(isOn && ((section == .picsvids && !carriesPicsVids) || section == .chat || section == .reading))
     }
+
+    /// The Rooms door holds the Screening Room alone in the App Store build: no Bazaar, Madrassa
+    /// or databases (owner, 2026-10-29). The door is then the Screening Room itself.
+    static var roomsAreScreeningOnly: Bool { isOn }
 }
 
 extension Section {

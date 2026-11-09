@@ -101,11 +101,10 @@ final class SkinWalkUITests: XCTestCase {
 
             // Account, with the skin control in focus.
             app = launch(["-kjskin", skin, "-kjtab", "account"])
-            let control = app.buttons["skin-\(skin)"]
+            let control = app.buttons["skin-toggle"]
             XCTAssertTrue(control.waitForExistence(timeout: 20))
             XCTAssertEqual(skinState(app), skin)
-            focus(app.buttons["skin-automatic"], by: .down)
-            focus(control, by: .right, tries: 4)
+            focus(control, by: .down)
             shot("\(skin)-6-account", app)
             app.terminate()
         }
@@ -123,16 +122,16 @@ final class SkinWalkUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 0.5)
             shot("\(skin)-7-transmission-\((page.value as? String) ?? "unknown")", app)
             // The field is drawn by the app over a near-invisible system field; typing into it
-            // must still reach the binding, which is what enables Continue.
-            let proceed = app.buttons["Continue"]
+            // must still reach the binding, which the Open button reports as its value.
+            let proceed = app.buttons["Open"]
             if skin == "day", (page.value as? String) == "Preview password", proceed.exists {
-                XCTAssertFalse(proceed.isEnabled, "Continue waits for a password")
+                XCTAssertEqual((proceed.value as? String)?.lowercased(), "nothing typed", "nothing typed yet")
                 XCUIRemote.shared.press(.select)
                 Thread.sleep(forTimeInterval: 1.5)
                 app.typeText("abc")
                 XCUIRemote.shared.press(.menu)   // closes the keyboard
                 Thread.sleep(forTimeInterval: 1.5)
-                XCTAssertTrue(proceed.isEnabled, "typing reaches the field")
+                XCTAssertEqual((proceed.value as? String)?.lowercased(), "password typed", "typing reaches the field")
                 shot("day-7b-transmission-typed", app)
             }
             app.terminate()
@@ -149,11 +148,12 @@ final class SkinWalkUITests: XCTestCase {
             app = launch(["-kjskin", skin, "-kjtab", "receiver"])
             let toggle = app.buttons["beyondTheAtlas"]
             XCTAssertTrue(toggle.waitForExistence(timeout: 60))
-            // Down into the region strip, then left along it and off its west end to the switch.
+            // Down into the region strip, then Up to the switch, which sits at the foot of the
+            // sidebar right above it since the front became two bands.
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
             XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-            for _ in 0..<40 where !toggle.hasFocus { XCUIRemote.shared.press(.left) }
+            for _ in 0..<6 where !toggle.hasFocus { XCUIRemote.shared.press(.up); kjPause(0.35) }
             XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
             shot("\(skin)-9-atlas-switch-focused", app)
             app.terminate()
@@ -181,15 +181,16 @@ final class SkinWalkUITests: XCTestCase {
         shot("notice-2-overlay-up", app)
     }
 
-    /// Chooses each skin with the remote, checks it is applied at once and kept across a launch,
-    /// and that Automatic hands the skin back to the hour.
+    /// Presses the skin button through every skin, checks each is applied at once, and that the
+    /// last one is kept across a launch.
     func testChoosingASkinAppliesAndPersists() {
         var app = launch(["-kjskin", "day", "-kjtab", "account"])
-        XCTAssertTrue(app.buttons["skin-grove"].waitForExistence(timeout: 20))
+        let toggle = app.buttons["skin-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
         XCTAssertEqual(skinState(app), "day")
-        XCTAssertTrue(focus(app.buttons["skin-automatic"], by: .down), "the skin control must take focus")
-        for skin in ["day", "grove", "smut"] {
-            XCTAssertTrue(focus(app.buttons["skin-\(skin)"], by: .right, tries: 4))
+        XCTAssertTrue(focus(toggle, by: .down), "the skin button must take focus")
+        // One button, as on the website: each press moves Day to Grove to Smut and back to Day.
+        for skin in ["grove", "smut", "day", "grove", "smut"] {
             XCUIRemote.shared.press(.select)
             wait(upTo: 3) { self.skinState(app) == skin }
             XCTAssertEqual(skinState(app), skin, "choosing \(skin) applies it at once")
@@ -199,15 +200,7 @@ final class SkinWalkUITests: XCTestCase {
 
         // No -kjskin: the choice made with the remote is what the app opens on.
         app = launch(["-kjtab", "account"])
-        XCTAssertTrue(app.buttons["skin-smut"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["skin-toggle"].waitForExistence(timeout: 20))
         XCTAssertEqual(skinState(app), "smut", "the choice is kept across a launch")
-
-        XCTAssertTrue(focus(app.buttons["skin-automatic"], by: .down))
-        XCUIRemote.shared.press(.select)
-        let hour = Calendar.current.component(.hour, from: Date())
-        let expected = (8...16).contains(hour) ? "day" : ((5...7).contains(hour) || (17...19).contains(hour) ? "smut" : "grove")
-        wait(upTo: 3) { self.skinState(app) == expected }
-        XCTAssertEqual(skinState(app), expected, "Automatic follows the hour (\(hour):00)")
-        shot("choose-2-automatic", app)
     }
 }

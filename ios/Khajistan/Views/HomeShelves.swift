@@ -23,7 +23,7 @@ struct HomeShelves: View {
             if StoreBuild.includes(.picsVids) { picsVids }
             madrassa
             bazaar
-            if ArchiveDestination.all.first(where: { $0.id == "chat" }).map { StoreBuild.includes($0) } == true { chat }
+            if ArchiveDestination.all.first(where: { $0.id == "chat" }).map({ StoreBuild.includes($0) }) == true { chat }
         }
         // The channel the app opens on comes first: the shelves load a moment after Home.
         .task {
@@ -44,27 +44,22 @@ struct HomeShelves: View {
             await model.bazaarSwap.load()
             await model.madrassaPosts.load()
         }
-        .fullScreenCover(item: $viewing) { PnvViewerView(row: $0) }
+        .fullScreenCover(item: $viewing) { PnvReelsView(start: $0).blocksMacNavigation(model) }
     }
 
     // MARK: - Receiver
 
+    /// One button that does what the Receiver is for: a live channel, at once.
     private var receiver: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            heading("Receiver") { model.tab = .receiver }
-            Button {
-                model.tab = .receiver
-                Task { await model.tuner.surf() }
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Surf").font(.system(.title2, weight: .bold))
-                    Text("A live channel at random, as set under the Receiver's Surf").kjSmall(faint: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
-            .accessibilityIdentifier("home-surf")
+        Button {
+            model.tab = .receiver
+            Task { await model.tuner.surf() }
+        } label: {
+            Label("Play live TV or radio", systemImage: "play.fill")
         }
+        .buttonStyle(SolidActionStyle())
+        .accessibilityHint("Opens the Receiver on a live channel picked at random")
+        .accessibilityIdentifier("home-surf")
     }
 
     // MARK: - Reading Room

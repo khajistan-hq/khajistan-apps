@@ -6,6 +6,10 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     /// The radio from the small player, opened full screen again.
     @State private var reopened: RadioAway?
+    /// The sections visited before this one, so Back goes one step back (owner, 2026-11-04).
+    @State private var visited: [Section] = []
+    /// Set while Back changes the section, so the change is not recorded as a visit.
+    @State private var goingBack = false
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -30,15 +34,29 @@ struct RootView: View {
                 .focusSection()
             // The radio left playing, under every section (owner gap: "while browsing other tabs"),
             // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
-            if let away = model.radioAway {
+            if let away = model.radioAway, away.pip == nil {
                 RadioBar(away: away) {
                     model.silenceRadio()
                     reopened = away
                 }
             }
         }
+        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
+        // as a radio from the small player does.
+        .onChange(of: model.restoring?.id) {
+            guard let away = model.restoring else { return }
+            model.restoring = nil
+            // Not silenced here: the player that opens silences it as it starts. If a page's cover
+            // is open and the screen cannot open over it, the channel plays on in the small bar
+            // rather than stopping with nothing on screen.
+            var bar = away
+            bar.pip = nil
+            model.radioAway = bar
+            reopened = away
+        }
         .fullScreenCover(item: $reopened) { away in
-            ReceiverPlayerView(channel: away.channel, list: away.list)
+            ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
+                               regionId: away.listRegion, listTitle: away.listTitle)
         }
         .background(palette.ground.ignoresSafeArea())
         #if DEBUG
@@ -69,12 +87,35 @@ struct RootView: View {
                 scene.windows.forEach { $0.overrideUserInterfaceStyle = style }
             }
         }
-        // Back (Menu) on any other section returns to the atlas (owner, 2026-10-05: "make sure
-        // it's easy to go back to home on Apple TV where the atlas is"). On the Receiver it does
-        // what tvOS does: a region pops back to the map, and the map leaves the app. The pop is
-        // done here as well, because Back pressed in the top bar never reaches the Receiver's stack.
+        // Back (Menu) goes one step back (owner, 2026-11-04: "Back click goes one step back"): a
+        // region pops back to the map, another section returns to the section visited before it,
+        // and with nothing visited to the atlas (owner, 2026-10-05). The map with nothing behind it
+        // leaves the app, as tvOS does. The pop is done here as well, because Back pressed in the
+        // top bar never reaches the Receiver's stack.
+        .onChange(of: model.section) { old, new in
+            // The atlas is the root: reaching it, by Back or the top bar, ends the history.
+            if new == .receiver { visited = [] } else if !goingBack { visited.append(old) }
+            goingBack = false
+        }
+        // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
+        // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
+        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
+            guard let away = model.radioAway else { return }
+            if away.controller.state == .playing || away.controller.state == .tuning {
+                away.controller.pause()
+            } else {
+                // Play tunes the station afresh, full screen, as the bar's own Play does.
+                model.silenceRadio()
+                reopened = away
+            }
+        })
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
-            if model.section != .receiver { model.section = .receiver } else { model.receiverPath.removeLast() }
+            if model.section == .receiver, !model.receiverPath.isEmpty {
+                model.receiverPath.removeLast()
+            } else {
+                goingBack = true
+                model.section = visited.popLast() ?? .receiver
+            }
         })
     }
 
@@ -85,7 +126,8 @@ struct RootView: View {
         case .transmission: TransmissionView()
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()
-        case .rooms: RoomsTVView()
+        case .rooms:
+            if StoreBuild.roomsAreScreeningOnly { TVScreeningRoom() } else { RoomsTVView() }
         case .chat: ChatView()
         case .account: AccountView()
         }
@@ -96,12 +138,11 @@ private struct BackToAtlas: ViewModifier {
     let active: Bool
     let back: () -> Void
 
+    // Always attached, handing Back to tvOS (nil) when there is nothing to go back to. An if/else
+    // here rebuilt the whole screen on every move to or from the Receiver, and the rebuild lost
+    // the section change it happened on, so the history never recorded leaving the atlas.
     func body(content: Content) -> some View {
-        if active {
-            content.onExitCommand(perform: back)
-        } else {
-            content
-        }
+        content.onExitCommand(perform: active ? back : nil)
     }
 }
 

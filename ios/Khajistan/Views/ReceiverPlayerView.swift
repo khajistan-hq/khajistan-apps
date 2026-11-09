@@ -22,14 +22,19 @@ struct ReceiverPlayerView: View {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player, soundCarriesInBackground: true).ignoresSafeArea()
             if let current, current.mediaType == "radio" && controller.state == .playing {
-                Text(current.name)
-                    .kjDisplay()
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, KJLayout.inset)
+                VStack(spacing: 12) {
+                    Text(current.name)
+                        .kjDisplay()
+                        .multilineTextAlignment(.center)
+                    if let caption = NowPlaying.caption(song: tuner.song, mediaType: "radio") {
+                        Text(caption).kjBody().multilineTextAlignment(.center)
+                    }
+                }
+                .padding(.horizontal, KJLayout.inset)
             }
             VStack {
                 Spacer()
-                ReceiverCaptionPlate(text: model.captions.text, skin: model.skin)
+                ReceiverCaptionPlate(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus)
                     .padding(.horizontal, 16)
                     .padding(.bottom, overlay.visible ? panelHeight + 12 : 24)
             }.allowsHitTesting(false)
@@ -83,6 +88,10 @@ struct ReceiverPlayerView: View {
                     Text(current.name).kjDisplay(KJType.headline, tracking: -0.04).lineLimit(2)
                 }
                 if !current.place.isEmpty { Text(current.place).kjBody() }
+                // Radio carries its song on the ground above; television prints it here.
+                if current.mediaType == "tv", let song = NowPlaying.caption(song: tuner.song, mediaType: "tv") {
+                    Text(song).kjBody().lineLimit(2)
+                }
                 if let attribution = current.sourceLine {
                     Text(attribution).kjSmall(faint: true).lineLimit(3)
                 }
@@ -260,7 +269,7 @@ struct ReceiverDevice: View {
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .overlay { StationClipLayer(clips: model.clips) }
         .overlay(alignment: .bottom) {
-            ReceiverCaptionPlate(text: model.captions.text, skin: model.skin).padding(8)
+            ReceiverCaptionPlate(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus).padding(8)
         }
         .clipped()
         // Only a radio station's name is read here: it is said nowhere else on the page.
@@ -345,10 +354,17 @@ struct ReceiverDevice: View {
             if let shown = visibleState { Kicker(shown).lineLimit(2) }
             if tuner.source == nil {
                 Text(part == .transmission ? "Choose a channel below." : "Choose a channel, or press Surf.").kjName().lineLimit(2)
-            } else if hasPicture {
+            } else if hasPicture || player.state == .tuning {
+                // While it tunes the screen holds the pigeon, so the name is written here.
                 Text(title).kjName().lineLimit(2)
             }
             if let place, !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }
+            if case .live(let channel) = tuner.source, player.state == .playing,
+               let song = NowPlaying.caption(song: tuner.song, mediaType: channel.mediaType) {
+                Text(song).kjSmall(faint: tuner.song.isEmpty).lineLimit(2)
+            } else if case .transmission = tuner.source, !tuner.song.isEmpty {
+                Text("Now playing: " + tuner.song).kjSmall().lineLimit(2)
+            }
             ReceiverCaptionStatus(session: model.captions)
             if let note = tuner.surfNote { Text(note).kjSmall(faint: true) }
         }
@@ -381,6 +397,10 @@ struct ReceiverDevice: View {
 
     private var place: String? {
         if case .live(let channel) = tuner.source { return channel.place }
+        // Transmission: the programme's own country (owner, 2026-11-05).
+        // Not until the store has tuned the channel asked for (see ReceiverTuner.watchHouseSong).
+        if case .transmission(let number) = tuner.source, model.transmission.channelNumber == number,
+           case .onAir(let air) = model.transmission.phase { return air.programme?.country }
         return nil
     }
 
@@ -403,12 +423,12 @@ struct ReceiverDevice: View {
         case .transmission:
             if player.state == .paused { return "Paused" }
             switch store.phase {
-            case .idle, .tuning: return "Channel \(store.channelNumber) \u{00B7} Connecting\u{2026}"
+            case .idle, .tuning: return "\(store.channelName(store.channelNumber)) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in to watch"
             case .offAir(_, let returns):
                 return returns.map { "Off air \u{00B7} returns at \($0) \(StationClock.tzLabel)" } ?? "Off air"
             case .failed(let message): return message
-            case .onAir: return "Channel \(store.channelNumber) \u{00B7} \(playerText)"
+            case .onAir: return "\(store.channelName(store.channelNumber)) \u{00B7} \(playerText)"
             }
         case .live: return playerText
         }

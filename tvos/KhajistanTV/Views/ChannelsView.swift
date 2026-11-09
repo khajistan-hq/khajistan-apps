@@ -63,7 +63,8 @@ struct ChannelsView: View {
                 native: model.receiver.nativeName(for: region.id),
                 channel: heroChannel,
                 preview: preview,
-                still: heroChannel.flatMap { model.stills.image(for: $0.id) }
+                still: heroChannel.flatMap { model.stills.image(for: $0.id) },
+                countries: countries
             )
             .padding(.horizontal, KJLayout.inset)
             .padding(.top, 24)
@@ -99,13 +100,22 @@ struct ChannelsView: View {
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
         }
         .fullScreenCover(item: $playing) { choice in
-            ReceiverPlayerView(channel: choice.channel, list: choice.list)
+            ReceiverPlayerView(channel: choice.channel, list: choice.list, regionId: region.id)
         }
     }
 
     // MARK: - The hero and the stills
 
     private var tvChannels: [Channel] { channels.filter { $0.mediaType == "tv" } }
+
+    /// The region's countries, the one with most channels first.
+    private var countries: [String] {
+        let names = channels.compactMap { $0.country?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0 != "Not yet verified" }
+            .map { $0 == "Borderland / diaspora" ? "Diaspora" : $0 }
+        let tally = Dictionary(names.map { ($0, 1) }, uniquingKeysWith: +)
+        return tally.keys.sorted { (tally[$0]!, $1) > (tally[$1]!, $0) }
+    }
 
     /// Every channel on the page, by id.
     private func channel(_ id: String?) -> Channel? {
@@ -203,6 +213,7 @@ struct ChannelsView: View {
                     }
                 }
                 .buttonStyle(HouseCardStyle())
+                .onPlayPauseCommand { playing = Playing(channel: channel, list: list) }
                 .focused($focusedId, equals: channel.id)
                 // No hold-for-Like menu: tvOS draws its focused item white. Like is on the player strip.
                 .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))

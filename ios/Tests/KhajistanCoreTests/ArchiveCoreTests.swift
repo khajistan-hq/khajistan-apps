@@ -200,7 +200,45 @@ func nativeRoomsAndEveryOtherDoorIsTheWebsite() throws {
     for destination in ArchiveDestination.all {
         try expect(ArchiveURL.isArchive(destination.url))
     }
-    try expect(ArchiveDestination.doors.map(\.door) == ["HOME", "PUBLICATIONS", "READING ROOM", "RECEIVER", "PICS/VIDS", "CHAT", "WALL", "BAZAAR", "ABOUT", "MAP"])
+    try expect(ArchiveDestination.doors.map(\.door) == ["HOME", "PUBLICATIONS", "READING ROOM", "DATABASES", "RECEIVER", "PICS/VIDS", "CHAT", "WALL", "LIFE", "BAZAAR", "ABOUT", "MAP"])
+}
+
+func everyLiveWebsiteNavigationRouteHasADestination() throws {
+    struct Snapshot: Decodable {
+        struct Destination: Decodable { let door: String; let path: String }
+        let destinations: [Destination]
+    }
+    let data = try Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/website-navigation-20261101.json"))
+    let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+    try expect(snapshot.destinations.count == 27)
+    try expect(Set(ArchiveDestination.all.map(\.id)).count == ArchiveDestination.all.count)
+    try expect(Set(ArchiveDestination.all.map(\.path)).count == ArchiveDestination.all.count)
+    for route in snapshot.destinations {
+        let destination = try require(ArchiveDestination.all.first { $0.path == route.path })
+        try expect(destination.door == route.door)
+        // The native film room and the searchable cinema index are distinct destinations.
+        if route.path == "/cinema/" { try expect(destination.nativeRoom == nil) }
+    }
+}
+
+func previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce() throws {
+    func space(_ host: String = "khajistan-archive.pages.dev", port: Int = 443,
+               scheme: String = "https", method: String = NSURLAuthenticationMethodHTTPBasic) -> URLProtectionSpace {
+        URLProtectionSpace(host: host, port: port, protocol: scheme, realm: "Khajistan Archive", authenticationMethod: method)
+    }
+    for host in ArchiveURL.hosts {
+        try expect(ArchiveURL.canAnswerPreviewChallenge(space(host), previousFailures: 0))
+        try expect(!ArchiveURL.canAnswerPreviewChallenge(space(host), previousFailures: 1))
+    }
+    for rejected in [space("example.com"), space("khajistan-archive.pages.dev.evil.org"),
+                     space(port: 8443), space(scheme: "http"), space(method: NSURLAuthenticationMethodServerTrust),
+                     space(method: NSURLAuthenticationMethodHTTPDigest)] {
+        try expect(!ArchiveURL.canAnswerPreviewChallenge(rejected, previousFailures: 0))
+    }
+    let proxy = URLProtectionSpace(proxyHost: "khajistan-archive.pages.dev", port: 443,
+                                   type: NSURLProtectionSpaceHTTPSProxy, realm: "Khajistan Archive",
+                                   authenticationMethod: NSURLAuthenticationMethodHTTPBasic)
+    try expect(!ArchiveURL.canAnswerPreviewChallenge(proxy, previousFailures: 0))
 }
 
 private struct AssertionFailure: Error, CustomStringConvertible {
@@ -223,6 +261,66 @@ func storeBuildLeavesOutTheSitesOwnRoutes() throws {
     for destination in ArchiveDestination.all where ["chat", "wall", "picsnvids"].contains(destination.id) {
         try expect(ArchiveURL.isLeftOutOfStoreBuild(destination.url))
     }
+}
+
+/// These listed URLs keep their store-exclusion verdict through deep-link parsing and
+/// storefront tagging. This checks the URL helpers, not AppModel or WKWebView execution.
+/// Reading Room titles and the other listed allowed routes must remain accessible.
+func storeExclusionSurvivesTheOpenChain() throws {
+    func openLink(_ path: String) throws -> URL {
+        let url = try require(URL(string: path, relativeTo: ArchiveURL.base)?.absoluteURL)
+        var parts = URLComponents()
+        parts.scheme = "khajistan"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
+        return try require(parts.url)
+    }
+    for path in ["/chat", "/chat.html", "/wall/", "/wall/zine/7", "/zines.html", "/canvas?kind=video",
+                 "/board/00000000-0000-0000-0000-000000000002?k=x", "/pics-n-vids", "/browse-archive.html"] {
+        let opened = try require(ArchiveURL.deepLink(try openLink(path)))
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(opened))
+        try expect(ArchiveURL.isLeftOutOfStoreBuild(JoinOffer.tagged(opened)))
+    }
+    for path in ["/reading-room.html", "/reading-room.html?m=filmart", "/screening-room.html", "/open-frequencies"] {
+        let opened = try require(ArchiveURL.deepLink(try openLink(path)))
+        try expect(!ArchiveURL.isLeftOutOfStoreBuild(opened) && !ArchiveURL.isLeftOutOfStoreBuild(JoinOffer.tagged(opened)))
+    }
+}
+
+private func regionChannel(_ id: String, region: String, medium: String = "tv") throws -> Channel {
+    let body: [String: Any] = ["id": id, "name": id, "mediaType": medium,
+                               "regionIds": [region], "streams": [["id": "https://example.invalid/\(id).m3u8"]]]
+    return try JSONDecoder().decode(Channel.self, from: JSONSerialization.data(withJSONObject: body))
+}
+
+func regionTapAfterGlobalSurfNeverEscapesItsRegion() throws {
+    let westA = try regionChannel("west-a", region: "maghreb")
+    let east = try regionChannel("east", region: "indus")
+    let westB = try regionChannel("west-b", region: "maghreb")
+    let globalSurf = [westA, east, westB]
+    let regional = [westA, westB]
+    let first = try require(ReceiverRegionChoice.choose(from: regional, currentID: globalSurf[0].id, medium: .all))
+    try expect(first.channel.id == westB.id)
+    try expect(first.list.map(\.id) == regional.map(\.id))
+    let wrapped = try require(ReceiverRegionChoice.choose(from: regional, currentID: first.channel.id, medium: .all))
+    try expect(wrapped.channel.id == westA.id)
+    try expect(!wrapped.list.contains(where: { $0.regionIds == ["indus"] }))
+}
+
+func regionTapPreservesMediumAndEligibleCatalogue() throws {
+    let tv = try regionChannel("tv", region: "maghreb")
+    let radio = try regionChannel("radio", region: "maghreb", medium: "radio")
+    let radioPick = try require(ReceiverRegionChoice.choose(from: [tv, radio], currentID: tv.id, medium: .radio))
+    try expect(radioPick.channel.id == radio.id && radioPick.list == [radio])
+    let tvPick = try require(ReceiverRegionChoice.choose(from: [tv, radio], currentID: radio.id, medium: .tv))
+    try expect(tvPick.channel.id == tv.id && tvPick.list == [tv])
+    // The region dial has always fallen back to its available medium when the preferred one is absent.
+    let fallback = try require(ReceiverRegionChoice.choose(from: [tv], currentID: nil, medium: .radio))
+    try expect(fallback.channel == tv)
+    try expect(ReceiverRegionChoice.choose(from: [], currentID: tv.id, medium: .all) == nil)
+    // A withdrawn current ID cannot re-enter the list supplied by ReceiverStore's eligibility filter.
+    let changed = try require(ReceiverRegionChoice.choose(from: [radio], currentID: "withdrawn", medium: .all))
+    try expect(changed.channel == radio && changed.list == [radio])
 }
 
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
@@ -270,7 +368,12 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Join is offered on the US storefront only, and fails closed", joinIsOfferedOnTheUSStorefrontOnly),
             ("A page opened off the US storefront carries app=1, once", offPageOffersCarryTheAppFlag),
             ("Native rooms; every other door is the website", nativeRoomsAndEveryOtherDoorIsTheWebsite),
-            ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes)
+            ("Every live website navigation route has a destination", everyLiveWebsiteNavigationRouteHasADestination),
+            ("Preview password only answers the exact HTTPS archive gate once", previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce),
+            ("A region tap after global Surf steps and wraps only within that region", regionTapAfterGlobalSurfNeverEscapesItsRegion),
+            ("Region taps preserve media choices and the eligible catalogue", regionTapPreservesMediumAndEligibleCatalogue),
+            ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes),
+            ("The open chain preserves the store exclusion at every step", storeExclusionSurvivesTheOpenChain)
         ]
         for (name, run) in tests { try run(); print("PASS \(name)") }
         print("\(tests.count) tests passed")

@@ -11,17 +11,26 @@ struct FilmShelf: View {
     /// Up Next: each card says where this device stopped the full film.
     var showsPlaces = false
     @State private var playing: Film?
+    /// Play/Pause on a card: the film itself, not its page, as on Apple's TV app.
+    @State private var playingDirect: Film?
+    /// Set by a screen that holds the film's page itself (the Screening Room): a shelf that
+    /// leaves (Up Next empties when a film ends) must not take the open page with it.
+    var present: ((Film, _ direct: Bool) -> Void)? = nil
 
     var body: some View {
         Shelf(title, count: count) {
             ForEach(films) { film in
                 Button {
                     onChoose()
-                    playing = film
+                    if let present { present(film, false) } else { playing = film }
                 } label: {
                     FilmCard(film: film, place: showsPlaces ? FilmPlaces.position(film.handle) : nil)
                 }
                 .buttonStyle(HouseCardStyle())
+                .onPlayPauseCommand {
+                    onChoose()
+                    if let present { present(film, opensPage) } else if opensPage { playingDirect = film } else { playing = film }
+                }
                 .accessibilityIdentifier(showsPlaces ? "upnext-\(film.handle)" : "film-\(film.handle)")
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }
@@ -29,6 +38,7 @@ struct FilmShelf: View {
         .fullScreenCover(item: $playing) { film in
             if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
+        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
     }
 }
 

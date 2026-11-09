@@ -20,12 +20,12 @@ struct YoursView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                LargeTitle(title: "Library", line: "Account, downloads and saved work")
-                if !places.isEmpty { placesBlock }
+                LargeTitle(title: "You", line: "Your account, your settings and what you saved")
                 savedTitlesBlock
                 accountBlock
                 skinBlock
                 libraryBlock
+                previewBlock
                 footer
             }
             .padding(.horizontal, KJLayout.inset)
@@ -40,53 +40,14 @@ struct YoursView: View {
                 ])
             }
         }
-        .sheet(isPresented: $showSignIn) { SignInView(onSignedIn: {}) }
+        .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: {}) }
         .quickLookPreview($preview)
+        .blocksMacNavigation(model, while: preview != nil)
         .onAppear(perform: readFiles)
-        .onChange(of: model.isShowingBrowser) { if !model.isShowingBrowser { readFiles() } }
+        .onChange(of: model.cover) { if model.cover != .browser { readFiles() } }
     }
 
     // MARK: - Places and saved titles
-
-    /// Where reading and watching stopped, on this device only (never synced), newest first.
-    private var places: [Resume] {
-        model.library.resume.filter { $0.position > 0 || $0.kind == .reading }
-    }
-
-    private var placesBlock: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ShelfHeader(title: "On this device")
-            ForEach(places.prefix(12)) { place in
-                Button { open(place) } label: {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(place.title).font(.system(.body, weight: .semibold)).lineLimit(2)
-                            Text(detail(place)).kjSmall(faint: true)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.system(.subheadline, weight: .bold)).foregroundStyle(palette.faint).accessibilityHidden(true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
-                .accessibilityIdentifier("place-\(place.id)")
-            }
-        }
-    }
-
-    private func detail(_ place: Resume) -> String {
-        switch place.kind {
-        case .reading: return ["Reading Room", place.detail, "p. \(Int(place.position))"].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-        case .film: return "Screening Room \u{00B7} stopped at \(FilmPlayback.clock(place.position))"
-        }
-    }
-
-    private func open(_ place: Resume) {
-        switch place.kind {
-        case .reading: model.open(.reading, at: [.readingTitle(place.ref, resume: true)])
-        case .film: model.open(.screening, at: [.film(place.ref)])
-        }
-    }
 
     /// Reading Room titles saved to the account, the same saves the website's dashboard lists.
     @ViewBuilder
@@ -137,7 +98,7 @@ struct YoursView: View {
 
     private var skinBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ShelfHeader(title: "Skin")
+            ShelfHeader(title: "Colours")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     skinTab("Automatic", pick: nil)
@@ -146,8 +107,8 @@ struct YoursView: View {
             }
             .scrollClipDisabled()
             Text(model.skinPick == nil
-                 ? "Following the sun where you are: \(model.skin.label) now. Day in daylight, Smut at dawn and dusk, Grove at night."
-                 : "\(model.skin.label), until the sky moves to its next band. Then Automatic again, as on the website.")
+                 ? "Changes with the time of day: yellow (Day) in daylight, pink (Smut) at dawn and dusk, green (Grove) at night."
+                 : "\(model.skin.label) for now. It goes back to Automatic at the next dawn, dusk or nightfall.")
                 .kjSmall(faint: true)
                 .accessibilityIdentifier("skinLine")
         }
@@ -172,6 +133,10 @@ struct YoursView: View {
             if model.auth.isSignedIn {
                 let email = model.auth.email ?? ""
                 Text(email.isEmpty ? "Signed in" : email).kjName(KJType.title)
+                if model.auth.pendingFactorId != nil {
+                    Button(kicker: "Finish two-step sign-in") { showSignIn = true }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
+                }
                 Button(kicker: "Sign out") { Task { await model.auth.signOut() } }
                     .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 0, bottom: 10, trailing: 0)))
                 tvSignInButton
@@ -187,7 +152,6 @@ struct YoursView: View {
             }
             webRow("Your Khajistan on the website", path: "dashboard.html", id: "web-dashboard")
             webRow("Your downloads", path: "downloads.html", id: "web-downloads")
-            previewBlock
         }
     }
 
@@ -218,7 +182,7 @@ struct YoursView: View {
         let isSet = model.auth.previewPassword != nil
         VStack(alignment: .leading, spacing: 8) {
             ShelfHeader(title: "Preview password")
-            Text(isSet ? "Set on this device, for Transmission, the Screening Room and the Reading Room shelves until launch." : "Not set. Transmission, the Screening Room and the Reading Room shelves ask for it until launch.")
+            Text(isSet ? "Set on this phone. Transmission, the Screening Room and the Reading Room are open." : "For testers, until Khajistan launches. It opens Transmission, the Screening Room and the Reading Room.")
                 .kjSmall(faint: true)
             if editingPassword {
                 HouseInputField("Password") { SecureField("", text: $draft) }
@@ -247,7 +211,8 @@ struct YoursView: View {
 
     private var libraryBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ShelfHeader(title: "On this device")
+            ShelfHeader(title: "Pages and files")
+            Text("Website pages you saved or opened, and files you downloaded.").kjSmall(faint: true)
             HStack(spacing: 0) {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 0) {
@@ -286,10 +251,10 @@ struct YoursView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(list) { page in
                     HStack(alignment: .firstTextBaseline) {
-                        Button { model.open(page.url) } label: {
+                        Button { model.openKept(page.url) } label: {
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(page.title).kjName().lineLimit(2)
-                                Text(page.url.path == "/" ? "The archive" : page.url.path).kjSmall(faint: true).lineLimit(1)
+                                Text(page.shownTitle).kjName().lineLimit(2)
+                                Text(ArchiveDestination.all.first { $0.path == page.url.path }?.title ?? "On the website").kjSmall(faint: true).lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -362,16 +327,19 @@ struct YoursView: View {
 
 /// Email and password, for Khajistan Transmission: the account the reader has on the website.
 struct SignInView: View {
+    let model: AppModel
     let onSignedIn: () async -> Void
-
-    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var email = ""
     @State private var password = ""
     @State private var busy = false
     @State private var errorLine: String?
+    @State private var code = ""
+    @State private var askCode = false
 
     private var canSubmit: Bool { !email.isEmpty && !password.isEmpty && !busy }
+    /// The password went through and the account has an authenticator.
+    private var codeOwed: Bool { model.auth.isSignedIn && model.auth.pendingFactorId != nil }
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -380,8 +348,28 @@ struct SignInView: View {
                 HStack {
                     Kicker("Khajistan account")
                     Spacer()
-                    Button(kicker: "Cancel") { dismiss() }.buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 0)))
+                    // During the code step the reader is signed in already: Cancel is "Not now".
+                    Button(kicker: "Cancel") { if askCode { Task { await finish() } } else { dismiss() } }
+                        .disabled(askCode && busy).buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 0)))
                 }
+                if askCode {
+                    // kj-mfa.js's words.
+                    Text("Two-step sign-in").kjDisplay()
+                    Text("Enter the six-digit code from your authenticator to finish signing in.").kjBody()
+                    HouseInputField("Six-digit code") {
+                        TextField("", text: $code)
+                            .textContentType(.oneTimeCode)
+                            .keyboardType(.numberPad)
+                            .accessibilityIdentifier("signInCode")
+                    }
+                    Button(kicker: busy ? "Checking\u{2026}" : "Finish signing in") { Task { await submitCode() } }
+                        .buttonStyle(HouseButtonStyle(solid: true))
+                        .disabled(busy)
+                    // Signed in already, at the lower level: everything but staff films works.
+                    Button(kicker: "Not now") { Task { await finish() } }
+                        .buttonStyle(HouseButtonStyle())
+                        .disabled(busy)
+                } else {
                 Text("Sign in").kjDisplay()
                 Text("The email and password you use on the website.").kjBody()
                 HouseInputField("Email") {
@@ -398,6 +386,7 @@ struct SignInView: View {
                 Button(kicker: busy ? "Signing in\u{2026}" : "Sign in") { Task { await submit() } }
                     .buttonStyle(HouseButtonStyle(solid: true))
                     .disabled(!canSubmit)
+                }
                 if let errorLine {
                     Text(errorLine).kjBody()
                         .onAppear { UIAccessibility.post(notification: .announcement, argument: errorLine) }
@@ -410,6 +399,10 @@ struct SignInView: View {
         .foregroundStyle(palette.ink)
         .tint(palette.accent)
         .presentationBackground(palette.ground)
+        .onAppear { if codeOwed { askCode = true } }
+        // No swipe-away mid-step: Cancel or Not now, so the screen that asked still hears it.
+        .interactiveDismissDisabled(askCode)
+        .blocksMacNavigation(model)
         .preferredColorScheme(model.skin == .day ? .light : .dark)
     }
 
@@ -419,9 +412,33 @@ struct SignInView: View {
         errorLine = nil
         do {
             try await model.auth.signIn(email: email.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-            await onSignedIn()
-            dismiss()
+            if codeOwed { askCode = true } else { await finish() }
         } catch {
+            show(error)
+        }
+        busy = false
+    }
+
+    private func finish() async {
+        await onSignedIn()
+        dismiss()
+    }
+
+    private func submitCode() async {
+        busy = true
+        errorLine = nil
+        do {
+            try await model.auth.verifyCode(code)
+            await finish()
+        } catch {
+            code = ""
+            show(error)
+            if !codeOwed { askCode = false }
+        }
+        busy = false
+    }
+
+    private func show(_ error: Error) {
             if let failure = error as? AuthError {
                 switch failure {
                 case .server(let text): errorLine = text
@@ -431,7 +448,5 @@ struct SignInView: View {
             } else {
                 errorLine = error.localizedDescription
             }
-        }
-        busy = false
     }
 }

@@ -31,7 +31,10 @@ struct FilmPlayerView: View {
     @State private var subtitles = RecordedSubtitles()
     @State private var panelHeight: CGFloat = 0
 
-    private static let jump: Double = 30
+    /// Left and right skip ten seconds, as Apple's player does.
+    private static let jump: Double = 10
+    /// The picture holds focus under the overlay, so a press always has somewhere to land.
+    @FocusState private var surfaceFocused: Bool
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -42,21 +45,26 @@ struct FilmPlayerView: View {
             PlayerLayerView(player: controller.player)
                 .ignoresSafeArea()
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: overlayVisible ? panelHeight : 0)
-            if overlayVisible {
-                overlay(palette)
-            } else {
-                // While the picture plays alone, this holds focus so a press wakes the overlay.
+            // Under the overlay in the full film, which has no button of its own there, so focus
+            // always has somewhere to go and Play and Back are not lost. Over the preview the
+            // offer's buttons hold focus, and the surface waits until the overlay hides.
+            if full != nil || !overlayVisible {
                 Button { wake() } label: { Color.clear }
                     .buttonStyle(SurfaceButtonStyle())
+                    .focused($surfaceFocused)
+            }
+            if overlayVisible {
+                overlay(palette)
             }
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
-            let hidden = !overlayVisible
             wake()
-            guard hidden, full != nil else { return }
+            // Left and right skip in the full film whenever the picture holds focus, overlay or
+            // not; on a lit button they move focus instead.
+            guard surfaceFocused, full != nil else { return }
             switch direction {
             case .left: seek(by: -Self.jump)
             case .right: seek(by: Self.jump)
@@ -67,11 +75,21 @@ struct FilmPlayerView: View {
             wake()
             switch controller.state {
             case .playing, .paused: controller.toggle()
-            case .idle, .failed: if full == nil { playPreview() }
+            // Not while connecting: a pause then drops the seek to the place the film resumes from.
             case .tuning: break
+            // After the full film ends, Play plays it again from the start.
+            case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
             }
         }
         .onExitCommand {
+            // Back first hides the overlay over a playing picture, as Apple's player does.
+            // The preview keeps its overlay: the offer is on it. VoiceOver keeps it too.
+            if overlayVisible, full != nil, controller.state == .playing, refusal == nil, !checking, !showSignIn,
+               OverlayTiming.hidesItself {
+                hideTask?.cancel()
+                withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
+                return
+            }
             stopEverything()
             dismiss()
         }
@@ -132,7 +150,10 @@ struct FilmPlayerView: View {
                 .padding(.top, 12)
                 .padding(.leading, -26)
             if let refusal {
-                Text(Films.denyText(film, status: refusal))
+                // A staff account that still owes its authenticator code is refused like a buyer.
+                Text(refusal == 403 && model.auth.pendingFactorId != nil
+                     ? "Finish two-step sign-in, then press Watch the full film again."
+                     : Films.denyText(film, status: refusal))
                     .kjBody()
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("filmNote")
@@ -165,6 +186,15 @@ struct FilmPlayerView: View {
                 }
                 .buttonStyle(HouseButtonStyle())
                 .accessibilityIdentifier("subtitlesControl")
+            }
+            if refusal == 403 && model.auth.pendingFactorId != nil {
+                Button {
+                    showSignIn = true
+                } label: {
+                    Text("Finish two-step sign-in").kjKicker()
+                }
+                .buttonStyle(HouseButtonStyle())
+                .accessibilityIdentifier("filmFinishCode")
             }
             if refusal == 401 && !model.auth.isSignedIn {
                 Button {
@@ -210,9 +240,11 @@ struct FilmPlayerView: View {
         model.silenceRadio()
         if startsFull {
             await watchFull()
-            if full == nil { watchFocused = true }
+            if full == nil { watchFocused = true } else { surfaceFocused = true }
             return
         }
+        // The offer's button first, not the picture under it.
+        watchFocused = true
         guard Films.previewURL(film) != nil else {
             watchFocused = true
             return
@@ -228,7 +260,7 @@ struct FilmPlayerView: View {
     private func playPreview() {
         guard let url = Films.previewURL(film) else { return }
         // A preview that reaches its end stops there; the site does not roll on to another film.
-        controller.onEnded = { controller.stop() }
+        controller.onEnded = { [weak controller] in controller?.stop() }
         controller.attach(url: url, seekTo: nil, title: Films.displayTitle(film), subtitle: "Preview", isLive: false)
     }
 
@@ -248,9 +280,9 @@ struct FilmPlayerView: View {
             full = (kind, expiresAt)
             model.clips.cover(caption: Films.displayTitle(film))
             // Watched to the end: it leaves Up Next.
-            controller.onEnded = { [handle = film.handle] in
+            controller.onEnded = { [weak controller, handle = film.handle] in
                 FilmPlaces.forget(handle)
-                controller.stop()
+                controller?.stop()
             }
             let resume = FilmPlaces.position(film.handle)
             controller.attach(url: url, seekTo: resume,
@@ -258,6 +290,7 @@ struct FilmPlayerView: View {
             await controller.settled()
             model.clips.uncover()
         case .refused(let status):
+            if status == 403 { await model.auth.rearmCode() }
             refusal = status
         }
     }
@@ -311,7 +344,7 @@ struct FilmPlayerView: View {
     private func wake() {
         if !overlayVisible {
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = true }
-            if full == nil { watchFocused = true }
+            if full == nil { watchFocused = true } else { surfaceFocused = true }
         }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }

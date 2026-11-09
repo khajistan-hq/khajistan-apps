@@ -8,6 +8,13 @@ struct SavedPage: Codable, Identifiable, Hashable, Sendable {
     init(url: URL, title: String, date: Date = .now) {
         id = UUID(); self.url = url; self.title = title; self.date = date
     }
+
+    /// The page's title without the website's " — KHAJISTAN" tail, or its path where it has none.
+    var shownTitle: String {
+        let short = title.replacingOccurrences(of: " \u{2014} KHAJISTAN", with: "", options: [.caseInsensitive, .anchored, .backwards])
+            .trimmingCharacters(in: .whitespaces)
+        return short.isEmpty ? url.path : short
+    }
 }
 
 /// Where reading or watching stopped, on this device. It names the object by its stable identity
@@ -55,7 +62,8 @@ struct LibraryState: Codable, Equatable, Sendable {
         bookmarks = try values.decodeIfPresent([SavedPage].self, forKey: .bookmarks) ?? []
         history = try values.decodeIfPresent([SavedPage].self, forKey: .history) ?? []
         resume = try values.decodeIfPresent([Resume].self, forKey: .resume) ?? []
-        pageMarks = try values.decodeIfPresent([PageMark].self, forKey: .pageMarks) ?? []
+        // Trimmed on read too, so a file written before the cap shrinks at the next launch save.
+        pageMarks = Array((try values.decodeIfPresent([PageMark].self, forKey: .pageMarks) ?? []).prefix(Self.maxPageMarks))
     }
 
     /// Keeps the newest place for this object, at the front, and at most forty places.
@@ -75,8 +83,11 @@ struct LibraryState: Codable, Equatable, Sendable {
             pageMarks.remove(at: index)
         } else {
             pageMarks.insert(PageMark(title: title, issue: issue, page: page, date: date), at: 0)
+            // Newest first, so the oldest go. The file is read on the main thread at launch.
+            if pageMarks.count > Self.maxPageMarks { pageMarks.removeLast(pageMarks.count - Self.maxPageMarks) }
         }
     }
+    static let maxPageMarks = 500
 
     /// The marked pages of one issue, in page order.
     func pageMarks(title: String, issue: String) -> [Int] {
@@ -90,6 +101,7 @@ struct LibraryState: Codable, Equatable, Sendable {
         history = Array(history.prefix(100))
     }
 
+    /// Not capped: bookmarks are pages the viewer chose one by one, and dropping one silently would lose it.
     mutating func toggleBookmark(_ url: URL, title: String) {
         guard ArchiveURL.isSaveable(url) else { return }
         if let index = bookmarks.firstIndex(where: { $0.url == url }) { bookmarks.remove(at: index) }

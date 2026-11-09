@@ -177,6 +177,8 @@ func skinColours() throws {
 
 func skinChoiceResolvesAutomaticAndFixed() throws {
     try expectEqual(SkinChoice.allCases.map(\.label), ["Automatic", "Day", "Grove", "Smut"])
+    // The skin button walks the website's order and comes back round.
+    try expectEqual([Skin.day, .grove, .smut].map(\.next), [.grove, .smut, .day])
     // Stored values: absent, empty, the retired skins and a wrong case all read as Automatic.
     for stored in [nil, "", "night", "dawn", "Grove", "auto", "DAY"] as [String?] {
         try expectEqual(SkinChoice(stored: stored), .automatic, String(describing: stored))
@@ -214,12 +216,18 @@ func deepLinksParse() throws {
         ("khajistan://transmission", .transmission),
         ("khajistan://transmission/1", .channel(1)),
         ("khajistan://transmission/2", .channel(2)),
+        ("khajistan://transmission/3", .channel(3)),
+        ("khajistan://transmission/4", .channel(4)),
+        ("khajistan://transmission/5", .channel(5)),
+        ("khajistan://transmission/6", .channel(6)),
+        ("khajistan://transmission/7", .channel(7)),
+        ("khajistan://transmission/99", .channel(99)),   // a number's shape; the schedule says if it exists
     ]
     for (text, link) in cases {
         try expectEqual(DeepLink(url: try require(URL(string: text))), link, text)
     }
     // Every link the extension builds reads back as itself.
-    for link in [DeepLink.receiver, .region("indus"), .region("central-asia"), .transmission, .channel(1), .channel(2)] {
+    for link in [DeepLink.receiver, .region("indus"), .region("central-asia"), .transmission] + (1...7).map(DeepLink.channel) {
         try expectEqual(DeepLink(url: link.url), link, link.url.absoluteString)
     }
     // A region id that is not one does not become a link to it.
@@ -231,13 +239,23 @@ func deepLinksRefuse() throws {
         "https://receiver/indus",                 // another scheme
         "khajistan://",                           // no host
         "khajistan://library",                    // a screen the app does not have
+        // The rooms an App Store build leaves out (App/StoreBuild.swift, owner 2026-10-06) are
+        // Section names here, so a link must never be able to name one: the top bar and the
+        // launch argument both refuse them, and so must the only outside entry, this parse.
+        // The TV takes no open?url= links of the phone's kind either.
+        "khajistan://picsvids",
+        "khajistan://chat",
+        "khajistan://wall",
+        "khajistan://open?url=https://khajistan-archive.pages.dev/chat",
         "khajistan://receiver/indus/extra",       // too deep
         "khajistan://receiver//indus",
         "khajistan://receiver/Indus",             // ids are lower case
         "khajistan://receiver/-indus",
         "khajistan://receiver/in--dus",
         "khajistan://receiver/in%20dus",
-        "khajistan://transmission/3",             // two channels
+        "khajistan://transmission/100",           // past any channel number
+        "khajistan://transmission/07",
+        "khajistan://transmission/-7",
         "khajistan://transmission/0",
         "khajistan://transmission/01",
         "khajistan://transmission/+1",
@@ -682,6 +700,39 @@ func authSessionRefusesAnonymousAndMalformed() throws {
     }
 }
 
+func authTwoStep() throws {
+    func totp(_ json: String) -> String? { AuthAPI.verifiedTOTP(from: Data(json.utf8)) }
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"verified"}]}"#), "f1")
+    // Negative cases: an unverified factor, another kind of factor, no factors, not JSON.
+    try expectEqual(totp(#"{"factors":[{"id":"f1","factor_type":"totp","status":"unverified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"","factor_type":"totp","status":"verified"}]}"#), nil)
+    try expectEqual(totp(#"{"id":"u","email":"a@b.c"}"#), nil)
+    try expectEqual(totp("not json"), nil)
+    try expectEqual(totp(#"{"factors":[{"id":"p1","factor_type":"phone","status":"verified"},{"id":"f2","factor_type":"totp","status":"verified"}]}"#), "f2")
+    try expectEqual(AuthAPI.code("123456"), "123456")
+    try expectEqual(AuthAPI.code(" 123 456 "), "123456")
+    try expectEqual(AuthAPI.code("12345"), nil)
+    try expectEqual(AuthAPI.code("1234567"), nil)
+    try expectEqual(AuthAPI.code("١٢٣٤٥٦"), nil)
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":"c9","type":"totp","expires_at":1}"#.utf8)), "c9")
+    try expectEqual(AuthAPI.challengeId(from: Data(#"{"id":""}"#.utf8)), nil)
+    let verify = AuthAPI.verifyRequest(factorId: "f1", challengeId: "c9", code: "123456", accessToken: "tok")
+    try expectEqual(verify.url?.path, "/auth/v1/factors/f1/verify")
+    try expectEqual(verify.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    try expectEqual(String(data: verify.httpBody ?? Data(), encoding: .utf8), #"{"challenge_id":"c9","code":"123456"}"#)
+    try expectEqual(AuthAPI.userRequest(accessToken: "tok").httpMethod, "GET")
+    // The session's own sign-in level, read off its token: a relaunch re-asks on aal1 only.
+    func aal(_ token: String) -> String? {
+        Session(accessToken: token, refreshToken: "r", expiresAt: Date(), email: nil, userId: "u").assurance
+    }
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMSJ9.sig"), "aal1")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1IiwiYWFsIjoiYWFsMiJ9.sig"), "aal2")
+    try expectEqual(aal("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1In0.sig"), nil)
+    try expectEqual(aal("not-a-jwt"), nil)
+    try expectEqual(aal("a.%%%.c"), nil)
+}
+
 func authErrorMessages() throws {
     func message(_ json: String) -> String? { AuthAPI.errorMessage(from: Data(json.utf8)) }
     try expectEqual(message(#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#), "Invalid login credentials")
@@ -828,6 +879,91 @@ func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil,
                           work_kind: nil, country: nil, description: nil, subtitle_url: nil)
 }
 
+/// What comes next (owner, 2026-11-08: "now playing and up next"), the same small schedule and
+/// the same four answers as the site's tests/station_clock_next_test.mjs, so the Swift and the
+/// JavaScript clocks are held to one rule. And `display_title` decodes.
+func nextProgrammeRule() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"},"s3":{"slug":"s3","name":"Show Three"}},
+     "programme_order":["A","B","C","D"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "B":{"id":"B","title":"b","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600},
+                   "D":{"id":"D","title":"d","display_title":"Title D","seconds":600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1]},
+       {"start":"12:30","start_minute":750,"minutes":30,"show":"s2","programmes":[2]},
+       {"start":"13:00","start_minute":780,"minutes":660,"show":"s3","programmes":[3]}]}}]}
+    """)
+    try expectEqual(p.programmes["A"]?.display_title, "Title A")
+    try expectEqual(p.programmes["B"]?.display_title, nil)
+    // Inside the slot: the roster's next entry, when this one ends.
+    var air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.programmeId, "A")
+    try expectEqual(air.nextProgrammeId, "B")
+    try expectEqual(air.nextProgrammeStart, "12:10")
+    try expectEqual(air.nextInSlot, true)
+    // A programme that overruns the slot hands over to the next slot's first.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 25)))
+    try expectEqual(air.programmeId, "A")
+    try expectEqual(air.nextProgrammeId, "C")
+    try expectEqual(air.nextProgrammeStart, "12:30")
+    try expectEqual(air.nextInSlot, false)
+    // A roster of one does not name itself; the next slot does.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 31)))
+    try expectEqual(air.programmeId, "C")
+    try expectEqual(air.nextProgrammeId, "D")
+    try expectEqual(air.nextProgrammeStart, "13:00")
+    // Past the month's grid there is no next.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 23, 50)))
+    try expectEqual(air.programmeId, "D")
+    try expectEqual(air.nextProgrammeId, nil)
+    // The roster walk at a file's end carries the rule too: B follows A, and B ends at 12:20,
+    // before the slot does, so the roster runs round and A airs again. That is what plays.
+    let following = try require(StationClock.following(
+        try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3))), in: p, at: pkt(2026, 11, 8, 12, 10)))
+    try expectEqual(following.programmeId, "B")
+    try expectEqual(following.nextProgrammeId, "A")
+    try expectEqual(following.nextProgrammeStart, "12:20")
+    // The names, the same four answers as the site's test.
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 31)))
+    try expectEqual(air.nowName, "Title C"); try expectEqual(air.nextName, "Title D"); try expectEqual(air.nextAt, "13:00")
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    // B has no title: walked past, never named by the plate's own show.
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title C"); try expectEqual(air.nextAt, "12:30")
+    air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 13)))
+    try expectEqual(air.nowName, "Show One"); try expectEqual(air.nextName, "Title A")
+    let same = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"}},
+     "programme_order":["A","B","C"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "B":{"id":"B","title":"b","display_title":"Title A","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1]},
+       {"start":"12:30","start_minute":750,"minutes":690,"show":"s2","programmes":[2]}]}}]}
+    """)
+    air = try require(StationClock.onAir(same, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title C"); try expectEqual(air.nextAt, "12:30")
+    // A repeat inside the slot is walked past, keeping the real time (the site's test, same answer).
+    let walk = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"}},
+     "programme_order":["A","A2","D","C"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":600},
+                   "A2":{"id":"A2","title":"a2","display_title":"Title A","seconds":600},
+                   "D":{"id":"D","title":"d","display_title":"Title D","seconds":600},
+                   "C":{"id":"C","title":"c","display_title":"Title C","seconds":3600}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1,2]},
+       {"start":"12:30","start_minute":750,"minutes":690,"show":"s2","programmes":[3]}]}}]}
+    """)
+    air = try require(StationClock.onAir(walk, channel: 1, at: pkt(2026, 11, 8, 12, 3)))
+    try expectEqual(air.nowName, "Title A"); try expectEqual(air.nextName, "Title D"); try expectEqual(air.nextAt, "12:20")
+}
+
 func runSecondsRules() throws {
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, nominal: 10)), 600)
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, cleanStart: 20, cleanEnd: 10)), 570)
@@ -873,6 +1009,47 @@ let syntheticJSON = #"""
 """#
 
 func syntheticSchedule() throws -> Programming { try decode(Programming.self, syntheticJSON) }
+
+/// The seven channels of 2026-11-04, listed out of order: the dial is the numbers, not the
+/// order of the list.
+let sevenChannelJSON = #"""
+{"_meta":{"channels":[
+  {"id":"family","number":4,"name":"Channel 4 · Family Tapes"},
+  {"id":"cinema","number":1,"name":"Channel 1 · Cinema","line":"Feature films"},
+  {"id":"state-tv","number":2,"name":"Channel 2 · State Television"},
+  {"id":"music","number":3,"name":"Channel 3 · Music"},
+  {"id":"mehfil","number":5,"name":"Channel 5 · Mehfil"},
+  {"id":"trailers","number":6,"name":"Channel 6 · Trailers"},
+  {"id":"macabre","number":7,"name":"Channel 7 · Macabre"}]},
+ "shows":{},"programme_order":[],"programmes":{},"days":[]}
+"""#
+
+func channelUpAndDownGoRoundTheDial() throws {
+    let seven = try decode(Programming.self, sevenChannelJSON)
+    try expectEqual(StationClock.channelNumbers(seven), [1, 2, 3, 4, 5, 6, 7])
+    try expectEqual(StationClock.channelId(seven, number: 7), "macabre")
+    // Channel Up seven times from Channel 1 visits every channel once and comes back to 1.
+    var number = 1, visited: [Int] = []
+    for _ in 0..<7 { number = StationClock.channel(seven, from: number, step: 1); visited.append(number) }
+    try expectEqual(visited, [2, 3, 4, 5, 6, 7, 1])
+    // Channel Down goes the other way round, and from 1 it is 7.
+    visited = []
+    for _ in 0..<7 { number = StationClock.channel(seven, from: number, step: -1); visited.append(number) }
+    try expectEqual(visited, [7, 6, 5, 4, 3, 2, 1])
+    try expectEqual(StationClock.channel(seven, from: 7, step: 1), 1)
+    try expectEqual(StationClock.channel(seven, from: 4, step: -1), 3)
+    // A number the schedule does not name goes to the first channel, either way.
+    try expectEqual(StationClock.channel(seven, from: 9, step: 1), 1)
+    try expectEqual(StationClock.channel(seven, from: 0, step: -1), 1)
+    // Two channels toggle, as the app always did; one channel stays where it is.
+    let two = try syntheticSchedule()
+    try expectEqual(StationClock.channel(two, from: 1, step: 1), 2)
+    try expectEqual(StationClock.channel(two, from: 1, step: -1), 2)
+    try expectEqual(StationClock.channel(two, from: 2, step: 1), 1)
+    let one = try decode(Programming.self, #"{"_meta":{"channels":[{"id":"a","number":1,"name":"A"}]},"shows":{},"programme_order":[],"programmes":{},"days":[]}"#)
+    try expectEqual(StationClock.channel(one, from: 1, step: 1), 1)
+    try expectEqual(StationClock.channel(one, from: 1, step: -1), 1)
+}
 
 func programmeWithoutATitleDecodes() throws {
     let p = try syntheticSchedule()
@@ -1097,7 +1274,7 @@ func secondsLeftCountsDownToTheSlotEnd() throws {
 func realUpcomingAgreesWithOnAir() throws {
     let p = try realProgramming("2026-10")
     var checked = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         var t = pkt(2026, 10, 1, 0, 0, 0)
         while t <= pkt(2026, 10, 31, 23, 59, 59) {
@@ -1198,7 +1375,7 @@ func stationClockMatchesTheJS() throws {
     try expect(onAir >= 300, "only \(onAir) on-air cases")
     try expect(offAir >= 6, "only \(offAir) off-air cases")
     try expect(trimmed >= 1, "no case exercises clean_start")
-    try expect(Set(cases.map(\.channel)) == [1, 2], "both channels must be present")
+    try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
 }
@@ -1244,7 +1421,7 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
     let f = try fixture()
     let p = f.programming
     // 10-10 is the first kept day; before 06:00 it is the late strip filed from the same day.
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.startLabel, "06:00")
         try expectEqual(StationClock.onAir(p, channel: number, at: pkt(2026, 10, 10, 6, 0, 0))?.into, 0)
@@ -1427,8 +1604,14 @@ func realProgrammingDecodesInEveryMonth() throws {
         let rawProgrammes = try require(raw["programmes"] as? [String: [String: Any]])
         try expectEqual(p.programmes.count, rawProgrammes.count, month)
         try expectEqual(p.programme_order.count, p.programmes.count, month)
-        try expectEqual(p._meta.channels.map(\.number), [1, 2], month)
-        try expectEqual(p._meta.channels.map(\.id), ["transfers", "audio"], month)
+        // Channels are numbered from 1 with no gap, and each id names one channel. Two before
+        // 2026-11-04, seven after; the app reads whichever the month carries.
+        let numbers = StationClock.channelNumbers(p)
+        try expect(!numbers.isEmpty, "\(month): no channels")
+        try expectEqual(numbers, Array(1...numbers.count), month)
+        let ids = Set(p._meta.channels.map(\.id))
+        try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
+        print("      \(month): channels " + p._meta.channels.sorted { $0.number < $1.number }.map(\.id).joined(separator: ", "))
         for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }
         for (key, value) in p.programmes { try expectEqual(key, value.id, month) }
         // The titleless programmes are exactly the ones whose raw record has no usable title.
@@ -1437,7 +1620,7 @@ func realProgrammingDecodesInEveryMonth() throws {
         var slots = 0
         for day in p.days {
             for (channel, strips) in day.channels {
-                try expect(channel == "transfers" || channel == "audio", "\(month): channel \(channel)")
+                try expect(ids.contains(channel), "\(month): channel \(channel) is not in _meta.channels")
                 for slot in strips {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
@@ -1465,7 +1648,7 @@ func realProgrammingDecodesInEveryMonth() throws {
 func realProgrammingClockInvariants() throws {
     let p = try realProgramming("2026-10")
     var checked = 0, offAir = 0, joinedPastLeader = 0
-    for number in [1, 2] {
+    for number in StationClock.channelNumbers(p) {
         var t = pkt(2026, 10, 1, 0, 0, 0)
         let end = pkt(2026, 10, 31, 23, 59, 59)
         while t <= end {
@@ -1491,7 +1674,7 @@ func realProgrammingClockInvariants() throws {
             if iso != "2026-10-31" { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
         }
     }
-    print("      \(checked) instants across October on both channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
+    print("      \(checked) instants across October on \(StationClock.channelNumbers(p).count) channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
     try expect(checked > 2500, "only \(checked) instants were on air")
 }
 
@@ -3005,7 +3188,11 @@ func liveCaptionLanguageOrder() throws {
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["detectedLanguageName": "Arabic"]), detected: nil), "ar")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Dari"]), detected: nil), "fa")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": "Persian, Dari"]), detected: nil), "fa")
-    try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Egypt"]), detected: nil), "ar")
+    for country in ["Egypt", "Pakistan", "Iran", "Turkey", "Morocco"] {
+        let unknown = try liveChannel(["primaryLanguage": NSNull(), "country": country])
+        try expect(CaptionRules.effectiveLangCode(unknown, detected: nil) == nil, "country is not language evidence")
+        try expect(CaptionRules.eligible(unknown, detected: nil, accuracy: nil), "unknown source stays Auto")
+    }
     try expect(CaptionRules.effectiveLangCode(try liveChannel(["primaryLanguage": NSNull(), "country": "Israel"]), detected: nil) == nil, "two-language countries are held")
     try expectEqual(CaptionRules.effectiveLangCode(try liveChannel(), detected: DetectedLanguage(lang_code: "pa", confirmed_lang_code: nil, needs_confirmation: true)), "pa")
 }
@@ -3088,6 +3275,15 @@ func liveCaptionEnglishGate() throws {
     }
     try expectEqual(CaptionRules.english(for: row("آج کی خبریں", english: "Today's news")), "Today's news")
     try expectEqual(CaptionRules.english(for: row("Hello there", english: nil, lang: "en")), "Hello there", "English speech paints as itself")
+    // The production detector emits "latin"; older rows used ISO "Latn".
+    for script in ["latin", "LATIN", "Latn", "latn"] {
+        let wire = Data(#"{"id":7,"channel_id":"c","text":"Live from London.","english":null,"lang":"en","script":"SCRIPT","final":true}"#.replacingOccurrences(of: "SCRIPT", with: script).utf8)
+        let decoded = try JSONDecoder().decode(CaptionWireRow.self, from: wire)
+        try expect(CaptionRules.isEnglishSource(decoded), "worker script tag \(script) admits English source immediately")
+        try expectEqual(CaptionRules.english(for: decoded), "Live from London.", "English source needs no translation request")
+        try expect(!CaptionRules.isEnglishSource(row("Live أخبار", english: nil, lang: "en", script: script)), "script metadata cannot override actual non-Latin letters")
+        try expect(!CaptionRules.isEnglishSource(row("Bonjour", english: nil, lang: "fr", script: script)), "Latin script alone does not imply English")
+    }
     try expect(CaptionRules.english(for: row("آج کی خبریں", english: nil)) == nil, "no English, nothing to paint")
     try expect(CaptionRules.english(for: row("Hello", english: nil, lang: "en", script: "Arab")) == nil, "a contradictory script tag is not English")
     for bad in ["آج کی news", "As an AI language model, I cannot", "Translation note: unclear", "```json", #"{"english":"x"}"#,
@@ -3135,13 +3331,67 @@ func liveCaptionBlocks() throws {
 
 func liveCaptionClock() throws {
     try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 24), 62, "12 s of lag under a 24 s hold lands 12 s ahead")
-    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1030, mediaNow: 50, behindLive: 24), 50, "a late row shows now")
-    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 0), 50, "radio, no hold: now")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1030, mediaNow: 50, behindLive: 24), 44, "preserve late source time for the scheduler")
+    try expectEqual(CaptionRules.mediaTime(atEpoch: 1000, now: 1012, mediaNow: 50, behindLive: 0), 38, "source time remains visible to the placement policy")
     try expect(CaptionRules.mediaTime(atEpoch: 1000, now: 1181, mediaNow: 0, behindLive: 0) == nil, "skewed by over three minutes")
     try expect(CaptionRules.mediaTime(atEpoch: 1031, now: 1000, mediaNow: 0, behindLive: 0) == nil, "from the future")
     try expectEqual(CaptionRules.holdTarget(lags: [], ceiling: 60), 24)
     try expectEqual(CaptionRules.holdTarget(lags: [10, 12, 30, 31, 33, 35, 36, 37, 38, 40], ceiling: 60), 44)
     try expectEqual(CaptionRules.holdTarget(lags: [50, 55], ceiling: 30), 30, "never past the live window")
+}
+
+func liveCaptionBoundedTimeline() throws {
+    var timeline = CaptionTimeline()
+    timeline.append("Already reading this.", at: 100, spoken: 3, now: 100)
+    let active = try require(timeline.cues.first)
+    for i in 0..<40 {
+        timeline.append("New sentence number \(i) has enough words for a whole plate.", at: 100 + Double(i) * 0.1, spoken: 2, now: 100)
+    }
+    try expectEqual(timeline.cues.first, active, "a reconnect burst cannot cut the active line")
+    try expect(timeline.dropped > 0, "an overload must be accounted for")
+    try expect(timeline.cues.contains { $0.text.contains("number 39") }, "fresh speech wins over stale unseen backlog")
+    for (a, b) in zip(timeline.cues, timeline.cues.dropFirst()) {
+        try expect(a.end <= b.start, "one plate at a time")
+    }
+    try expect((timeline.cues.last?.start ?? 100) <= 110, "40-row burst cannot build 30 seconds of backlog")
+    for cue in timeline.cues { try expect(cue.end - cue.start >= 2, "never flash to catch up") }
+
+    var compact = CaptionTimeline()
+    for i in 0..<5 { compact.append("Word\(i).", at: 110 + Double(i) * 0.2, spoken: 0.2, now: 100) }
+    try expectEqual(compact.cues.count, 1, "short unseen fragments share a two-line plate")
+    try expectEqual(compact.dropped, 0, "compaction preserves every word")
+    try expect(compact.cues[0].text.contains("Word0.") && compact.cues[0].text.contains("Word4."))
+    try expect(compact.cues[0].end <= 113, "five short phrases do not add ten seconds")
+
+    var ordered = CaptionTimeline()
+    ordered.append("Later source sentence.", at: 120, spoken: 2, now: 100)
+    ordered.append("Earlier source sentence.", at: 110, spoken: 2, now: 100)
+    try expectEqual(ordered.cues.map(\.start), [110, 120], "recoveries sort by source time")
+    ordered.advance(to: 121)
+    let current = ordered.cues
+    ordered.append("obsolete recovery", at: 90, spoken: 2, now: 121)
+    try expectEqual(ordered.cues, current, "old rows cannot displace current speech")
+    ordered.append("bad clock", at: .infinity, spoken: 2, now: 121)
+    try expectEqual(ordered.cues, current)
+    ordered.advance(to: 123)
+    try expect(ordered.cues.isEmpty)
+
+    var reordered = CaptionTimeline()
+    reordered.append("First.", at: 110, spoken: 2, now: 100)
+    reordered.append("Third.", at: 112, spoken: 2, now: 100)
+    reordered.append("Second.", at: 111, spoken: 2, now: 100)
+    try expectEqual(reordered.cues.map(\.text).joined(separator: " ").replacingOccurrences(of: "\n", with: " "), "First. Second. Third.", "compaction retains every source anchor for reordering")
+
+    var contained = CaptionTimeline()
+    contained.append("Long thought.", at: 110, spoken: 7, now: 100)
+    contained.append("Yes.", at: 111, spoken: 2, now: 100)
+    try expectEqual(contained.cues.last?.end, 117, "compaction cannot shorten the earlier source span")
+
+    var rewind = CaptionTimeline()
+    rewind.append("At the source moment.", at: 94, spoken: 2, now: 90)
+    try expectEqual(rewind.cues.first?.start, 94, "after 100→90 seek the cue is at 94, never pre-seek 100")
+    try expectEqual(WebVTT.text(at: 93.9, in: rewind.cues), nil)
+    try expectEqual(WebVTT.text(at: 94, in: rewind.cues), "At the source moment.")
 }
 
 func liveCaptionRealtime() throws {
@@ -3156,12 +3406,18 @@ func liveCaptionRealtime() throws {
     try expectEqual(changes["table"] as? String, "live_caption_wire")
     try expectEqual(changes["filter"] as? String, "channel_id=eq.indus-x")
     try expectEqual(changes["event"] as? String, "INSERT")
+    let subscriptions = try require((payload["config"] as? [String: Any])?["postgres_changes"] as? [[String: Any]])
+    try expectEqual(subscriptions.compactMap { $0["event"] as? String }, ["INSERT", "UPDATE"])
+    try expect(subscriptions.allSatisfy { ($0["filter"] as? String) == "channel_id=eq.indus-x" }, "both event types stay scoped to the channel")
 
     let insert = #"{"event":"postgres_changes","payload":{"data":{"type":"INSERT","schema":"public","table":"live_caption_wire","record":{"id":42,"channel_id":"indus-x","text":"خبر","english":"News","lang":"ur","at_epoch":1759666000.5,"spoken_seconds":1.8,"final":true,"sn":12,"program_epoch":null}},"ids":[1]},"ref":null,"topic":"realtime:captions:indus-x"}"#
     guard case .row(let row) = CaptionRealtime.event(insert, channelId: "indus-x") else { throw Failure(description: "an insert must be a row") }
     try expectEqual(row.id, 42)
     try expectEqual(row.english, "News")
     try expectEqual(row.at_epoch, 1759666000.5)
+    let update = insert.replacingOccurrences(of: "\"type\":\"INSERT\"", with: "\"type\":\"UPDATE\"")
+    guard case .row(let updatedRow) = CaptionRealtime.event(update, channelId: "indus-x") else { throw Failure(description: "late-English UPDATE must decode") }
+    try expectEqual(updatedRow.id, row.id)
     try expectEqual(CaptionRealtime.event(insert, channelId: "other"), .other, "another channel's topic")
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"ok","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .subscribed)
     try expectEqual(CaptionRealtime.event(#"{"event":"phx_reply","payload":{"status":"error","response":{}},"ref":"1","topic":"realtime:captions:indus-x"}"#, channelId: "indus-x"), .closed)
@@ -3332,6 +3588,11 @@ func readingFeedRowsDecodeLeniently() throws {
     let rows = try require(RRAPI.titles(fromFeed: data))
     try expectEqual(rows.map(\.collection_slug), ["a", "b"], "a row that does not decode is dropped, not the feed")
     try expectEqual(rows[0].issues?.map(\.pages), [12, 7, 0])
+    // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
+    let wild = try require(RRAPI.titles(fromFeed: Data("""
+    [{"collection_slug":"w","issues":[{"id":"a","pages":1e30},{"id":"b","pages":9223372036854775807},{"id":"c","pages":-4}]}]
+    """.utf8)))
+    try expectEqual(wild[0].issues?.map(\.pages), [RRIssueRow.maxPages, RRIssueRow.maxPages, 0])
     try expect(RRAPI.titles(fromFeed: Data("{}".utf8)) == nil, "an object is not a feed")
 }
 
@@ -4101,12 +4362,64 @@ func stillPlanTakesOneAtATimeSpacedAndCapped() throws {
         now += 0.5
     }
     try expectEqual(taken.count, StillPlan.perVisit)
-    try expectEqual(StillPlan.perVisit, 12)
+    try expectEqual(StillPlan.perVisit, 24)
     try expect(plan3.exhausted)
     try expectEqual(Set(taken).count, taken.count, "no channel twice")
 }
 
+// MARK: - The song on air
+
+func nowPlayingReadsTheRPC() throws {
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"TLC","title":"No Scrubs","heard_at":"x"}]"#.utf8)), "TLC \u{2013} No Scrubs")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":null,"title":"Ya Am Al Shal"}]"#.utf8)), "Ya Am Al Shal")
+    // Nothing on air is "", which clears the line; an unreadable answer is nil, which keeps it.
+    try expectEqual(NowPlaying.parse(Data("[]".utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"[{"artist":"A","title":"  "}]"#.utf8)), "")
+    try expectEqual(NowPlaying.parse(Data(#"{"message":"No API key"}"#.utf8)), nil)
+    try expectEqual(NowPlaying.caption(song: "A \u{2013} B", mediaType: "tv"), "Now playing: A \u{2013} B")
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "radio"), NowPlaying.unavailable)
+    try expectEqual(NowPlaying.caption(song: "", mediaType: "tv"), nil)
+}
+
+func houseSongsFindTheSpan() throws {
+    let file = #"{"_meta":{},"songs":{"tvx-1":[[80,252,"Walid Sarkis","Ya Am Al Shal"],[300,400,"","Untitled"]]}}"#
+    let spans = try require(HouseSongs.decode(Data(file.utf8))?["tvx-1"])
+    try expectEqual(spans.count, 2)
+    try expectEqual(HouseSongs.song(in: spans, at: 80), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    try expectEqual(HouseSongs.song(in: spans, at: 251.9), "Walid Sarkis \u{2013} Ya Am Al Shal")
+    // The end is exclusive, the gap between songs is silent, and a span with no artist is the title.
+    try expectEqual(HouseSongs.song(in: spans, at: 252), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 79.9), "")
+    try expectEqual(HouseSongs.song(in: spans, at: 350), "Untitled")
+    try expectEqual(HouseSongs.decode(Data("not json".utf8)), nil)
+    // A null artist is no artist; a span that does not read is dropped alone, never the file.
+    let rough = #"{"songs":{"a":[[1,9,null,"T"],["x",2,"A","B"]],"b":[[0,5,"A","B"]]}}"#
+    let read = try require(HouseSongs.decode(Data(rough.utf8)))
+    try expectEqual(read["a"], [SongSpan(start: 1, end: 9, artist: "", title: "T")])
+    try expectEqual(read["b"]?.count, 1)
+    let oops = try require(HouseSongs.decode(Data(#"{"songs":{"a":"oops","b":[[0,5,"A","B"]]}}"#.utf8)))
+    try expectEqual(oops["a"], [])
+    try expectEqual(oops["b"]?.count, 1)
+}
+
+func nowPlayingKeepsThroughMisses() throws {
+    var s = NowPlaying.step(kept: "", failures: 0, answer: "A \u{2013} B")
+    try expectEqual(s.kept, "A \u{2013} B")
+    // Two failed calls keep the song; the third drops it.
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "A \u{2013} B")
+    s = NowPlaying.step(kept: s.kept, failures: s.failures, answer: nil)
+    try expectEqual(s.kept, "")
+    // An answer of nothing clears at once, and any answer resets the count.
+    try expectEqual(NowPlaying.step(kept: "X", failures: 0, answer: "").kept, "")
+    try expectEqual(NowPlaying.step(kept: "X", failures: 2, answer: "Y").failures, 0)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
+    ("houseSongsFindTheSpan", houseSongsFindTheSpan),
+    ("nowPlayingKeepsThroughMisses", nowPlayingKeepsThroughMisses),
     ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
     ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
@@ -4140,15 +4453,18 @@ let tests: [(String, () throws -> Void)] = [
     ("Auth session from a body", authSessionFromBody),
     ("Auth refuses anonymous and malformed bodies", authSessionRefusesAnonymousAndMalformed),
     ("Auth error messages", authErrorMessages),
+    ("Auth two-step sign-in", authTwoStep),
     ("Auth requests", authRequests),
     ("Session expiry and storage", sessionExpiryAndStorage),
     ("stationNow agrees with Calendar", stationNowAgreesWithCalendar),
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("Now and next: the next programme", nextProgrammeRule),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
+    ("Channel Up and Down go round all seven channels", channelUpAndDownGoRoundTheDial),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
@@ -4225,6 +4541,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Live captions: the English gate", liveCaptionEnglishGate),
     ("Live captions: blocks of two 42-character lines", liveCaptionBlocks),
     ("Live captions: the clock and the hold", liveCaptionClock),
+    ("Live captions: bounded timeline preserves readable source order", liveCaptionBoundedTimeline),
     ("Live captions: realtime messages", liveCaptionRealtime),
     ("Live captions: real channels and accuracy decode", liveCaptionRealChannelsDecode),
     ("Reading Room: rare, Khajistan, the rest, stamped", readingRoomRanksRareThenKhajistanThenRestThenStamped),
@@ -4264,6 +4581,7 @@ let tests: [(String, () throws -> Void)] = [
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),
+    ("Surf: Any, Music, Film, Local", surfGenreChoices),
     ("Surf: one pool per atlas scope; cameras by region", shuffleScopesAndCameraRegions),
 ]
 
@@ -4419,6 +4737,39 @@ func surfMediumChoices() throws {
     try expectEqual(ShuffleMedium.stored(nil), .all, "a new device surfs everything")
     try expectEqual(ShuffleMedium.stored("tv"), .tv, "a kept choice stays")
     try expectEqual(ShuffleScope.stored("nonsense"), .main)
+}
+
+func surfGenreChoices() throws {
+    func tagged(_ id: String, _ medium: String, _ genres: [String]?) throws -> Channel {
+        var object: [String: Any] = ["id": id, "name": id, "mediaType": medium, "regionIds": ["indus"],
+                                     "streams": [["id": "s1", "format": "hls"]], "activeStreamId": "s1"]
+        if let genres { object["genres"] = genres }
+        return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+    }
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: Data("""
+    {"regions":[{"id":"indus","label":"Indus","kind":"state","tier":"heartbeat"}],
+     "regionFiles":{"indus":"/data/i.json"},"regionCounts":{},"totals":{"channels":0,"live":0,"byMedium":{}}}
+    """.utf8))
+    let list = [try tagged("songs-tv", "tv", ["music"]), try tagged("songs-radio", "radio", ["music", "local"]),
+                try tagged("film", "tv", ["film"]), try tagged("drama", "tv", ["drama"]),
+                try tagged("news", "tv", ["news"]), try tagged("untagged", "radio", nil),
+                try tagged("general", "tv", ["general"])]
+    func pool(_ medium: ShuffleMedium, _ genre: SurfGenre) -> [String] {
+        ShufflePick.pool([(region: "indus", channels: list)], index: index, medium: medium, scope: .main, genre: genre).map(\.id)
+    }
+    try expectEqual(pool(.all, .any).count, list.count, "Any keeps every channel, tagged or not")
+    try expectEqual(pool(.all, .songs), ["songs-tv", "songs-radio"])
+    try expectEqual(pool(.tv, .songs), ["songs-tv"], "genre and medium narrow together")
+    try expectEqual(pool(.all, .film), ["film", "drama"], "Film takes drama too")
+    try expectEqual(pool(.all, .local), ["songs-radio"])
+    try expect(!pool(.all, .songs).contains("untagged") && !pool(.all, .songs).contains("general"),
+               "an untagged or general channel is not a song channel")
+    try expectEqual(SurfGenre.stored(nil), .any, "a new device surfs every genre")
+    try expectEqual(SurfGenre.stored("songs"), .songs)
+    try expectEqual(SurfGenre.allCases.map(\.label), ["Any", "Music", "Film", "Local"],
+                    "the music filter reads Music (owner, 2026-11-04); its stored value stays songs")
+    try expect(SurfChoice(medium: .all, scope: .main) != SurfChoice(medium: .all, scope: .main, genre: .songs),
+               "each genre keeps its own surf history")
 }
 
 func shuffleScopesAndCameraRegions() throws {

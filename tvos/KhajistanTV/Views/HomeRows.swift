@@ -18,13 +18,17 @@ struct HomeRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            transmissionRow
-            readingRow
-            // A section this build leaves out (StoreBuild: Pics/Vids and Chat in the App Store
-            // build) has no shelf on Home either.
+            // Until launch the schedule is locked and its door in the top bar says so; a shelf of
+            // two closed cards here would be a second door to the same closed room.
+            if model.transmission.programming != nil { transmissionRow }
+            // A section this build leaves out (StoreBuild: Pics/Vids, Chat, the Reading Room and
+            // every room but the Screening Room in the App Store build) has no shelf on Home either.
+            if StoreBuild.includes(.reading) { readingRow }
             if StoreBuild.includes(.picsvids) { picsVidsRow }
-            madrassaRow
-            bazaarRow
+            if !StoreBuild.roomsAreScreeningOnly {
+                madrassaRow
+                bazaarRow
+            }
             if StoreBuild.includes(.chat) { chatRow }
         }
         // The channel the app opens on comes first: the shelves load a moment after the front.
@@ -37,10 +41,11 @@ struct HomeRows: View {
                     await model.pnv.loadMore(region: region)
                 }
             }
-            await model.reading.start()
+            if StoreBuild.includes(.reading) { await model.reading.start() }
             if StoreBuild.includes(.chat) { await model.chat.start() }
         }
         .task(id: model.auth.previewPassword) {
+            guard !StoreBuild.roomsAreScreeningOnly else { return }
             try? await Task.sleep(for: .seconds(2))
             await model.bazaar.load()
             await model.bazaarSwap.load()
@@ -59,19 +64,28 @@ struct HomeRows: View {
     private var transmissionRow: some View {
         let store = model.transmission
         let now = TransmissionStore.now()
-        return Shelf("Khajistan Transmission", count: "Two channels") {
-            ForEach([1, 2], id: \.self) { number in
+        return Shelf("Khajistan Transmission") {
+            // Until the schedule says which channels there are, one door to the station page.
+            if store.channelNumbers.isEmpty {
+                Button {
+                    model.open(DeepLink.transmission.url)
+                } label: {
+                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
+                        Kicker("Khajistan Transmission")
+                    }
+                }
+                .buttonStyle(HouseCardStyle())
+                .accessibilityIdentifier("home-transmission-station")
+            }
+            ForEach(store.channelNumbers, id: \.self) { number in
                 let onAir = store.nowOn(channel: number, at: now)
                 Button {
                     model.open(DeepLink.channel(number).url)
                 } label: {
-                    CardPlate(width: 560, height: ChannelCard.height) {
+                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
                         VStack(alignment: .leading, spacing: 10) {
                             Kicker(onAir == nil ? "Channel \(number)" : "Channel \(number) \u{00B7} On air")
-                            if store.programming == nil {
-                                // Without the schedule the channel has no name to give but its number.
-                                Text("The schedule opens with the preview password.").kjSmall(faint: true).lineLimit(2)
-                            } else {
+                            if store.programming != nil {
                                 Text(onAir?.show?.name ?? store.channelName(number))
                                     .kjName()
                                     .lineLimit(2)
@@ -80,6 +94,7 @@ struct HomeRows: View {
                     }
                 }
                 .buttonStyle(HouseCardStyle())
+                .onPlayPauseCommand { model.open(DeepLink.channel(number).url) }
                 .accessibilityIdentifier("home-transmission-\(number)")
             }
         }
@@ -251,12 +266,19 @@ struct HomeSections: View {
             switch door {
             case .picsvids: return StoreBuild.includes(.picsvids)
             case .chat: return StoreBuild.includes(.chat)
-            default: return true
+            case .reading: return StoreBuild.includes(.reading)
+            case .bazaar, .madrassa, .databases: return !StoreBuild.roomsAreScreeningOnly
+            case .screening: return true
             }
         }
     }
 
     var body: some View {
+        // One door left (the App Store build) is the top bar's own Screening Room: no shelf.
+        if doors.count > 1 { shelf }
+    }
+
+    private var shelf: some View {
         Shelf("Khajistan", count: "Every part") {
             ForEach(doors) { door in
                 Button { open(door) } label: {

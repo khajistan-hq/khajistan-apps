@@ -20,16 +20,15 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// From the top bar to the Receiver's region strip: Down onto the front (it lands on its first
-    /// control, Shuffle, or on the strip), then Right off the sidebar onto the strip. Never presses
-    /// Select, so nothing on the way is switched.
+    /// From the top bar (or Surf, where focus rests at launch) to the Receiver's region strip:
+    /// Down through the sidebar until a region card has focus. Since the front became two bands
+    /// (2026-10-29) the strip runs under the sidebar, so the old Right off the sidebar found
+    /// nothing. Never presses Select, so nothing on the way is switched.
     @discardableResult
     func kjFocusStrip(_ app: XCUIApplication) -> Bool {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        let shuffle = app.buttons["shuffle"]
-        for _ in 0..<4 where !focused.exists && !shuffle.hasFocus { XCUIRemote.shared.press(.down); kjPause(0.3) }
-        for _ in 0..<6 where !focused.exists { XCUIRemote.shared.press(.right); kjPause(0.3) }
+        for _ in 0..<10 where !focused.exists { XCUIRemote.shared.press(.down); kjPause(0.35) }
         return focused.exists
     }
 

@@ -23,8 +23,10 @@ final class ArchiveBrowser: NSObject {
     private var observations: [NSKeyValueObservation] = []
     private var downloads: [ObjectIdentifier: URL] = [:]
     private var requestedURL: URL?
+    private let previewPassword: () -> String?
 
-    override init() {
+    init(previewPassword: @escaping () -> String?) {
+        self.previewPassword = previewPassword
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
@@ -95,6 +97,17 @@ final class ArchiveBrowser: NSObject {
 }
 
 extension ArchiveBrowser: WKNavigationDelegate {
+    func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
+                 completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        let space = challenge.protectionSpace
+        guard ArchiveURL.canAnswerPreviewChallenge(space, previousFailures: challenge.previousFailureCount),
+              let password = previewPassword(), !password.isEmpty else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+        completionHandler(.useCredential, URLCredential(user: KJConfig.previewUser, password: password, persistence: .none))
+    }
+
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { error = nil }
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { isStale = false }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -211,7 +224,7 @@ extension ArchiveBrowser: WKDownloadDelegate {
             try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: target.path)
             var values = URLResourceValues(); values.isExcludedFromBackup = true
             try target.setResourceValues(values)
-            downloadMessage = "Saved \(target.lastPathComponent) to Library → Files."
+            downloadMessage = "Saved \(target.lastPathComponent) to You → Files."
         } catch { downloadMessage = "Could not save download: \(error.localizedDescription)" }
         try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
     }

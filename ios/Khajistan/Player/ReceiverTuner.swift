@@ -27,6 +27,9 @@ final class ReceiverTuner {
     private(set) var list: [Channel] = []
     /// The live channels' player. Transmission plays on its store's own.
     let controller = PlayerController()
+    /// The song on the live channel (NowPlaying), or "". Every surface showing the channel reads it.
+    private(set) var song = ""
+    @ObservationIgnored private var songTask: Task<Void, Never>?
 
     let captions: LiveCaptionSession
     @ObservationIgnored private var initialOpenAttempted = false
@@ -34,6 +37,9 @@ final class ReceiverTuner {
     @ObservationIgnored private var openingRevision = 0
     @ObservationIgnored private var surfRevision = 0
     @ObservationIgnored private var intentRevision = 0
+    #if DEBUG
+    @ObservationIgnored private var heldFirstOpeningForTest = false
+    #endif
     @ObservationIgnored private let clips: StationClips
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private let transmission: TransmissionStore
@@ -95,6 +101,15 @@ final class ReceiverTuner {
             }
         }
         #if DEBUG
+        // Hold only the first opening until normal navigation cancels it. A fixed delay can
+        // elapse while XCUITest is attaching, accidentally testing an already-selected channel.
+        if UserDefaults.standard.bool(forKey: "kjholdfirstopening"), !heldFirstOpeningForTest {
+            heldFirstOpeningForTest = true
+            while !Task.isCancelled, isActive(), opening == openingRevision {
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            return
+        }
         // Reproduce a tab change while automatic selection is suspended without depending on network speed.
         let delay = UserDefaults.standard.integer(forKey: "kjopeningdelayms")
         if delay > 0 {
@@ -133,6 +148,26 @@ final class ReceiverTuner {
 
     // MARK: - Choosing
 
+    /// A region tap supersedes pending Surf/region loads, and never walks a previous global pool.
+    func selectRegion(_ id: String, allowSelection: @escaping @MainActor () -> Bool = { true }) async {
+        guard !Task.isCancelled, allowSelection() else { return }
+        initialOpenAttempted = true
+        openingPending = false
+        openingRevision += 1
+        intentRevision += 1
+        let intent = intentRevision
+        surfRevision += 1
+        let search = surfRevision
+        surfing = false
+        let currentID = (destination ?? channel)?.id
+        let medium = ShuffleMedium.stored(UserDefaults.standard.string(forKey: ShuffleMedium.key))
+        guard let eligible = try? await receiver.channels(regionId: id, cameras: false) else { return }
+        // A later Stop, step, play, Surf or region selection owns the receiver now.
+        guard !Task.isCancelled, allowSelection(), intent == intentRevision, search == surfRevision,
+              let choice = ReceiverRegionChoice.choose(from: eligible, currentID: currentID, medium: medium) else { return }
+        play(choice.channel, in: choice.list)
+    }
+
     func play(_ channel: Channel, in list: [Channel]) {
         stop()
         self.list = list
@@ -144,11 +179,12 @@ final class ReceiverTuner {
     func playTransmission(_ number: Int) {
         stop()
         source = .transmission(number)
+        watchHouseSong()
         transmission.player.state = .tuning
         changeTask = Task { await openTransmission(number) }
     }
 
-    /// The next channel (1) or the one before (-1). Transmission has two, so either way switches.
+    /// The next channel (1) or the one before (-1), round the list or the dial.
     func step(_ delta: Int) {
         intentRevision += 1
         switch source {
@@ -161,7 +197,7 @@ final class ReceiverTuner {
             changeTask = Task { await change(to: target) }
         case .transmission:
             changeTask?.cancel()
-            changeTask = Task { await switchTransmission() }
+            changeTask = Task { await switchTransmission(step: delta) }
         case nil:
             return
         }
@@ -234,7 +270,9 @@ final class ReceiverTuner {
         }
         let defaults = UserDefaults.standard
         let pool = await ShufflePick.surf(index, medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
-                                          scope: .stored(defaults.string(forKey: ShuffleScope.key))) { region in
+                                          // Surf follows the Beyond the atlas switch, as on the Apple TV
+                                          // (owner, 2026-10-29: one control for both).
+                                          scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main) { region in
             try? await self.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
@@ -264,6 +302,8 @@ final class ReceiverTuner {
         captions.detach()
         tuneTask?.cancel()
         changeTask?.cancel()
+        songTask?.cancel()
+        song = ""
         controller.stop()
         if case .transmission = source { transmission.stop() }
         clips.clear()
@@ -275,6 +315,8 @@ final class ReceiverTuner {
     /// The pigeon covers a buffer mid-broadcast too, as on the site. Only outside a change, and only
     /// for a stall that lasts: a blip must not flash the bird.
     func playerStateChanged(from old: PlayerController.State, to new: PlayerController.State) {
+        // Before the change guard: the first play after a retune is what brings carried CC back.
+        if new == .playing, source != nil { captions.playbackResumed() }
         guard !changing, source != nil else { return }
         if old == .playing && new == .tuning, Date().timeIntervalSince(settledAt) > 3 {
             Task {
@@ -318,12 +360,24 @@ final class ReceiverTuner {
     // MARK: - Live channels
 
     private func tune(_ target: Channel) {
-        captions.detach()
+        captions.detach(keepingCarry: true)
         tuneTask?.cancel()
         controller.stop()
         controller.state = .tuning
         source = .live(target)
         captions.attach(target, player: controller)
+        songTask?.cancel()
+        song = ""
+        if target.mediaType == "radio" || target.mediaType == "tv" {
+            songTask = Task { [weak self] in
+                // Not asked while paused or tuning: the worker would listen for nobody.
+                await NowPlaying.watch(target.id, active: { self?.controller.state == .playing }) { line in
+                    // Left for Transmission or another channel: the line is not this one's.
+                    guard let self else { return }
+                    self.song = self.channel?.id == target.id ? line : ""
+                }
+            }
+        }
         tuneTask = Task {
             do {
                 let url = try await receiver.resolve(target)
@@ -332,6 +386,39 @@ final class ReceiverTuner {
             } catch {
                 if Task.isCancelled { return }
                 controller.state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// Khajistan Transmission's song: the span of songs.json the player's position is in, checked
+    /// each second while the receiver stays on Transmission (the website reads `timeupdate`).
+    private func watchHouseSong() {
+        songTask?.cancel()
+        song = ""
+        songTask = Task { [weak self] in
+            var heldFor = "", spans: [SongSpan] = []
+            var retryAt = Date.distantPast
+            while !Task.isCancelled {
+                guard let self, case .transmission(let number) = self.source else { return }
+                var line = ""
+                // Until the store has tuned the channel asked for, its phase is the programme
+                // being left, whose song must not print under the new channel's name.
+                if self.transmission.channelNumber == number, case .onAir(let air) = self.transmission.phase {
+                    // A programme with no spans yet (a failed or gated read) is asked again each
+                    // minute, as tvOS does.
+                    if air.programmeId != heldFor || (spans.isEmpty && Date() >= retryAt) {
+                        heldFor = air.programmeId
+                        spans = await HouseSongs.shared.spans(for: air.programmeId, previewPassword: self.transmission.previewPassword)
+                        retryAt = Date().addingTimeInterval(60)
+                        // Stopped or retuned while the file was on its way: this line is not theirs.
+                        guard !Task.isCancelled, case .transmission(number) = self.source,
+                              self.transmission.channelNumber == number else { return }
+                    }
+                    let time = self.transmission.player.player.currentTime().seconds
+                    if time.isFinite { line = HouseSongs.song(in: spans, at: time) }
+                }
+                if line != self.song { self.song = line }
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
@@ -387,12 +474,17 @@ final class ReceiverTuner {
         settledAt = Date()
     }
 
-    private func switchTransmission() async {
+    private func switchTransmission(step: Int) async {
         guard !Task.isCancelled else { return }
         let mine = begin()
         defer { if run == mine { changing = false } }
-        let next = transmission.channelNumber == 1 ? 2 : 1
+        // From the channel this tuner last asked for, not the one the store has reached: a second
+        // swipe lands before the first has tuned, and stepping from the store would lose it.
+        let from: Int
+        if case .transmission(let number) = source { from = number } else { from = transmission.channelNumber }
+        let next = transmission.channel(from: from, step: step)
         source = .transmission(next)
+        watchHouseSong()
         async let quiet: Void = transmission.player.fadeOut()
         clips.cover(caption: transmission.channelName(next), animated: false)
         await quiet

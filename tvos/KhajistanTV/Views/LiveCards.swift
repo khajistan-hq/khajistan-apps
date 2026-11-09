@@ -95,7 +95,12 @@ struct ChannelHero: View {
     let channel: Channel?
     let preview: LivePreview
     let still: UIImage?
+    /// The countries the region's channels come from, most channels first.
+    var countries: [String] = []
     @Environment(\.palette) private var palette
+    /// The picture has kept the viewer waiting past `slowAfter` with nothing to show.
+    @State private var slow = false
+    private static let slowAfter: Duration = .seconds(8)
 
     private var playing: Bool { preview.live && preview.channelId == channel?.id }
 
@@ -109,6 +114,10 @@ struct ChannelHero: View {
                     if let native {
                         Text(native).kjDisplay(KJType.name * 1.4, tracking: 0).foregroundStyle(palette.faint).lineLimit(1)
                     }
+                }
+                if !countries.isEmpty {
+                    Text(countries.prefix(5).joined(separator: " \u{00B7} ")).kjBody().lineLimit(1)
+                        .accessibilityIdentifier("regionCountries")
                 }
                 Spacer(minLength: 24)
                 if let channel { about(channel) }
@@ -136,6 +145,9 @@ struct ChannelHero: View {
             if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
                 Text(broadcaster).kjSmall(faint: true).lineLimit(1)
             }
+            // What the remote does here, for anyone new to it.
+            Text("Press to watch full screen \u{00B7} Back for the map").kjSmall(faint: true).lineLimit(1)
+                .accessibilityHidden(true)
         }
     }
 
@@ -158,7 +170,14 @@ struct ChannelHero: View {
                     Image(uiImage: still).resizable().scaledToFit()
                 } else {
                     palette.lift
-                    if channel != nil { Kicker("Tuning\u{2026}") }
+                    if channel != nil {
+                        VStack(spacing: 12) {
+                            Kicker("Tuning\u{2026}")
+                            // A preview that never arrives is no reason to stop: the full-screen
+                            // player tries harder, and another channel is one press away.
+                            if slow { Text("Still tuning. Press to watch full screen, or try another channel.").kjSmall().multilineTextAlignment(.center).padding(.horizontal, 40) }
+                        }
+                    }
                 }
                 // A moving picture sits on black (DESIGN.md, Letterbox).
                 PlayerLayerView(player: preview.player)
@@ -169,6 +188,11 @@ struct ChannelHero: View {
             .accessibilityElement()
             .accessibilityLabel(playing ? "Live picture" : (still == nil ? "Tuning" : "Still picture"))
             .accessibilityIdentifier("heroPicture")
+            .task(id: channel?.id) {
+                slow = false
+                try? await Task.sleep(for: Self.slowAfter)
+                if !Task.isCancelled { slow = true }
+            }
             .accessibilityValue(playing ? "live" : (still == nil ? "waiting" : "still"))
         }
     }
@@ -181,9 +205,32 @@ struct PictureCard: View {
     static let width: CGFloat = 420
     static let height: CGFloat = 236
 
-    let channel: Channel
+    /// The channel whose place and heart head the card; nil for a card that names a region.
+    let channel: Channel?
+    let title: String
     let still: UIImage?
     var liked = false
+    var width: CGFloat = Self.width
+    var height: CGFloat = Self.height
+    /// Drawn on the plate while no still has come, so the card says what it holds at a glance.
+    var symbol: String?
+
+    init(channel: Channel, still: UIImage?, liked: Bool = false) {
+        self.channel = channel
+        self.title = channel.name
+        self.still = still
+        self.liked = liked
+    }
+
+    /// A region's card on the Receiver's front: its name over a still of one of its channels.
+    init(title: String, still: UIImage?, width: CGFloat, height: CGFloat, symbol: String? = nil) {
+        self.channel = nil
+        self.title = title
+        self.still = still
+        self.width = width
+        self.height = height
+        self.symbol = symbol
+    }
     @Environment(\.isFocused) private var isFocused
     @Environment(\.palette) private var palette
 
@@ -194,7 +241,7 @@ struct PictureCard: View {
             if let still {
                 Color.black
                 Image(uiImage: still).resizable().scaledToFit()
-                    .frame(width: Self.width, height: Self.height)
+                    .frame(width: width, height: height)
                 LinearGradient(stops: [
                     .init(color: plate.opacity(0), location: 0.3),
                     .init(color: plate.opacity(0.88), location: 0.72),
@@ -202,20 +249,27 @@ struct PictureCard: View {
                 ], startPoint: .top, endPoint: .bottom)
             } else {
                 plate
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 44, weight: .semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                        .padding(24)
+                        .accessibilityHidden(true)
+                }
             }
             VStack(alignment: .leading, spacing: 6) {
-                CardKicker(channel: channel, liked: liked)
-                Text(channel.name)
+                if let channel { CardKicker(channel: channel, liked: liked) }
+                Text(title)
                     .kjName(still == nil ? 40 : KJType.name)
                     .lineLimit(2)
             }
             .padding(24)
         }
-        .frame(width: Self.width, height: Self.height)
+        .frame(width: width, height: height)
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
         .kjCardArt()
-        .animation(.easeOut(duration: 0.15), value: isFocused)
+        // No fade on focus: halfway between the plates the lettering reads on neither.
         .animation(.easeOut(duration: 0.35), value: still != nil)
     }
 }

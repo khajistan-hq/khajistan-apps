@@ -17,10 +17,15 @@ struct SearchView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                LargeTitle(title: "Search", line: "Every room the app draws, and the website")
+                LargeTitle(title: "Search", line: "Find anything in Khajistan")
                 field
-                if settled.count >= 2 { results }
-                websiteRow
+                if settled.count >= 2 {
+                    results
+                } else if trimmed.isEmpty {
+                    Text("Type the name of a magazine, a film, a place or a person. Try \u{201C}Lahore\u{201D}.")
+                        .kjBody().foregroundStyle(palette.faint)
+                }
+                if !trimmed.isEmpty { websiteRow }
             }
             .padding(.horizontal, KJLayout.inset)
             .kjColumn()
@@ -117,7 +122,7 @@ struct SearchView: View {
             }
         }
         if !notSearched.isEmpty {
-            Text("Not searched here: \(notSearched.joined(separator: ", ")) \u{2014} behind the site password on this device, or not yet loaded.")
+            Text("Not searched here: \(notSearched.joined(separator: ", ")) \u{2014} open at launch, or not loaded yet.")
                 .kjSmall(faint: true)
                 .accessibilityIdentifier("searchNotSearched")
         }
@@ -173,8 +178,8 @@ struct SearchView: View {
             Button(action: searchWebsite) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(trimmed.isEmpty ? "The website's index" : "\u{201C}\(trimmed)\u{201D} on the website").kjName()
-                        Text("Every room, in the website's own search").kjSmall(faint: true)
+                        Text("\u{201C}\(trimmed)\u{201D} on the website").kjName()
+                        Text("Search the whole website too").kjSmall(faint: true)
                     }
                     Spacer(minLength: 0)
                     Text("\u{2197}").kjName().accessibilityHidden(true)

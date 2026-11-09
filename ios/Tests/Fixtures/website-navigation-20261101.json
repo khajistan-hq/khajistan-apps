@@ -1,0 +1,141 @@
+{
+  "source": "https://khajistan-archive.pages.dev/scripts/kj-chrome.js",
+  "checkedAt": "2026-11-01T23:39:14Z",
+  "destinations": [
+    {
+      "door": "PUBLICATIONS",
+      "title": "PUBLICATIONS",
+      "path": "/publications.html"
+    },
+    {
+      "door": "READING ROOM",
+      "title": "READING ROOM",
+      "path": "/reading-room.html"
+    },
+    {
+      "door": "READING ROOM",
+      "title": "Madrassa",
+      "path": "/madrassa.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "DATABASES",
+      "path": "/databases.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Pakistani Music Database",
+      "path": "/pakistan-music-index.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "National Broadcast Register",
+      "path": "/national-broadcasts.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Logos of the Middle World",
+      "path": "/logos.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Cinema of the Middle World",
+      "path": "/cinema/"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Television of the Middle World",
+      "path": "/television/"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Arabic Music Index",
+      "path": "/arabic-music-index.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Persian Music Index",
+      "path": "/persian-music-index.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "Film Censor Certificates",
+      "path": "/censor-certificates.html"
+    },
+    {
+      "door": "DATABASES",
+      "title": "American War Propaganda Leaflets",
+      "path": "/leaflets.html"
+    },
+    {
+      "door": "RECEIVER",
+      "title": "RECEIVER",
+      "path": "/open-frequencies"
+    },
+    {
+      "door": "RECEIVER",
+      "title": "Screening Room",
+      "path": "/screening-room.html"
+    },
+    {
+      "door": "RECEIVER",
+      "title": "Listening Desk",
+      "path": "/listening-desk.html"
+    },
+    {
+      "door": "PICS/VIDS",
+      "title": "PICS/VIDS",
+      "path": "/browse-archive.html"
+    },
+    {
+      "door": "CHAT",
+      "title": "CHAT",
+      "path": "/chat"
+    },
+    {
+      "door": "WALL",
+      "title": "WALL",
+      "path": "/wall/"
+    },
+    {
+      "door": "LIFE",
+      "title": "LIFE",
+      "path": "/life"
+    },
+    {
+      "door": "BAZAAR",
+      "title": "BAZAAR",
+      "path": "/bazaar.html"
+    },
+    {
+      "door": "BAZAAR",
+      "title": "Rare Books & Ephemera",
+      "path": "/toshakhana.html"
+    },
+    {
+      "door": "BAZAAR",
+      "title": "Downloads",
+      "path": "/digital/"
+    },
+    {
+      "door": "ABOUT",
+      "title": "ABOUT",
+      "path": "/about.html"
+    },
+    {
+      "door": "ABOUT",
+      "title": "Your Khajistan",
+      "path": "/dashboard.html"
+    },
+    {
+      "door": "ABOUT",
+      "title": "Human Desk",
+      "path": "/human-desk.html"
+    },
+    {
+      "door": "ABOUT",
+      "title": "Send Us Your Records",
+      "path": "/submit.html"
+    }
+  ]
+}

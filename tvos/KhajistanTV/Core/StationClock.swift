@@ -17,6 +17,19 @@ struct OnAir: Equatable, Sendable {
     let endLabel: String
     let nextShow: Programming.Show?
     let nextStart: String?
+    /// The programme after this one and when it starts (owner, 2026-11-08: "now playing and up
+    /// next"), as `KJStation.onAir` gives them on the site. Nil past the month's grid.
+    var nextProgrammeId: String? = nil
+    var nextProgramme: Programming.Programme? = nil
+    var nextProgrammeStart: String? = nil
+    /// True when the next programme belongs to this slot's show, false when the next slot opens.
+    var nextInSlot = false
+    /// What every surface prints, decided once (kj-station-clock.js computes the same three):
+    /// Now is the programme's clean title, else its show; Up next is the programme at `nextAt` by
+    /// its clean title, else by its show, and never Now itself.
+    var nowName: String? = nil
+    var nextName: String? = nil
+    var nextAt: String? = nil
 }
 
 /// One strip of a channel's schedule as the guide lists it: when it starts and ends, and whose
@@ -65,6 +78,21 @@ enum StationClock {
 
     static func channelId(_ p: Programming, number: Int) -> String? {
         p._meta.channels.first { $0.number == number }?.id
+    }
+
+    /// The channel numbers the schedule names, lowest first. The schedule is the only list.
+    static func channelNumbers(_ p: Programming) -> [Int] {
+        p._meta.channels.map(\.number).sorted()
+    }
+
+    /// The channel `step` places on from `number`, round the dial: Channel Up from the last
+    /// channel is the first, Channel Down from the first is the last. From a number the schedule
+    /// does not name, the first channel.
+    static func channel(_ p: Programming, from number: Int, step: Int) -> Int {
+        let numbers = channelNumbers(p)
+        guard let index = numbers.firstIndex(of: number) else { return numbers.first ?? number }
+        let count = numbers.count
+        return numbers[((index + step) % count + count) % count]
     }
 
     static func day(_ p: Programming, iso: String) -> Programming.Day? {
@@ -137,7 +165,7 @@ enum StationClock {
         guard let id = programmeId(p, index: slot.programmes[position.index]) else { return nil }
         let programme = p.programmes[id]
         let next = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes)
-        return OnAir(
+        return withNextProgramme(OnAir(
             channelId: channelId,
             date: now.iso,
             slot: slot,
@@ -152,7 +180,7 @@ enum StationClock {
             endLabel: clockLabel(slot.start_minute + slot.minutes),
             nextShow: next.flatMap { p.shows[$0.slot.show] },
             nextStart: next?.slot.start
-        )
+        ), in: p, nowSeconds: now.seconds, iso: now.iso, minute: now.minutes)
     }
 
     /// `onAir` for a channel given by its number (1 or 2); nil for a number the schedule lacks.
@@ -184,7 +212,7 @@ enum StationClock {
         let nextIndex = (((current.rosterIndex + 1) % count) + count) % count
         guard let id = programmeId(p, index: slot.programmes[nextIndex]) else { return nil }
         let programme = p.programmes[id]
-        return OnAir(
+        return withNextProgramme(OnAir(
             channelId: current.channelId,
             date: current.date,
             slot: slot,
@@ -198,7 +226,79 @@ enum StationClock {
             endLabel: current.endLabel,
             nextShow: current.nextShow,
             nextStart: current.nextStart
-        )
+        ), in: p, nowSeconds: now.seconds, iso: now.iso, minute: now.minutes)
+    }
+
+    /// The programme after the one on air, the website's rule (kj-station-clock.js onAir):
+    /// inside the slot the roster's next entry, once this one ends before the slot does; else the
+    /// next slot opens on its first. A roster of one that runs round again is not "next".
+    static func withNextProgramme(_ air: OnAir, in p: Programming, nowSeconds: Int, iso: String, minute: Int) -> OnAir {
+        var out = air
+        let endsAt = Double(nowSeconds) + runSeconds(air.programme) - air.into
+        let slot = air.slot
+        if endsAt < Double((slot.start_minute + slot.minutes) * 60), slot.programmes.count > 1 {
+            let index = slot.programmes[(air.rosterIndex + 1) % slot.programmes.count]
+            out.nextProgrammeId = programmeId(p, index: index)
+            out.nextProgrammeStart = clockLabel(Int(endsAt / 60))
+            out.nextInSlot = true
+        } else if let next = nextSlot(p, channel: air.channelId, iso: iso, minute: minute),
+                  let first = next.slot.programmes.first {
+            out.nextProgrammeId = programmeId(p, index: first)
+            out.nextProgrammeStart = next.slot.start
+        }
+        out.nextProgramme = out.nextProgrammeId.flatMap { p.programmes[$0] }
+        // The names, the site's rule (kj-station-clock.js onAir): Up next is the first programme
+        // after this one, in this slot, whose name differs from Now, at the minute it starts;
+        // failing that, the next slot's first programme by its title, else by its show.
+        let next = nextSlot(p, channel: air.channelId, iso: iso, minute: minute)
+        let nextSlotShow = next.flatMap { p.shows[$0.slot.show] }
+        func title(_ id: String?) -> String? { nonEmpty(id.flatMap { p.programmes[$0]?.display_title }) }
+        out.nowName = title(air.programmeId) ?? nonEmpty(air.show?.name)
+        // Neither name already on screen is said again: not Now, and not the show the plate carries.
+        let nowName = out.nowName
+        func said(_ name: String?) -> Bool { name == nil || name == nowName || name == air.show?.name }
+        let count = slot.programmes.count
+        var t = endsAt
+        var k = 1
+        while k < count, t < Double((slot.start_minute + slot.minutes) * 60) {
+            let id = programmeId(p, index: slot.programmes[(air.rosterIndex + k) % count])
+            let name = title(id)                 // an untitled programme is walked past, not named
+            if !said(name) {
+                out.nextName = name
+                out.nextAt = clockLabel(Int(t / 60))
+                break
+            }
+            t += runSeconds(id.flatMap { p.programmes[$0] })
+            k += 1
+        }
+        if out.nextName == nil, let next {
+            // The next slot: its first programme or its show if new to the screen, else down its
+            // roster, each programme at the minute it starts (the site's rule).
+            let roster = next.slot.programmes
+            let first = roster.first.flatMap { programmeId(p, index: $0) }
+            if let name = [title(first), nonEmpty(nextSlotShow?.name)].first(where: { !said($0) }) {
+                out.nextName = name
+                out.nextAt = next.slot.start
+            } else {
+                var u = Double(next.slot.start_minute * 60)
+                let end = Double((next.slot.start_minute + next.slot.minutes) * 60)
+                for index in roster where u < end {
+                    let id = programmeId(p, index: index)
+                    if let name = title(id), !said(name) {
+                        out.nextName = name
+                        out.nextAt = clockLabel(Int(u / 60))
+                        break
+                    }
+                    u += runSeconds(id.flatMap { p.programmes[$0] })
+                }
+            }
+        }
+        return out
+    }
+
+    private static func nonEmpty(_ text: String?) -> String? {
+        guard let text, !text.isEmpty else { return nil }
+        return text
     }
 
     // MARK: Up next

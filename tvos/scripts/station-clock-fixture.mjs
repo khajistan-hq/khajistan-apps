@@ -92,7 +92,7 @@ function expectAt(prog, nowMs, channel) {
 
 const cases = [];
 for (const nowMs of instants) {
-  for (const channel of [1, 2]) cases.push({ nowMs, channel, expect: expectAt(programming, nowMs, channel) });
+  for (const { number: channel } of programming._meta.channels) cases.push({ nowMs, channel, expect: expectAt(programming, nowMs, channel) });
 }
 
 // --- self-checks, so a bad fixture fails here and not as a mystery in Swift -----------------

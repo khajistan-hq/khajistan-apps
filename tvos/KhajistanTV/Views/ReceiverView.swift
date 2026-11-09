@@ -8,15 +8,19 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var composed: ComposedMap?
     @State private var mapError: String?
+    /// Each camera region's cameras to take a still from, and the ones asked for now.
+    @State private var cameraPicks: [String: [Channel]] = [:]
+    @State private var cameraWanted: [Channel] = []
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
+    @State private var surfTask: Task<Void, Never>?
+    @State private var surfRevision = 0
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
-    @AppStorage(ShuffleScope.key) private var scopeRaw = ShuffleScope.main.rawValue
+    @AppStorage(SurfGenre.key) private var genreRaw = SurfGenre.any.rawValue
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
     /// Once per launch: coming back from a region keeps the focus on the region.
-    @State private var surfFocusedAtLaunch = false
 
     var body: some View {
         @Bindable var model = model
@@ -32,8 +36,13 @@ struct ReceiverView: View {
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
         .fullScreenCover(item: $shuffled) { pick in
-            ReceiverPlayerView(channel: pick.channel, list: pick.list)
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, surfChoice: pick.surfChoice)
         }
+        .onDisappear { cancelSurf() }
+        .onChange(of: mediumRaw) { cancelSurf() }
+        .onChange(of: genreRaw) { cancelSurf() }
+        .onChange(of: model.extendedAtlas) { cancelSurf() }
+        .onChange(of: model.receiverPath) { cancelSurf() }
         // The id restarts the load when the switch moves, so the map follows it.
         .task(id: model.extendedAtlas) { await load() }
         // Nothing plays until it is chosen (owner, 2026-10-29: "it goes straight to playing a
@@ -73,13 +82,20 @@ struct ReceiverView: View {
             // the shelves, full width, as the TV app lays its rows. A press down from the strip
             // scrolls to them (owner, 2026-10-06: they "should expand into their contents on
             // home page", and "behave like apple tv native films/tv app").
+            ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top, spacing: 60) {
-                        sidebar(index)
-                        mapArea
-                    }
-                    .padding(.bottom, 12)
+                    // Two bands, owner 2026-10-29 ("symmetrically ... make the map bigger"): the
+                    // sidebar beside the map, then the region cards across the full width, on
+                    // the same grid as the shelves under them.
+                    AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
+                               leading: AnyView(sidebar(index)),
+                               // Focus on the strip: the strip at the foot of the screen and the
+                               // map above it, so the region it lights is in view, never a sliver
+                               // of the map under the top bar.
+                               stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
+                        .padding(.bottom, 12)
+                    GenreShelves()
                     HomeSections()
                     camerasRow(index)
                     filmsRow
@@ -92,6 +108,7 @@ struct ReceiverView: View {
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
+            }
             .kjTopFade()
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the strip) goes to Surf first; Back from
@@ -108,31 +125,19 @@ struct ReceiverView: View {
 
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
+            // Less to read (owner, 2026-10-29: "simplified its too much text"): the name, Surf,
+            // one count and the switch. The pictures are under the map.
             Text("Receiver")
                 .kjDisplay()
-            Text("Live television, live radio and public cameras from the Middle World.")
-                .kjBody()
             surf
-            Grid(alignment: .leading, horizontalSpacing: 48, verticalSpacing: 20) {
-                GridRow {
-                    Figure(label: "Live now", value: figure(index.totals.live))
-                    Figure(label: "Television", value: figure(index.totals.byMedium["tv"]))
-                }
-                GridRow {
-                    Figure(label: "Radio", value: figure(index.totals.byMedium["radio"]))
-                    Figure(label: "Cameras", value: figure(index.totals.byMedium["camera"]))
-                }
-            }
-            HouseSwitch(title: "Beyond the atlas", detail: "The wider Islamicate, Rumelia to Nusantara", isOn: extendedBinding)
+            Figure(label: "Live now", value: figure(index.totals.live))
+            HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: extendedBinding)
                 .accessibilityIdentifier("beyondTheAtlas")
                 // The plate's padding is pulled back so the switch sits on the page margin.
                 .padding(.leading, -26)
         }
-        // Full height, so the focus section reaches down beside the region strip: a press left
-        // off the strip's west end lands on the switch. Sized to its content it ended above
-        // the strip, and the switch could not be reached with the remote at all.
-        .frame(width: 560, alignment: .topLeading)
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        // The strip runs under it now, so a press up from the strip reaches the switch.
+        .frame(width: 520, alignment: .leading)
         .focusSection()
     }
 
@@ -149,12 +154,6 @@ struct ReceiverView: View {
         )
     }
 
-    // MARK: - Map
-
-    private var mapArea: some View {
-        AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open)
-    }
-
     // MARK: - Surf
 
     /// A live channel at random, one press from the front (owner, 2026-10-06: "easily accessible
@@ -165,19 +164,17 @@ struct ReceiverView: View {
     private var surf: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
-                Task { await shuffle() }
+                surfTask = Task { await shuffle() }
             } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(shuffling ? "Surfing\u{2026}" : "Surf").kjKicker()
-                    Text(surfLine).kjSmall(faint: true)
-                }
+                // The shuffle mark says what Surf does before the word has been learnt.
+                Label(shuffling ? "Surfing\u{2026}" : "Surf", systemImage: "shuffle").kjKicker()
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
             // The top bar and the strip each claim the first focus; this one is placed last.
             .task {
-                guard !surfFocusedAtLaunch, model.receiverPath.isEmpty else { return }
-                surfFocusedAtLaunch = true
+                guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+                model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true
             }
@@ -186,19 +183,18 @@ struct ReceiverView: View {
             // The plate's padding is pulled back so the label sits on the page margin.
             .padding(.leading, -26)
             chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            // "Main atlas · Extended atlas · Everywhere" is wider than the sidebar; the line above
-            // says "atlas", so the chips can drop it.
-            chips(ShuffleScope.allCases.map { ($0.rawValue, $0.label.replacingOccurrences(of: " atlas", with: "")) },
-                  current: scopeRaw, id: "shuffle-scope") { scopeRaw = $0 }
+            chips(SurfGenre.allCases.map { ($0.rawValue, $0.label) }, current: genreRaw, id: "surf-genre") { genreRaw = $0 }
             if let surfNote { Text(surfNote).kjSmall(faint: true) }
         }
     }
 
     private var medium: ShuffleMedium { .stored(mediumRaw) }
+    private var genre: SurfGenre { .stored(genreRaw) }
+    private var choiceNow: SurfChoice { SurfChoice(medium: medium, scope: scope, genre: genre) }
 
-    /// One line that fits the sidebar; the chips under it say which medium and which atlas.
-    private let surfLine = "A live channel at random from the atlas"
-    private var scope: ShuffleScope { .stored(scopeRaw) }
+    /// Surf follows the Beyond the atlas switch: the atlas when it is off, everywhere when it is on.
+    /// One control for both (owner, 2026-10-29), where the front had a switch and a row of chips.
+    private var scope: ShuffleScope { model.extendedAtlas ? .everywhere : .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
         HStack(spacing: 4) {
@@ -215,19 +211,32 @@ struct ReceiverView: View {
     }
 
     private func shuffle() async {
-        guard let index = model.receiver.index, !shuffling else { return }
+        guard let index = model.receiver.index, !shuffling, !Task.isCancelled, model.receiverPath.isEmpty else { return }
+        surfRevision += 1
+        let revision = surfRevision
         shuffling = true
         surfNote = nil
-        defer { shuffling = false }
-        let pool = await ShufflePick.surf(index, medium: medium, scope: scope) { region in
+        defer { if revision == surfRevision { shuffling = false } }
+        let choice = choiceNow
+        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope, genre: choice.genre) { region in
             try? await model.receiver.channels(regionId: region, cameras: false)
         }
-        guard !Task.isCancelled else { return }
-        if let channel = pool.first {
-            shuffled = ShufflePick(channel: channel, list: pool)
+        guard !Task.isCancelled, revision == surfRevision, model.receiverPath.isEmpty,
+              choice == choiceNow else { return }
+        model.surfHistory.update(catalogue, for: choice)
+        if let channel = model.surfHistory.next(for: choice) {
+            if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }
+            shuffled = ShufflePick(channel: channel, list: catalogue.channels, surfChoice: choice)
             return
         }
-        surfNote = "Nothing to surf there right now."
+        surfNote = catalogue.isComplete ? "Nothing to surf there right now." : "You have visited the available channels. Try Surf again to load the rest of the atlas."
+    }
+
+    private func cancelSurf() {
+        surfRevision += 1
+        surfTask?.cancel()
+        surfTask = nil
+        shuffling = false
     }
 
     // MARK: - Cameras
@@ -238,27 +247,46 @@ struct ReceiverView: View {
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("Cameras", count: "\(CameraRegions.total(index).formatted()) in \(regions.count) regions") {
+            Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
                 ForEach(regions) { region in
                     Button {
                         model.camerasFirst = region.id
                         model.receiverPath.append(region)
                     } label: {
-                        CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(region.label).kjName().lineLimit(2)
-                                Spacer(minLength: 0)
-                                if let count = index.regionCounts[region.id]?.byMedium["camera"] {
-                                    Text("\(count.formatted()) \(count == 1 ? "camera" : "cameras")").kjSmall(faint: true)
-                                }
-                            }
-                        }
+                        // The region's name over a still from one of its cameras, taken on this
+                        // device as the region cards' are (owner, 2026-10-29: pictures on them).
+                        PictureCard(title: region.label,
+                                    still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
+                                    width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
                     }
                     .buttonStyle(HouseCardStyle())
                     .accessibilityIdentifier("cameras-\(region.id)")
                 }
             }
             .accessibilityIdentifier("shelf-cameras")
+            .task(id: regions.map(\.id)) { await pickCameras(regions) }
+            // Back from a region page: the stills store forgot the list when the page went.
+            .onAppear { model.stills.wantToo(cameraWanted) }
+        }
+    }
+
+    /// Up to three cameras per region, and the stills for them: the first of each, then a spare
+    /// only where the card is still a plate (a black frame or a dead stream).
+    private func pickCameras(_ regions: [ReceiverIndex.Region]) async {
+        for region in regions where cameraPicks[region.id] == nil {
+            guard !Task.isCancelled else { return }
+            let cameras = (try? await model.receiver.channels(regionId: region.id, cameras: true)) ?? []
+            cameraPicks[region.id] = Array(cameras.prefix(3))
+        }
+        for rank in 0..<3 {
+            guard !Task.isCancelled else { return }
+            let lacking = regions.filter { region in
+                !(cameraPicks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
+            }
+            cameraWanted = lacking.compactMap { cameraPicks[$0.id]?.dropFirst(rank).first }
+            if cameraWanted.isEmpty { return }
+            model.stills.wantToo(cameraWanted)
+            try? await Task.sleep(for: .seconds(Double(cameraWanted.count) * 4))
         }
     }
 
@@ -349,28 +377,55 @@ private struct AtlasPanel: View {
     let mapError: String?
     let failure: (String) -> AnyView
     let open: (MapRegion) -> Void
+    /// The sidebar, beside the map.
+    let leading: AnyView
+    /// Called as focus comes onto the region strip from elsewhere.
+    var stripFocused: () -> Void = {}
+    static let stripAnchor = "atlasStrip"
+    @Environment(AppModel.self) private var model
     @FocusState private var focusedRegion: String?
+    /// The region lit in the A–Z list at the right of the map. Its own focus state: the strip and
+    /// the list both carry every region, and one value bound to both is ambiguous.
+    @FocusState private var listedRegion: String?
+    /// Up to three television channels per region, by region id: the card shows the first whose
+    /// still has come.
+    @State private var picks: [String: [Channel]] = [:]
+    /// The picks west to east: what the front asks stills for.
+    @State private var wanted: [Channel] = []
 
     var body: some View {
         Group {
             if let mapError {
-                failure(mapError)
+                HStack(alignment: .center, spacing: 40) { leading; failure(mapError) }
             } else if let composed {
-                VStack(alignment: .leading, spacing: 24) {
-                    RegionMapView(map: composed, highlighted: focusedRegion)
-                        .frame(height: 600)
-                    regionStrip(composed)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 40) {
+                        leading
+                        RegionMapView(map: composed, highlighted: listedRegion ?? focusedRegion)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: Self.mapHeight)
+                        regionList(composed)
+                    }
+
+                    regionStrip(composed).id(Self.stripAnchor)
                 }
                 // Room for a focused plate's lift at the top edge.
                 .padding(.top, 8)
             } else {
-                TuningLoader("Loading the receiver\u{2026}")
-                    .frame(maxWidth: .infinity, minHeight: 600)
+                HStack(alignment: .center, spacing: 40) {
+                    leading
+                    TuningLoader("Loading the receiver\u{2026}")
+                        .frame(maxWidth: .infinity, minHeight: Self.mapHeight)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .focusSection()
         .defaultFocus($focusedRegion, "indus")
+        .onChange(of: focusedRegion == nil) { _, left in if !left { stripFocused() } }
+        // Back from a region page starts a fresh share and asks again for what was wanted.
+        .onAppear { model.stills.beginVisit(); model.stills.want(wanted) }
+        .onDisappear { model.stills.endVisit() }
         #if DEBUG
         // `-kjautowalk YES` steps focus along the region strip, for measuring on a device with
         // no one at the remote (FrameMeter prints how many frames come late meanwhile).
@@ -391,51 +446,219 @@ private struct AtlasPanel: View {
 
     /// Every region that opens channels, west to east by where it sits on the map, so a press
     /// right on the remote moves east across the map. Focus here is what the map highlights.
+    /// Each is a picture card (owner, 2026-10-29: "visual hook like the posters of screening room"):
+    /// the region's name over a still of one of its television channels, taken on this device as
+    /// the region page takes them. A region with no still yet, or no television, shows its name.
     private func regionStrip(_ map: ComposedMap) -> some View {
         let regions = map.regions
             .filter(\.opensChannels)
             .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
         return ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 4) {
+            // The shelves' grid: their card size and spacing, so the columns line up.
+            LazyHStack(spacing: 32) {
                 ForEach(regions) { region in
                     Button {
                         open(region)
                     } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(region.label).kjKicker()
-                            if let live = region.live {
-                                Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
-                            }
-                        }
+                        PictureCard(title: region.label,
+                                    still: (picks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
+                                    width: Self.cardWidth, height: Self.cardHeight)
                     }
-                    .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 22, bottom: 14, trailing: 22)))
+                    .buttonStyle(HouseCardStyle())
                     .focused($focusedRegion, equals: region.id)
                     .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.live.map { "\(region.label), \($0) live" } ?? region.label)
-                    // A chip mostly scrolled under the sidebar is not drawn: its label went first
-                    // and left its count ("44") standing alone at the edge. A quarter out is still
-                    // drawn, so the first chip's pulled-back plate at rest is untouched. Resting
-                    // on whole chips (.viewAligned) broke focus walking the strip on tvOS.
-                    .scrollTransition(axis: .horizontal) { chip, phase in
-                        chip.opacity(phase.value < -0.25 ? 0 : 1)
-                    }
+                    .accessibilityLabel(region.label)
                 }
             }
-            // The plates' padding is pulled back so the first label sits on the map's margin.
-            .padding(.horizontal, -22)
-            .padding(.vertical, 12)
+            .padding(.vertical, 40)
         }
         .scrollClipDisabled()
-        // Clipped on the left, so a strip scrolled east does not run over the sidebar.
-        .mask {
-            // Faded over the plates' pull-back rather than cut, so a chip scrolled under the
-            // sidebar does not leave an orphan "44" at the edge.
-            HStack(spacing: 0) {
-                LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 22)
-                Rectangle()
+        .frame(height: Self.cardHeight + 80)
+        .task(id: regions.map(\.id)) { await pick(regions) }
+    }
+
+    /// Every region that opens channels, A to Z, at the right of the map (Joey, 2026-11-02: "a
+    /// list on the right side of the screen that when you scroll down and highlight it,
+    /// highlights that particular region"). A name lit here lights its shape on the map; Select
+    /// opens the region's page, its television and its radio on shelves of their own.
+    /// It repeats the picture strip under the map on purpose: asked whether to drop the strip, the
+    /// owner chose to keep both (2026-11-03).
+    private func regionList(_ map: ComposedMap) -> some View {
+        let regions = map.regions
+            .filter(\.opensChannels)
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+        return VStack(alignment: .leading, spacing: 8) {
+            Kicker("Regions A\u{2013}Z")
+            ScrollView(.vertical, showsIndicators: false) {
+                // Not lazy: tens of rows, and every one must exist for the remote and for tests.
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(regions) { region in
+                        Button {
+                            open(region)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                Text(region.label).kjName(28).lineLimit(1)
+                                Spacer(minLength: 8)
+                                if let live = region.live, live > 0 {
+                                    Text(live.formatted()).kjSmall(faint: true).monospacedDigit()
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                        .focused($listedRegion, equals: region.id)
+                        .accessibilityIdentifier("regionList-\(region.id)")
+                        .accessibilityLabel(region.label)
+                        .accessibilityValue(region.live.map { "\($0) live" } ?? "")
+                    }
+                }
+                // Room inside the clip for a focused row's lift.
+                .padding(12)
             }
-            .padding(.leading, -22).padding(.trailing, -200).padding(.vertical, -60)
+            .padding(-12)
         }
-        .frame(height: 96)
+        .frame(width: Self.listWidth, height: Self.mapHeight, alignment: .topLeading)
+        .focusSection()
+        .accessibilityIdentifier("regionList")
+    }
+
+    static let listWidth: CGFloat = 320
+    static let cardWidth = ChannelCard.width
+    static let cardHeight = ChannelCard.height
+    /// Was 520 beside a 560-point sidebar, with the strip under the map only.
+    static let mapHeight: CGFloat = 640
+
+    /// One television channel per region, west to east, and the stills for them. The lists are the
+    /// region shards the region page reads, so opening a region afterwards reads nothing new.
+    private func pick(_ regions: [MapRegion]) async {
+        for region in regions where picks[region.id] == nil {
+            guard !Task.isCancelled else { return }
+            let channels = (try? await model.receiver.channels(regionId: region.id, cameras: false)) ?? []
+            picks[region.id] = Array(channels.filter { $0.mediaType == "tv" }.prefix(6))
+        }
+        // First choices, then a spare only for a region whose card is still a plate (a black frame
+        // or a dead stream), so no still is spent on a region that already has a picture.
+        for rank in 0..<6 {
+            guard !Task.isCancelled else { return }
+            let lacking = regions.filter { region in
+                !(picks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
+            }
+            wanted = lacking.compactMap { picks[$0.id]?.dropFirst(rank).first }
+            if wanted.isEmpty { return }
+            model.stills.want(wanted)
+            // The plan takes one still every 1.5 s at most and gives each up to 10 s.
+            try? await Task.sleep(for: .seconds(Double(wanted.count) * 4))
+        }
+    }
+}
+
+/// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
+/// 2026-11-04: news was not on the front as a category). The kinds are the region lists' own
+/// `genres`; a channel sits on every shelf it is tagged for. The shelves follow the Beyond the
+/// atlas switch, and up and down in the player surf the shelf the channel came from.
+private struct GenreShelves: View {
+    private struct Kind: Identifiable {
+        let id: String
+        let label: String
+        let tags: Set<String>
+    }
+
+    private struct Row: Identifiable {
+        let kind: Kind
+        let channels: [Channel]
+        var id: String { kind.id }
+    }
+
+    private struct Pick: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        let title: String
+        var id: String { channel.id }
+    }
+
+    /// News first (asked for by name), then music and film, then the rest.
+    private static let kinds = [
+        Kind(id: "news", label: "News", tags: ["news"]),
+        Kind(id: "music", label: "Music", tags: ["music"]),
+        Kind(id: "film", label: "Film & drama", tags: ["film", "drama"]),
+        Kind(id: "faith", label: "Faith", tags: ["faith"]),
+        Kind(id: "culture", label: "Culture", tags: ["culture"]),
+        Kind(id: "sport", label: "Sport", tags: ["sport"]),
+        Kind(id: "children", label: "Children", tags: ["children"]),
+    ]
+    /// A kind with fewer channels than this is not a shelf yet.
+    private static let fewest = 3
+    /// The shelves whose first cards get live stills, and how many each. The region cards above
+    /// take their share first; 24 a visit in all (StillPlan).
+    private static let pictured: [String] = ["news", "music"]
+    private static let picturedCards = 4
+
+    @Environment(AppModel.self) private var model
+    @State private var rows: [Row] = []
+    @State private var playing: Pick?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(rows) { row in
+                Shelf(row.kind.label, count: "\(row.channels.count) live") {
+                    ForEach(row.channels) { channel in
+                        let liked = model.saves.isSaved(channel)
+                        let still = model.stills.image(for: channel.id)
+                        Button {
+                            playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+                        } label: {
+                            PictureCard(channel: channel, still: still, liked: liked)
+                        }
+                        .buttonStyle(HouseCardStyle())
+                        // Play/Pause on a card plays it, as on Apple's TV app.
+                        .onPlayPauseCommand { playing = Pick(channel: channel, list: row.channels, title: row.kind.label) }
+                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
+                        .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
+                    }
+                }
+                .accessibilityIdentifier("genre-\(row.id)")
+            }
+        }
+        .task(id: model.extendedAtlas) { await load() }
+        // Back from a player: the visit ended, and with it the wanted lists.
+        .onAppear { wantStills() }
+        .fullScreenCover(item: $playing) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
+        }
+    }
+
+    /// Every region list in the atlas shown, read together (each is cached after its first read),
+    /// then sorted into the kinds in region order, each channel once per shelf.
+    private func load() async {
+        guard let index = model.receiver.index else { return }
+        let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
+        let ids = index.listedRegions.filter { scope.includes(tier: $0.tier) }.map(\.id)
+        var lists: [String: [Channel]] = [:]
+        await withTaskGroup(of: (String, [Channel]).self) { group in
+            for id in ids {
+                group.addTask { @MainActor in
+                    (id, (try? await model.receiver.channels(regionId: id, cameras: false)) ?? [])
+                }
+            }
+            for await (id, list) in group { lists[id] = list }
+        }
+        guard !Task.isCancelled else { return }
+        let channels = ids.flatMap { lists[$0] ?? [] }.filter { $0.mediaType != "camera" }
+        rows = Self.kinds.compactMap { kind in
+            var seen = Set<String>()
+            let shelf = channels.filter { channel in
+                guard !Set((channel.genres ?? []).map { $0.lowercased() }).isDisjoint(with: kind.tags) else { return false }
+                return seen.insert(channel.id).inserted
+            }
+            return shelf.count >= Self.fewest ? Row(kind: kind, channels: shelf) : nil
+        }
+        wantStills()
+    }
+
+    private func wantStills() {
+        let first = Self.pictured.flatMap { id in
+            rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
+        }
+        if !first.isEmpty { model.stills.wantNext(first) }
     }
 }

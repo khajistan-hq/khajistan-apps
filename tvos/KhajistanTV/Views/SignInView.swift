@@ -17,16 +17,23 @@ struct SignInView: View {
     @State private var withPassword = false
     /// Said over the password form when phone sign-in could not start.
     @State private var phoneNote: String?
+    @State private var code = ""
+    /// Shown once the password or the phone went through for an account with an authenticator, or
+    /// on opening when a signed-in account still owes its code (Account's "Finish two-step sign-in").
+    @State private var askCode = false
+
+    private var codeOwed: Bool { model.auth.isSignedIn && model.auth.pendingFactorId != nil }
 
     var body: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
-            if withPassword {
+            if askCode {
+                codeForm
+            } else if withPassword {
                 passwordForm
             } else {
                 PhoneSignInPanel(signedIn: {
-                    await onSignedIn()
-                    dismiss()
+                    if codeOwed { askCode = true } else { await finish() }
                 }, usePassword: { unavailable in
                     phoneNote = unavailable ? "Signing in with a phone is not available right now." : nil
                     withPassword = true
@@ -39,7 +46,9 @@ struct SignInView: View {
         .onChange(of: errorLine) { _, line in
             if let line { UIAccessibility.post(notification: .announcement, argument: line) }
         }
-        .onExitCommand { dismiss() }
+        .onAppear { if codeOwed { askCode = true } }
+        // During the code step the viewer is signed in already: leaving is "Not now".
+        .onExitCommand { if askCode { if !busy { Task { await finish() } } } else { dismiss() } }
     }
 
     private var passwordForm: some View {
@@ -98,10 +107,62 @@ struct SignInView: View {
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password
             )
-            await onSignedIn()
-            dismiss()
+            if codeOwed { askCode = true } else { await finish() }
         } catch {
             errorLine = message(for: error)
+        }
+        busy = false
+    }
+
+    private func finish() async {
+        await onSignedIn()
+        dismiss()
+    }
+
+    /// kj-mfa.js's words: the code from the authenticator finishes the sign-in.
+    private var codeForm: some View {
+        VStack(alignment: .leading, spacing: 32) {
+            Text("Two-step sign-in")
+                .kjDisplay(KJType.headline, tracking: -0.055)
+            Text("Enter the six-digit code from your authenticator to finish signing in.")
+                .kjBody()
+            HouseInputField("Six-digit code", text: code) {
+                TextField("", text: $code)
+                    .textContentType(.oneTimeCode)
+                    .keyboardType(.numberPad)
+                    .accessibilityIdentifier("tvSignInCode")
+            }
+            Button(kicker: "Finish signing in") {
+                Task { await submitCode() }
+            }
+            .buttonStyle(HouseButtonStyle())
+            .padding(.leading, -26)
+            .disabled(busy)
+            if let line = errorLine {
+                Text(line).kjBody()
+            }
+            // Signed in already, at the lower level: everything but staff films works.
+            Button(kicker: "Not now") { Task { await finish() } }
+                .buttonStyle(HouseButtonStyle())
+                .padding(.leading, -26)
+                .disabled(busy)
+        }
+        .kjBody()
+        .padding(KJLayout.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func submitCode() async {
+        busy = true
+        errorLine = nil
+        do {
+            try await model.auth.verifyCode(code)
+            await finish()
+        } catch {
+            code = ""
+            errorLine = message(for: error)
+            // Signed out under it: the password form, which shows the reason; the phone panel does not.
+            if !codeOwed { askCode = false; withPassword = true }
         }
         busy = false
     }

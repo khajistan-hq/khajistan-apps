@@ -4,11 +4,18 @@ import StoreKit
 
 /// The bottom bar's doors (owner brief, 2026-10-27): HOME, ROOMS (every room of the website's
 /// menu, the native ones drawn here), the RECEIVER, the LIBRARY (account, saved work, what is on
-/// this device) and SEARCH.
+/// this device) and SEARCH. All five on iPad and Mac; a phone's bar has four (`inBar`, owner
+/// 2026-11-04), so `allCases` is every door, not the bar.
 enum AppTab: String, CaseIterable, Identifiable {
     case home, rooms, receiver, library, search
 
     var id: String { rawValue }
+
+    /// The doors the bar shows. A phone leaves ROOMS out (owner, 2026-11-04: "hide rooms on the
+    /// iphone"); its rooms open from HOME's tiles and HOME's "Every room" link. iPad and Mac keep it.
+    @MainActor static var inBar: [AppTab] {
+        UIDevice.current.userInterfaceIdiom == .phone ? allCases.filter { $0 != .rooms } : allCases
+    }
 
     /// The tab bar's icon (SF Symbols: monochrome, in the text's colour).
     var symbol: String {
@@ -16,7 +23,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "house"
         case .rooms: return "square.grid.2x2"
         case .receiver: return "dot.radiowaves.left.and.right"
-        case .library: return "books.vertical"
+        case .library: return "person.crop.circle"
         case .search: return "magnifyingglass"
         }
     }
@@ -26,7 +33,7 @@ enum AppTab: String, CaseIterable, Identifiable {
         case .home: return "Home"
         case .rooms: return "Rooms"
         case .receiver: return "Receiver"
-        case .library: return "Library"
+        case .library: return "You"
         case .search: return "Search"
         }
     }
@@ -54,12 +61,19 @@ enum AppTab: String, CaseIterable, Identifiable {
 
 @MainActor @Observable
 final class AppModel {
+    enum Cover: String, Identifiable {
+        case browser, chat
+        var id: String { rawValue }
+    }
     var library = LibraryState()
     /// A sentence for the house banner.
     var message: String?
-    var isShowingBrowser = false
-    /// Chat opens over the tabs, as the browser does.
-    var isShowingChat = false
+    /// One full-screen destination at a time, including when a Mac menu switches between them.
+    var cover: Cover?
+    /// Local reader/player/form presentations keep menu navigation disabled until closed.
+    var menuNavigationLocks: Set<UUID> = []
+    /// A finger is turning the Receiver map's dial: the page under it holds still meanwhile.
+    var mapScrubbing = false
     /// A room asked for from outside Chat (a card on Home): Chat opens on it, then clears it.
     var chatRoom: String?
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
@@ -69,6 +83,11 @@ final class AppModel {
     /// The room open in ROOMS, nil for the list of rooms. Kept while another bar door is on show,
     /// so coming back finds the room where it was left.
     var room: NativeRoom?
+    /// The door a room was opened from when the bar has no ROOMS door (a phone): Back out of the
+    /// room goes there rather than to the hidden list, and the bar keeps it lit meanwhile.
+    /// Set only by `open(_ room:)`; cleared by HOME's "Every room" and by Back. Anything else that
+    /// switches to `.rooms` must clear it too, or Back revives an old door.
+    var roomReturn: AppTab?
     /// Each room's own stack of pushed screens, kept per room for the same reason.
     var roomPaths: [NativeRoom: [RoomRoute]] = [:]
     /// The skin on screen: the sky's, or the reader's pick while the sky is in the band it was
@@ -87,7 +106,7 @@ final class AppModel {
     /// in `init` held up the first screen.
     var browser: ArchiveBrowser {
         if let madeBrowser { return madeBrowser }
-        let made = ArchiveBrowser()
+        let made = ArchiveBrowser(previewPassword: { [weak auth] in auth?.previewPassword })
         made.onVisit = { [weak self] url, title in self?.updateLibrary { $0.visit(url, title: title) } }
         if let skinScript { made.applySkin(script: skinScript) }
         madeBrowser = made
@@ -260,6 +279,12 @@ final class AppModel {
 
     // MARK: - Rooms
 
+    /// A Mac menu command can arrive while a full-screen page is covering the tab bar.
+    func selectTab(_ tab: AppTab) {
+        cover = nil
+        self.tab = tab
+    }
+
     /// A website page in the in-app browser. Only the archive's own two hosts open here. Off the
     /// US storefront the page carries `app=1`, so the website hides its offers too.
     func open(_ url: URL) {
@@ -272,12 +297,25 @@ final class AppModel {
         openWebsite(url)
     }
 
+    /// A page kept on this device (saved or recently opened). One that is a room the app draws
+    /// itself, addressed with no particulars ("/open-frequencies"), opens the room here rather
+    /// than its web page; any other opens as `open(_:)` does.
+    func openKept(_ url: URL) {
+        if url.query == nil, url.fragment == nil,
+           let room = ArchiveDestination.all.first(where: { $0.path == url.path && $0.nativeRoom != nil }),
+           StoreBuild.includes(room) {
+            open(room)
+        } else {
+            open(url)
+        }
+    }
+
     /// A website page in the house browser, even where the app has a native room for it: for the
     /// "on the website" controls, whose point is the page itself.
     func openWebsite(_ url: URL) {
         guard ArchiveURL.isArchive(url) else { return }
         browser.load(showsJoin ? url : JoinOffer.tagged(url))
-        isShowingBrowser = true
+        cover = .browser
     }
 
     /// A door from the website's menu: a room the app draws itself switches tab, the rest is web.
@@ -304,10 +342,13 @@ final class AppModel {
         instant.disablesAnimations = true
         withTransaction(instant) {
             if room == .chat {
-                isShowingChat = true
+                cover = .chat
             } else if let tab = AppTab(room) {
+                cover = nil
                 self.tab = tab
             } else {
+                cover = nil
+                if tab != .rooms { roomReturn = AppTab.inBar.contains(.rooms) ? nil : tab }
                 self.room = room
                 if let route { roomPaths[room] = route }
                 self.tab = .rooms

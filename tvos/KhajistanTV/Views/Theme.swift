@@ -528,21 +528,54 @@ struct PlayerStrip: View {
     var accessory: AnyView? = nil
     @Environment(\.palette) private var palette
 
+    /// Whether the first strongly directional letter is Arabic-script (Arabic, Persian, Urdu).
+    static func isRightToLeft(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            if (0x0590...0x08FF).contains(scalar.value) || (0xFB1D...0xFEFF).contains(scalar.value) { return true }
+            if CharacterSet.letters.contains(scalar) { return false }
+        }
+        return false
+    }
+
+    /// `lines` is the name's own limit: set once here, since an outer lineLimit cannot widen an
+    /// inner one (Fable, 2026-11-08: a second `.lineLimit(2)` outside was a no-op).
+    @ViewBuilder private func nameText(lines: Int) -> some View {
+        if let name, !name.isEmpty {
+            Text(name)
+                .font(.system(size: 30, weight: .black))
+                .tracking(30 * -0.03)
+                .lineLimit(lines)
+                // An Arabic or Persian name sets from the right, so its second line does too.
+                .multilineTextAlignment(Self.isRightToLeft(name) ? .trailing : .leading)
+                .accessibilityLabel("Now playing, \(name)")
+                .accessibilityIdentifier("stripName")
+        }
+    }
+
+    @ViewBuilder private var detailText: some View {
+        if let detail, !detail.isEmpty {
+            Text(detail)
+                .font(.system(size: 24, weight: .semibold))
+                .lineLimit(1)
+                .opacity(0.85)
+        }
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 36) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 20) {
-                    if let name, !name.isEmpty {
-                        Text(name)
-                            .font(.system(size: 30, weight: .black))
-                            .tracking(30 * -0.03)
-                            .lineLimit(1)
+                // The name and the detail share a line while both fit whole; a long name (a
+                // programme title, since 2026-11-08) puts the detail on a line of its own rather
+                // than crushing it to a sliver.
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 20) {
+                        nameText(lines: 1).fixedSize()
+                        detailText.fixedSize()
                     }
-                    if let detail, !detail.isEmpty {
-                        Text(detail)
-                            .font(.system(size: 24, weight: .semibold))
-                            .lineLimit(1)
-                            .opacity(0.85)
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Stacked, a long title may take a second line rather than be cut.
+                        nameText(lines: 2)
+                        detailText
                     }
                 }
                 if let attribution, !attribution.isEmpty {
@@ -567,8 +600,12 @@ struct PlayerStrip: View {
                         .lineLimit(1)
                         .fixedSize()
                     Text(upNext.name)
-                        .font(.system(size: 24, weight: .semibold))
-                        .lineLimit(1)
+                        // 26: secondary to the 30pt name, and above tvOS's readable floor at three
+                        // metres (settled on that principle after reviews asked for 24 and for 28).
+                        .font(.system(size: 26, weight: .semibold))
+                        // Two lines: a programme title is longer than a show name.
+                        .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
                 }
                 .frame(maxWidth: 520, alignment: .trailing)
                 .accessibilityElement(children: .combine)
@@ -647,8 +684,6 @@ private struct SwitchLabel: View {
 /// reach anything.
 enum OverlayTiming {
     static let idle: Duration = .seconds(2.6)
-    /// After a choice on the player's strip (Captions, Like): long enough to read what changed.
-    static let afterChoice: Duration = .seconds(4)
     static var hidesItself: Bool { !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning }
 }
 
@@ -743,7 +778,7 @@ enum Section: String, CaseIterable, Identifiable {
         // The website's own nav label (kj-chrome.js, door `picsnvids`: PICS/VIDS).
         case .picsvids: return "Pics/Vids"
         // The Screening Room, the Bazaar, the Madrassa and the databases, under one door.
-        case .rooms: return "Rooms"
+        case .rooms: return StoreBuild.roomsAreScreeningOnly ? "Screening Room" : "Rooms"
         case .chat: return "Chat"
         case .account: return "Account"
         }
@@ -790,7 +825,9 @@ struct TopBar: View {
                     .accessibilityIdentifier("nav-\(section.rawValue)")
                 }
             }
-            .defaultFocus($focused, current)
+            // Up from a page lands on the section on screen, as on Apple's TV app, not on the
+            // tab nearest the item left.
+            .defaultFocus($focused, current, priority: .userInitiated)
         }
         // The launch focus is the system's first pick, top-left; place it on the current tab.
         .onAppear { focused = current }

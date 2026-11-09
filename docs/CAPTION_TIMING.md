@@ -1,0 +1,60 @@
+# Native Receiver caption timing — 2026-10-30
+
+Applies to Apple TV and the iOS/Mac Catalyst Receiver. Website code and recognition/translation providers are unchanged.
+
+## Behavior
+
+- A closed websocket reconnects with bounded backoff. REST recovery runs independently, so a slow recovery request cannot stop live frames. Quiet or disconnected feeds are checked every two seconds instead of leaving captions in 15–18-second batches.
+- Translation has an absolute eight-second deadline, including authentication and response download. Later ready translations stay ordered; an expired result never reappears after newer speech.
+- The source timeline stays separate from reading-time padding. Unseen short fragments may share a two-line plate. Original phrase anchors survive compaction and out-of-order recovery. An active caption retains its full readable duration.
+- Queue overload removes stale unseen backlog and reports omitted speech instead of dropping the current sentence behind a 30-second queue. Each admitted plate keeps the existing 2–7-second reading rules and 20 characters/second target.
+- A caption-triggered seek finishes before rows are mapped again. The source anchor is preserved, rather than clamped to the old playhead. An eight-second watchdog cancels a stalled seek. Turning captions off cancels its outstanding seek; late callbacks cannot affect a new session.
+- Fresh REST rows may adjust the hold using server creation time. Old recovered rows cannot rewind playback. Nonseekable streams use approximate arrival-time display.
+
+## Verification
+
+`KJ_ARCHIVE=/path/to/filmart/archive tvos/scripts/test-core.sh` exercises real local catalogue parity and shared caption timing. `ios/scripts/test-core.sh` verifies the phone/Mac shared sources.
+
+`tvos/scripts/test-caption-session.sh` compiles each actual production caption service and shared core against in-memory network and player boundaries. It never contacts a caption provider or starts paid demand. All 47 service scenarios pass (24 tvOS, 23 iOS/Mac), including the MBC dropout and terminal playback lifecycle checks. Both CI workflows run their platform's service tests. `KJ_CAPTION_TEST_PLATFORMS` selects a platform; `KJ_CAPTION_SERVICE_SOURCE` supports mutation checks.
+
+Reconnect, source-clock placement and fresh REST adaptation were also run with deliberately broken implementations. All three checks failed, proving they detect those defects.
+
+Builds checked: tvOS Simulator, Mac Catalyst, and signed physical tvOS Release. The signed app was installed and launched on the owner's connected Apple TV.
+
+## Limits
+
+These tests establish app scheduling and recovery behavior, not speech-recognition accuracy or a measured latency distribution on a live channel. Source segment availability, recognition finalization and translation still add latency. Unstamped players retain the 24-second startup hold. A player with a finite programme clock now waits for a real caption before deciding whether an extra seek is needed. Exact synchronization requires reliable programme timestamps and a seekable carrier. The Mac code is built but its installed application has not been replaced.
+
+## MBC dropout follow-up
+
+The owner identified an MBC channel in Jazirat al-Arab on Apple TV, without remembering which MBC channel. Read-only playlist probes on 2026-10-30 found programme timestamps and approximately 61.4-second windows on the nine MBC television feeds checked (the two radio-name entries were excluded from that statement). No MBC rows remained in the short-lived wire when inspected, so the exact viewing incident cannot be reconstructed.
+
+Two additional client dropout paths are fixed:
+
+- The worker may PATCH English into an existing source row. The client now subscribes to both INSERT and UPDATE, and REST refreshes can also complete a pending translation. Only the same source identity, inside its original absolute deadline, can complete it. Late/duplicate updates cannot replay captions, and uncertain, changed-source or rejected-language updates are refused.
+- Fresh speech that cannot be synchronized safely is displayed with an approximate-timing notice instead of being discarded solely for being more than six seconds late. That six-second limit still bounds unseen display backlog. Stale recovery history remains excluded. Freshness is captured on receipt, so waiting for English does not invalidate an otherwise timely REST row.
+
+A failed on-demand translation now waits for the server's original translation until the existing deadline; it does not permanently discard the pending row immediately. This is not a claim of improved recognition accuracy or measured MBC end-to-end performance.
+
+## Live audit contract and lifecycle follow-up
+
+Real-stream worker probes exposed a script-label mismatch: the worker emits `latin`, while native immediate English-source display previously recognized only `Latn` or an absent tag. The shared core now accepts both labels case-insensitively, still requiring `lang=en` and Latin-only source text. A decoded-wire regression covers canonical and legacy labels, mixed-script rejection, and non-English rejection.
+
+On Apple TV, terminal playback failure, explicit pause, or idle now suspends captions and releases demand; returning to playing requires an explicit CC press. Temporary tuning/buffering remains active so source-clock seeking does not disable captions. The weak player callback is cleared on detach/retune and fenced against an old player. Starting CC while playback is unavailable is refused. A production-service harness reproduced the prior terminal-failure leak and verifies release, retuning, buffering, and explicit restart.
+
+These changes are separately reviewed and tested. Their live app behavior and recognition fidelity still require authenticated viewing; local real-stream worker results do not prove deployed-worker parity or device-level audio synchronization.
+
+## Authenticated live audit: programme clock transitions
+
+A signed-in MBC1 tvOS simulator run exposed two timing defects that synthetic playback clocks had not covered:
+
+- At CC startup, the player was already 34.50 seconds behind its programme clock, while its configured live offset reported 12 seconds. An unconditional startup resync sought another 12 seconds. The first row then waited 11.49 seconds between receipt and display. Stamped players now defer startup resync until an actual cue demonstrates lateness; missing/invalid programme clocks keep the existing fallback.
+- One unstamped row among programme-stamped MBC rows triggered a further 24.975-second rewind through the fallback clock. `at_epoch` without `program_epoch` is not authoritative programme provenance. A missing stamp must not trigger that fallback seek when the player has a valid programme clock. Short-lived placement calibration may approximate a missing stamp; the app explicitly identifies approximate timing and discards stale calibration on lifecycle/seek changes.
+
+These observations used the authenticated app, server wire metadata and numeric-only DEBUG logs. They measure clock handling, not acoustic transcription accuracy. Numeric logs contain no caption text, account details or tokens and compile out of Release logging.
+
+The initial signed-in simulator build had signing disabled; it lost sign-in after replacement. Future authenticated simulator tests must use signing-enabled builds with simulated keychain entitlements. The interruption is not evidence that physical-device signing or production account persistence is broken.
+
+Dunya News exposed another clock limitation: the first server row appeared49.394 seconds after CC, arrived at the app49.710 seconds after CC, then waited another28.85 seconds because a nonseekable, unstamped player reported a configured42-second offset. When neither programme time nor a seek window exists, captions now use explicitly approximate arrival-time display instead of preserving that unverifiable future estimate. Ancient/invalid source epochs remain rejected and genuine future programme-stamped cues retain their clock placement. The upstream49-second cold-start is unresolved; this client fix does not remove it.
+
+Final automated gate for these measured clock regressions:47/47 actual-service scenarios; independent reviewer16 focused scenarios and both tvOS Simulator/Mac Catalyst builds. The baseline live run preceded these last three corrections. Live post-correction acoustic alignment remains to be checked.

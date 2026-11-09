@@ -66,6 +66,11 @@ final class TransmissionStore {
 
     /// The station month `programming` was fetched for.
     @ObservationIgnored private var month: String?
+    /// When `programming` landed, in system uptime, and whether a fetch is refreshing a held one.
+    @ObservationIgnored private var fetchedAt: TimeInterval?
+    @ObservationIgnored private var refreshing = false
+    /// How long a month's schedule is trusted before it is fetched again.
+    static let scheduleMaxAge: TimeInterval = 30 * 60
     /// Bumped by every schedule fetch. An answer that arrives under an older number belongs to a
     /// fetch a newer one has replaced, and is dropped.
     @ObservationIgnored private var scheduleGeneration = 0
@@ -160,7 +165,11 @@ final class TransmissionStore {
     /// A second call while a fetch is in flight waits for that fetch.
     func loadSchedule() async {
         let monthKey = StationClock.stationMonth(Self.now())
-        if schedule == .ready, month == monthKey { return }
+        // A schedule held for this month is fetched again once it is `scheduleMaxAge` old, so a
+        // channel added on the site reaches a set that was never closed (owner, 2026-11-09: "i dont
+        // see new channels on my apple tv"). The held one stays on screen while it is fetched.
+        let heldReady = schedule == .ready && month == monthKey
+        if heldReady, let at = fetchedAt, ProcessInfo.processInfo.systemUptime - at < Self.scheduleMaxAge { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
             return
@@ -169,7 +178,8 @@ final class TransmissionStore {
         let gen = scheduleGeneration
         // A schedule held for the month that has just ended stays in place until the new one
         // lands: a programme that finishes in the meantime still has a roster to walk.
-        schedule = .loading
+        refreshing = heldReady
+        if !heldReady { schedule = .loading }
         let task = Task { [self] in
             await fetchSchedule(month: monthKey, generation: gen)
             if scheduleGeneration == gen { scheduleLoad = nil }
@@ -241,10 +251,14 @@ final class TransmissionStore {
         programming = decoded
         month = monthKey
         schedule = .ready
+        fetchedAt = ProcessInfo.processInfo.systemUptime
+        refreshing = false
     }
 
     /// A fetch that ended without a schedule: nothing is held, and the page says why.
     private func dropSchedule(_ state: ScheduleState) {
+        // A failed refresh keeps the schedule already on screen; it is tried again next time.
+        if refreshing, programming != nil { refreshing = false; return }
         programming = nil
         month = nil
         schedule = state

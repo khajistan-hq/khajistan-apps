@@ -20,11 +20,14 @@ concurrency:
 jobs:
   simulator:
     runs-on: macos-26
-    # The UI suite outgrew 75 minutes: every tvOS run cut at the limit from 2026-11-09 on,
+    # The UI suite outgrew 75 minutes: every tvOS run was cut at the limit from 2026-11-08 on,
     # with tests still passing (PR 48: 58 passed, 0 failed when cut). The one run allowed
-    # 100 (PR 9, 2026-11-09) finished in 87, the test step alone 80. Public repo: macOS
-    # minutes are not billed.
-    timeout-minutes: 100
+    # 100 (PR 9, 2026-11-09) finished in 87, the test step alone 80, and the suite grew
+    # about 12 minutes in the day before. Public repo: macOS minutes are not billed.
+    # ponytail: a longer limit, not a faster suite. When this one is reached, split the UI
+    # tests across two jobs (-only-testing the slow classes, -skip-testing them in the other),
+    # at the cost of two of the plan's five macOS slots per push.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:

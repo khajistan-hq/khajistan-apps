@@ -24,7 +24,9 @@ jobs:
     # on macos-26 started within minutes all day.
     runs-on: macos-26
     # The unchanged base took 33m40s; allow the full UI suite and artifact export to finish.
-    timeout-minutes: 45
+    # main's run of 2026-11-09 passed in 44 min 59 s against 45: one slow runner from a
+    # cut. 60 gives the same headroom the tvOS job has.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:

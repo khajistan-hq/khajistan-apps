@@ -108,7 +108,10 @@ final class TransmissionStore {
     /// not downloaded again, so coming back to the page, signing in or trying again costs nothing.
     /// A second call while a fetch is in flight waits for that fetch.
     func loadSchedule() async {
-        let monthKey = StationClock.stationMonth(Date())
+        // The month is picked by the station clock, so wait for the server's time first. AppModel
+        // starts that reading at launch, so this usually returns at once; at most 1.5 s.
+        await ServerClock.sync(clockFile: Self.clockFile)
+        let monthKey = StationClock.stationMonth(ServerClock.now())
         if schedule == .ready, month == monthKey { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
@@ -217,6 +220,18 @@ final class TransmissionStore {
     }
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
+    /// The site's clock file, whose `Date` header is the station's time (ServerClock).
+    static let clockFile = KJConfig.site.appending(path: "scripts/kj-station-clock.js")
+
+    /// Back on the screen: read the server again, and rejoin only if the clock moved by more than
+    /// a set that kept playing would notice (20 s, as on the website).
+    func resyncClock() async {
+        let before = ServerClock.currentSkew
+        let after = await ServerClock.sync(clockFile: Self.clockFile, force: true)
+        guard abs(after - before) > 20, case .onAir = phase else { return }
+        await rejoinLive()
+    }
+
     func rejoinLive() async {
         await tune(channel: channelNumber)
     }
@@ -238,7 +253,7 @@ final class TransmissionStore {
             phase = .failed("The schedule has not loaded.")
             return
         }
-        let now = Date()
+        let now = ServerClock.now()
         guard let air = StationClock.onAir(p, channel: channelNumber, at: now) else {
             goOffAir(p, channelId: StationClock.channelId(p, number: channelNumber), at: now, generation: gen)
             return
@@ -266,7 +281,7 @@ final class TransmissionStore {
     /// as it does on air. With nothing following, the channel is off air until it returns.
     func handover() async {
         guard case .onAir(let current) = phase, let p = programming else { return }
-        let now = Date()
+        let now = ServerClock.now()
         if let month, month != StationClock.stationMonth(now) {
             await tune(channel: channelNumber)
             return
@@ -298,7 +313,7 @@ final class TransmissionStore {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(15))
                 guard let self, !Task.isCancelled, gen == self.generation, case .offAir = self.phase else { return }
-                let now = Date()
+                let now = ServerClock.now()
                 let due: Bool
                 if let p = self.programming, StationClock.stationMonth(now) == self.month {
                     due = StationClock.onAir(p, channel: self.channelNumber, at: now) != nil

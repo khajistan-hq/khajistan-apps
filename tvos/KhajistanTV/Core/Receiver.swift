@@ -98,7 +98,10 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     /// (owner, 2026-10-08). The rest of the record's sentence stays in the data and on the website.
     var sourceLine: String? {
         guard let attributionText else { return nil }
-        let first = attributionText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? attributionText
+        var first = attributionText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? attributionText
+        // Most records close the clause with a full stop before the third-party notice (owner,
+        // 2026-11-09: "redundant"). Cut at the notice, not at a full stop: names carry them (98.5).
+        if let notice = first.range(of: ". Playback uses") { first = String(first[..<notice.lowerBound]) }
         let line = first.trimmingCharacters(in: .whitespaces)
         return line.isEmpty ? nil : line
     }

@@ -27,7 +27,13 @@ struct KhajistanApp: App {
                 // Back from the lock screen or another app: the sky may have moved.
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { withAnimation(.easeInOut(duration: 0.4)) { model.refreshSkin() } }
+                    if phase == .active { Task { await model.transmission.resyncClock() } }
                     if phase == .background { model.tuner.appLeftTheScreen() }
+                }
+                // The device clock was set (NTP after boot, or by hand) while the app stayed on
+                // screen: the old skew is now wrong by that much, so read the server again.
+                .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in
+                    Task { await model.transmission.resyncClock() }
                 }
         }
         #if targetEnvironment(macCatalyst)

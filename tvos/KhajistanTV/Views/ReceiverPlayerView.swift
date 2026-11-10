@@ -7,8 +7,9 @@ import UIKit
 /// guide"); play/pause pauses, and pressing it again tunes the channel afresh, because a live
 /// signal paused for a minute is not the live signal any more.
 ///
-/// The strip's controls (Captions, Like, Guide): Select on the picture, with the strip showing,
-/// lights the first; left and right then walk them, Select works one, and Back lets go.
+/// The strip's controls (Captions, Like, Guide, PiP): Select on the picture, with the strip showing,
+/// lights the first, and so does right (owner, 2026-11-08); left and right then walk them, Select
+/// works one, and Back lets go. Right opens the guide only on the bare picture; left always does.
 struct ReceiverPlayerView: View {
     /// The channels up and down step through: the shelf the viewer came from, or the region last
     /// chosen from in the guide.
@@ -140,6 +141,9 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             // The screen is closing: a press now must not act on a signal already handed on.
             guard !leaving else { return }
+            // Read before wake() shows the strip: a press on the bare picture opens the guide, a
+            // right press with the strip already up walks onto it (owner, 2026-11-08).
+            let stripWasUp = stripShown
             wake()
             if let row = guideRow {
                 let count = guideList.count
@@ -155,7 +159,7 @@ struct ReceiverPlayerView: View {
             switch direction {
             case .up: click(by: -1)
             case .down: click(by: 1)
-            case .right: moveRight()
+            case .right: moveRight(stripWasUp: stripWasUp)
             case .left: moveLeft()
             @unknown default: break
             }
@@ -292,7 +296,8 @@ struct ReceiverPlayerView: View {
         case .pip: startPictureInPicture()
         case nil:
             // With the strip showing, Select lights its first control; left and right
-            // then walk the controls (right on the bare picture opens the guide).
+            // then walk the controls (right with the strip up does the same; right on the
+            // bare picture, and left, open the guide).
             if stripShown { if case .failed = controller.state {} else { armed = .captions } }
             wake()
         }
@@ -326,9 +331,12 @@ struct ReceiverPlayerView: View {
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
-            if !model.captions.note.isEmpty { return model.captions.note }
             // Radio prints its song on the ground; television carries it after the place.
             let tvSong = current.mediaType == "tv" ? NowPlaying.caption(song: song, mediaType: "tv") : nil
+            // A captions note hides the song only while captions are on. With them off, tuning
+            // writes the channel's parked reason ("No captions: …") on almost every music
+            // channel, and the song never showed on television.
+            if !model.captions.note.isEmpty, tvSong == nil || model.captions.isEnabled { return model.captions.note }
             let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }
@@ -547,15 +555,23 @@ struct ReceiverPlayerView: View {
         step(by: delta)
     }
 
-    private func moveRight() {
+    private func moveRight(stripWasUp: Bool) {
         switch armed {
-        case nil: return openGuide()
+        case nil:
+            // With the strip up, right lights its first control, as Select does, so Like, Guide
+            // and picture in picture are reached by swiping (owner, 2026-11-08: "when i swipe
+            // right ... it opens the guide instead of making me navigate the bottom bar to PIP").
+            // On the bare picture, and on a failed picture with no controls to walk, it opens
+            // the guide (owner, 2026-11-04). Left on the picture always opens the guide.
+            if stripWasUp, !isFailed { armed = .captions } else { openGuide() }
         case .captions: armed = .like
         case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .guide: if pipOffered { armed = .pip }
         case .pip: break
         }
     }
+
+    private var isFailed: Bool { if case .failed = controller.state { return true } else { return false } }
 
     private func moveLeft() {
         switch armed {

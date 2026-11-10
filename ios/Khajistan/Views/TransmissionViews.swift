@@ -73,8 +73,8 @@ struct TransmissionSection: View {
                             HouseRule()
                             Button { choose(number) } label: {
                                 ChannelCard(name: store.channelName(number), line: store.channelLine(number),
-                                            onAir: store.nowOn(channel: number, at: context.date),
-                                            returns: store.returnTime(channel: number, at: context.date))
+                                            onAir: store.nowOn(channel: number, at: ServerClock.now(context.date)),
+                                            returns: store.returnTime(channel: number, at: ServerClock.now(context.date)))
                             }
                             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 0, bottom: 14, trailing: 0)))
                             .accessibilityIdentifier("transmission-channel-\(number)")

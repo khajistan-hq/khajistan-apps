@@ -88,6 +88,7 @@ struct ReceiverView: View {
                     // Two bands, owner 2026-10-29 ("symmetrically ... make the map bigger"): the
                     // sidebar beside the map, then the region cards across the full width, on
                     // the same grid as the shelves under them.
+                    VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
                                // Focus on the strip: the strip at the foot of the screen and the
@@ -95,6 +96,10 @@ struct ReceiverView: View {
                                // of the map under the top bar.
                                stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
                         .padding(.bottom, 12)
+                    // In a stack of their own with no spacing: a front with no likes has no gap
+                    // where the shelf would be. The shelf brings its own 12 points above it.
+                    LikedShelf()
+                    }
                     GenreShelves()
                     HomeSections()
                     camerasRow(index)
@@ -659,6 +664,177 @@ private struct GenreShelves: View {
         let first = Self.pictured.flatMap { id in
             rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
         }
-        if !first.isEmpty { model.stills.wantNext(first) }
+        if !first.isEmpty { model.stills.wantNext(first, place: 1) }
+    }
+}
+
+/// The channels the account liked, newest first, the first shelf under the map, so a liked channel
+/// is one press down and one Select from the front (owner, 2026-11-08: "add liked channels on
+/// homepage for an account so they are easily accessible"). The likes are the account's
+/// `passport_saves`, the same the website's heart and the player's Like write, so a like made on
+/// any device is here. Signed out, or with nothing liked, there is no shelf. Up and down in the
+/// player surf the liked channels.
+private struct LikedShelf: View {
+    private struct Pick: Identifiable {
+        let channel: Channel
+        let list: [Channel]
+        var id: String { channel.id }
+    }
+
+    @Environment(AppModel.self) private var model
+    @Environment(\.scenePhase) private var scenePhase
+    /// Every ref a channel answers to, mapped to it, for the channels found so far.
+    @State private var found: [String: Channel] = [:]
+    /// Liked refs a full walk of the receiver did not find (off air, or gone), with when, kept on
+    /// this device so a stale like does not cost a walk of every list at each launch. Looked for
+    /// again after `missingFor`.
+    @AppStorage("kj.likedMissing.v1") private var missingStore = ""
+    /// The refs the last walk was asked for: a ref not among them is a new like, looked for at once.
+    /// Nil until the first walk of a launch, whose refs are the account's, not new likes.
+    @State private var lastRefs: Set<String>?
+    private static let missingFor: TimeInterval = 6 * 3600
+
+    private var missing: Set<String> {
+        let now = Date().timeIntervalSince1970
+        return Set(missingStore.split(separator: "\n").compactMap { line -> String? in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let at = TimeInterval(parts[0]), now - at < Self.missingFor else { return nil }
+            return String(parts[1])
+        })
+    }
+
+    private func unmarkMissing(_ refs: Set<String>) {
+        missingStore = missingStore.split(separator: "\n").filter { line in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            return parts.count == 2 && !refs.contains(String(parts[1]))
+        }.joined(separator: "\n")
+    }
+
+    private func markMissing(_ refs: Set<String>) {
+        let now = Date().timeIntervalSince1970
+        let kept = missingStore.split(separator: "\n").filter { line in
+            let parts = line.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let at = TimeInterval(parts[0]) else { return false }
+            return now - at < Self.missingFor && !refs.contains(String(parts[1]))
+        }.map(String.init)
+        missingStore = (kept + refs.map { "\(Int(now)) \($0)" }).joined(separator: "\n")
+    }
+    @State private var playing: Pick?
+    /// Cards that get a live still, from the front.
+    private static let pictured = 4
+
+    /// The account's likes, newest first. A Debug build takes `-kjlikedrefs channel:a,channel:b`
+    /// in their place, so the shelf can be seen and tested with no account signed in.
+    private var refs: [String] {
+        #if DEBUG
+        if let given = UserDefaults.standard.string(forKey: "kjlikedrefs") {
+            return given.split(separator: ",").map(String.init)
+        }
+        #endif
+        return model.saves.likedChannelRefs
+    }
+
+    /// The liked channels the region lists still carry, newest like first, each once. A like of a
+    /// channel taken off the receiver is not drawn.
+    private var channels: [Channel] {
+        var seen = Set<String>()
+        return refs.compactMap { found[$0] }.filter { seen.insert($0.id).inserted }
+    }
+
+    var body: some View {
+        let list = channels
+        // A stack, not a Group: a Group hands its modifiers to its children, and with no likes yet
+        // there is no child, so the task that reads the likes would never run.
+        VStack(alignment: .leading, spacing: 0) {
+            if !list.isEmpty {
+                Shelf("Liked", count: "\(list.count) live") {
+                    // No heart on these cards: the shelf's name already says they are liked.
+                    ForEach(list) { channel in
+                        let still = channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
+                        Button {
+                            playing = Pick(channel: channel, list: list)
+                        } label: {
+                            if channel.mediaType == "radio" {
+                                RadioCard(channel: channel)
+                            } else {
+                                PictureCard(channel: channel, still: still)
+                            }
+                        }
+                        .buttonStyle(HouseCardStyle())
+                        .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
+                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: false))
+                        .accessibilityIdentifier("liked-\(channel.id)")
+                    }
+                }
+                .accessibilityIdentifier("shelf-liked")
+                .padding(.top, 12)
+                .onAppear { wantStills(list) }
+            }
+        }
+        // Again each time the app comes forward: a read that failed at launch (an Apple TV waking
+        // before its network) is retried, and a read that worked is not repeated (SavesStore).
+        .task(id: "\(model.auth.session?.userId ?? "")|\(scenePhase)") { await model.saves.load() }
+        // Again when the app comes forward: a list that failed to load at launch is read again
+        // (the store caches the ones that loaded, so a walk that found everything costs nothing).
+        .task(id: "\(refs.joined(separator: ","))|\(scenePhase)") { await resolve() }
+        .fullScreenCover(item: $playing) { pick in
+            ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
+        }
+    }
+
+    /// Finds each liked channel in the region lists: the atlas, then the cameras, then the wider
+    /// regions (fewest lists first; the wider ones are not cached with *Beyond the atlas* off),
+    /// each tier read at once (the store caches every list), and stops after the first tier that
+    /// leaves nothing unfound. A like no list carries is remembered as missing on this
+    /// device for `missingFor`, so the receiver is not walked for it on every launch or change.
+    private func resolve() async {
+        guard let index = model.receiver.index else { return }
+        let main = index.listedRegions.filter { ShuffleScope.main.includes(tier: $0.tier) }
+        let wide = index.listedRegions.filter { !ShuffleScope.main.includes(tier: $0.tier) }
+        // Every region, as the cameras shelf reads them: one may carry cameras and no list.
+        let cameras = index.regions.filter { index.cameraFiles?[$0.id] != nil }
+        let tiers: [([ReceiverIndex.Region], Bool)] = [(main, false), (cameras, true), (wide, false)]
+        let wanted = Set(refs)
+        // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes
+        // that arrive next are not taken for new ones.
+        // An account that unliked everything has no likes: its next like is new, so it is fresh.
+        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; wantStills([]); return }
+        // A like just made is worth a walk, even of a channel off air a moment ago.
+        let fresh = lastRefs.map { wanted.subtracting($0) } ?? []
+        lastRefs = wanted
+        if !fresh.isEmpty, !fresh.isDisjoint(with: missing) { unmarkMissing(fresh) }
+        var unfound: Set<String> { wanted.subtracting(found.keys).subtracting(missing) }
+        // Missing is written only after every list has loaded: a like is not given up on a failed read.
+        var complete = true
+        for (regions, camerasOnly) in tiers {
+            if unfound.isEmpty { break }
+            // Nil for a list that did not load, so a failed read is never taken for "not there".
+            let lists = await withTaskGroup(of: [Channel]?.self) { group in
+                for region in regions {
+                    group.addTask { @MainActor in
+                        try? await model.receiver.channels(regionId: region.id, cameras: camerasOnly)
+                    }
+                }
+                var all: [[Channel]?] = []
+                for await list in group { all.append(list) }
+                return all
+            }
+            guard !Task.isCancelled else { return }
+            if lists.contains(where: { $0 == nil }) { complete = false }
+            for channel in lists.compactMap({ $0 }).joined() {
+                for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
+                where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
+            }
+            // Asked for as soon as a tier lands, so the shelf's stills do not wait on the wider walk.
+            wantStills(channels)
+        }
+        if complete, !unfound.isEmpty { markMissing(unfound) }
+        wantStills(channels)
+    }
+
+    private func wantStills(_ list: [Channel]) {
+        let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
+        // Sent when empty too, so channels no longer liked stop taking stills.
+        model.stills.wantNext(first, place: 0)
     }
 }

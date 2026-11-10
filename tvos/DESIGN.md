@@ -118,6 +118,20 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   scrolls to the Screening Room's full-width shelf under it, as the TV app lays its rows, peeking
   at the bottom of the first screen. The Khajistan Radio mixes are not on the TV (owner,
   2026-10-06): they play as programmes on Transmission's channel 2, the website's sound channel.
+- **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
+  accessible"): the first shelf under the map, so a liked channel is one press down from the region
+  strip and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
+  player's Like and the website's heart write, read at launch and at sign-in; a like made on this
+  TV shows at once), newest first, as live cards: picture cards for
+  television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
+  says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
+  liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
+  filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
+  is not drawn; it is looked for again at the first launch six hours on, or at once when it is
+  liked again (the app remembers it on the device, so a stale like costs no walk of every list at
+  each launch). Likes are read again when the app comes
+  forward if the first read failed. Stills: 28 a visit on the TV (24 on the phone), so Liked's four
+  do not cost Music its pictures.
 - **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero
   across the top that stays while the shelves scroll under it. At left the crumb kicker RECEIVER →
   INDUS, the name (headline) and native name, then the channel focus rests on: ● LIVE · TELEVISION

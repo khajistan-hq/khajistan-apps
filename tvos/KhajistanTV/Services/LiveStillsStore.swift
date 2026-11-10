@@ -28,9 +28,10 @@ final class LiveStills {
     @ObservationIgnored private let receiver: ReceiverStore
     @ObservationIgnored private var plan = StillPlan()
     @ObservationIgnored private var wanted: [Channel] = []
-    /// Wanted after the first list and before the second: the first cards of the Receiver's News
-    /// and Music shelves, which sit between its regions and its cameras.
-    @ObservationIgnored private var wantedNext: [Channel] = []
+    /// Wanted after the first list and before the second: the first cards of the shelves between
+    /// the Receiver's regions and its cameras (Liked, then News and Music), one list per shelf by
+    /// its place on the page, so one shelf's list never replaces another's.
+    @ObservationIgnored private var wantedNext: [Int: [Channel]] = [:]
     /// A second list, wanted after the first: the Receiver's camera cards, beside its regions.
     @ObservationIgnored private var wantedToo: [Channel] = []
     @ObservationIgnored private var onScreen: [Channel] = []
@@ -78,7 +79,7 @@ final class LiveStills {
         driver?.cancel()
         driver = nil
         wanted = []
-        wantedNext = []
+        wantedNext = [:]
         wantedToo = []
         onScreen = []
         visit += 1
@@ -92,9 +93,11 @@ final class LiveStills {
         drive()
     }
 
-    /// Wanted after `want`'s list and before `wantToo`'s, and kept when either changes.
-    func wantNext(_ channels: [Channel]) {
-        wantedNext = channels.filter { $0.mediaType != "radio" }
+    /// Wanted after `want`'s list and before `wantToo`'s, and kept when either changes. `place` is
+    /// the shelf's order on the page: a lower place is pictured first, and a shelf's new list
+    /// replaces only its own.
+    func wantNext(_ channels: [Channel], place: Int = 0) {
+        wantedNext[place] = channels.filter { $0.mediaType != "radio" }
         drive()
     }
 
@@ -142,7 +145,8 @@ final class LiveStills {
                     continue
                 }
                 let now = Date().timeIntervalSince1970
-                let all = self.wanted + self.wantedNext + self.wantedToo
+                let next = self.wantedNext.keys.sorted().flatMap { self.wantedNext[$0] ?? [] }
+                let all = self.wanted + next + self.wantedToo
                 guard let id = self.plan.next(wanted: all.map(\.id), has: { self.image(for: $0) != nil }, now: now) else {
                     let wait = self.plan.wait(now: now)
                     if wait == 0 { break }

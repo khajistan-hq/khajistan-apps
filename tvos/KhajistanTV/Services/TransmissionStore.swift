@@ -38,7 +38,7 @@ final class TransmissionStore {
         #if DEBUG
         if let pinned = pinnedStart { return pinned.addingTimeInterval(real.timeIntervalSince(launched)) }
         #endif
-        return real
+        return ServerClock.now(real)
     }
 
     #if DEBUG
@@ -159,6 +159,9 @@ final class TransmissionStore {
     /// not downloaded again, so coming back to the page, signing in or trying again costs nothing.
     /// A second call while a fetch is in flight waits for that fetch.
     func loadSchedule() async {
+        // The month is picked by the station clock, so wait for the server's time first. AppModel
+        // starts that reading at launch, so this usually returns at once; at most 1.5 s.
+        await ServerClock.sync(clockFile: Self.clockFile)
         let monthKey = StationClock.stationMonth(Self.now())
         if schedule == .ready, month == monthKey { return }
         if let held = scheduleLoad, held.month == monthKey {
@@ -318,6 +321,18 @@ final class TransmissionStore {
     }
 
     /// Resuming a paused transmission is joining it again, not continuing from where it paused.
+    /// The site's clock file, whose `Date` header is the station's time (ServerClock).
+    static let clockFile = KJConfig.site.appending(path: "scripts/kj-station-clock.js")
+
+    /// Back on the screen: read the server again, and rejoin only if the clock moved by more than
+    /// a set that kept playing would notice (20 s, as on the website).
+    func resyncClock() async {
+        let before = ServerClock.currentSkew
+        let after = await ServerClock.sync(clockFile: Self.clockFile, force: true)
+        guard abs(after - before) > 20, case .onAir = phase else { return }
+        await rejoinLive()
+    }
+
     func rejoinLive() async {
         // A retry asks for a fresh address: the held one may be the one that failed.
         signed.removeAll()

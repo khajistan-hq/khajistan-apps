@@ -401,3 +401,67 @@ enum StationClock {
         return era * 146_097 + dayOfEra - 719_468
     }
 }
+
+/// The server's time, not the device's (2026-11-10, ported from kj-station-clock.js). A device
+/// whose clock is wrong joined every programme that far behind everyone else. One HEAD of the
+/// site's clock file reads the server's `Date` header. The header is whole seconds, so a reading
+/// is only good to about ±0.5 s plus half the round trip: a device already within `floor` of it
+/// keeps its own clock, because a coarser correction would move an accurate set off the second.
+/// Read at launch and again (`force`) each time the app comes back to the screen: an Apple TV
+/// can start before its own clock is set, and a skew kept after the device is corrected would
+/// put the set that far AHEAD. A failed reading is never kept, so the next call asks again.
+enum ServerClock {
+    static let floor: TimeInterval = 2
+    /// A request that hangs must not hold the first tune.
+    static let wait: TimeInterval = 1.5
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var skew: TimeInterval = 0
+    nonisolated(unsafe) private static var reading: Task<TimeInterval?, Never>?
+
+    /// Server time minus device time, in seconds; 0 while no reading is held or the device is close.
+    static var currentSkew: TimeInterval { lock.withLock { skew } }
+    static func now(_ real: Date = Date()) -> Date { real.addingTimeInterval(currentSkew) }
+
+    /// +0.5: the header truncates to the second. Returns the skew now in force.
+    @discardableResult
+    static func apply(server: Date, sent: Date, received: Date) -> TimeInterval {
+        guard received >= sent else { return currentSkew }
+        let midpoint = sent.addingTimeInterval(received.timeIntervalSince(sent) / 2)
+        let s = server.addingTimeInterval(0.5).timeIntervalSince(midpoint)
+        return lock.withLock { skew = abs(s) > floor ? s : 0; return skew }
+    }
+
+    static func parseHTTPDate(_ text: String?) -> Date? {
+        guard let text else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "GMT")
+        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return f.date(from: text)
+    }
+
+    /// Concurrent callers share one request. `force` asks the server again even when a reading
+    /// is held. Never throws: no answer keeps the skew in force (0 before any reading), which is
+    /// what the station ran on before this existed.
+    @discardableResult
+    static func sync(clockFile: URL, session: URLSession = .shared, force: Bool = false) async -> TimeInterval {
+        let task: Task<TimeInterval?, Never> = lock.withLock {
+            if !force, let reading { return reading }
+            let made = Task<TimeInterval?, Never> {
+                var request = URLRequest(url: clockFile.appending(queryItems: [URLQueryItem(name: "clock", value: String(Int(Date().timeIntervalSince1970 * 1000)))]),
+                                         cachePolicy: .reloadIgnoringLocalAndRemoteCacheData, timeoutInterval: wait)
+                request.httpMethod = "HEAD"
+                let sent = Date()
+                guard let (_, response) = try? await session.data(for: request),
+                      let server = parseHTTPDate((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Date"))
+                else { return nil }
+                return apply(server: server, sent: sent, received: Date())
+            }
+            reading = made
+            return made
+        }
+        if let read = await task.value { return read }
+        lock.withLock { if reading == task { reading = nil } }   // a failed reading is not kept
+        return currentSkew
+    }
+}

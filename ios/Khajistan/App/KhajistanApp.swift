@@ -27,6 +27,7 @@ struct KhajistanApp: App {
                 // Back from the lock screen or another app: the sky may have moved.
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active { withAnimation(.easeInOut(duration: 0.4)) { model.refreshSkin() } }
+                    if phase == .active { Task { await model.transmission.resyncClock() } }
                     if phase == .background { model.tuner.appLeftTheScreen() }
                 }
         }

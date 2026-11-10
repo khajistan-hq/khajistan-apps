@@ -113,6 +113,8 @@ final class AppModel {
         self.receiver = ReceiverStore()
         self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
+        // The station clock's server reading starts now, alongside everything else launch fetches.
+        Task { await ServerClock.sync(clockFile: TransmissionStore.clockFile) }
         self.pnv = PicsVidsStore(auth: auth)
         self.saves = SavesStore(auth: auth)
         bazaar = SiteFeed(auth: auth, path: Bazaar.cataloguePath) { data in

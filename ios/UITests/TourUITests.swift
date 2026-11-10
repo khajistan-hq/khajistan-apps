@@ -33,10 +33,12 @@ final class TourUITests: XCTestCase {
         let region = app.buttons["region-maghreb"]
         for _ in 0..<6 where !(region.exists && region.isHittable) { app.swipeUp(); sleep(1) }
         if region.exists && region.isHittable { region.tap(); sleep(6); shot("tour-6-receiver-tap-region", app) }
-        for part in ["part-cameras", "part-transmission"] where app.buttons[part].exists {
+        // Only where the button can be tapped, as the region and the website are: after a region
+        // opens, a slow runner can leave the parts scrolled under the header (CI, PR 9).
+        for part in ["part-cameras", "part-transmission"] where app.buttons[part].exists && app.buttons[part].isHittable {
             app.buttons[part].tap(); sleep(6); shot("tour-6-receiver-\(part)", app)
         }
-        app.buttons["part-live"].tap(); sleep(1)
+        if app.buttons["part-live"].isHittable { app.buttons["part-live"].tap(); sleep(1) }
         // A room that opens the website, and the way back.
         if app.buttons["tab-rooms"].exists {
             app.buttons["tab-rooms"].tap()

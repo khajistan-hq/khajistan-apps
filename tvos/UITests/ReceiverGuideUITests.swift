@@ -123,9 +123,11 @@ final class ReceiverGuideUITests: XCTestCase {
         // A playing station keeps the Apple TV awake: radio plays through the app's own audio
         // engine, which tvOS does not count as playing, and the box slept and stopped the sound
         // (owner, 2026-10-29).
-        let awake = app.staticTexts["keepAwake"].firstMatch
+        // The root screen and the full-screen player each carry a readout; the one under a cover
+        // may not redraw, so the live one, whichever it is, answers.
+        let readouts = app.staticTexts.matching(identifier: "keepAwake")
         func awakeIs(_ value: String) -> Bool {
-            let match = NSPredicate { _, _ in awake.exists && awake.label == value }
+            let match = NSPredicate { _, _ in readouts.allElementsBoundByIndex.contains { $0.label == value } }
             return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: match, object: nil)], timeout: 5) == .completed
         }
         if nowPlaying.waitForExistence(timeout: 40) {

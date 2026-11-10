@@ -74,6 +74,8 @@ final class AppModel {
     var menuNavigationLocks: Set<UUID> = []
     /// A finger is turning the Receiver map's dial: the page under it holds still meanwhile.
     var mapScrubbing = false
+    /// A room asked for from outside Chat (a card on Home): Chat opens on it, then clears it.
+    var chatRoom: String?
     /// The region Pics/Vids shows: a region token, or `PicsVidsStore.allRegions` for all of them.
     /// The phone draws one grid under a region filter; the store keeps one feed per key.
     var pnvRegion = PicsVidsStore.allRegions

@@ -429,6 +429,19 @@ final class KhajistanUITests: XCTestCase {
         return total == 0 ? 0 : Double(lit) / Double(total)
     }
 
+    /// Whether the picture in `rect` lights within `timeout`. Only for the checks before the
+    /// background: a live channel's first frames can be dark, and a slow CI runner reached the
+    /// first check before the picture had painted (PR 9, 2026-11-09). The checks after the
+    /// background stay single reads, because a picture that stays black is the bug.
+    private func becomesLit(_ rect: CGRect, _ app: XCUIApplication, timeout: TimeInterval = 15) -> Bool {
+        let end = Date().addingTimeInterval(timeout)
+        repeat {
+            if litShare(rect, app) > 0.05 { return true }
+            sleep(1)
+        } while Date() < end
+        return false
+    }
+
     /// "Play with the app closed" (DECISIONS 24): the picture lets go of the player while the app
     /// is away, so a television channel's sound carries on. Back in the app, the picture comes
     /// back, full screen and then docked; Bugbot found both black while the state said Playing.
@@ -447,7 +460,7 @@ final class KhajistanUITests: XCTestCase {
         let dockHeight = (set.width - 12) * 9 / 16
         let dock = CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
                           width: set.width * 0.6, height: dockHeight * 0.6)
-        XCTAssertGreaterThan(litShare(dock, app), 0.05, "the docked picture shows before the background")
+        XCTAssertTrue(becomesLit(dock, app), "the docked picture shows before the background")
 
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 10, "full screen opens")
@@ -457,7 +470,7 @@ final class KhajistanUITests: XCTestCase {
         let fullHeight = screen.width * 9 / 16
         let full = CGRect(x: screen.width * 0.2, y: screen.midY - fullHeight * 0.3,
                           width: screen.width * 0.6, height: fullHeight * 0.6)
-        XCTAssertGreaterThan(litShare(full, app), 0.05, "the full-screen picture shows before the background")
+        XCTAssertTrue(becomesLit(full, app), "the full-screen picture shows before the background")
 
         XCUIDevice.shared.press(.home)
         sleep(6)
@@ -594,6 +607,30 @@ final class KhajistanUITests: XCTestCase {
     /// Chat (own builds only; App Store builds leave it out): ROOMS' Chat door opens the rooms,
     /// a room shows its lines or says there are none, a signed-out reader is told to sign in to
     /// write, and back and close return to HOME. Reads the live site's rooms.
+    /// A Chat card on Home opens its own room, as the other shelves open the thing on the card.
+    /// The shelf shows rooms already loaded, so Chat is opened once first.
+    func testHomeChatCardOpensItsRoom() throws {
+#if KJ_APP_STORE
+        throw XCTSkip("App Store builds leave chat out")
+#else
+        let app = launch(skin: "grove", tab: "rooms")
+        let door = app.buttons["destination-chat"]
+        for _ in 0..<8 where !door.exists { app.swipeUp() }
+        door.tap()
+        waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch, 30, "the rooms load")
+        app.buttons["closePlayer"].tap()
+        app.buttons["tab-home"].tap()
+        let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home-chat-'")).firstMatch
+        for _ in 0..<12 where !(card.exists && card.isHittable) { app.swipeUp() }
+        waitFor(card, 5, "Home has a Chat shelf once the rooms are loaded")
+        let slug = card.identifier.replacingOccurrences(of: "home-chat-", with: "")
+        card.tap()
+        waitFor(app.staticTexts["chatRoomName"], 10, "the card opens its own room, not the list")
+        XCTAssertFalse(app.buttons["chat-room-\(slug)"].exists, "the room list is not what opened")
+        shot("chat-from-home-card", app)
+#endif
+    }
+
     func testChatOpensFromHomeAndShowsARoom() throws {
 #if KJ_APP_STORE
         throw XCTSkip("App Store builds leave chat out")

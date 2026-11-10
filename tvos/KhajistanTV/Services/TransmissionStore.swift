@@ -83,6 +83,12 @@ final class TransmissionStore {
     /// once-a-minute tuneToNow does. Without it a file that runs past its slot kept the old
     /// show on screen, and the old "now" in the overlay, until the file ended.
     @ObservationIgnored private var slotWatch: Task<Void, Never>?
+    /// A refused signing asked again (Refusal, 2026-11-09): how many times in a row on this
+    /// channel, the timer, and when the month was last read again because of one.
+    @ObservationIgnored private var refusals = 0
+    @ObservationIgnored private var refusedChannel: Int?
+    @ObservationIgnored private var refusalWatch: Task<Void, Never>?
+    @ObservationIgnored private var rereadAt = Date.distantPast
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -256,6 +262,12 @@ final class TransmissionStore {
     /// is not held for the current station month, so a month that has turned is picked up here.
     /// Needing a sign-in and failing are phases the player shows, not errors.
     func tune(channel: Int) async {
+        refusals = 0
+        await tune(channel: channel, keepingRefusals: true)
+    }
+
+    /// `tune(channel:)` without starting the refusal count over: the retry after a refusal.
+    private func tune(channel: Int, keepingRefusals: Bool) async {
         channelNumber = channel
         let gen = beginTune()
         player.stop()
@@ -321,6 +333,7 @@ final class TransmissionStore {
     func rejoinLive() async {
         // A retry asks for a fresh address: the held one may be the one that failed.
         signed.removeAll()
+        refusals = 0
         await tune(channel: channelNumber)
     }
 
@@ -476,6 +489,8 @@ final class TransmissionStore {
         offAirWatch = nil
         slotWatch?.cancel()
         slotWatch = nil
+        refusalWatch?.cancel()
+        refusalWatch = nil
         return generation
     }
 
@@ -519,12 +534,16 @@ final class TransmissionStore {
             // A signer that redirects is refused, as the website's fetch does with redirect: 'error'.
             reply = try await send(request, refusingRedirects: true)
         } catch {
-            if gen == generation, !Task.isCancelled { phase = .failed(error.localizedDescription) }
+            if gen == generation, !Task.isCancelled { refused(status: 0, reason: nil, generation: gen) }
             return nil
         }
         guard gen == generation else { return nil }
         if reply.status == 401 {
             phase = .needsSignIn
+            return nil
+        }
+        if reply.status != 200 {
+            refused(status: reply.status, reason: Refusal.reason(from: reply.data), generation: gen)
             return nil
         }
         let url: URL
@@ -542,7 +561,51 @@ final class TransmissionStore {
         print("KJTUNE carrier host=\(url.host ?? "-") ext=\(url.pathExtension)")
         #endif
         if let viewer { signed["\(route)|\(viewer)"] = (url, Date().addingTimeInterval(Self.signedLife)) }
+        refusals = 0
         return url
+    }
+
+    /// The signer said no. Asked again on Refusal's delays while the viewer stays on this
+    /// channel; a 403 "not on air now" means this schedule and the signer's disagree, most often
+    /// a month rebuilt while the app was open, so the month is read again first (at most once a
+    /// minute) and the channel tuned on it. A tune, a stop or a channel change cancels the wait.
+    private func refused(status: Int, reason: String?, generation gen: Int) {
+        if refusedChannel != channelNumber { refusals = 0; refusedChannel = channelNumber }
+        guard let wait = Refusal.retryIn(status: status, reason: reason, attempt: refusals) else {
+            phase = .failed("This transmission is unavailable right now.")
+            return
+        }
+        refusals += 1
+        let reread = reason == Refusal.notOnAir && Date().timeIntervalSince(rereadAt) >= 60
+        phase = .failed(reread ? "This transmission is unavailable right now. Checking the schedule again."
+                               : "This transmission is unavailable right now. Trying again in \(wait) s.")
+        refusalWatch?.cancel()
+        refusalWatch = Task { [weak self] in
+            guard let self else { return }
+            var read = false
+            if reread {
+                self.rereadAt = Date()
+                // A failed read must not cost the month already held: loadSchedule drops it on a
+                // failure, so it is put back, and the retry waits instead of tuning at once.
+                let held = (programming: self.programming, month: self.month)
+                self.month = nil
+                await self.loadSchedule()
+                read = self.schedule == .ready
+                // Only a failed fetch is undone. A 401 or 404 is an answer the station page must
+                // show, and a tune that started meanwhile owns the schedule from here.
+                if !read, !Task.isCancelled, gen == self.generation, case .failed = self.schedule,
+                   let programming = held.programming {
+                    self.programming = programming
+                    self.month = held.month
+                    self.schedule = .ready
+                }
+            }
+            if !read { try? await Task.sleep(for: .seconds(wait)) }
+            guard !Task.isCancelled, gen == self.generation, case .failed = self.phase else { return }
+            // A task of its own: tuning cancels this watch, and a cancelled task cannot finish
+            // the network calls tuning makes.
+            Task { await self.tune(channel: self.channelNumber, keepingRefusals: true) }
+        }
     }
 
     /// The dancer listens to a programme that is sound with no picture (most of Channel 3, the

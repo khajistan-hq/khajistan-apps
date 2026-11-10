@@ -20,7 +20,11 @@ concurrency:
 jobs:
   simulator:
     runs-on: macos-26
-    timeout-minutes: 75
+    # The UI suite outgrew 75 minutes: every tvOS run cut at the limit from 2026-11-09 on,
+    # with tests still passing (PR 48: 58 passed, 0 failed when cut). The one run allowed
+    # 100 (PR 9, 2026-11-09) finished in 87, the test step alone 80. Public repo: macOS
+    # minutes are not billed.
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
         with:

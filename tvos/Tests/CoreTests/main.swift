@@ -4426,7 +4426,91 @@ func nowPlayingKeepsThroughMisses() throws {
     try expectEqual(NowPlaying.step(kept: "X", failures: 2, answer: "Y").failures, 0)
 }
 
+// MARK: - Server clock (2026-11-10, mirrors archive tests/station_clock_next_test.mjs)
+
+func serverClockCorrectsASlowDevice() throws {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    // Server 10 minutes ahead of a device whose round trip took 0.1 s.
+    let skew = ServerClock.apply(server: t0.addingTimeInterval(600), sent: t0, received: t0.addingTimeInterval(0.1))
+    try expectClose(skew, 600.45)
+    try expectClose(ServerClock.now(t0).timeIntervalSince(t0), 600.45)
+    // A corrected device drops the old skew rather than keeping it.
+    try expectEqual(ServerClock.apply(server: t0, sent: t0, received: t0), 0)
+    try expectEqual(ServerClock.now(t0), t0)
+}
+
+func serverClockFloorKeepsAnAccurateDevice() throws {
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    try expectEqual(ServerClock.apply(server: t0.addingTimeInterval(1.499), sent: t0, received: t0), 0)   // 1.999 s
+    try expectClose(ServerClock.apply(server: t0.addingTimeInterval(1.501), sent: t0, received: t0), 2.001)
+    try expectClose(ServerClock.apply(server: t0.addingTimeInterval(-240), sent: t0, received: t0), -239.5)
+    // A backwards round trip changes nothing.
+    try expectClose(ServerClock.apply(server: t0.addingTimeInterval(900), sent: t0, received: t0.addingTimeInterval(-1)), -239.5)
+    _ = ServerClock.apply(server: t0, sent: t0, received: t0)
+}
+
+func serverClockReadsTheHTTPDateHeader() throws {
+    let d = try expectNotNil(ServerClock.parseHTTPDate("Tue, 10 Nov 2026 07:02:54 GMT"))
+    try expectEqual(d.timeIntervalSince1970, 1_794_294_174)
+    try expect(ServerClock.parseHTTPDate("not a date") == nil)
+    try expect(ServerClock.parseHTTPDate(nil) == nil)
+}
+
+
+/// Answers every request with a `Date` header, or fails when `dateHeader` is nil.
+final class StubClockProtocol: URLProtocol {
+    nonisolated(unsafe) static var dateHeader: String?
+    nonisolated(unsafe) static var requests = 0
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests += 1
+        guard let header = Self.dateHeader else {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
+        }
+        let reply = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Date": header])!
+        client?.urlProtocol(self, didReceive: reply, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [StubClockProtocol.self]
+    let session = URLSession(configuration: config)
+    let file = URL(string: "https://example.test/scripts/kj-station-clock.js")!
+    let http = DateFormatter()
+    http.locale = Locale(identifier: "en_US_POSIX"); http.timeZone = TimeZone(identifier: "GMT")
+    http.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+    func run(force: Bool) -> TimeInterval {
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var out: TimeInterval = .nan
+        Task { out = await ServerClock.sync(clockFile: file, session: session, force: force); done.signal() }
+        done.wait()
+        return out
+    }
+    _ = ServerClock.apply(server: Date(), sent: Date(), received: Date())      // start from 0
+    StubClockProtocol.dateHeader = nil
+    try expectEqual(run(force: true), 0, "no answer keeps the device clock")
+    // The failure was not kept: an ordinary call asks again, and takes the server's +10 min.
+    StubClockProtocol.dateHeader = http.string(from: Date().addingTimeInterval(600))
+    try expectClose(run(force: false), 600, tolerance: 1.5)
+    // A held reading answers without a request.
+    let asked = StubClockProtocol.requests
+    try expectClose(run(force: false), 600, tolerance: 1.5)
+    try expectEqual(StubClockProtocol.requests, asked)
+    // Back on the screen with the device set right: force replaces the old skew.
+    StubClockProtocol.dateHeader = http.string(from: Date())
+    try expectEqual(run(force: true), 0)
+}
+
+
 let tests: [(String, () throws -> Void)] = [
+    ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
+    ("serverClockFloorKeepsAnAccurateDevice", serverClockFloorKeepsAnAccurateDevice),
+    ("serverClockReadsTheHTTPDateHeader", serverClockReadsTheHTTPDateHeader),
+    ("serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne", serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne),
     ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
     ("houseSongsFindTheSpan", houseSongsFindTheSpan),
     ("nowPlayingKeepsThroughMisses", nowPlayingKeepsThroughMisses),

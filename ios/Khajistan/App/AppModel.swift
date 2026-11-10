@@ -154,6 +154,8 @@ final class AppModel {
         let auth = AuthStore()
         self.auth = auth
         transmission = TransmissionStore(auth: auth)
+        // The station clock's server reading starts now, alongside everything else launch fetches.
+        Task { await ServerClock.sync(clockFile: TransmissionStore.clockFile) }
         captions = LiveCaptionSession(auth: auth)
         stills = LiveStills(receiver: receiver)
         tuner = ReceiverTuner(clips: clips, receiver: receiver, transmission: transmission, captions: captions)

@@ -30,6 +30,11 @@ struct KhajistanApp: App {
                     if phase == .active { Task { await model.transmission.resyncClock() } }
                     if phase == .background { model.tuner.appLeftTheScreen() }
                 }
+                // The device clock was set (NTP after boot, or by hand) while the app stayed on
+                // screen: the old skew is now wrong by that much, so read the server again.
+                .onReceive(NotificationCenter.default.publisher(for: .NSSystemClockDidChange)) { _ in
+                    Task { await model.transmission.resyncClock() }
+                }
         }
         #if targetEnvironment(macCatalyst)
         .commands {

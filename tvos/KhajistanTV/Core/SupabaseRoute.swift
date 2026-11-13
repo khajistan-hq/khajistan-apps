@@ -146,8 +146,7 @@ enum SupabaseRoute {
                 routedRequest.url = request.url.map { routed($0) }
                 return try await session.data(for: routedRequest, delegate: delegate)
             }
-            // With no way to the project open, a project request still fails at once.
-            guard isDropped(error), isRepeatable(request), !(onProject && path == .unreachable) else { throw error }
+            guard retriesDropped(error, request: request, onProject: onProject, path: path) else { throw error }
             try await Task.sleep(for: droppedRetryDelay)
             return try await session.data(for: routedRequest, delegate: delegate)
         }
@@ -160,6 +159,13 @@ enum SupabaseRoute {
     static func isDropped(_ error: Error) -> Bool {
         guard let code = (error as? URLError)?.code else { return false }
         return code == .networkConnectionLost || code == .secureConnectionFailed
+    }
+
+    /// Whether a failed request is sent once more: a dropped connection, on a request that can be
+    /// sent twice, and not a project request when no way to the project is open (that one still
+    /// fails at once).
+    static func retriesDropped(_ error: Error, request: URLRequest, onProject: Bool, path: Path) -> Bool {
+        isDropped(error) && isRepeatable(request) && !(onProject && path == .unreachable)
     }
 
     /// Only a request with no effect of its own is sent twice.

@@ -4627,6 +4627,13 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expectEqual([r.status ?? -1, r.requests], [-1, 1], "a POST is never sent twice")
     r = run("GET", drops: 1, error: URLError(.notConnectedToInternet))
     try expectEqual([r.status ?? -1, r.requests], [-1, 1], "no network is not a dropped connection")
+    // The rule itself, for the project's own requests: no route open fails at once.
+    let get = URLRequest(url: url), lost = URLError(.networkConnectionLost)
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .direct))
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .proxy))
+    try expect(!SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .unreachable))
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
+    try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {

@@ -1031,19 +1031,28 @@ let syntheticJSON = #"""
 
 func syntheticSchedule() throws -> Programming { try decode(Programming.self, syntheticJSON) }
 
-/// The seven channels of 2026-11-04, listed out of order: the dial is the numbers, not the
-/// order of the list.
+/// The seven channels of 2026-11-04. Since 2026-11-13 the dial follows the order of the list
+/// (channelListFollowsTheScheduleOrder), so this one is listed in number order.
 let sevenChannelJSON = #"""
 {"_meta":{"channels":[
-  {"id":"family","number":4,"name":"Channel 4 · Family Tapes"},
   {"id":"cinema","number":1,"name":"Channel 1 · Cinema","line":"Feature films"},
   {"id":"state-tv","number":2,"name":"Channel 2 · State Television"},
   {"id":"music","number":3,"name":"Channel 3 · Music"},
+  {"id":"family","number":4,"name":"Channel 4 · Family Tapes"},
   {"id":"mehfil","number":5,"name":"Channel 5 · Mehfil"},
   {"id":"trailers","number":6,"name":"Channel 6 · Trailers"},
   {"id":"macabre","number":7,"name":"Channel 7 · Macabre"}]},
  "shows":{},"programme_order":[],"programmes":{},"days":[]}
 """#
+
+func channelListFollowsTheScheduleOrder() throws {
+    // Owner, 2026-11-13: Mujra, film and dance on top. The schedule lists them first; the app
+    // must not re-sort by number.
+    let raw = #"{"_meta":{"channels":[{"id":"mujra","number":18,"name":"Channel 18 · Mujra"},{"id":"cinema","number":1,"name":"Channel 1 · Bioscope"},{"id":"raqs","number":12,"name":"Channel 12 · Raqs"}]},"shows":{},"programme_order":[],"programmes":{},"days":[]}"#
+    let p = try decode(Programming.self, raw)
+    try expectEqual(StationClock.channelNumbers(p), [18, 1, 12])
+    try expectEqual(StationClock.channel(p, from: 12, step: 1), 18)
+}
 
 func channelUpAndDownGoRoundTheDial() throws {
     let seven = try decode(Programming.self, sevenChannelJSON)
@@ -1707,7 +1716,7 @@ func realProgrammingDecodesInEveryMonth() throws {
         // 2026-11-04, seven after; the app reads whichever the month carries.
         let numbers = StationClock.channelNumbers(p)
         try expect(!numbers.isEmpty, "\(month): no channels")
-        try expectEqual(numbers, Array(1...numbers.count), month)
+        try expectEqual(numbers.sorted(), Array(1...numbers.count), month)
         let ids = Set(p._meta.channels.map(\.id))
         try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
         print("      \(month): channels " + p._meta.channels.sorted { $0.number < $1.number }.map(\.id).joined(separator: ", "))
@@ -4719,6 +4728,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
+    ("The channel list follows the schedule order, Mujra first", channelListFollowsTheScheduleOrder),
     ("Channel Up and Down go round all seven channels", channelUpAndDownGoRoundTheDial),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),

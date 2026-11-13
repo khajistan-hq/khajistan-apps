@@ -1319,10 +1319,10 @@ func realProgrammingDecodesInEveryMonth() throws {
         // 2026-11-04, seven after.
         let numbers = StationClock.channelNumbers(p)
         try expect(!numbers.isEmpty, "\(month): no channels")
-        try expectEqual(numbers, Array(1...numbers.count), month)
+        try expectEqual(numbers.sorted(), Array(1...numbers.count), month)
         // The phone's next and previous go round the dial: next from the last is the first.
-        try expectEqual(StationClock.channel(p, from: numbers.count, step: 1), 1, month)
-        try expectEqual(StationClock.channel(p, from: 1, step: -1), numbers.count, month)
+        try expectEqual(StationClock.channel(p, from: numbers.last!, step: 1), numbers.first!, month)
+        try expectEqual(StationClock.channel(p, from: numbers.first!, step: -1), numbers.last!, month)
         let ids = Set(p._meta.channels.map(\.id))
         try expectEqual(ids.count, numbers.count, "\(month): a channel id is used twice")
         for id in p.programme_order { _ = try require(p.programmes[id], "\(month): \(id) is in programme_order and not in programmes") }

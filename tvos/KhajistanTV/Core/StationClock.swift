@@ -80,9 +80,10 @@ enum StationClock {
         p._meta.channels.first { $0.number == number }?.id
     }
 
-    /// The channel numbers the schedule names, lowest first. The schedule is the only list.
+    /// The channel numbers the schedule names, in the schedule's own order. The schedule is the
+    /// only list: since 2026-11-13 it puts C18 Mujra, C1 Bioscope and C12 Raqs first (owner).
     static func channelNumbers(_ p: Programming) -> [Int] {
-        p._meta.channels.map(\.number).sorted()
+        p._meta.channels.map(\.number)
     }
 
     /// The channel `step` places on from `number`, round the dial: Channel Up from the last

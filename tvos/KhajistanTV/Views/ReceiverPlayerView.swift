@@ -160,7 +160,7 @@ struct ReceiverPlayerView: View {
             case .up: click(by: -1)
             case .down: click(by: 1)
             case .right: moveRight(stripWasUp: stripWasUp)
-            case .left: moveLeft()
+            case .left: moveLeft(onStrip: stripWasUp)
             @unknown default: break
             }
         }
@@ -562,7 +562,7 @@ struct ReceiverPlayerView: View {
             // and picture in picture are reached by swiping (owner, 2026-11-08: "when i swipe
             // right ... it opens the guide instead of making me navigate the bottom bar to PIP").
             // On the bare picture, and on a failed picture with no controls to walk, it opens
-            // the guide (owner, 2026-11-04). Left on the picture always opens the guide.
+            // the guide (owner, 2026-11-04). Left past CC on the strip stops there (owner, 2026-11-07).
             if stripWasUp, !isFailed { armed = .captions } else { openGuide() }
         case .captions: armed = .like
         case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
@@ -573,14 +573,15 @@ struct ReceiverPlayerView: View {
 
     private var isFailed: Bool { if case .failed = controller.state { return true } else { return false } }
 
-    private func moveLeft() {
+    private func moveLeft(onStrip: Bool) {
         switch armed {
         case .pip: armed = guideOffered ? .guide : .like
         case .guide: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
-        // Left or right on the picture opens the guide, as a live TV app does (owner, 2026-11-04).
-        case nil: return openGuide()
+        // Left or right on the bare picture opens the guide, as a live TV app does (owner,
+        // 2026-11-04). With the strip up, left past CC stops there.
+        case nil: if !onStrip { return openGuide() }
         }
         if armed == nil { wake() }
     }

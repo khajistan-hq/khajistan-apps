@@ -46,14 +46,24 @@ final class KhajistanUITests: XCTestCase {
     private func tapOnHome(_ app: XCUIApplication, _ id: String) {
         app.buttons["tab-home"].tap()
         let target = app.buttons[id]
+        scrollHome(app, to: target, id)
+        target.tap()
+    }
+
+    /// Scrolls HOME until `target` sits clear above the bar and the small player.
+    /// One snapshot per look: HOME's LazyVStack drops rows as they leave the screen, so a row seen
+    /// by `exists` can be gone by the next query, and `frame` or `isHittable` on it then fails the test.
+    private func scrollHome(_ app: XCUIApplication, to target: XCUIElement, _ name: String) {
         // The top of the bar, or of the small player when one sits over it.
         let player = app.descendants(matching: .any)["nowPlaying"]
-        let floor = (player.exists ? player.frame.minY : app.buttons["tab-home"].frame.minY) - 4
+        let floor = ((try? player.snapshot())?.frame.minY ?? app.buttons["tab-home"].frame.minY) - 4
         // Its middle, which is where tap() lands; a tall tile need not fit whole.
-        let clear = { target.exists && !target.frame.isEmpty && target.frame.midY > 60 && target.frame.midY < floor - 20 }
+        let clear = {
+            guard let frame = (try? target.snapshot())?.frame, !frame.isEmpty else { return false }
+            return frame.midY > 60 && frame.midY < floor - 20
+        }
         for _ in 0..<16 where !clear() { app.swipeUp(velocity: .slow) }
-        XCTAssertTrue(clear(), "HOME scrolls to \(id)")
-        target.tap()
+        XCTAssertTrue(clear(), "HOME scrolls to \(name)")
     }
 
     /// HOME is on screen. Its first room tile marks it: "Every room" sits below the picture tiles
@@ -621,8 +631,7 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["closePlayer"].tap()
         app.buttons["tab-home"].tap()
         let card = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'home-chat-'")).firstMatch
-        for _ in 0..<12 where !(card.exists && card.isHittable) { app.swipeUp() }
-        waitFor(card, 5, "Home has a Chat shelf once the rooms are loaded")
+        scrollHome(app, to: card, "Home's Chat shelf, there once the rooms are loaded")
         let slug = card.identifier.replacingOccurrences(of: "home-chat-", with: "")
         card.tap()
         waitFor(app.staticTexts["chatRoomName"], 10, "the card opens its own room, not the list")

@@ -548,6 +548,21 @@ let supabasePlay = "https://qojysegeddztsxdmhjfb.supabase.co/functions/v1/tv-pla
 let streamUID = "625a05145f897f6a3fd10d4f67643384"
 let streamHostURL = "https://customer-0svgnorro16tedsf.cloudflarestream.com"
 
+func refusalsAreAskedAgainOnlyWhenTheAnswerCanChange() throws {
+    // Asked again: the on-air disagreement, every 5xx, a rate limit, no answer at all.
+    for (status, reason) in [(403, Optional(Refusal.notOnAir)), (503, "schedule unavailable"), (502, nil), (429, nil), (0, nil)] {
+        try expectEqual(Refusal.retryIn(status: status, reason: reason, attempt: 0), 15, "\(status) \(reason ?? "-")")
+    }
+    // Not asked again; the near miss is the other 403.
+    for (status, reason) in [(401, Optional<String>.none), (400, nil), (404, nil), (403, "not on the schedule"), (403, nil)] {
+        try expect(Refusal.retryIn(status: status, reason: reason, attempt: 0) == nil, "\(status) \(reason ?? "-")")
+    }
+    // Bounded: five tries, then Try again.
+    try expectEqual((0...5).map { Refusal.retryIn(status: 503, reason: nil, attempt: $0) }, [15, 45, 120, 300, 600, nil])
+    try expectEqual(Refusal.reason(from: Data(#"{"error":"not on air now"}"#.utf8)), Refusal.notOnAir)
+    try expect(Refusal.reason(from: Data("<html>".utf8)) == nil)
+}
+
 func transmissionRoutesTheThreeShapes() throws {
     try expectEqual(Transmission.route(for: supabasePlay), .tvPlay(try require(URL(string: supabasePlay))))
     try expectEqual(Transmission.route(for: "https://qojysegeddztsxdmhjfb.supabase.co:443/functions/v1/tv-play?id=x"),
@@ -4672,6 +4687,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Saves: requests, and refusals", passportSaveRequests),
     ("Saves: films in any script, and named collections", passportFilmRefsAndCollections),
     ("Database route: direct, or the site's /sb/ proxy", supabaseRouteRewrites),
+    ("Transmission: a refusal is asked again only when the answer can change", refusalsAreAskedAgainOnlyWhenTheAnswerCanChange),
     ("TV sign-in from a phone: codes, requests, answers", tvSignInFromAPhone),
     ("Reading Room: provenance", readingProvenance),
     ("Surf: All, TV only, Radio only", surfMediumChoices),

@@ -110,6 +110,38 @@ enum Transmission {
     }
 }
 
+// MARK: - A refusal is asked again
+
+/// When the signer's refusal is worth asking again. Mirrors retryIn() in
+/// archive/scripts/kj-transmission-auth.js (2026-11-09): tv-stream-token signs a programme only
+/// while it is on air and reads the schedule through a ten-minute cache, so after a rebuild the
+/// app and the signer can disagree for up to ten minutes; a 5xx can also clear by itself. The
+/// delays add up to eighteen minutes, then the player waits for Try again. A sign-in (401), a
+/// malformed source (400), a programme the station does not air (403 "not on the schedule") and
+/// a missing file (404) get the same answer every time, so they are not asked again.
+enum Refusal {
+    static let notOnAir = "not on air now"
+    static let retrySeconds = [15, 45, 120, 300, 600]
+
+    private struct Body: Decodable { let error: String? }
+
+    /// The signer's own words, {"error":"…"}, or nil.
+    static func reason(from data: Data) -> String? {
+        (try? JSONDecoder().decode(Body.self, from: data))?.error
+    }
+
+    /// Seconds to wait before attempt `attempt` (0 first), or nil to stop. `status` 0 is a
+    /// request that got no answer at all, which is asked again like a 5xx.
+    static func retryIn(status: Int, reason: String?, attempt: Int) -> Int? {
+        if status == 403 {
+            guard reason == notOnAir else { return nil }
+        } else if status > 0, status < 500, status != 429 {
+            return nil
+        }
+        return retrySeconds.indices.contains(attempt) ? retrySeconds[attempt] : nil
+    }
+}
+
 // MARK: - The song on air
 
 /// The song on a channel, as the website's receiver shows it (open-frequencies.js

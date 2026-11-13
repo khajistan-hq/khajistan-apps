@@ -121,7 +121,10 @@ enum SupabaseRoute {
 
     /// Sends a request on the route: a project address is moved onto it; one that cannot connect
     /// asks both ways again and is sent once more if another way now answers. With no way open,
-    /// a project request fails at once instead of waiting out its timeout.
+    /// a project request fails at once instead of waiting out its timeout. Any request that can
+    /// safely be sent twice (GET, HEAD) and lost its connection part-way is sent once more after
+    /// `droppedRetryDelay`: a phone moving between Wi-Fi and cellular, or a TV's Wi-Fi blinking,
+    /// failed the schedule, the Receiver index and the stream token at once with no second try.
     static func data(for request: URLRequest, session: URLSession, delegate: URLSessionTaskDelegate? = nil) async throws -> (Data, URLResponse) {
         var routedRequest = request
         routedRequest.url = request.url.map { routed($0) }
@@ -139,10 +142,28 @@ enum SupabaseRoute {
         do {
             return try await session.data(for: routedRequest, delegate: delegate)
         } catch {
-            guard onProject, await reconsider(after: error) else { throw error }
-            routedRequest.url = request.url.map { routed($0) }
+            if onProject, await reconsider(after: error) {
+                routedRequest.url = request.url.map { routed($0) }
+                return try await session.data(for: routedRequest, delegate: delegate)
+            }
+            guard isDropped(error), isRepeatable(request) else { throw error }
+            try await Task.sleep(for: droppedRetryDelay)
             return try await session.data(for: routedRequest, delegate: delegate)
         }
+    }
+
+    static let droppedRetryDelay: Duration = .seconds(1)
+
+    /// A connection that was open and went away (-1005), or a TLS handshake cut off (-1200), as
+    /// against a host that is not there or a request that ran out of time.
+    static func isDropped(_ error: Error) -> Bool {
+        guard let code = (error as? URLError)?.code else { return false }
+        return code == .networkConnectionLost || code == .secureConnectionFailed
+    }
+
+    /// Only a request with no effect of its own is sent twice.
+    static func isRepeatable(_ request: URLRequest) -> Bool {
+        ["GET", "HEAD"].contains((request.httpMethod ?? "GET").uppercased())
     }
 
     /// The project's own host, or the proxy's path on the site.

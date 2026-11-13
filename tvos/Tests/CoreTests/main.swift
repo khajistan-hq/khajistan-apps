@@ -4550,6 +4550,54 @@ final class StubClockProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Drops the connection for the first `drops` requests, then answers 200.
+final class StubDropProtocol: URLProtocol {
+    nonisolated(unsafe) static var drops = 0
+    nonisolated(unsafe) static var requests = 0
+    nonisolated(unsafe) static var error = URLError(.networkConnectionLost)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests += 1
+        if Self.requests <= Self.drops { client?.urlProtocol(self, didFailWithError: Self.error); return }
+        let reply = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: reply, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("ok".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [StubDropProtocol.self]
+    let session = URLSession(configuration: config)
+    // The site's own address: not the project, so no route is reconsidered.
+    let url = URL(string: "https://example.test/data/khajistan-tv/programming-2026-12.json")!
+    func run(_ method: String, drops: Int, error: URLError = URLError(.networkConnectionLost)) -> (status: Int?, requests: Int) {
+        StubDropProtocol.drops = drops; StubDropProtocol.requests = 0; StubDropProtocol.error = error
+        var request = URLRequest(url: url); request.httpMethod = method
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var status: Int?
+        Task {
+            status = (try? await SupabaseRoute.data(for: request, session: session)).flatMap { ($0.1 as? HTTPURLResponse)?.statusCode }
+            done.signal()
+        }
+        done.wait()
+        return (status, StubDropProtocol.requests)
+    }
+    var r = run("GET", drops: 1)
+    try expectEqual([r.status ?? -1, r.requests], [200, 2], "a GET whose connection dropped is sent again and answers")
+    r = run("GET", drops: 1, error: URLError(.secureConnectionFailed))
+    try expectEqual([r.status ?? -1, r.requests], [200, 2], "a cut TLS handshake (-1200) too")
+    r = run("GET", drops: 2)
+    try expectEqual([r.status ?? -1, r.requests], [-1, 2], "once, not forever")
+    r = run("POST", drops: 1)
+    try expectEqual([r.status ?? -1, r.requests], [-1, 1], "a POST is never sent twice")
+    r = run("GET", drops: 1, error: URLError(.notConnectedToInternet))
+    try expectEqual([r.status ?? -1, r.requests], [-1, 1], "no network is not a dropped connection")
+}
+
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubClockProtocol.self]
@@ -4641,6 +4689,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Real October: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
+    ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),

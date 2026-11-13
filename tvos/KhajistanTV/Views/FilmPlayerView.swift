@@ -105,6 +105,8 @@ struct FilmPlayerView: View {
         }
         .task { await open() }
         .task { await trackPosition() }
+        // A cover presented over the player (Sign in) can take its appearance and give it back.
+        .onAppear { gone = false }
         .onDisappear { gone = true; stopEverything() }
     }
 

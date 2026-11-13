@@ -146,7 +146,8 @@ enum SupabaseRoute {
                 routedRequest.url = request.url.map { routed($0) }
                 return try await session.data(for: routedRequest, delegate: delegate)
             }
-            guard isDropped(error), isRepeatable(request) else { throw error }
+            // With no way to the project open, a project request still fails at once.
+            guard isDropped(error), isRepeatable(request), !(onProject && path == .unreachable) else { throw error }
             try await Task.sleep(for: droppedRetryDelay)
             return try await session.data(for: routedRequest, delegate: delegate)
         }

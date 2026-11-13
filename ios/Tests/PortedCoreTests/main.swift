@@ -1305,9 +1305,9 @@ func realProgrammingDecodesInEveryMonth() throws {
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
         throw Skip(reason: "data/khajistan-tv is not in this checkout")
     }
-    let months = names.filter { $0.hasPrefix("programming-2026-") && $0.hasSuffix(".json") }
+    let months = names.filter { $0.hasPrefix("programming-20") && $0.hasSuffix(".json") }
         .map { String($0.dropFirst("programming-".count).dropLast(".json".count)) }.sorted()
-    try expect(!months.isEmpty, "no programming-2026-*.json files")
+    try expect(!months.isEmpty, "no programming-*.json files")
     var tallies: [String: Int] = [:]
     for month in months {
         let data = try realFile("data/khajistan-tv/programming-\(month).json")
@@ -1363,22 +1363,47 @@ func realProgrammingDecodesInEveryMonth() throws {
     try expect((tallies["tv-play"] ?? 0) > 0)
 }
 
+/// The earliest month file the site checkout holds, and its first and last day as instants. The
+/// real-data clock tests were written on October's file, which has since rotated out, so they read
+/// whichever month is there (Skip when none is).
+func realEarliestMonth() throws -> (p: Programming, key: String, first: Date, last: Date) {
+    let directory = repoRoot.appendingPathComponent("data/khajistan-tv")
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    guard let key = names.filter({ $0.hasPrefix("programming-20") && $0.hasSuffix(".json") })
+        .map({ String($0.dropFirst("programming-".count).dropLast(".json".count)) }).sorted().first else {
+        throw Skip(reason: "data/khajistan-tv/programming-*.json is not in this checkout")
+    }
+    let p = try realProgramming(key)
+    func instant(_ iso: String, _ h: Int, _ m: Int, _ s: Int) throws -> Date {
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        try expectEqual(parts.count, 3, iso)
+        return pkt(parts[0], parts[1], parts[2], h, m, s)
+    }
+    let first = try require(p.days.map(\.date).min()), last = try require(p.days.map(\.date).max())
+    return (p, key, try instant(first, 0, 0, 0), try instant(last, 23, 59, 59))
+}
+
 func realProgrammingClockInvariants() throws {
-    let p = try realProgramming("2026-10")
-    var checked = 0, offAir = 0, joinedPastLeader = 0
+    let (p, key, first, end) = try realEarliestMonth()
+    let lastDay = try require(p.days.map(\.date).max())
+    var checked = 0, offAir = 0, joinedPastLeader = 0, late = 0
     for number in StationClock.channelNumbers(p) {
-        var t = pkt(2026, 10, 1, 0, 0, 0)
-        let end = pkt(2026, 10, 31, 23, 59, 59)
+        var t = first
         while t <= end {
             defer { t = t.addingTimeInterval(1747) }
             guard let air = StationClock.onAir(p, channel: number, at: t) else { offAir += 1; continue }
             checked += 1
-            let c = karachi.dateComponents([.year, .month, .day, .hour, .minute, .second], from: t)
-            let iso = isoString(c.year ?? 0, c.month ?? 0, c.day ?? 0)
-            let minute = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            let now = StationClock.stationNow(t)
+            let iso = now.iso
             let programme = try require(air.programme, air.programmeId)
-            try expectEqual(air.date, iso)
-            try expect(minute >= air.slot.start_minute && minute < air.slot.start_minute + air.slot.minutes)
+            // On air today, or on yesterday's strip still running past midnight; either way the
+            // clock is inside the strip in the strip's own day.
+            let at = try require(StationClock.slotSecond(air.date, now: now), "\(air.date) is neither today nor yesterday")
+            if air.date != iso { late += 1 }
+            try expect(at >= air.slot.startSecond && at < air.slot.endSecond)
+            let left = try require(StationClock.secondsLeft(in: air, at: t))
+            try expect(StationClock.secondsLeft(in: air, at: t.addingTimeInterval(Double(left))) == nil, "the strip is over after secondsLeft")
+            if left > 1 { try expect(StationClock.secondsLeft(in: air, at: t.addingTimeInterval(Double(left - 1))) != nil) }
             try expectEqual(p.programme_order[air.slot.programmes[air.rosterIndex]], air.programmeId)
             try expect(air.into >= 0 && air.into < StationClock.runSeconds(programme), "into \(air.into) of \(StationClock.runSeconds(programme))")
             try expectClose(air.seekTo, (programme.clean_start ?? 0) + air.into, tolerance: 1e-9)
@@ -1389,10 +1414,10 @@ func realProgrammingClockInvariants() throws {
             try expectEqual(air.startLabel, air.slot.start)
             try expectEqual(air.channelId, StationClock.channelId(p, number: number))
             // A next strip exists everywhere except in the last day of the month's file.
-            if iso != "2026-10-31" { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
+            if iso != lastDay { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
         }
     }
-    print("      \(checked) instants across October on both channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
+    print("      \(checked) instants across \(key) on \(StationClock.channelNumbers(p).count) channels, \(offAir) off air, \(late) on yesterday's strip, \(joinedPastLeader) on a programme with a clean_start")
     try expect(checked > 2500, "only \(checked) instants were on air")
 }
 
@@ -2328,7 +2353,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Real shards and withdrawal feeds decode", realShardsAndWithdrawalFeedsDecode),
     ("Every real region shard decodes", everyRealShardDecodes),
     ("Real programming decodes in every month", realProgrammingDecodesInEveryMonth),
-    ("Real October schedule clock invariants", realProgrammingClockInvariants),
+    ("Real schedule clock invariants", realProgrammingClockInvariants),
     ("ViewBox parses and refuses", viewBoxParsesAndRefuses),
     ("SVGPath: absolute subpaths and implicit lineto", svgPathAbsoluteSubpaths),
     ("SVGPath: relative commands, H and V", svgPathRelativeCommands),

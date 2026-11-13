@@ -868,7 +868,9 @@ func positionInSlotWalksAndWrapsTheRoster() throws {
     let start = 360 * 60
     // 600 + 270 + 300 = 1170 s round.
     let cases: [(second: Int, index: Int, into: Double)] = [
-        (start - 500, 0, 0),          // before the slot clamps to its start
+        // Before the slot's start reads as yesterday's strip still running past midnight, the
+        // site's rule since 2026-11-08: 86 400 - 500 = 85 900 s in, 73 rounds and 490 s.
+        (start - 500, 0, 490),
         (start, 0, 0), (start + 599, 0, 599), (start + 600, 1, 0), (start + 869, 1, 269),
         (start + 870, 2, 0), (start + 1169, 2, 299),
         (start + 1170, 0, 0),         // a short roster runs round again
@@ -1338,7 +1340,10 @@ func realProgrammingDecodesInEveryMonth() throws {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
                                "\(month) \(day.date) \(slot.start): a roster index is out of range")
-                    try expect(slot.start_minute >= 0 && slot.minutes > 0 && slot.start_minute + slot.minutes <= 1440)
+                    // A strip starts inside its own day and may run past midnight (2026-11-08), never
+                    // into a third day.
+                    try expect(slot.startSecond >= 0 && slot.lengthSeconds > 0
+                               && slot.endSecond <= 2 * StationClock.daySeconds, "\(month) \(day.date) \(slot.start): a strip out of its day")
                     try expect(p.shows[slot.show] != nil, "\(month): slot names an unknown show \(slot.show)")
                     try expectEqual(StationClock.clockLabel(slot.start_minute), slot.start, "\(month) \(day.date)")
                 }

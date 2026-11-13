@@ -59,6 +59,16 @@ struct Programming: Decodable, Sendable {
         let minutes: Int
         let show: String
         let programmes: [Int]
+        /// Since 2026-11-08 a strip carries whole programmes and the next starts the second they
+        /// end, so the site writes the strip in seconds (fractional), and an evening strip can run
+        /// past midnight. A file built before that has minutes only. kj-station-clock.js reads
+        /// these first (slotStart / slotLength); so does every reading in StationClock.
+        var start_second: Double? = nil
+        var seconds: Double? = nil
+
+        var startSecond: Double { start_second ?? Double(start_minute * 60) }
+        var lengthSeconds: Double { seconds ?? Double(minutes * 60) }
+        var endSecond: Double { startSecond + lengthSeconds }
     }
 
     struct Day: Decodable, Sendable {
@@ -72,6 +82,9 @@ struct Programming: Decodable, Sendable {
     let programme_order: [String]
     let programmes: [String: Programme]
     let days: [Day]
+    /// The last day of the previous month, so a strip still running after midnight on the 1st
+    /// is found (the site writes it since 2026-11-08). Nil in older files.
+    var prev_day: Day? = nil
 }
 
 // The decoder lives in an extension so the memberwise initialiser stays available to previews

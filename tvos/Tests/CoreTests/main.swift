@@ -1098,7 +1098,9 @@ func positionInSlotWalksAndWrapsTheRoster() throws {
     let start = 360 * 60
     // 600 + 270 + 300 = 1170 s round.
     let cases: [(second: Int, index: Int, into: Double)] = [
-        (start - 500, 0, 0),          // before the slot clamps to its start
+        // Before the slot's start reads as yesterday's strip still running past midnight, the
+        // site's rule since 2026-11-08: 86 400 - 500 = 85 900 s in, 73 rounds and 490 s.
+        (start - 500, 0, 490),
         (start, 0, 0), (start + 599, 0, 599), (start + 600, 1, 0), (start + 869, 1, 269),
         (start + 870, 2, 0), (start + 1169, 2, 299),
         (start + 1170, 0, 0),         // a short roster runs round again
@@ -1330,6 +1332,12 @@ struct Fixture: Decodable {
             let nextStart: String?
             let slotStart: String
             let slotStartMinute: Int
+            /// Only in the December fixture (station-clock-fixture-2026-12.json).
+            var nextProgrammeId: String? = nil
+            var nextProgrammeStart: String? = nil
+            var nowName: String? = nil
+            var nextName: String? = nil
+            var nextAt: String? = nil
         }
 
         let nowMs: Double
@@ -1399,6 +1407,52 @@ func stationClockMatchesTheJS() throws {
     try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
+}
+
+/// The site's schedule since 2026-11-08: strips in seconds, evening strips that run past
+/// midnight, and the 1st's late strips in prev_day. Before this port the app read 00:00 to each
+/// channel's first strip of the day as off air while the site was still playing yesterday's.
+func stationClockMatchesTheJSPastMidnight() throws {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("station-clock-fixture-2026-12.json")
+    let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
+    try expectEqual(f.source, "programming-2026-12.json")
+    let p = f.programming
+    try expect(p.prev_day != nil, "the fixture must carry prev_day")
+    var failures: [String] = [], late = 0, firstDayLate = 0, onAir = 0
+    for (position, c) in f.cases.enumerated() {
+        var diff = mismatches(p, c)
+        let date = Date(timeIntervalSince1970: c.nowMs / 1000)
+        if let want = c.expect, let air = StationClock.onAir(p, channel: c.channel, at: date) {
+            onAir += 1
+            func check(_ name: String, _ swift: String?, _ js: String?) {
+                if swift != js { diff.append("\(name): swift \(swift ?? "nil"), js \(js ?? "nil")") }
+            }
+            check("nextProgrammeId", air.nextProgrammeId, want.nextProgrammeId)
+            check("nextProgrammeStart", air.nextProgrammeStart, want.nextProgrammeStart)
+            check("nowName", air.nowName, want.nowName)
+            check("nextName", air.nextName, want.nextName)
+            check("nextAt", air.nextAt, want.nextAt)
+            if want.date != StationClock.stationNow(date).iso {
+                late += 1
+                if want.date == p.prev_day?.date { firstDayLate += 1 }
+            }
+        }
+        if !diff.isEmpty { failures.append("case \(position) nowMs \(Int(c.nowMs)) ch \(c.channel): " + diff.joined(separator: "; ")) }
+    }
+    print("      \(f.cases.count) cases, \(onAir) on air, \(late) on a strip from yesterday (\(firstDayLate) from prev_day)")
+    try expect(failures.isEmpty, "\(failures.count) of \(f.cases.count) differ; first: " + failures.prefix(3).joined(separator: " | "))
+    try expect(late >= 50, "only \(late) cases after midnight on yesterday's strip")
+    try expect(firstDayLate >= 5, "only \(firstDayLate) cases read prev_day")
+    // following() and secondsLeft() keep counting on yesterday's strip past midnight.
+    for c in f.cases {
+        let date = Date(timeIntervalSince1970: c.nowMs / 1000)
+        guard let want = c.expect, want.date != StationClock.stationNow(date).iso,
+              let air = StationClock.onAir(p, channel: c.channel, at: date) else { continue }
+        let left = try require(StationClock.secondsLeft(in: air, at: date), "secondsLeft on a late strip, case \(Int(c.nowMs))")
+        try expect(left > 0 && Double(left) <= air.slot.lengthSeconds + 1)
+        let next = try require(StationClock.following(air, in: p, at: date))
+        try expectEqual(next.date, air.date, "following stays in the late strip")
+    }
 }
 
 /// A check that cannot fail is decoration: bend each field of a real expectation and the
@@ -1646,7 +1700,10 @@ func realProgrammingDecodesInEveryMonth() throws {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
                                "\(month) \(day.date) \(slot.start): a roster index is out of range")
-                    try expect(slot.start_minute >= 0 && slot.minutes > 0 && slot.start_minute + slot.minutes <= 1440)
+                    // A strip starts inside its own day and may run past midnight (2026-11-08), never
+                    // into a third day.
+                    try expect(slot.startSecond >= 0 && slot.lengthSeconds > 0
+                               && slot.endSecond <= 2 * StationClock.daySeconds, "\(month) \(day.date) \(slot.start): a strip out of its day")
                     try expect(p.shows[slot.show] != nil, "\(month): slot names an unknown show \(slot.show)")
                     try expectEqual(StationClock.clockLabel(slot.start_minute), slot.start, "\(month) \(day.date)")
                 }
@@ -4197,15 +4254,18 @@ func databasesDecodeTheRealFiles() throws {
         try db.records(try db.paths.map { try realFile($0) })
     }
     let expected: [ArchiveDatabase: Int] = [
-        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 6_686, .persianMusic: 45_568,
+        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 5_796, .persianMusic: 34_072,
         .censorCertificates: 52, .iranianCinema: 1_437, .pakistaniCinema: 6_179, .turkishCinema: 65,
         .screenMarks: 1_726, .pakistaniDramas: 1_599,
     ]
-    for (db, count) in expected {
+    // Every count is checked before any failure, so one run names all that drifted.
+    var drifted: [String] = []
+    for (db, count) in expected.sorted(by: { $0.key.title < $1.key.title }) {
         let all = try records(db)
-        try expectEqual(all.count, count, "\(db.title) record count")
+        if all.count != count { drifted.append("\(db.title): got \(all.count), expected \(count)") }
         try expectEqual(Set(all.map(\.id)).count, all.count, "\(db.title) ids are unique")
     }
+    try expect(drifted.isEmpty, "record counts: " + drifted.joined(separator: "; "))
     // logos.html shows review == false with an image file, and nothing else.
     let raw = try JSONSerialization.jsonObject(with: try realFile("data/logos.json")) as? [String: Any]
     let shown = ((raw?["records"] as? [[String: Any]]) ?? []).filter { ($0["review"] as? Bool) == false && ($0["image_file"] as? String)?.isEmpty == false }
@@ -4580,6 +4640,7 @@ let tests: [(String, () throws -> Void)] = [
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
     ("Real October: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
+    ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),

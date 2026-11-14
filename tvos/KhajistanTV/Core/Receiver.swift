@@ -88,7 +88,7 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     let description: String?
     let genres: [String]?
     /// A person's ruling that the dancer stays off this channel (open-frequencies.js
-    /// isReverentChannel). Absent on every record today; honoured when present.
+    /// isReverentChannel). Indus's Sikh kirtan and gurbani stations carry it (2026-11-14).
     let reverent: Bool?
     let visualiser: Bool?
     /// The receiver payload carries explicit transcription/translation rights refusals.

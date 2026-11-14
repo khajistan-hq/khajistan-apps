@@ -46,7 +46,10 @@ struct PicsVidsView: View {
         .task { await store.start() }
         // Left before the Reel's page came: the viewer must not open by itself later.
         .onDisappear { reelTask?.cancel(); reelNote = nil }
-        .onChange(of: reelNote) { if let reelNote { AccessibilityNotification.Announcement(reelNote).post() } }
+        // Only the outcome is announced; the Loading line is read when focus lands on it.
+        .onChange(of: reelNote) {
+            if let reelNote, reelNote != "Loading\u{2026}" { AccessibilityNotification.Announcement(reelNote).post() }
+        }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
@@ -121,7 +124,9 @@ struct PicsVidsView: View {
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
                     // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
                     // then comes back with nothing, not done and no error.
-                    for _ in 0..<2 where store.feed(all).items.isEmpty && !store.feed(all).isDone && !Task.isCancelled {
+                    // A real failure (an error on the feed) is not asked again: its note shows at once.
+                    for pass in 0..<2 where store.feed(all).items.isEmpty && !store.feed(all).isDone && !Task.isCancelled
+                        && (pass == 0 || store.feed(all).error == nil) {
                         await store.retry(region: all)
                         // Another caller's load may be the one in flight.
                         while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {

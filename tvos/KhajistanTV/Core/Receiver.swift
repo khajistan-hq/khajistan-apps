@@ -143,6 +143,24 @@ struct Health: Decodable, Sendable {
     }
 
     let results: [Result]
+    /// When the sweep wrote the file, ISO 8601 ("2026-11-01T13:23:05.398418Z").
+    let generatedAt: String?
+
+    /// The health pipeline sweeps every 30 minutes and publishes a row older than 2 hours as
+    /// `unknown` (khajistan-machinery scripts/ops/OF_HEALTH_DROPLET.md). A file older than that
+    /// has missed several sweeps and says nothing about now.
+    static let maximumAge: TimeInterval = 2 * 60 * 60
+
+    /// Written within `maximumAge` of `now`. A file with no readable time is not fresh.
+    func isFresh(at now: Date) -> Bool {
+        guard let generatedAt else { return false }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let written = fractional.date(from: generatedAt) ?? ISO8601DateFormatter().date(from: generatedAt) else {
+            return false
+        }
+        return now.timeIntervalSince(written) <= Self.maximumAge
+    }
 }
 
 /// The three withdrawal feeds folded into what the eligibility rules look up. Any of them may
@@ -198,6 +216,21 @@ enum ReceiverRules {
         }
         return kept.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
+
+    /// The channel after `currentID` in `list`, wrapping, that has not already failed on this
+    /// screen (`dead`). Nil when every other channel has. A current channel not in the list
+    /// starts the search at the top.
+    static func nextLive(after currentID: String, in list: [Channel], dead: Set<String>) -> Channel? {
+        guard !list.isEmpty else { return nil }
+        let start = (list.firstIndex { $0.id == currentID } ?? -1) + 1
+        return (0..<list.count)
+            .map { list[(start + $0) % list.count] }
+            .first { $0.id != currentID && !dead.contains($0.id) }
+    }
+
+    /// A refusal that asks for an account. Playback never moves past one on its own: the viewer
+    /// signs in or chooses.
+    static func isAccountGate(httpStatus: Int) -> Bool { httpStatus == 401 || httpStatus == 403 }
 
     /// GET site/api/frequency?stream=<streamId>. The id is opaque, so it is encoded as one.
     static func carrierURL(streamID: String) -> URL {

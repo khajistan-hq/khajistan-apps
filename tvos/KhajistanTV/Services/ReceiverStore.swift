@@ -176,6 +176,13 @@ final class ReceiverStore {
               let stream = channel.activeStream else {
             throw ReceiverStoreError.notOnDial
         }
+        #if DEBUG
+        // `-kjdeadchannels a,b` makes those channels fail as a dead signal does, so moving on
+        // from one can be seen in the simulator, where a really dead channel is hard to find.
+        if UserDefaults.standard.string(forKey: "kjdeadchannels")?.split(separator: ",").contains(Substring(channel.id)) == true {
+            throw ReceiverStoreError.unplayable
+        }
+        #endif
         let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
@@ -199,7 +206,9 @@ final class ReceiverStore {
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
         let (denied, suspects, graded) = await (denylist, offAir, health)
         guard !Task.isCancelled else { return }
-        controls = Controls(denylist: denied, offAir: suspects, health: graded)
+        // A stale health file is ignored as a missing one is: it would withdraw channels on old news.
+        let fresh = graded.flatMap { $0.isFresh(at: Date()) ? $0 : nil }
+        controls = Controls(denylist: denied, offAir: suspects, health: fresh)
         if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
     }
 

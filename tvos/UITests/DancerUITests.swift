@@ -143,8 +143,37 @@ final class DancerUITests: XCTestCase {
         app.terminate()
     }
 
+    /// Why the receiver would not list `id` today, read from the site's own files: missing from its
+    /// region file, or named by the denylist or the off-air list. Nil when it is listed, and when
+    /// the site cannot be read (an offline simulator then fails or skips in the player as before).
+    private static func withdrawal(_ id: String, region: String) -> String? {
+        let base = URL(string: "https://khajistan-archive.pages.dev/data/open-frequencies/")!
+        let quoted = "\"\(id)\""
+        func read(_ file: String) -> String? {
+            // A URLSession task, not Data(contentsOf:), which XCTest flags as synchronous loading.
+            var body: String?
+            let done = DispatchSemaphore(value: 0)
+            URLSession.shared.dataTask(with: base.appendingPathComponent(file)) { data, response, _ in
+                if (response as? HTTPURLResponse)?.statusCode == 200, let data { body = String(decoding: data, as: UTF8.self) }
+                done.signal()
+            }.resume()
+            return done.wait(timeout: .now() + 20) == .success ? body : nil
+        }
+        guard let shard = read("regions/\(region).json") else { return nil }
+        if !shard.contains(quoted) { return "not in regions/\(region).json" }
+        for feed in ["denylist.json", "off-air-suspects.json"] where read(feed)?.contains(quoted) == true {
+            return "named in \(feed)"
+        }
+        return nil
+    }
+
     /// Saut-ul-Quran: recitation. The dancer must never appear, and no tap is made at all.
     func testReverentChannelHasNoDancer() throws {
+        // A channel the site has withdrawn is not on the dial, so there is nothing to open: skip,
+        // as for a carrier off air. Saut-ul-Quran went on the denylist on 2026-11-14.
+        if let reason = Self.withdrawal("pbc-saut-ul-quran", region: "indus") {
+            throw XCTSkip("Saut-ul-Quran is not on the dial: \(reason)")
+        }
         let app = XCUIApplication()
         let id = try XCTUnwrap(openRadio(["pbc-saut-ul-quran"], skin: "day", app), "the recitation channel must open")
         XCTAssertEqual(id, "pbc-saut-ul-quran", "the recitation channel must open")

@@ -46,6 +46,13 @@ struct ReceiverPlayerView: View {
     /// lets go, Select works it. Focus never leaves the surface (see below).
     @State private var armed: Chip?
     @State private var likeNote: String?
+    /// A dead signal moves on by itself: the channels that failed on this screen (never tried
+    /// twice by the move), the pending move, and what the strip says about it.
+    @State private var deadHere: Set<String> = []
+    @State private var moveOnTask: Task<Void, Never>?
+    @State private var moveOnNote: String?
+    /// The last failure was an account refusal: the screen waits for the viewer, never moves past it.
+    @State private var failedAtGate = false
     /// The song on the channel on screen (NowPlaying), or "".
     @State private var song = ""
     /// The guide, open over the left of the picture: the row the remote has lit, as an index in
@@ -204,7 +211,10 @@ struct ReceiverPlayerView: View {
             stopEverything()
             dismiss()
         }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) { _, state in
+            wake()
+            if state.isFailed { moveOnFromDeadSignal() }
+        }
         .onChange(of: focus) { wake() }
         // A control cannot stay lit on a strip nobody can see: Select would work it blind.
         .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
@@ -327,7 +337,7 @@ struct ReceiverPlayerView: View {
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
-        case .failed(let message): return message + " Click down for the next channel."
+        case .failed(let message): return moveOnNote ?? likeNote ?? message + " Click down for the next channel."
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }
@@ -428,6 +438,7 @@ struct ReceiverPlayerView: View {
 
     private func openGuide() {
         guard guideOffered else { return }
+        stopMovingOn()
         hideTask?.cancel()
         guideLoad?.cancel()
         guideLoading = false
@@ -512,10 +523,12 @@ struct ReceiverPlayerView: View {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         wake()
+        if isFailed { moveOnFromDeadSignal() }
     }
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
     private func pick(_ target: Channel) {
+        stopMovingOn()
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         // Up and down then step through the region chosen from. Surf keeps its own walk.
@@ -647,6 +660,7 @@ struct ReceiverPlayerView: View {
         player.stop()
         player.holdsSound = behind
         player.state = .tuning
+        failedAtGate = false
         if !behind { current = target }
         wake()
         tuneTask = Task {
@@ -669,6 +683,9 @@ struct ReceiverPlayerView: View {
             } catch {
                 if Task.isCancelled || !tuneIntent.admits(ticket) { return }
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
+                if case ReceiverStoreError.http(let code) = error, ReceiverRules.isAccountGate(httpStatus: code) {
+                    failedAtGate = true
+                }
                 player.state = .failed(PlayerController.unreachable)
             }
         }
@@ -683,6 +700,7 @@ struct ReceiverPlayerView: View {
     /// The neighbour of the channel last asked for, wrapping at either end, reached behind the
     /// pigeon. A press while a flight is on screen ends that flight and takes over from it.
     private func step(by delta: Int) {
+        stopMovingOn()
         if let surfChoice {
             guard let target = model.surfHistory.next(for: surfChoice) else {
                 say("You have visited the available channels. Go back to Surf to load the rest of the atlas.")
@@ -777,11 +795,82 @@ struct ReceiverPlayerView: View {
         model.captions.attach(target, player: next)
         wake()
         UIAccessibility.post(notification: .announcement, argument: target.name)
+        // A dead channel cut in after a dead one: the state did not change, so say it here.
+        if next.state.isFailed { moveOnFromDeadSignal() }
+    }
+
+    // MARK: - Moving on from a dead signal
+
+    /// Long enough to read the strip's line before the pigeon flies.
+    private static let deadSignalPause: Duration = .seconds(3)
+
+    /// The signal on screen failed (the resolver refused it, or it stopped after the player's one
+    /// retune): name the next live channel on the strip, then tune it, as a press down would.
+    /// Each channel is tried once per screen, so a list of dead channels ends, not loops. An
+    /// account refusal is never moved past. Any press, the guide or Pause cancels the move.
+    private func moveOnFromDeadSignal() {
+        stopMovingOn()
+        // An open guide is the viewer choosing: closing it without a pick starts the move.
+        guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate else { return }
+        deadHere.insert(current.id)
+        let dead = current
+        let stopLine = "No other channel here is reaching us right now."
+        if let surfChoice {
+            // Planned on a copy of Surf's walk, passing over channels that already failed here:
+            // a cancelled move spends nothing, and the planned walk, with any new cycle it
+            // started, is taken only when the move happens.
+            guard let (target, cycle) = model.surfHistory.plan(for: surfChoice, skipping: deadHere) else {
+                return announce(stopLine)
+            }
+            announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
+            moveOnTask = Task {
+                guard await pausedOnDeadSignal(dead) else { return }
+                model.surfHistory.take(cycle, for: surfChoice)
+                moveOnNote = nil
+                destination = target
+                changeTask?.cancel()
+                changeTask = Task { await change(to: target) }
+            }
+            return
+        }
+        guard let target = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere) else {
+            announce(list.count < 2 ? nil : stopLine)
+            return
+        }
+        announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
+        moveOnTask = Task {
+            guard await pausedOnDeadSignal(dead) else { return }
+            moveOnNote = nil
+            destination = target
+            changeTask?.cancel()
+            changeTask = Task { await change(to: target) }
+        }
+    }
+
+    /// The pause before a move, true when nothing has changed since: the same dead signal on
+    /// screen, no flight under way, no guide open.
+    private func pausedOnDeadSignal(_ dead: Channel) async -> Bool {
+        try? await Task.sleep(for: Self.deadSignalPause)
+        return !Task.isCancelled && !leaving && current.id == dead.id && isFailed && destination == nil && guideRow == nil
+    }
+
+    /// The strip's line for the move, said to VoiceOver as well.
+    private func announce(_ line: String?) {
+        moveOnNote = line
+        wake()
+        if let line { UIAccessibility.post(notification: .announcement, argument: line) }
+    }
+
+    private func stopMovingOn() {
+        moveOnTask?.cancel()
+        moveOnTask = nil
+        moveOnNote = nil
     }
 
     /// Pause cancels a pending resolver/change immediately; no late attach can resume it.
     /// Captions release their lease. Resuming playback restores the saved CC preference.
     private func pauseReceiver() {
+        stopMovingOn()
         tuneIntent.cancel()
         tuneTask?.cancel()
         changeTask?.cancel()
@@ -800,6 +889,7 @@ struct ReceiverPlayerView: View {
     /// Everything this screen started: the tuning, the wipe, the timer, the signal and the clip.
     private func stopEverything() {
         leaving = true
+        stopMovingOn()
         guideRow = nil
         guideLoad?.cancel()
         cancelPrefetches()

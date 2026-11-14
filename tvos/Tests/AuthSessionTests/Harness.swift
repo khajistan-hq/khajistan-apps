@@ -87,6 +87,13 @@ struct Failure: Error { let message: String }
         let sameLogin=Task { try? await same.signIn(email:"a@example.invalid",password:"fixture") }
         try await waitRequest();URLSession.release("a");await sameLogin.value
         try check(invalidated == 1,"explicit same-account login invalidates old captions")
-        print("PASS seven actual AuthStore race scenarios; no external network")
+        // A refused refresh keeps the preview password; a chosen sign-out clears it (shared TV).
+        let shared=try store();shared.setPreviewPassword("preview-fixture")
+        let refused=Task { try? await shared.validAccessToken() };try await waitRequest()
+        URLSession.release("a",code:401);_ = await refused.value
+        try check(shared.session == nil && shared.previewPassword == "preview-fixture","a refused refresh keeps the preview password")
+        await shared.signOut()
+        try check(shared.previewPassword == nil && Keychain.read("preview") == nil,"sign-out clears the preview password")
+        print("PASS eight actual AuthStore scenarios; no external network")
     }
 }

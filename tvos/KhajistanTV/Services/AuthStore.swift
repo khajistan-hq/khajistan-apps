@@ -124,9 +124,12 @@ final class AuthStore {
     }
 
     /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
+    /// The preview password goes too: an Apple TV is shared, so the next viewer starts with nothing
+    /// saved (owner, 2026-11-14). A refused refresh keeps it; only a chosen sign-out clears it.
     func signOut() async {
         let token = session?.accessToken
         clearSession()
+        clearPreviewPassword()
         guard let token else { return }
         _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
     }

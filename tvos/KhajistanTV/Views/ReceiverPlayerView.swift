@@ -816,15 +816,16 @@ struct ReceiverPlayerView: View {
         let dead = current
         let stopLine = "No other channel here is reaching us right now."
         if let surfChoice {
-            // Surf's walk is asked only when the pause ends, so a cancelled move spends no visit
-            // and a new cycle it starts is kept. A channel that already failed here ends the move
-            // instead of going round again; the cut names the channel it lands on.
-            announce("\(dead.name) is off the air. Moving to the next channel\u{2026}")
+            // Planned on a copy of Surf's walk, passing over channels that already failed here:
+            // a cancelled move spends nothing, and the planned walk, with any new cycle it
+            // started, is taken only when the move happens.
+            guard let (target, cycle) = model.surfHistory.plan(for: surfChoice, skipping: deadHere) else {
+                return announce(stopLine)
+            }
+            announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
             moveOnTask = Task {
                 guard await pausedOnDeadSignal(dead) else { return }
-                guard let target = model.surfHistory.next(for: surfChoice), !deadHere.contains(target.id) else {
-                    return announce(stopLine)
-                }
+                model.surfHistory.take(cycle, for: surfChoice)
                 moveOnNote = nil
                 destination = target
                 changeTask?.cancel()

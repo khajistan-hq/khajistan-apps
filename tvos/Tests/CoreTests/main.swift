@@ -444,6 +444,27 @@ func nextLiveSkipsDeadChannelsAndWraps() throws {
     try expect(!ReceiverRules.isAccountGate(httpStatus: 404) && !ReceiverRules.isAccountGate(httpStatus: 500))
 }
 
+func surfPlanSkipsDeadChannelsWithoutSpendingTheWalk() throws {
+    let channels = try ["a", "b", "c"].map { try eligibilityChannel($0) }
+    let choice = SurfChoice(medium: .all, scope: .main)
+    var history = SurfHistory()
+    history.update(SurfCatalogue(channels: channels, missingRegions: []), for: choice)
+    // A plan changes nothing: asking twice of an untouched walk gives a walk that still has all three.
+    let first = try require(history.plan(for: choice, skipping: []))
+    var untouched = history
+    try expectEqual(Set((0..<3).compactMap { _ in untouched.next(for: choice)?.id }), ["a", "b", "c"])
+    // Every other channel dead: the plan passes them over and lands on the live one.
+    let live = first.channel.id
+    let dead = Set(["a", "b", "c"]).subtracting([live])
+    var walked = history
+    walked.take(first.cycle, for: choice)
+    let again = try require(walked.plan(for: choice, skipping: dead.union([live]).subtracting([live])))
+    try expectEqual(again.channel.id, live)   // a new cycle, past the dead two
+    // All dead: no plan, even though the catalogue is complete and would cycle for ever.
+    try expect(history.plan(for: choice, skipping: ["a", "b", "c"]) == nil)
+    try expect(SurfHistory().plan(for: choice, skipping: []) == nil)
+}
+
 func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     let channels: [Channel] = [
         // kept
@@ -4736,6 +4757,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
     ("Health older than two hours is not fresh", healthOlderThanTwoHoursIsNotFresh),
     ("Next live channel skips dead ones and wraps", nextLiveSkipsDeadChannelsAndWraps),
+    ("Surf plan skips dead channels without spending the walk", surfPlanSkipsDeadChannelsWithoutSpendingTheWalk),
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

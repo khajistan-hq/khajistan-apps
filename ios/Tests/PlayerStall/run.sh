@@ -2,7 +2,7 @@
 # Plays the app's own PlayerController against a carrier that stops sending, in a simulator.
 #   ios/Tests/PlayerStall/run.sh ios|tvos [SIMULATOR_UDID] [REPO_ROOT]
 # REPO_ROOT defaults to this checkout; point it at another checkout to run the same cases on
-# older code. The simulator must be booted (xcrun simctl boot <udid>). Takes about two minutes.
+# older code. The simulator must be booted (xcrun simctl boot <udid>). Takes about four minutes.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 platform=${1:?ios or tvos}

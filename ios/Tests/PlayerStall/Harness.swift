@@ -23,9 +23,9 @@ struct StallHarness {
     @MainActor static func main() async {
         let base = CommandLine.arguments[1]
         var failures = 0
-        // The stall limit is 20 s. 35 s leaves room for it and still ends before the system's own
-        // 60 s network timeout, so a pass here is the controller's doing.
-        let limit = 35.0
+        // The stall limit is 20 s, and a dead carrier is retuned once (a second's grace, ten
+        // seconds of tone again on the first case) before the second stall is shown: 80 s.
+        let limit = 80.0
 
         let stalled = PlayerController()
         stalled.attach(url: URL(string: base + "/tone.mp3?cut=80000")!, seekTo: nil, title: "stall", subtitle: nil)
@@ -41,7 +41,8 @@ struct StallHarness {
         stalled.stop()
 
         let paused = PlayerController()
-        paused.attach(url: URL(string: base + "/tone.mp3?cut=720000")!, seekTo: nil, title: "seek", subtitle: nil)
+        // A recording, so its retune comes back at 100 s, past the cut, and stalls again.
+        paused.attach(url: URL(string: base + "/tone.mp3?cut=720000")!, seekTo: nil, title: "seek", subtitle: nil, isLive: false)
         if await wait(20, { paused.state == .playing }) {
             paused.pause()
             paused.player.seek(to: CMTime(seconds: 100, preferredTimescale: 600)) { _ in }
@@ -56,6 +57,27 @@ struct StallHarness {
             exit(2)
         }
         paused.stop()
+
+        // A carrier that stops sending for a while and then comes back: the stall is the
+        // network's, and one retune plays on from where it stopped instead of showing a failure.
+        let healing = PlayerController()
+        healing.attach(url: URL(string: base + "/tone.mp3?cut=80000&heal=\(UUID().uuidString)")!, seekTo: nil,
+                       title: "heal", subtitle: nil, isLive: false)
+        if await wait(20, { healing.state == .playing }) {
+            let since = Date()
+            var sawFailure = false
+            let recovered = await wait(limit, {
+                if isFailed(healing.state) { sawFailure = true }
+                // 80 000 bytes at 64 kb/s is 10 s of tone: past 13 s, it is playing past the cut.
+                return sawFailure || (healing.state == .playing && healing.player.currentTime().seconds > 13)
+            }) && !sawFailure
+            print((recovered ? "PASS" : "FAIL") + " a carrier that comes back is retuned once and plays on after \(Int(Date().timeIntervalSince(since))) s (state: \(healing.state))")
+            if !recovered { failures += 1 }
+        } else {
+            print("ERROR heal carrier never played (state: \(healing.state))")
+            exit(2)
+        }
+        healing.stop()
         exit(failures == 0 ? 0 : 1)
     }
 }

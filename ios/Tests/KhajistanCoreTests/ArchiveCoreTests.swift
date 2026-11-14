@@ -76,6 +76,20 @@ func downloadNamesCannotTraverseDirectories() throws {
     try expect(longName.hasSuffix(".pdf"))
 }
 
+func downloadsComeOnlyFromTheArchivesHosts() throws {
+    for value in ["https://khajistan-archive.pages.dev/books/a.pdf", "https://ARCHIVE.khajistan.com/x.zip",
+                  "blob:https://khajistan-archive.pages.dev/5c1f-uuid"] {
+        try expect(ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    for value in ["https://evil.example/a.pdf", "http://khajistan-archive.pages.dev/a.pdf",
+                  "https://khajistan-archive.pages.dev.evil.example/a.pdf", "https://khajistan-archive.pages.dev:8443/a.pdf",
+                  "https://user@khajistan-archive.pages.dev/a.pdf", "blob:https://evil.example/5c1f-uuid",
+                  "blob:null/5c1f-uuid", "data:application/pdf;base64,JVBERi0=", "file:///etc/hosts"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    try expect(!ArchiveURL.allowsDownload(nil))
+}
+
 // MARK: - Sky (the website's KJSky, differential)
 
 private struct SkyFixture: Decodable {
@@ -360,6 +374,7 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Bounded history and bookmark toggle", historyDeduplicatesAndHasBoundedSize),
             ("Disk round trip and corruption preservation", libraryRoundTripAndCorruptFile),
             ("Download traversal and Unicode limits", downloadNamesCannotTraverseDirectories),
+            ("Downloads come only from the archive's hosts", downloadsComeOnlyFromTheArchivesHosts),
             ("Sky matches the site's KJSky (differential)", skyMatchesTheSitesJS),
             ("The sky comparator can fail", skyComparatorCanFail),
             ("A skin pick holds only in its band", skyPickHoldsOnlyInItsBand),

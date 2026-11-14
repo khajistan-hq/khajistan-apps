@@ -144,6 +144,18 @@ enum ArchiveURL {
             && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
     }
 
+    /// A file may be saved only from the archive's own hosts: an https archive URL, or a blob the
+    /// archive page made (`blob:https://<archive host>/<id>`). Anything else a page links, frames
+    /// or redirects to is not saved, whatever WebKit would download.
+    static func allowsDownload(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        if url.scheme?.lowercased() == "blob" {
+            let origin = url.absoluteString.dropFirst("blob:".count)
+            return URL(string: String(origin)).map(isArchive) ?? false
+        }
+        return isArchive(url)
+    }
+
     /// The existing preview password answers only the archive's own HTTPS Basic gate,
     /// once. It is never a credential for a linked site, a proxy or a different auth scheme.
     static func canAnswerPreviewChallenge(_ space: URLProtectionSpace, previousFailures: Int) -> Bool {

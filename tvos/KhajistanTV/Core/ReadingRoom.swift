@@ -1030,3 +1030,19 @@ enum RRSite {
         origin.appendingPathComponent("data/rr-modules.json")
     }
 }
+
+/// Page scans kept on disk: unreadable until the device is first unlocked after a restart, and
+/// never in a backup. RRPageDisk (Services/ReadingStore.swift) writes through this.
+enum RRPrivateFiles {
+    static let writeOptions: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+
+    /// Makes `folder` and marks it excluded from backup, so nothing written inside is backed up.
+    @discardableResult
+    static func prepare(_ folder: URL) -> URL {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var marked = folder
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try? marked.setResourceValues(values)
+        return folder
+    }
+}

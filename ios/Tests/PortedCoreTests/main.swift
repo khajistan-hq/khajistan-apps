@@ -2253,6 +2253,18 @@ func realMixesDecodeAndAllPlay() throws {
     try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
 }
 
+func readingPageCacheIsProtectedAndNotBackedUp() throws {
+    // The page cache must not be readable before first unlock, nor copied into a backup.
+    try expect(RRPrivateFiles.writeOptions.contains(.completeFileProtectionUntilFirstUserAuthentication))
+    try expect(RRPrivateFiles.writeOptions.contains(.atomic))
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rr-private-\(UUID())", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    RRPrivateFiles.prepare(folder)
+    let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isExcludedFromBackupKey])
+    try expect(values.isDirectory == true)
+    try expect(values.isExcludedFromBackup == true, "the page folder is excluded from backup")
+}
+
 func readingPageCountsClamp() throws {
     // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
     let wild = try require(RRAPI.titles(fromFeed: Data("""
@@ -2383,6 +2395,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
     ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
     ("Reading Room: a page count out of range clamps", readingPageCountsClamp),
+    ("Reading Room: the page cache is protected and not backed up", readingPageCacheIsProtectedAndNotBackedUp),
     ("Mix presentation rules", mixPresentationRules),
     ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
     ("Mix clock format", mixClockFormat),

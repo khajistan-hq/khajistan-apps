@@ -814,31 +814,43 @@ struct ReceiverPlayerView: View {
         guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate else { return }
         deadHere.insert(current.id)
         let dead = current
-        let found: Channel?
+        let stopLine = "No other channel here is reaching us right now."
         if let surfChoice {
-            // Asked of a copy: a move that is cancelled spends no visit. The walk starts a new
-            // cycle once the atlas is spent; a channel that already failed here ends the move
-            // instead of going round again.
-            var trial = model.surfHistory
-            found = trial.next(for: surfChoice).flatMap { deadHere.contains($0.id) ? nil : $0 }
-        } else {
-            found = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere)
+            // Surf's walk is asked only when the pause ends, so a cancelled move spends no visit
+            // and a new cycle it starts is kept. A channel that already failed here ends the move
+            // instead of going round again; the cut names the channel it lands on.
+            announce("\(dead.name) is off the air. Moving to the next channel\u{2026}")
+            moveOnTask = Task {
+                guard await pausedOnDeadSignal(dead) else { return }
+                guard let target = model.surfHistory.next(for: surfChoice), !deadHere.contains(target.id) else {
+                    return announce(stopLine)
+                }
+                moveOnNote = nil
+                destination = target
+                changeTask?.cancel()
+                changeTask = Task { await change(to: target) }
+            }
+            return
         }
-        guard let target = found else {
-            announce(surfChoice == nil && list.count < 2 ? nil : "No other channel here is reaching us right now.")
+        guard let target = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere) else {
+            announce(list.count < 2 ? nil : stopLine)
             return
         }
         announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
         moveOnTask = Task {
-            try? await Task.sleep(for: Self.deadSignalPause)
-            guard !Task.isCancelled, !leaving, current.id == dead.id, isFailed, destination == nil, guideRow == nil else { return }
+            guard await pausedOnDeadSignal(dead) else { return }
             moveOnNote = nil
-            // The visit is spent only now, as a pick in the guide spends it.
-            if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }
         }
+    }
+
+    /// The pause before a move, true when nothing has changed since: the same dead signal on
+    /// screen, no flight under way, no guide open.
+    private func pausedOnDeadSignal(_ dead: Channel) async -> Bool {
+        try? await Task.sleep(for: Self.deadSignalPause)
+        return !Task.isCancelled && !leaving && current.id == dead.id && isFailed && destination == nil && guideRow == nil
     }
 
     /// The strip's line for the move, said to VoiceOver as well.

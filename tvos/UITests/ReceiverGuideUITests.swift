@@ -39,6 +39,12 @@ final class ReceiverGuideUITests: XCTestCase {
 
         let current = app.staticTexts["currentChannel"]
         XCTAssertTrue(current.waitForExistence(timeout: 15))
+        // The strip hides only over a playing picture, and the channels are live third-party
+        // streams: one can be down from the CI runner (CI 2026-11-13, Smut: the strip never hid).
+        // This walk is about the guide, not one broadcaster, so a channel that does not play in
+        // 45 s gives way to the next on the shelf (Down), three at most.
+        XCTAssertTrue(playsOneOfThree(app, until: app.staticTexts.matching(NSPredicate(format: "identifier == 'playerState' AND label == 'Playing'")).firstMatch),
+                      "one of the first three television channels plays: \(app.staticTexts["playerState"].label)")
         let start = current.label
         let guideControl = app.buttons["guideControl"]
         XCTAssertTrue(guideControl.waitForExistence(timeout: 30), "the strip offers the guide once the channel plays")
@@ -134,13 +140,14 @@ final class ReceiverGuideUITests: XCTestCase {
             let match = NSPredicate { _, _ in readouts.allElementsBoundByIndex.contains { $0.label == value } }
             return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: match, object: nil)], timeout: 5) == .completed
         }
-        if nowPlaying.waitForExistence(timeout: 40) {
+        // Radio is live third-party mounts too: a station that does not play gives way to the next.
+        if playsOneOfThree(app, until: nowPlaying) {
             XCTAssertTrue(awakeIs("on"), "a playing station holds the Apple TV awake")
             kjPause(2)
             kjScreenshot("\(skin)-g4-radio", app: app)
         } else {
             kjScreenshot("\(skin)-g4-radio-not-playing", app: app)
-            XCTFail("the station played and showed Now Playing")
+            XCTFail("one of the first three stations played and showed Now Playing")
         }
 
         // Menu leaves the station playing, in Sonos's small player under the region; Off stops it.
@@ -159,5 +166,16 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
         XCTAssertTrue(awakeIs("off"), "with nothing playing the Apple TV may sleep again")
+    }
+
+    /// Waits up to 45 s for `sign` on the channel just opened; when it does not come, Down tunes
+    /// the next channel on the same shelf. Three channels at most.
+    private func playsOneOfThree(_ app: XCUIApplication, until sign: XCUIElement) -> Bool {
+        for attempt in 0..<3 {
+            if sign.waitForExistence(timeout: 45) { return true }
+            print("GUIDE \(app.staticTexts["currentChannel"].label) did not play: \(app.staticTexts["playerState"].label)")
+            if attempt < 2 { XCUIRemote.shared.press(.down) }
+        }
+        return false
     }
 }

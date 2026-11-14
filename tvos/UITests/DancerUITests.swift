@@ -126,21 +126,37 @@ final class DancerUITests: XCTestCase {
         return id
     }
 
-    /// A Pakistani FM station on a live MP3 mount, played through LiveRadio: the signal must be
-    /// readable, and the dancer comes on when what is playing carries a beat. Live radio may be
-    /// talking at that minute, so the beat is recorded rather than required; the signal is required.
+    /// A Pakistani or Punjabi FM station on a live MP3 mount, played through LiveRadio: the signal
+    /// must be readable, and the dancer comes on when what is playing carries a beat. Live radio may
+    /// be talking at that minute, so the beat is recorded rather than required; the signal is required.
+    /// The stations are live third-party mounts, and one can be down from the CI runner, so a station
+    /// whose signal is not readable in 45 s gives way to the next, three at most.
     func testRadioDancer() {
-        let app = XCUIApplication()
-        let id = openRadio(["pbc-fm-101-lahore", "radio-in-punjab-rocks-radio", "radio-pk-cityfm89"], skin: "day", app)
-        XCTAssertNotNil(id, "a progressive radio channel must open")
-        XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
-        let deadline = Date().addingTimeInterval(45)
-        while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
-        XCTAssertFalse(status(app).hasPrefix("stage=absent"), "a live radio mount must be readable (\(status(app)))")
-        let first = waitForDancing(app, timeout: 40)
-        print("DANCER radio \(id ?? "-") first: \(first)")
-        _ = photograph("radio-\(id ?? "none")", app)
-        app.terminate()
+        var left = ["radio-in-punjab-rocks-radio", "radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4"]
+        var tried: [String] = []
+        for _ in 0..<3 {
+            let app = XCUIApplication()
+            guard let id = openRadio(left, skin: "day", app) else {
+                XCTFail("a progressive radio channel must open (tried \(tried))")
+                return
+            }
+            left.removeAll { $0 == id }
+            XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
+            let deadline = Date().addingTimeInterval(45)
+            while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
+            if status(app).hasPrefix("stage=absent") {
+                tried.append("\(id): \(app.staticTexts["playerState"].label)")
+                shot("radio-unreadable-\(id)", app)
+                app.terminate()
+                continue
+            }
+            let first = waitForDancing(app, timeout: 40)
+            print("DANCER radio \(id) first: \(first)")
+            _ = photograph("radio-\(id)", app)
+            app.terminate()
+            return
+        }
+        XCTFail("a live radio mount must be readable; none of three was in 45 s: \(tried)")
     }
 
     /// Saut-ul-Quran: recitation. The dancer must never appear, and no tap is made at all.

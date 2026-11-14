@@ -776,9 +776,15 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(app.buttons["pnvReelRegion"].value as? String, "Horn of Africa")
         var last = onScreen()
         var seen = Set([last].compactMap { $0 })
+        func moved(from last: String?) -> Bool {
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let now = onScreen(); return now != nil && now != last }, object: nil)], timeout: 6) == .completed
+        }
         for swipe in 1...24 {
             app.swipeUp()
-            sleep(1)
+            // CI's slower simulator can still be settling the last page and swallow the swipe
+            // (2026-11-14, swipe 15): one more swipe. A reel that is stuck fails either way.
+            if !moved(from: last) { app.swipeUp(); _ = moved(from: last) }
             let now = onScreen()
             XCTAssertNotNil(now, "a reel is on screen after swipe \(swipe)")
             XCTAssertNotEqual(now, last, "swipe \(swipe) moved on")

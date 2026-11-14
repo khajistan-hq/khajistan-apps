@@ -268,8 +268,10 @@ final class ReadingStore {
         guard let (data, response) = try? await urlSession.data(for: request),
               let status = (response as? HTTPURLResponse)?.statusCode else { return nil }
         guard status == 200 else {
-            // Only the gate's answer is kept; an outage is asked again on the next open.
-            if status == 401 || status == 404 { RRShelfDisk.write(Data(), key) }
+            // Only the gate's answer with no password is kept: the gated key is the same for every
+            // password, so a wrong one's refusal must not stand in for the right one. An outage is
+            // asked again on the next open.
+            if authorization == nil, status == 401 || status == 404 { RRShelfDisk.write(Data(), key) }
             return nil
         }
         return await Task.detached(priority: .userInitiated) {

@@ -198,7 +198,8 @@ struct PnvViewerView: View {
     /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
     /// place while nothing is lit, as the Receiver's strip cues its controls.
     private var saveControls: some View {
-        let saved = model.saves.isSaved(pnvKey: current.media_key)
+        // Between deals there is no object on screen to have saved.
+        let saved = !stranded && model.saves.isSaved(pnvKey: current.media_key)
         return HStack(spacing: 14) {
             StripChipStyle.face(Text((armed == nil ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
                 .accessibilityAddTraits(.isButton)

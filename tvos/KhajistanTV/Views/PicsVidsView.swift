@@ -46,6 +46,7 @@ struct PicsVidsView: View {
         .task { await store.start() }
         // Left before the Reel's page came: the viewer must not open by itself later.
         .onDisappear { reelTask?.cancel(); reelNote = nil }
+        .onChange(of: reelNote) { if let reelNote { AccessibilityNotification.Announcement(reelNote).post() } }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
@@ -118,10 +119,14 @@ struct PicsVidsView: View {
                     defer { reelTask = nil }
                     let all = PicsVidsStore.allRegions
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
-                    if store.feed(all).items.isEmpty { await store.retry(region: all) }
-                    // Another caller's load (a shelf, a kind tab) may be the one in flight.
-                    while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {
-                        try? await Task.sleep(for: .milliseconds(150))
+                    // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
+                    // then comes back with nothing, not done and no error.
+                    for _ in 0..<2 where store.feed(all).items.isEmpty && !store.feed(all).isDone && !Task.isCancelled {
+                        await store.retry(region: all)
+                        // Another caller's load may be the one in flight.
+                        while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(150))
+                        }
                     }
                     guard !Task.isCancelled else { return }
                     if let first = store.feed(all).items.first {

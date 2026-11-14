@@ -35,7 +35,7 @@ struct PnvReelsView: View {
     @State private var laps: [[PnvRow]] = []
     /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
     /// so the reader scrolls to it, as it does on arrival.
-    @State private var jump: String?
+    @State private var jump = 0
 
     let start: PnvRow
     let source: Source
@@ -98,7 +98,9 @@ struct PnvReelsView: View {
         // The seeded position can land a page off in a lazy stack that has not built the tapped
         // page yet; scrolling to it once on arrival puts the reel on the object that was tapped.
         .onAppear { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) }
-        .onChange(of: jump) { if let jump { proxy.scrollTo(jump, anchor: .top) } }
+        // A counter, not the id: two regions can open on the same object, and the same id set
+        // twice would not change and would not scroll.
+        .onChange(of: jump) { if let position { proxy.scrollTo(position, anchor: .top) } }
         // On the pager itself, not the screen: on the screen it also renamed the Close button.
         .accessibilityIdentifier("pnvReels")
         // The account, which VoiceOver reads; the page's own identifier carries the key for tests.
@@ -227,8 +229,6 @@ struct PnvReelsView: View {
         owner = nil
         activatedId = nil
         laps = []
-        // Cleared, so reopening on the same first page still scrolls to it.
-        jump = nil
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.
@@ -240,7 +240,7 @@ struct PnvReelsView: View {
     private func reopenIfLost() {
         guard isStream, let first = items.first, current == nil else { return }
         position = ReelItem.id(lap: 0, first.id)
-        jump = position
+        jump += 1
         activate()
     }
 

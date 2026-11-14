@@ -475,7 +475,8 @@ final class PlayerController {
     private func fail(error: Error?, stalled: Bool = false) {
         let logged = (player.currentItem?.errorLog()?.events ?? []).map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
         let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
-        guard !recent, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
+        // A signal the viewer paused is never brought back by a retune: it fails as it is.
+        guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
             player.pause()
             state = .failed(Self.unreachable)
             return

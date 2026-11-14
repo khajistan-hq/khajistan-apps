@@ -58,6 +58,9 @@ final class PicsVidsStore {
     private(set) var kind: PnvKind?
     /// The site's Shuffle: every shelf re-dealt along the room's permutation from a random place.
     private(set) var shuffled = false
+    /// Counts the times every shelf was started over (a new kind, Shuffle on or off, a new deal).
+    /// Views key their first-page loads on it: a re-deal changes no flag, only this.
+    private(set) var deal = 0
     private(set) var noticeVisible = false
 
     @ObservationIgnored private var roster: [PnvAccount] = []
@@ -135,6 +138,7 @@ final class PicsVidsStore {
         guard kind != self.kind else { return }
         self.kind = kind
         generation += 1
+        deal += 1
         feeds = [:]
     }
 
@@ -144,6 +148,7 @@ final class PicsVidsStore {
         guard on || shuffled else { return }
         shuffled = on
         generation += 1
+        deal += 1
         feeds = [:]
     }
 

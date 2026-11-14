@@ -22,6 +22,8 @@ struct PnvViewerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
+    @State private var restartTask: Task<Void, Never>?
     @State private var armed: Control?
     @State private var saveNote: String?
     @State private var showCollections = false
@@ -239,11 +241,17 @@ struct PnvViewerView: View {
     /// A new region or a new deal: the stream starts over and opens on its first object.
     private func restart(_ change: () -> Void) {
         stepTask?.cancel()
+        restartTask?.cancel()
+        // The object on screen stops now, not when the new deal arrives.
+        loadTask?.cancel()
+        controller.stop()
+        phase = .loading
         change()
         saveNote = nil
         let shelf = region
-        stepTask = Task {
-            if store.feed(shelf).items.isEmpty { await store.loadMore(region: shelf) }
+        restartTask = Task {
+            defer { if !Task.isCancelled { restartTask = nil } }
+            if store.feed(shelf).items.isEmpty { await store.retry(region: shelf) }
             guard !Task.isCancelled, let first = store.feed(shelf).items.first else {
                 if !Task.isCancelled { saveNote = store.feed(shelf).error ?? "Nothing filed under this yet." }
                 return
@@ -355,6 +363,8 @@ struct PnvViewerView: View {
 
     /// The neighbour in the stream. At the end of what is loaded the next page is asked for first.
     private func step(by delta: Int) {
+        // While a new deal loads there is no neighbour yet; the press waits for nothing.
+        guard restartTask == nil else { return }
         stepTask?.cancel()
         stepTask = Task {
             if let list {
@@ -383,6 +393,7 @@ struct PnvViewerView: View {
     private func stopEverything() {
         loadTask?.cancel()
         stepTask?.cancel()
+        restartTask?.cancel()
         hideTask?.cancel()
         controller.stop()
     }

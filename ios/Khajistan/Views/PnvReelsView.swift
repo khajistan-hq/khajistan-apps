@@ -115,7 +115,7 @@ struct PnvReelsView: View {
         .task { await model.saves.load() }
         .onChange(of: position) { activate() }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
-        .task(id: "\(model.pnvRegion)|\(store.shuffled)|\(store.kind?.rawValue ?? "")") {
+        .task(id: "\(model.pnvRegion)|\(store.deal)") {
             guard isStream else { return }
             if store.feed(model.pnvRegion).isUntouched { await store.loadMore(region: model.pnvRegion) }
         }

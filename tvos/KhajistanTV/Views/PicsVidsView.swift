@@ -108,7 +108,8 @@ struct PicsVidsView: View {
             Button {
                 Task {
                     let all = PicsVidsStore.allRegions
-                    if store.feed(all).items.isEmpty { await store.loadMore(region: all) }
+                    // retry clears a failed load first; a feed that failed once would refuse loadMore.
+                    if store.feed(all).items.isEmpty { await store.retry(region: all) }
                     if let first = store.feed(all).items.first { viewing = Viewing(row: first, region: all) }
                 }
             } label: {
@@ -261,7 +262,7 @@ private struct PnvRegionShelf: View {
             .accessibilityIdentifier("pnv-shelf-\(region)")
             .accessibilityValue(String(feed.items.count))
             // The first page, again whenever the filter starts the shelves over.
-            .task(id: "\(store.kind?.rawValue ?? "")|\(store.shuffled)") { await store.loadMore(region: region) }
+            .task(id: store.deal) { await store.loadMore(region: region) }
         }
     }
 

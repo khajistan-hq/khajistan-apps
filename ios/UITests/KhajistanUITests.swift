@@ -753,6 +753,18 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(shuffle.value as? String, "Off")
         shuffle.tap()
         XCTAssertTrue(NSPredicate(format: "value == 'On'").evaluate(with: shuffle) || shuffle.waitForValue("On"), "Shuffle turns on")
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        func onScreen() -> String? {
+            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+        }
+        func reelOpens(_ note: String) {
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed, note)
+        }
+        reelOpens("the shuffled reel opens")
+        // A second deal while Shuffle is on changes no flag; the reel must still load it.
+        shuffle.press(forDuration: 1.2)
+        app.buttons["Deal again"].tap()
+        reelOpens("a new deal opens on a page")
         shuffle.press(forDuration: 1.2)
         app.buttons["Stream order"].tap()
         XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
@@ -760,12 +772,7 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["pnvReelRegion"].tap()
         // The menu's item, not the grid's chip of the same name under the reel.
         app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
-        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
-        func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
-        }
-        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed,
-                      "the region's reel opens")
+        reelOpens("the region's reel opens")
         XCTAssertEqual(app.buttons["pnvReelRegion"].value as? String, "Horn of Africa")
         var last = onScreen()
         var seen = Set([last].compactMap { $0 })

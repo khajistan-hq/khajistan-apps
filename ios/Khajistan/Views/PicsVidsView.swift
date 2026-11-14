@@ -35,7 +35,7 @@ struct PicsVidsView: View {
         .task { await store.start() }
         // The store pages each feed only when asked; ask for the first page whenever the region,
         // the kind or the store's readiness changes and that feed has none yet.
-        .task(id: "\(model.pnvRegion)|\(store.kind?.rawValue ?? "all")|\(store.shuffled)|\(store.phase == .ready)") {
+        .task(id: "\(model.pnvRegion)|\(store.kind?.rawValue ?? "all")|\(store.deal)|\(store.phase == .ready)") {
             if store.phase == .ready, feed.isUntouched { await store.loadMore(region: model.pnvRegion) }
         }
         .fullScreenCover(item: $viewing) { row in

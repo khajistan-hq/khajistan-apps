@@ -24,6 +24,9 @@ struct PnvViewerView: View {
     @State private var stepTask: Task<Void, Never>?
     /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
     @State private var restartTask: Task<Void, Never>?
+    /// True from a restart until the new deal's first object is shown: the object in `current`
+    /// belongs to the old deal, so nothing of it is drawn.
+    @State private var stranded = false
     @State private var armed: Control?
     @State private var saveNote: String?
     @State private var showCollections = false
@@ -155,8 +158,8 @@ struct PnvViewerView: View {
 
     private func overlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            StatusBand(leading: ["Khajistan Pics/Vids", "@" + store.accountHandle(for: current)],
-                       trailing: [current.isVideo ? "Video" : "Picture"])
+            StatusBand(leading: ["Khajistan Pics/Vids", stranded ? regionName : "@" + store.accountHandle(for: current)],
+                       trailing: stranded ? [] : [current.isVideo ? "Video" : "Picture"])
             Spacer(minLength: 0)
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
@@ -170,8 +173,10 @@ struct PnvViewerView: View {
             if let state = stateText {
                 Kicker(state).accessibilityIdentifier("pnvViewerState")
             }
-            Text(PnvAPI.metaLine(for: current, regionToken: store.regionToken(for: current), date: Self.dateText))
-                .kjBody()
+            if !stranded {
+                Text(PnvAPI.metaLine(for: current, regionToken: store.regionToken(for: current), date: Self.dateText))
+                    .kjBody()
+            }
             if let caption {
                 Text(caption)
                     .kjSmall(faint: true)
@@ -245,6 +250,9 @@ struct PnvViewerView: View {
         // The object on screen stops now, not when the new deal arrives.
         loadTask?.cancel()
         controller.stop()
+        picture = nil
+        caption = nil
+        stranded = true
         phase = .loading
         change()
         saveNote = nil
@@ -312,6 +320,7 @@ struct PnvViewerView: View {
         loadTask?.cancel()
         controller.stop()
         current = row
+        stranded = false
         picture = nil
         caption = nil
         phase = .loading
@@ -371,6 +380,8 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         // While a new deal loads there is no neighbour yet; the press waits for nothing.
         guard restartTask == nil else { return }
+        // A deal that came back empty or failed: Left or Right asks for it again.
+        if stranded { restart {}; return }
         stepTask?.cancel()
         stepTask = Task {
             if let list {

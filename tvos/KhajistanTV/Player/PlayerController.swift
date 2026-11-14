@@ -223,6 +223,9 @@ final class PlayerController {
         } else {
             state = .tuning
             player.play()
+            // syncWithPlayer finds .tuning already set and would not start the watch, so a stream
+            // that died while paused sat on "Connecting…" for good (PlayerStall harness).
+            watchForStall()
         }
     }
 

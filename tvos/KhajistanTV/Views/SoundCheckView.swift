@@ -15,9 +15,14 @@ struct SoundCheckView: View {
     @Environment(\.palette) private var palette
 
     static var requested: SoundCheckView? {
+        // A test hook: a retail build plays nothing a launch argument names.
+        #if DEBUG
         guard let text = UserDefaults.standard.string(forKey: "kjsoundtest"), let url = URL(string: text),
               url.scheme == "https" else { return nil }
         return SoundCheckView(url: url, start: UserDefaults.standard.double(forKey: "kjsoundtestat"))
+        #else
+        return nil
+        #endif
     }
 
     var body: some View {

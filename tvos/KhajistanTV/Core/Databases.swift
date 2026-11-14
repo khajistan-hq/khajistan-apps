@@ -291,7 +291,7 @@ enum DBRead {
     static func decade(_ year: Int?) -> String? { year.map { "\($0 / 10 * 10)s" } }
 
     static func url(_ value: Any?) -> URL? {
-        guard let text = text(value), let url = URL(string: text), url.scheme == "https" || url.scheme == "http", url.host != nil else { return nil }
+        guard let text = text(value), let url = URL(string: text), url.scheme == "https", url.host != nil else { return nil }
         return url
     }
 

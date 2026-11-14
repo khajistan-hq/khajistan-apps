@@ -1107,7 +1107,9 @@ func positionInSlotWalksAndWrapsTheRoster() throws {
     let start = 360 * 60
     // 600 + 270 + 300 = 1170 s round.
     let cases: [(second: Int, index: Int, into: Double)] = [
-        (start - 500, 0, 0),          // before the slot clamps to its start
+        // Before the slot's start reads as yesterday's strip still running past midnight, the
+        // site's rule since 2026-11-08: 86 400 - 500 = 85 900 s in, 73 rounds and 490 s.
+        (start - 500, 0, 490),
         (start, 0, 0), (start + 599, 0, 599), (start + 600, 1, 0), (start + 869, 1, 269),
         (start + 870, 2, 0), (start + 1169, 2, 299),
         (start + 1170, 0, 0),         // a short roster runs round again
@@ -1301,26 +1303,47 @@ func secondsLeftCountsDownToTheSlotEnd() throws {
     try expectEqual(StationClock.secondsLeft(in: late, at: pkt(2026, 10, 11, 0, 0, 0)), nil)
 }
 
+/// The earliest month file the site checkout holds, and its first and last day as instants. The
+/// real-data clock tests were written on October's file, which has since rotated out, so they read
+/// whichever month is there (Skip when none is).
+func realEarliestMonth() throws -> (p: Programming, key: String, first: Date, last: Date) {
+    let directory = repoRoot.appendingPathComponent("data/khajistan-tv")
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+    guard let key = names.filter({ $0.hasPrefix("programming-20") && $0.hasSuffix(".json") })
+        .map({ String($0.dropFirst("programming-".count).dropLast(".json".count)) }).sorted().first else {
+        throw Skip(reason: "data/khajistan-tv/programming-*.json is not in this checkout")
+    }
+    let p = try realProgramming(key)
+    func instant(_ iso: String, _ h: Int, _ m: Int, _ s: Int) throws -> Date {
+        let parts = iso.split(separator: "-").compactMap { Int($0) }
+        try expectEqual(parts.count, 3, iso)
+        return pkt(parts[0], parts[1], parts[2], h, m, s)
+    }
+    let first = try require(p.days.map(\.date).min()), last = try require(p.days.map(\.date).max())
+    return (p, key, try instant(first, 0, 0, 0), try instant(last, 23, 59, 59))
+}
+
 func realUpcomingAgreesWithOnAir() throws {
-    let p = try realProgramming("2026-10")
+    let (p, key, first, last) = try realEarliestMonth()
     var checked = 0
     for number in StationClock.channelNumbers(p) {
         let id = try require(StationClock.channelId(p, number: number))
-        var t = pkt(2026, 10, 1, 0, 0, 0)
-        while t <= pkt(2026, 10, 31, 23, 59, 59) {
+        var t = first
+        while t <= last {
             defer { t = t.addingTimeInterval(3517) }
             let strips = StationClock.upcoming(p, channelId: id, at: t, count: 4)
             let expectedFirst = StationClock.onAir(p, channelId: id, at: t)?.nextStart ?? StationClock.returnTime(p, channelId: id, at: t)
             try expectEqual(strips.first?.startLabel, expectedFirst)
-            // Soonest first, and every strip starts after now.
+            // Soonest first, and every strip starts after now (read in seconds: a strip filed on a
+            // day can start past its midnight).
             let now = StationClock.stationNow(t)
-            let keys = strips.map { "\($0.date) \(StationClock.clockLabel($0.slot.start_minute))" }
-            try expectEqual(keys, keys.sorted())
-            try expect(strips.allSatisfy { $0.date > now.iso || $0.slot.start_minute > now.minutes })
+            let keys = strips.map { ($0.date, $0.slot.startSecond) }
+            try expect(zip(keys, keys.dropFirst()).allSatisfy { $0 < $1 }, "\(key) ch \(number): not soonest first")
+            try expect(strips.allSatisfy { $0.date > now.iso || $0.slot.startSecond > Double(now.seconds) })
             checked += 1
         }
     }
-    print("      \(checked) instants across October")
+    print("      \(checked) instants across \(key)")
 }
 
 // MARK: - Station clock: differential against the site's own JS
@@ -1339,6 +1362,12 @@ struct Fixture: Decodable {
             let nextStart: String?
             let slotStart: String
             let slotStartMinute: Int
+            /// Only in the December fixture (station-clock-fixture-2026-12.json).
+            var nextProgrammeId: String? = nil
+            var nextProgrammeStart: String? = nil
+            var nowName: String? = nil
+            var nextName: String? = nil
+            var nextAt: String? = nil
         }
 
         let nowMs: Double
@@ -1408,6 +1437,55 @@ func stationClockMatchesTheJS() throws {
     try expect(Set(cases.map(\.channel)) == Set(StationClock.channelNumbers(f.programming)), "every channel must be present")
     // Every one of those programmes came out of the decoded trim, so the trim carried what it needed.
     for c in cases { if let want = c.expect { _ = try require(f.programming.programmes[want.programmeId], want.programmeId) } }
+}
+
+/// The site's schedule since 2026-11-08: strips in seconds, evening strips that run past
+/// midnight, and the 1st's late strips in prev_day. Before this port the app read 00:00 to each
+/// channel's first strip of the day as off air while the site was still playing yesterday's.
+func stationClockMatchesTheJSPastMidnight() throws {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("station-clock-fixture-2026-12.json")
+    let f = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url))
+    try expectEqual(f.source, "programming-2026-12.json")
+    let p = f.programming
+    try expect(p.prev_day != nil, "the fixture must carry prev_day")
+    var failures: [String] = [], late = 0, firstDayLate = 0, onAir = 0
+    for (position, c) in f.cases.enumerated() {
+        var diff = mismatches(p, c)
+        let date = Date(timeIntervalSince1970: c.nowMs / 1000)
+        if let want = c.expect, let air = StationClock.onAir(p, channel: c.channel, at: date) {
+            onAir += 1
+            func check(_ name: String, _ swift: String?, _ js: String?) {
+                if swift != js { diff.append("\(name): swift \(swift ?? "nil"), js \(js ?? "nil")") }
+            }
+            check("nextProgrammeId", air.nextProgrammeId, want.nextProgrammeId)
+            check("nextProgrammeStart", air.nextProgrammeStart, want.nextProgrammeStart)
+            check("nowName", air.nowName, want.nowName)
+            check("nextName", air.nextName, want.nextName)
+            check("nextAt", air.nextAt, want.nextAt)
+            if want.date != StationClock.stationNow(date).iso {
+                late += 1
+                if want.date == p.prev_day?.date { firstDayLate += 1 }
+            }
+        }
+        if !diff.isEmpty { failures.append("case \(position) nowMs \(Int(c.nowMs)) ch \(c.channel): " + diff.joined(separator: "; ")) }
+    }
+    print("      \(f.cases.count) cases, \(onAir) on air, \(late) on a strip from yesterday (\(firstDayLate) from prev_day)")
+    try expect(failures.isEmpty, "\(failures.count) of \(f.cases.count) differ; first: " + failures.prefix(3).joined(separator: " | "))
+    try expect(late >= 50, "only \(late) cases after midnight on yesterday's strip")
+    try expect(firstDayLate >= 5, "only \(firstDayLate) cases read prev_day")
+    // following() and secondsLeft() keep counting on yesterday's strip past midnight.
+    for c in f.cases {
+        let date = Date(timeIntervalSince1970: c.nowMs / 1000)
+        guard let want = c.expect, want.date != StationClock.stationNow(date).iso,
+              let air = StationClock.onAir(p, channel: c.channel, at: date) else { continue }
+        let left = try require(StationClock.secondsLeft(in: air, at: date), "secondsLeft on a late strip, case \(Int(c.nowMs))")
+        try expect(left > 0 && Double(left) <= air.slot.lengthSeconds + 1)
+        // Over exactly then, and not a second before.
+        try expect(StationClock.secondsLeft(in: air, at: date.addingTimeInterval(Double(left))) == nil)
+        if left > 1 { try expect(StationClock.secondsLeft(in: air, at: date.addingTimeInterval(Double(left - 1))) != nil) }
+        let next = try require(StationClock.following(air, in: p, at: date))
+        try expectEqual(next.date, air.date, "following stays in the late strip")
+    }
 }
 
 /// A check that cannot fail is decoration: bend each field of a real expectation and the
@@ -1622,9 +1700,9 @@ func realProgrammingDecodesInEveryMonth() throws {
     guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else {
         throw Skip(reason: "data/khajistan-tv is not in this checkout")
     }
-    let months = names.filter { $0.hasPrefix("programming-2026-") && $0.hasSuffix(".json") }
+    let months = names.filter { $0.hasPrefix("programming-20") && $0.hasSuffix(".json") }
         .map { String($0.dropFirst("programming-".count).dropLast(".json".count)) }.sorted()
-    try expect(!months.isEmpty, "no programming-2026-*.json files")
+    try expect(!months.isEmpty, "no programming-*.json files")
     var tallies: [String: Int] = [:]
     for month in months {
         let data = try realFile("data/khajistan-tv/programming-\(month).json")
@@ -1655,7 +1733,10 @@ func realProgrammingDecodesInEveryMonth() throws {
                     slots += 1
                     try expect(!slot.programmes.isEmpty && slot.programmes.allSatisfy { $0 >= 0 && $0 < p.programme_order.count },
                                "\(month) \(day.date) \(slot.start): a roster index is out of range")
-                    try expect(slot.start_minute >= 0 && slot.minutes > 0 && slot.start_minute + slot.minutes <= 1440)
+                    // A strip starts inside its own day and may run past midnight (2026-11-08), never
+                    // into a third day.
+                    try expect(slot.startSecond >= 0 && slot.lengthSeconds > 0
+                               && slot.endSecond <= 2 * StationClock.daySeconds, "\(month) \(day.date) \(slot.start): a strip out of its day")
                     try expect(p.shows[slot.show] != nil, "\(month): slot names an unknown show \(slot.show)")
                     try expectEqual(StationClock.clockLabel(slot.start_minute), slot.start, "\(month) \(day.date)")
                 }
@@ -1676,21 +1757,26 @@ func realProgrammingDecodesInEveryMonth() throws {
 }
 
 func realProgrammingClockInvariants() throws {
-    let p = try realProgramming("2026-10")
-    var checked = 0, offAir = 0, joinedPastLeader = 0
+    let (p, key, first, end) = try realEarliestMonth()
+    let lastDay = try require(p.days.map(\.date).max())
+    var checked = 0, offAir = 0, joinedPastLeader = 0, late = 0
     for number in StationClock.channelNumbers(p) {
-        var t = pkt(2026, 10, 1, 0, 0, 0)
-        let end = pkt(2026, 10, 31, 23, 59, 59)
+        var t = first
         while t <= end {
             defer { t = t.addingTimeInterval(1747) }
             guard let air = StationClock.onAir(p, channel: number, at: t) else { offAir += 1; continue }
             checked += 1
-            let c = karachi.dateComponents([.year, .month, .day, .hour, .minute, .second], from: t)
-            let iso = isoString(c.year ?? 0, c.month ?? 0, c.day ?? 0)
-            let minute = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            let now = StationClock.stationNow(t)
+            let iso = now.iso
             let programme = try require(air.programme, air.programmeId)
-            try expectEqual(air.date, iso)
-            try expect(minute >= air.slot.start_minute && minute < air.slot.start_minute + air.slot.minutes)
+            // On air today, or on yesterday's strip still running past midnight; either way the
+            // clock is inside the strip in the strip's own day.
+            let at = try require(StationClock.slotSecond(air.date, now: now), "\(air.date) is neither today nor yesterday")
+            if air.date != iso { late += 1 }
+            try expect(at >= air.slot.startSecond && at < air.slot.endSecond)
+            let left = try require(StationClock.secondsLeft(in: air, at: t))
+            try expect(StationClock.secondsLeft(in: air, at: t.addingTimeInterval(Double(left))) == nil, "the strip is over after secondsLeft")
+            if left > 1 { try expect(StationClock.secondsLeft(in: air, at: t.addingTimeInterval(Double(left - 1))) != nil) }
             try expectEqual(p.programme_order[air.slot.programmes[air.rosterIndex]], air.programmeId)
             try expect(air.into >= 0 && air.into < StationClock.runSeconds(programme), "into \(air.into) of \(StationClock.runSeconds(programme))")
             try expectClose(air.seekTo, (programme.clean_start ?? 0) + air.into, tolerance: 1e-9)
@@ -1701,10 +1787,10 @@ func realProgrammingClockInvariants() throws {
             try expectEqual(air.startLabel, air.slot.start)
             try expectEqual(air.channelId, StationClock.channelId(p, number: number))
             // A next strip exists everywhere except in the last day of the month's file.
-            if iso != "2026-10-31" { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
+            if iso != lastDay { try expect(air.nextStart != nil, "\(iso) \(air.startLabel) has no next strip") }
         }
     }
-    print("      \(checked) instants across October on \(StationClock.channelNumbers(p).count) channels, \(offAir) off air, \(joinedPastLeader) on a programme with a clean_start")
+    print("      \(checked) instants across \(key) on \(StationClock.channelNumbers(p).count) channels, \(offAir) off air, \(late) on yesterday's strip, \(joinedPastLeader) on a programme with a clean_start")
     try expect(checked > 2500, "only \(checked) instants were on air")
 }
 
@@ -4206,15 +4292,18 @@ func databasesDecodeTheRealFiles() throws {
         try db.records(try db.paths.map { try realFile($0) })
     }
     let expected: [ArchiveDatabase: Int] = [
-        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 6_686, .persianMusic: 45_568,
+        .pakistanMusic: 19_363, .nationalBroadcasts: 257, .arabicMusic: 5_796, .persianMusic: 34_072,
         .censorCertificates: 52, .iranianCinema: 1_437, .pakistaniCinema: 6_179, .turkishCinema: 65,
         .screenMarks: 1_726, .pakistaniDramas: 1_599,
     ]
-    for (db, count) in expected {
+    // Every count is checked before any failure, so one run names all that drifted.
+    var drifted: [String] = []
+    for (db, count) in expected.sorted(by: { $0.key.title < $1.key.title }) {
         let all = try records(db)
-        try expectEqual(all.count, count, "\(db.title) record count")
+        if all.count != count { drifted.append("\(db.title): got \(all.count), expected \(count)") }
         try expectEqual(Set(all.map(\.id)).count, all.count, "\(db.title) ids are unique")
     }
+    try expect(drifted.isEmpty, "record counts: " + drifted.joined(separator: "; "))
     // logos.html shows review == false with an image file, and nothing else.
     let raw = try JSONSerialization.jsonObject(with: try realFile("data/logos.json")) as? [String: Any]
     let shown = ((raw?["records"] as? [[String: Any]]) ?? []).filter { ($0["review"] as? Bool) == false && ($0["image_file"] as? String)?.isEmpty == false }
@@ -4499,6 +4588,63 @@ final class StubClockProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Drops the connection for the first `drops` requests, then answers 200.
+final class StubDropProtocol: URLProtocol {
+    nonisolated(unsafe) static var drops = 0
+    nonisolated(unsafe) static var requests = 0
+    nonisolated(unsafe) static var error = URLError(.networkConnectionLost)
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests += 1
+        if Self.requests <= Self.drops { client?.urlProtocol(self, didFailWithError: Self.error); return }
+        let reply = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: reply, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("ok".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [StubDropProtocol.self]
+    let session = URLSession(configuration: config)
+    // The site's own address: not the project, so no route is reconsidered.
+    let url = URL(string: "https://example.test/data/khajistan-tv/programming-2026-12.json")!
+    func run(_ method: String, drops: Int, error: URLError = URLError(.networkConnectionLost)) -> (status: Int?, requests: Int) {
+        StubDropProtocol.drops = drops; StubDropProtocol.requests = 0; StubDropProtocol.error = error
+        var request = URLRequest(url: url); request.httpMethod = method
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var status: Int?
+        Task {
+            status = (try? await SupabaseRoute.data(for: request, session: session)).flatMap { ($0.1 as? HTTPURLResponse)?.statusCode }
+            done.signal()
+        }
+        done.wait()
+        return (status, StubDropProtocol.requests)
+    }
+    var r = run("GET", drops: 1)
+    try expectEqual([r.status ?? -1, r.requests], [200, 2], "a GET whose connection dropped is sent again and answers")
+    r = run("GET", drops: 1, error: URLError(.secureConnectionFailed))
+    try expectEqual([r.status ?? -1, r.requests], [200, 2], "a cut TLS handshake (-1200) too")
+    r = run("GET", drops: 2)
+    try expectEqual([r.status ?? -1, r.requests], [-1, 2], "once, not forever")
+    r = run("HEAD", drops: 1)
+    try expectEqual([r.status ?? -1, r.requests], [200, 2], "a HEAD too")
+    r = run("POST", drops: 1)
+    try expectEqual([r.status ?? -1, r.requests], [-1, 1], "a POST is never sent twice")
+    r = run("GET", drops: 1, error: URLError(.notConnectedToInternet))
+    try expectEqual([r.status ?? -1, r.requests], [-1, 1], "no network is not a dropped connection")
+    // The rule itself, for the project's own requests: no route open fails at once.
+    let get = URLRequest(url: url), lost = URLError(.networkConnectionLost)
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .direct))
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .proxy))
+    try expect(!SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .unreachable))
+    try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
+    try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
+}
+
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubClockProtocol.self]
@@ -4588,8 +4734,10 @@ let tests: [(String, () throws -> Void)] = [
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
-    ("Real October: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
+    ("Real schedule: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
+    ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
+    ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),
@@ -4597,7 +4745,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Real shards and withdrawal feeds decode", realShardsAndWithdrawalFeedsDecode),
     ("Every real region shard decodes", everyRealShardDecodes),
     ("Real programming decodes in every month", realProgrammingDecodesInEveryMonth),
-    ("Real October schedule clock invariants", realProgrammingClockInvariants),
+    ("Real schedule clock invariants", realProgrammingClockInvariants),
     ("ViewBox parses and refuses", viewBoxParsesAndRefuses),
     ("SVGPath: absolute subpaths and implicit lineto", svgPathAbsoluteSubpaths),
     ("SVGPath: relative commands, H and V", svgPathRelativeCommands),

@@ -22,6 +22,8 @@ struct FilmPlayerView: View {
     @State private var full: (kind: String?, expiresAt: String?)?
     @State private var refusal: Int?
     @State private var checking = false
+    /// Set once the screen has gone: a token that answers afterwards must not start a film no one sees.
+    @State private var gone = false
     @State private var showSignIn = false
     @State private var overlayVisible = true
     @State private var hideTask: Task<Void, Never>?
@@ -103,7 +105,9 @@ struct FilmPlayerView: View {
         }
         .task { await open() }
         .task { await trackPosition() }
-        .onDisappear { stopEverything() }
+        // A cover presented over the player (Sign in) can take its appearance and give it back.
+        .onAppear { gone = false }
+        .onDisappear { gone = true; stopEverything() }
     }
 
     // MARK: - Overlay
@@ -271,6 +275,9 @@ struct FilmPlayerView: View {
         refusal = nil
         let answer = await model.films.requestFullFilm(film)
         checking = false
+        // Back pressed while vod-token answered: the film would play, and keep the TV awake, with
+        // no screen. The Play button's and the offer's Tasks are not the view's own.
+        guard !gone, !Task.isCancelled else { return }
         switch answer {
         case .granted(let token, let kind, let expiresAt):
             guard let url = Films.fullFilmURL(token: token) else {

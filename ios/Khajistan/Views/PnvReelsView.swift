@@ -133,7 +133,7 @@ struct PnvReelsView: View {
         guard row.isVideo else { phase = .ready; return }
         phase = .loading
         let key = row.id
-        loadTask = Task {
+        loadTask = Task { [controller] in
             do {
                 // A flick past a page is not a visit: only a page still current after a moment
                 // asks for its stream (a Khajistan TV row mints a token per ask).

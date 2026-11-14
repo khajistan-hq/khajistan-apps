@@ -165,6 +165,10 @@ final class PlayerController {
         player.volume = 0
         fadeInPending = true
         player.play()
+        // The wait that follows is ended by playing or by this: syncWithPlayer finds .tuning
+        // already set and would not start the watch, so a stream that died while paused sat on
+        // "Connecting…" for good (PlayerStall harness).
+        watchForStall()
     }
 
     /// Brings the sound down to nothing over `seconds`, for a channel change: the old channel

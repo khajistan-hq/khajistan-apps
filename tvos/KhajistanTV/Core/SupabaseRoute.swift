@@ -205,6 +205,14 @@ enum SupabaseRoute {
         return result
     }
 
+    #if DEBUG
+    /// The probe's session settings. The network harness (ios/Tests/PnvRetry) stubs them, so it
+    /// runs without reaching the project. Debug only: a release build has no seam to swap.
+    nonisolated(unsafe) static var probeConfiguration: () -> URLSessionConfiguration = { .ephemeral }
+    #else
+    private static func probeConfiguration() -> URLSessionConfiguration { .ephemeral }
+    #endif
+
     private static func probe(viaProxy: Bool) async -> Bool {
         var request = URLRequest(url: base(for: viaProxy ? .proxy : .direct).appendingPathComponent("rest/v1/"))
         request.timeoutInterval = probeLimit
@@ -212,7 +220,7 @@ enum SupabaseRoute {
         request.httpMethod = "HEAD"
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
-        let config = URLSessionConfiguration.ephemeral
+        let config = probeConfiguration()
         config.timeoutIntervalForRequest = probeLimit
         config.timeoutIntervalForResource = probeLimit + 0.5
         let session = URLSession(configuration: config)

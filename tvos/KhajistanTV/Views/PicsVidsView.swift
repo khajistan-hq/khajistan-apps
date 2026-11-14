@@ -9,6 +9,9 @@ struct PicsVidsView: View {
     @Environment(AppModel.self) private var model
     @State private var viewing: Viewing?
     @State private var dontAskAgain = false
+    /// The Reel's first page on its way, or why it did not come.
+    @State private var reelTask: Task<Void, Never>?
+    @State private var reelNote: String?
     @FocusState private var focus: Focus?
 
     private enum Focus: Hashable { case noticeOK, firstTab }
@@ -41,6 +44,8 @@ struct PicsVidsView: View {
         // Down from the top bar lands on the first control, never on the tile under the bar item.
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         .task { await store.start() }
+        // Left before the Reel's page came: the viewer must not open by itself later.
+        .onDisappear { reelTask?.cancel(); reelNote = nil }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
@@ -106,11 +111,19 @@ struct PicsVidsView: View {
             // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
             // and Shuffle are changed inside it.
             Button {
-                Task {
+                reelTask?.cancel()
+                reelNote = "Loading\u{2026}"
+                reelTask = Task {
                     let all = PicsVidsStore.allRegions
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
                     if store.feed(all).items.isEmpty { await store.retry(region: all) }
-                    if let first = store.feed(all).items.first { viewing = Viewing(row: first, region: all) }
+                    guard !Task.isCancelled else { return }
+                    if let first = store.feed(all).items.first {
+                        reelNote = nil
+                        viewing = Viewing(row: first, region: all)
+                    } else {
+                        reelNote = store.feed(all).error ?? "Nothing filed yet."
+                    }
                 }
             } label: {
                 Label("Reel", systemImage: "play.rectangle.on.rectangle").kjKicker()
@@ -118,6 +131,7 @@ struct PicsVidsView: View {
             .buttonStyle(HouseTabStyle(isCurrent: false))
             .padding(.leading, 28)
             .accessibilityIdentifier("pnvReel")
+            if let reelNote { Text(reelNote).kjSmall(faint: true).accessibilityIdentifier("pnvReelNote") }
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)

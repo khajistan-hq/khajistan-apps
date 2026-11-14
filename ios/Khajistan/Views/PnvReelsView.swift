@@ -33,6 +33,9 @@ struct PnvReelsView: View {
     @State private var fixed: [PnvRow]
     /// The extra rounds dealt once the feed ran out, each the feed again in a new order.
     @State private var laps: [[PnvRow]] = []
+    /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
+    /// so the reader scrolls to it, as it does on arrival.
+    @State private var jump: String?
 
     let start: PnvRow
     let source: Source
@@ -95,6 +98,7 @@ struct PnvReelsView: View {
         // The seeded position can land a page off in a lazy stack that has not built the tapped
         // page yet; scrolling to it once on arrival puts the reel on the object that was tapped.
         .onAppear { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) }
+        .onChange(of: jump) { if let jump { proxy.scrollTo(jump, anchor: .top) } }
         // On the pager itself, not the screen: on the screen it also renamed the Close button.
         .accessibilityIdentifier("pnvReels")
         // The account, which VoiceOver reads; the page's own identifier carries the key for tests.
@@ -141,17 +145,19 @@ struct PnvReelsView: View {
             Spacer(minLength: 0)
             if isStream {
                 regionMenu
-                Button { deal(shuffled: !store.shuffled) } label: {
+                // A tap shuffles, and while on deals again, as the grid's button and the website's
+                // "Shuffle again" do; a long press goes back to the stream's own order.
+                Button { deal(shuffled: true) } label: {
                     Image(systemName: "shuffle").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
                 }
                 .buttonStyle(ReelRailStyle(isOn: store.shuffled))
                 .accessibilityLabel("Shuffle")
                 .accessibilityValue(store.shuffled ? "On" : "Off")
-                .accessibilityHint(store.shuffled ? "Deals the reel again. Hold for the stream's own order." : "")
+                .accessibilityHint(store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
+                .accessibilityAction(named: "Stream order") { deal(shuffled: false) }
                 .accessibilityIdentifier("pnvReelShuffle")
                 .contextMenu {
                     if store.shuffled {
-                        Button("Deal again", systemImage: "shuffle") { deal(shuffled: true) }
                         Button("Stream order", systemImage: "list.bullet") { deal(shuffled: false) }
                     }
                 }
@@ -228,6 +234,7 @@ struct PnvReelsView: View {
     private func reopenIfLost() {
         guard isStream, let first = items.first, current == nil else { return }
         position = ReelItem.id(lap: 0, first.id)
+        jump = position
         activate()
     }
 
@@ -244,7 +251,9 @@ struct PnvReelsView: View {
         if isStream, let index = pages.firstIndex(where: { $0.id == currentId }), index >= pages.count - 4 {
             if store.feed(model.pnvRegion).isDone {
                 // The feed has given everything: deal it again, so the reel never ends.
-                if !items.isEmpty { laps.append(items.shuffled()) }
+                // ponytail: every lap is kept and `reel` is rebuilt per render; cap laps if a
+                // region of thousands is swiped for hours.
+                if !items.isEmpty { laps.append(Self.nextLap(items, after: pages.last?.row.id)) }
             } else {
                 Task { await store.loadMore(region: model.pnvRegion) }
             }
@@ -286,6 +295,14 @@ struct PnvReelsView: View {
                 if !Task.isCancelled { phase = .failed(error.localizedDescription) }
             }
         }
+    }
+
+    /// The objects again in a new order, never opening on the one just shown (with one object
+    /// there is nothing else to show).
+    static func nextLap(_ rows: [PnvRow], after last: String?) -> [PnvRow] {
+        var lap = rows.shuffled()
+        if lap.count > 1, lap.first?.id == last { lap.swapAt(0, Int.random(in: 1..<lap.count)) }
+        return lap
     }
 
     /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1).

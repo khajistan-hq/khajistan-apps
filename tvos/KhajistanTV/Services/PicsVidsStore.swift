@@ -170,8 +170,8 @@ final class PicsVidsStore {
 
     // MARK: - Paging
 
-    /// The key of the one feed that spans every region. The Apple TV app never asks for it; the
-    /// phone's single grid does, under its "All" filter (ios/, which compiles this file).
+    /// The key of the one feed that spans every region: the phone's grid under its "All" filter,
+    /// and the Apple TV's Reel (ios/ compiles this file too).
     static let allRegions = ""
 
     /// The next page of one region's shelf: the first when it has none yet. Safe to call as often
@@ -193,7 +193,11 @@ final class PicsVidsStore {
             if roomSize == nil {
                 roomSize = (try? await fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
             }
-            guard gen == generation else { return }
+            // A probe cancelled with its caller picks no start: the next ask probes again.
+            guard gen == generation, !Task.isCancelled else {
+                if gen == generation { feeds[region]?.isLoading = false }
+                return
+            }
             // No size (the probe failed): the walk starts at the top and still reaches every row.
             feed.start = Int.random(in: 1...max(roomSize ?? 1, 1))
             feed.after = feed.start - 1

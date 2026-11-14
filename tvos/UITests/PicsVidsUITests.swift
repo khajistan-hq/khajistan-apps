@@ -302,7 +302,10 @@ final class PicsVidsUITests: XCTestCase {
             if let now { seen.insert(now) }
             last = now
         }
-        XCTAssertLessThanOrEqual(seen.count, 19, "22 presses over 19 objects came round again")
+        // 23 objects shown: fewer distinct ones means it came round; more than half means it is
+        // not stuck in a short cycle. Neither reads the region's live count.
+        XCTAssertLessThan(seen.count, 23, "the stream came round to objects it had shown")
+        XCTAssertGreaterThan(seen.count, 11, "the stream walks the region, not a short cycle")
         kjScreenshot("pv-reel-03-came-round", app: app)
     }
 }

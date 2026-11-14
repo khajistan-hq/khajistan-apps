@@ -65,7 +65,7 @@ struct PnvViewerView: View {
         let palette = Palette(model.skin)
         ZStack {
             // Moving pictures letterbox on black (owner, 2026-10-05); a still keeps the ground.
-            (current.isVideo ? Color.black : palette.ground).ignoresSafeArea()
+            (current.isVideo && !stranded ? Color.black : palette.ground).ignoresSafeArea()
             // The poster stands in until the video is playing, then gives way to it: the two
             // frames need not have the same edges.
             // Nothing of the old deal is drawn between deals, whatever a late fetch writes.
@@ -86,8 +86,9 @@ struct PnvViewerView: View {
             // The focus target: it draws nothing and holds focus so the remote's presses land.
             Button {
                 switch armed {
-                case .save: wake(); toggleSave()
-                case .collection: wake(); openCollections()
+                // Between deals the object in `current` is not on screen: nothing acts on it.
+                case .save: wake(); if !stranded { toggleSave() }
+                case .collection: wake(); if !stranded { openCollections() }
                 case .shuffle: wake(); restart { store.setShuffled(!store.shuffled) }
                 case .region: wake(); nextRegion()
                 case nil: if phase == .needsSignIn { showSignIn = true } else { wake() }
@@ -98,7 +99,7 @@ struct PnvViewerView: View {
             .buttonStyle(SurfaceButtonStyle())
             .accessibilityIdentifier("pnvViewerSurface")
             // The object on show, for UI tests that walk the stream.
-            .accessibilityValue(current.media_key)
+            .accessibilityValue(stranded ? "" : current.media_key)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)

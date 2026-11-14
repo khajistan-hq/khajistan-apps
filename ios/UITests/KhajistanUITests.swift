@@ -762,8 +762,8 @@ final class KhajistanUITests: XCTestCase {
         }
         reelOpens("the shuffled reel opens")
         // A second deal while Shuffle is on changes no flag; the reel must still load it.
-        shuffle.press(forDuration: 1.2)
-        app.buttons["Deal again"].tap()
+        shuffle.tap()
+        XCTAssertEqual(shuffle.value as? String, "On", "a tap while on deals again and stays on")
         reelOpens("a new deal opens on a page")
         shuffle.press(forDuration: 1.2)
         app.buttons["Stream order"].tap()
@@ -785,7 +785,18 @@ final class KhajistanUITests: XCTestCase {
             if let now { seen.insert(now) }
             last = now
         }
-        XCTAssertLessThanOrEqual(seen.count, 19, "24 swipes over 19 objects came round again")
+        // 25 pages shown: fewer distinct ones means the reel came round; more than half means it
+        // is not stuck in a short cycle. Neither reads the region's live count.
+        XCTAssertLessThan(seen.count, 25, "the reel came round to objects it had shown")
+        XCTAssertGreaterThan(seen.count, 12, "the reel walks the region, not a short cycle")
+        // Back to All regions and to Horn of Africa again, a feed already loaded: the reel must
+        // land on a page, not between two.
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'All regions' AND identifier != 'pnvregion-all'")).firstMatch.tap()
+        reelOpens("All regions opens on a page")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        reelOpens("a region already loaded opens on a page")
         shot("pnv-reel-endless", app)
     }
 

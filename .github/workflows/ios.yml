@@ -75,10 +75,6 @@ jobs:
             sleep 15
           done
           echo 'simulator did not boot in two attempts' >&2; exit 1
-      - name: Pics/Vids store against stubbed answers
-        # Retries on a busy server, and the shuffle walk reaching every object once from any
-        # start, with no live data (ios/Tests/PnvRetry). About fifteen seconds.
-        run: sh ios/Tests/PnvRetry/run.sh '${{ steps.simulator.outputs.udid }}' "$PWD"
       - name: Build and test iOS app
         run: |
           set -euo pipefail
@@ -86,6 +82,11 @@ jobs:
             -configuration Debug -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}' \
             -derivedDataPath ios/.ci/DerivedData -resultBundlePath ios/.ci/TestResults.xcresult \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO 2>&1 | tee ios/.ci/xcodebuild.log
+      - name: Pics/Vids store against stubbed answers
+        # Retries on a busy server, and the shuffle walk reaching every object once from any
+        # start, with no live data (ios/Tests/PnvRetry). About fifteen seconds. After the UI
+        # tests, so nothing it runs on the simulator is there while they run.
+        run: sh ios/Tests/PnvRetry/run.sh '${{ steps.simulator.outputs.udid }}' "$PWD"
       - name: Export screenshots and simulator app
         if: always()
         run: |

@@ -2,7 +2,7 @@ import Foundation
 
 // Drives the app's own PicsVidsStore against answers this file gives (run.sh): the region shelf
 // must survive one 500 from a busy server, and must still give up on a refusal. The Receiver's
-// list gets one quiet second try when the first cannot connect (CI, 2026-11-03: a TLS handshake
+// list gets one second try after a dropped connection (CI, 2026-11-03: a TLS handshake
 // dropped once and the Receiver sat on "The receiver has not loaded" for the rest of the test).
 
 final class Stub: URLProtocol, @unchecked Sendable {
@@ -117,7 +117,7 @@ struct PnvRetryHarness {
             if !ok { failures += 1 }
         }
         await receiver([-1], loads: true, expectRequests: 2, "receiver list: a failed TLS handshake is asked again once")
-        await receiver([0], loads: true, expectRequests: 2, "receiver list: a timed-out connection is asked again once")
+        await receiver([0], loads: false, expectRequests: 1, "receiver list: a timed-out request is not sent again (SupabaseRoute: only a dropped one is)")
         await receiver([-1, -1], loads: false, expectRequests: 2, shows: Stub.tlsText, "receiver list: two failures in a row, the screen says why")
         await receiver([404], loads: false, expectRequests: 1, "receiver list: an answer from the server is not asked again")
         await receiver([-2], loads: false, expectRequests: 1, "receiver list: a host that does not resolve is not asked again")

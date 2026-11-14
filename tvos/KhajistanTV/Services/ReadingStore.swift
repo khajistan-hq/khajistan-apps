@@ -65,6 +65,8 @@ final class ReadingStore {
 
     private unowned let auth: AuthStore
     private let urlSession: URLSession
+    /// Seconds the module index is waited for when a kept shelf opens with no answer kept for it.
+    private static let modulesAskOnOpen: TimeInterval = 4
     private let origin: URL
 
     private struct Job {
@@ -249,11 +251,29 @@ final class ReadingStore {
         // Kept per site and per gate state: the index is behind the site password, and a copy read
         // with the password must not stand in once it is gone (nor a test server's for the site's).
         let key = RRShelfDisk.key(request) + " @" + (origin.host ?? "") + (authorization == nil ? " open" : " gated")
-        if fromDevice { return await Task.detached(priority: .userInitiated) { RRShelfDisk.read(key).flatMap(RRModuleIndex.parse) }.value }
+        // A refusal is kept too (an empty file), so a kept shelf knows the index was asked for under this
+        // site and gate. With nothing kept, the shelf was kept under another (before the password, or a
+        // test server's) and the index is asked for now; else the room stays one tab until the feed is stale.
+        if fromDevice {
+            if let index = await Task.detached(priority: .userInitiated, operation: { () -> RRModuleIndex?? in
+                RRShelfDisk.read(key).map(RRModuleIndex.parse)
+            }).value {
+                return index
+            }
+            // Asked while the kept shelf waits to open, so never for long.
+            request.timeoutInterval = Self.modulesAskOnOpen
+        }
         if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await urlSession.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+              let status = (response as? HTTPURLResponse)?.statusCode else { return nil }
+        guard status == 200 else {
+            // Only the gate's answer with no password is kept: the gated key is the same for every
+            // password, so a wrong one's refusal must not stand in for the right one. An outage is
+            // asked again on the next open.
+            if authorization == nil, status == 401 || status == 404 { RRShelfDisk.write(Data(), key) }
+            return nil
+        }
         return await Task.detached(priority: .userInitiated) {
             guard let index = RRModuleIndex.parse(data) else { return nil }
             RRShelfDisk.write(data, key)

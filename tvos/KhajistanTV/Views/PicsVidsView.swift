@@ -12,6 +12,7 @@ struct PicsVidsView: View {
     /// The Reel's first page on its way, or why it did not come.
     @State private var reelTask: Task<Void, Never>?
     @State private var reelNote: String?
+    private static let reelLoading = "Loading\u{2026}"
     @FocusState private var focus: Focus?
 
     private enum Focus: Hashable { case noticeOK, firstTab }
@@ -46,9 +47,10 @@ struct PicsVidsView: View {
         .task { await store.start() }
         // Left before the Reel's page came: the viewer must not open by itself later.
         .onDisappear { reelTask?.cancel(); reelNote = nil }
-        // Only the outcome is announced; the Loading line is read when focus lands on it.
+        // Only the outcome is announced; the Loading line stays on screen for sight and is
+        // reachable by VoiceOver's own exploring, as plain text.
         .onChange(of: reelNote) {
-            if let reelNote, reelNote != "Loading\u{2026}" { AccessibilityNotification.Announcement(reelNote).post() }
+            if let reelNote, reelNote != Self.reelLoading { AccessibilityNotification.Announcement(reelNote).post() }
         }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
@@ -117,7 +119,7 @@ struct PicsVidsView: View {
             Button {
                 // A second press while the first page loads waits on the same load.
                 guard reelTask == nil else { return }
-                reelNote = "Loading\u{2026}"
+                reelNote = Self.reelLoading
                 reelTask = Task {
                     defer { reelTask = nil }
                     let all = PicsVidsStore.allRegions

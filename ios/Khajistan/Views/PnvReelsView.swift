@@ -257,8 +257,9 @@ struct PnvReelsView: View {
         if isStream, let index = pages.firstIndex(where: { $0.id == currentId }), index >= pages.count - 4 {
             if store.feed(model.pnvRegion).isDone {
                 // The feed has given everything: deal it again, so the reel never ends.
-                // ponytail: every lap is kept and `reel` is rebuilt per render; cap laps if a
-                // region of thousands is swiped for hours.
+                // ponytail: every lap is kept and `reel` is rebuilt per render. A lap starts only
+                // once the whole feed has been shown and is the feed's size, so it costs what the
+                // feed already costs, after as many swipes; cap laps if a big region ever gets there.
                 if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
             } else {
                 Task { await store.loadMore(region: model.pnvRegion) }

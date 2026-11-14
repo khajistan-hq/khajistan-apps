@@ -250,6 +250,8 @@ final class ReceiverTuner {
     private(set) var surfing = false
     /// Why the last Surf found nothing, until the next one.
     private(set) var surfNote: String?
+    /// Which channels each Surf pool has visited this cycle.
+    @ObservationIgnored private var surfHistory = SurfHistory()
 
     /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
     /// settings (owner, 2026-10-07); next and previous then walk every channel of that setting
@@ -269,18 +271,22 @@ final class ReceiverTuner {
             return
         }
         let defaults = UserDefaults.standard
-        let pool = await ShufflePick.surf(index, medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
-                                          // Surf follows the Beyond the atlas switch, as on the Apple TV
-                                          // (owner, 2026-10-29: one control for both).
-                                          scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main) { region in
+        let choice = SurfChoice(medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
+                                // Surf follows the Beyond the atlas switch, as on the Apple TV
+                                // (owner, 2026-10-29: one control for both).
+                                scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main)
+        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope) { region in
             try? await self.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
-        if let channel = pool.first {
-            play(channel, in: pool)
+        // Every channel of the pool once before any repeats, as on the Apple TV.
+        if let channel = surfHistory.press(catalogue, for: choice, onAir: destination ?? self.channel) {
+            if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }
+            play(channel, in: catalogue.channels.shuffled())
             return
         }
-        surfNote = "Nothing to surf there right now."
+        surfNote = catalogue.isComplete ? "Nothing to surf there right now."
+            : "You have visited the available channels. Press Surf again to load the rest of the atlas."
     }
 
     /// Turns the receiver off.

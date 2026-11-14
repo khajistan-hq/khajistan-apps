@@ -132,12 +132,6 @@ extension ShufflePick {
         return SurfCatalogue(channels: pool(read, index: index, medium: medium, scope: scope, genre: genre),
                              missingRegions: failed.sorted())
     }
-
-    @MainActor
-    static func surf(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
-                     load: @escaping @MainActor (String) async -> [Channel]?) async -> [Channel] {
-        await catalogue(index, medium: medium, scope: scope, load: load).channels.shuffled()
-    }
 }
 
 struct SurfChoice: Hashable {
@@ -183,7 +177,7 @@ struct SurfCycle {
     }
 }
 
-/// Held by the TV app, so closing and reopening Surf does not reshuffle already visited channels.
+/// Held by each app, so closing and reopening Surf does not reshuffle already visited channels.
 struct SurfHistory {
     private var cycles: [SurfChoice: SurfCycle] = [:]
     private var catalogues: [SurfChoice: SurfCatalogue] = [:]
@@ -199,6 +193,14 @@ struct SurfHistory {
 
     mutating func visit(_ channel: Channel, for choice: SurfChoice) {
         cycles[choice, default: SurfCycle()].visit(channel.id)
+    }
+
+    /// One Surf press: the catalogue as loaded now, the channel on air counted as seen (so it is
+    /// never the pick), then the next unvisited channel of `choice`'s own cycle.
+    mutating func press(_ catalogue: SurfCatalogue, for choice: SurfChoice, onAir: Channel?) -> Channel? {
+        update(catalogue, for: choice)
+        if let onAir { visit(onAir, for: choice) }
+        return next(for: choice)
     }
 }
 

@@ -303,7 +303,8 @@ final class PicsVidsUITests: XCTestCase {
             last = now
         }
         // 23 objects shown: fewer distinct ones means it came round; more than half means it is
-        // not stuck in a short cycle. Neither reads the region's live count.
+        // not stuck in a short cycle. The window rests on live data: Horn of Africa held 19
+        // objects on 2026-11-14, and the test needs 12 to 22.
         XCTAssertLessThan(seen.count, 23, "the stream came round to objects it had shown")
         XCTAssertGreaterThan(seen.count, 11, "the stream walks the region, not a short cycle")
         kjScreenshot("pv-reel-03-came-round", app: app)

@@ -154,7 +154,9 @@ struct PnvReelsView: View {
                 .accessibilityLabel("Shuffle")
                 .accessibilityValue(store.shuffled ? "On" : "Off")
                 .accessibilityHint(store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
-                .accessibilityAction(named: "Stream order") { deal(shuffled: false) }
+                .accessibilityActions {
+                    if store.shuffled { Button("Stream order") { deal(shuffled: false) } }
+                }
                 .accessibilityIdentifier("pnvReelShuffle")
                 .contextMenu {
                     if store.shuffled {
@@ -213,6 +215,8 @@ struct PnvReelsView: View {
     }
 
     private func deal(shuffled: Bool) {
+        // Off while already off would only throw the viewer back to the first page.
+        guard shuffled || store.shuffled else { return }
         restart { store.setShuffled(shuffled) }
     }
 
@@ -223,6 +227,8 @@ struct PnvReelsView: View {
         owner = nil
         activatedId = nil
         laps = []
+        // Cleared, so reopening on the same first page still scrolls to it.
+        jump = nil
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.
@@ -253,7 +259,7 @@ struct PnvReelsView: View {
                 // The feed has given everything: deal it again, so the reel never ends.
                 // ponytail: every lap is kept and `reel` is rebuilt per render; cap laps if a
                 // region of thousands is swiped for hours.
-                if !items.isEmpty { laps.append(Self.nextLap(items, after: pages.last?.row.id)) }
+                if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
             } else {
                 Task { await store.loadMore(region: model.pnvRegion) }
             }
@@ -295,14 +301,6 @@ struct PnvReelsView: View {
                 if !Task.isCancelled { phase = .failed(error.localizedDescription) }
             }
         }
-    }
-
-    /// The objects again in a new order, never opening on the one just shown (with one object
-    /// there is nothing else to show).
-    static func nextLap(_ rows: [PnvRow], after last: String?) -> [PnvRow] {
-        var lap = rows.shuffled()
-        if lap.count > 1, lap.first?.id == last { lap.swapAt(0, Int.random(in: 1..<lap.count)) }
-        return lap
     }
 
     /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1).

@@ -403,6 +403,18 @@ enum PnvAPI {
     }
 }
 
+// MARK: - The endless reel
+
+enum PnvReel {
+    /// The objects again in a new order, never opening on the one just shown (with one object
+    /// there is nothing else to show).
+    static func nextLap(_ rows: [PnvRow], after last: String?) -> [PnvRow] {
+        var lap = rows.shuffled()
+        if lap.count > 1, lap.first?.id == last { lap.swapAt(0, Int.random(in: 1..<lap.count)) }
+        return lap
+    }
+}
+
 // MARK: - The stream's layout (kj-browse-archive.js place())
 
 enum PnvLayout {

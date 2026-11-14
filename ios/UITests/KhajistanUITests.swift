@@ -786,7 +786,8 @@ final class KhajistanUITests: XCTestCase {
             last = now
         }
         // 25 pages shown: fewer distinct ones means the reel came round; more than half means it
-        // is not stuck in a short cycle. Neither reads the region's live count.
+        // is not stuck in a short cycle. The window rests on live data: Horn of Africa held 19
+        // objects on 2026-11-14, and the test needs 13 to 24.
         XCTAssertLessThan(seen.count, 25, "the reel came round to objects it had shown")
         XCTAssertGreaterThan(seen.count, 12, "the reel walks the region, not a short cycle")
         // Back to All regions and to Horn of Africa again, a feed already loaded: the reel must

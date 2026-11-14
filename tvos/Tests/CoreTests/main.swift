@@ -4678,6 +4678,7 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 
 let tests: [(String, () throws -> Void)] = [
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
+    ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
     ("serverClockFloorKeepsAnAccurateDevice", serverClockFloorKeepsAnAccurateDevice),
     ("serverClockReadsTheHTTPDateHeader", serverClockReadsTheHTTPDateHeader),
@@ -5129,6 +5130,21 @@ func pnvImageKeyCarriesSize() throws {
     try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(url, maxPixel: 2400))
     try expectEqual(PnvMedia.imageKey(url, maxPixel: 400), PnvMedia.imageKey(URL(string: "https://example.org/a.jpg")!, maxPixel: 400))
     try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(URL(string: "https://example.org/b.jpg")!, maxPixel: 400))
+}
+
+func pnvNextLapNeverRepeatsAtTheSeam() throws {
+    func row(_ k: String) -> PnvRow {
+        PnvRow(media_key: k, account: nil, account_key: nil, shortcode: nil, kind: "image", resource_type: nil, media_host: nil,
+               resource_endpoint: nil, width: nil, height: nil, taken_at: nil, corpus: nil, da_id: nil)
+    }
+    let rows = ["a", "b", "c"].map(row)
+    for _ in 0..<500 {
+        let lap = PnvReel.nextLap(rows, after: "a")
+        try expect(lap.first?.id != "a", "a lap never opens on the object just shown")
+        try expectEqual(Set(lap.map(\.id)), ["a", "b", "c"], "a lap holds every object once")
+    }
+    // One object: nothing else to show, so it repeats (negative case of the swap).
+    try expectEqual(PnvReel.nextLap([row("a")], after: "a").map(\.id), ["a"])
 }
 
 func pnvShuffleWalkWrapsOnce() throws {

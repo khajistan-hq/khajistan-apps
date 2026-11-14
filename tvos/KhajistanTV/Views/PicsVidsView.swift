@@ -111,12 +111,18 @@ struct PicsVidsView: View {
             // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
             // and Shuffle are changed inside it.
             Button {
-                reelTask?.cancel()
+                // A second press while the first page loads waits on the same load.
+                guard reelTask == nil else { return }
                 reelNote = "Loading\u{2026}"
                 reelTask = Task {
+                    defer { reelTask = nil }
                     let all = PicsVidsStore.allRegions
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
                     if store.feed(all).items.isEmpty { await store.retry(region: all) }
+                    // Another caller's load (a shelf, a kind tab) may be the one in flight.
+                    while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {
+                        try? await Task.sleep(for: .milliseconds(150))
+                    }
                     guard !Task.isCancelled else { return }
                     if let first = store.feed(all).items.first {
                         reelNote = nil

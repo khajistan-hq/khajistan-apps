@@ -279,6 +279,8 @@ struct PnvViewerView: View {
     /// Save, as the website's heart: on the account, with no title or picture kept, so an object
     /// taken off the shelf leaves nothing of itself in a library.
     private func toggleSave() {
+        // Between deals `current` is not on screen; no route (remote, VoiceOver) acts on it.
+        guard !stranded else { return }
         guard model.saves.canSave else { saveNote = "Sign in under Account to save to your account."; return }
         guard PassportSaves.pnvRef(current.media_key) != nil else { saveNote = "This object cannot be saved yet."; return }
         let key = current.media_key
@@ -289,6 +291,7 @@ struct PnvViewerView: View {
     }
 
     private func openCollections() {
+        guard !stranded else { return }
         guard model.saves.canSave else { saveNote = "Sign in under Account to keep collections."; return }
         showCollections = true
     }

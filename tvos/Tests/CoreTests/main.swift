@@ -4645,6 +4645,27 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
 }
 
+func aPlayerIsRetunedOnlyForTheNetwork() throws {
+    func retunes(_ error: Error?, _ logged: [(domain: String, code: Int)] = [], stalled: Bool = false) -> Bool {
+        SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled)
+    }
+    for code in [URLError.Code.timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .secureConnectionFailed] {
+        try expect(retunes(URLError(code)), "\(code.rawValue) is the network")
+    }
+    let wrapped = NSError(domain: "AVFoundationErrorDomain", code: -11800,
+                          userInfo: [NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)])
+    try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
+    try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
+    try expect(!retunes(URLError(.userAuthenticationRequired)))
+    try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
+    try expect(!retunes(nil), "an item failure with no cause")
+    try expect(retunes(nil, stalled: true), "a carrier that stopped sending")
+    try expect(retunes(nil, [(NSURLErrorDomain, NSURLErrorTimedOut)], stalled: true))
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", 404)], stalled: true), "a stall after a 404 is not the network")
+    try expect(!retunes(URLError(.networkConnectionLost), [("CoreMediaErrorDomain", 403)]), "a gate refused once stays shut")
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", -12937)], stalled: true), "an authentication error stays shut")
+}
+
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubClockProtocol.self]
@@ -4738,6 +4759,7 @@ let tests: [(String, () throws -> Void)] = [
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
+    ("A player is retuned only for the network, never past a refusal", aPlayerIsRetunedOnlyForTheNetwork),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),

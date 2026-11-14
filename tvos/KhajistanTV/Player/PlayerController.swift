@@ -48,6 +48,18 @@ final class PlayerController {
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
+    /// What `attach` was last asked to play, and when: a network failure retunes it once.
+    @ObservationIgnored private var tuned: Tuned?
+    /// When the last retune was: a failure within `retuneSpacing` of it is shown, not retuned.
+    @ObservationIgnored private var retunedAt: ContinuousClock.Instant?
+    /// Two failures this close together are "in a row": a carrier that keeps dying is not
+    /// retuned for ever.
+    private static let retuneSpacing: Duration = .seconds(60)
+
+    private struct Tuned {
+        let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, listen: Bool, live: Bool
+        let at = ContinuousClock.now
+    }
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now
     #endif
@@ -68,6 +80,8 @@ final class PlayerController {
     /// LiveRadio, the only way its samples can be read; anything it cannot play comes back here
     /// and plays on AVPlayer, with no dancer.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
+        tuned = Tuned(url: url, seekTo: seekTo, title: title, subtitle: subtitle, isLive: isLive, listen: listen, live: live)
+        retunedAt = nil
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         generation += 1
@@ -111,12 +125,13 @@ final class PlayerController {
 
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] observed, _ in
             let status = observed.status
+            let error = observed.error
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
                 switch status {
                 case .failed:
-                    Self.log.error("item failed: \(observed.error?.localizedDescription ?? "no error", privacy: .public)")
-                    self.state = .failed(Self.unreachable)
+                    Self.log.error("item failed: \(error?.localizedDescription ?? "no error", privacy: .public)")
+                    self.fail(error: error)
                 case .readyToPlay: self.begin(at: start, generation: gen)
                 default: break
                 }
@@ -133,11 +148,11 @@ final class PlayerController {
         failObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
         ) { [weak self] notification in
-            let cause = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "no error"
+            let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
-                Self.log.error("stopped mid-play: \(cause, privacy: .public)")
-                self.state = .failed(Self.unreachable)
+                Self.log.error("stopped mid-play: \(error?.localizedDescription ?? "no error", privacy: .public)")
+                self.fail(error: error)
             }
         }
 
@@ -450,8 +465,45 @@ final class PlayerController {
             try? await Task.sleep(for: Self.stallLimit)
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
             Self.log.error("stalled for 20 s")
-            self.player.pause()
-            self.state = .failed(Self.unreachable)
+            self.fail(error: nil, stalled: true)
+        }
+    }
+
+    /// Every way an AVPlayer signal fails ends here. One the network caused
+    /// (SupabaseRoute.retunesPlayback) is retuned once with a fresh item, at the same live
+    /// position; a refusal, or a second failure within a minute of the retune, is shown.
+    private func fail(error: Error?, stalled: Bool = false) {
+        let logged = (player.currentItem?.errorLog()?.events ?? []).map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
+        // A signal the viewer paused is never brought back by a retune: it fails as it is.
+        guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
+            player.pause()
+            state = .failed(Self.unreachable)
+            return
+        }
+        Self.log.error("retuning once")
+        retune(tuned)
+    }
+
+    /// A live signal rejoins where its clock has got to (a live stream at the live edge, a
+    /// transmission at its start plus the time since); a recording carries on where it was.
+    private func retune(_ tuned: Tuned) {
+        let position = player.currentTime().seconds
+        let gen = generation
+        state = .tuning
+        timeoutTask?.cancel()
+        // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
+        // back has a moment. ponytail: fixed wait, not a network path monitor.
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: SupabaseRoute.droppedRetryDelay)
+            guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            let elapsed = (ContinuousClock.now - tuned.at) / .seconds(1)
+            let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite ? position : tuned.seekTo)
+            self.attach(url: tuned.url, seekTo: seekTo, title: tuned.title, subtitle: tuned.subtitle,
+                        isLive: tuned.isLive, listen: tuned.listen, live: tuned.live)
+            self.retunedAt = .now
+            // The clock keeps the first tuning's start, so a later retune lands live too.
+            self.tuned = tuned
         }
     }
 

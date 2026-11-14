@@ -34,6 +34,18 @@ final class PlayerController {
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
     /// A new signal starts silent and its sound comes up once it is actually playing.
     @ObservationIgnored private var fadeInPending = false
+    /// What `attach` was last asked to play, and when: a network failure retunes it once.
+    @ObservationIgnored private var tuned: Tuned?
+    /// When the last retune was: a failure within `retuneSpacing` of it is shown, not retuned.
+    @ObservationIgnored private var retunedAt: ContinuousClock.Instant?
+    /// Two failures this close together are "in a row": a carrier that keeps dying is not
+    /// retuned for ever.
+    private static let retuneSpacing: Duration = .seconds(60)
+
+    private struct Tuned {
+        let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, fadeIn: Bool
+        let at = ContinuousClock.now
+    }
 
     /// The controller that last started a signal: the one the lock screen's buttons reach.
     private static weak var active: PlayerController?
@@ -71,6 +83,8 @@ final class PlayerController {
     /// `fadeIn` false starts at full volume: the 0.9 s ramp is the Receiver's channel change, and
     /// on a six-second reel it is a third of the clip spoken too quietly.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, fadeIn: Bool = true) {
+        tuned = Tuned(url: url, seekTo: seekTo, title: title, subtitle: subtitle, isLive: isLive, fadeIn: fadeIn)
+        retunedAt = nil
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         generation += 1
@@ -88,11 +102,12 @@ final class PlayerController {
 
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] observed, _ in
             let status = observed.status
-            let message = observed.error?.localizedDescription ?? "This signal could not be played."
+            let error = observed.error
+            let message = error?.localizedDescription ?? "This signal could not be played."
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
                 switch status {
-                case .failed: self.state = .failed(message)
+                case .failed: self.fail(message, error: error)
                 case .readyToPlay: self.begin(at: start, generation: gen)
                 default: break
                 }
@@ -113,7 +128,7 @@ final class PlayerController {
             let message = cause?.localizedDescription ?? "The signal stopped."
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
-                self.state = .failed(message)
+                self.fail(message, error: cause)
             }
         }
 
@@ -281,8 +296,44 @@ final class PlayerController {
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: Self.stallLimit)
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
-            self.player.pause()
-            self.state = .failed("The signal stopped.")
+            self.fail("The signal stopped.", error: nil, stalled: true)
+        }
+    }
+
+    /// Every way a signal fails ends here. One the network caused (SupabaseRoute.retunesPlayback)
+    /// is retuned once with a fresh item, at the same live position; a refusal, or a second
+    /// failure within a minute of the retune, is shown.
+    private func fail(_ message: String, error: Error?, stalled: Bool = false) {
+        let logged = (player.currentItem?.errorLog()?.events ?? []).map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
+        // A signal the viewer paused is never brought back by a retune: it fails as it is.
+        guard !recent, wantsPlayback, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
+            player.pause()
+            state = .failed(message)
+            return
+        }
+        retune(tuned)
+    }
+
+    /// A live signal rejoins where its clock has got to (a live stream at the live edge, a
+    /// transmission at its start plus the time since); a recording carries on where it was.
+    private func retune(_ tuned: Tuned) {
+        let position = player.currentTime().seconds
+        let gen = generation
+        state = .tuning
+        timeoutTask?.cancel()
+        // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
+        // back has a moment. ponytail: fixed wait, not a network path monitor.
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: SupabaseRoute.droppedRetryDelay)
+            guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            let elapsed = (ContinuousClock.now - tuned.at) / .seconds(1)
+            let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite ? position : tuned.seekTo)
+            self.attach(url: tuned.url, seekTo: seekTo, title: tuned.title, subtitle: tuned.subtitle,
+                        isLive: tuned.isLive, fadeIn: tuned.fadeIn)
+            self.retunedAt = .now
+            // The clock keeps the first tuning's start, so a later retune lands live too.
+            self.tuned = tuned
         }
     }
 

@@ -297,9 +297,16 @@ final class KhajistanUITests: XCTestCase {
         waitFor(state, 10, "the receiver is on the page")
         XCTAssertFalse(app.buttons["closePlayer"].exists, "a channel does not open full screen by itself")
         XCTAssertTrue(app.buttons["tab-receiver"].isHittable, "the tab bar stays on screen")
+        // The channels are live third-party streams, and one can be down from the CI runner (CI on
+        // PR 59: swept-pk-24-news-hd never played). This test is about docking and full screen, not
+        // one broadcaster, so a channel that does not play in 45 s gives way to the next, three at most.
         let playing = NSPredicate(format: "label == 'Playing'")
-        expectation(for: playing, evaluatedWith: state)
-        waitForExpectations(timeout: 60)
+        for attempt in 0..<3 {
+            let tuned = XCTNSPredicateExpectation(predicate: playing, object: state)
+            if XCTWaiter.wait(for: [tuned], timeout: 45) == .completed { break }
+            if attempt < 2 { app.buttons["nextChannel"].tap() }
+        }
+        XCTAssertEqual(state.label, "Playing", "one of the first three channels plays docked")
         shot("player-playing", app)
         let before = state.value as? String ?? ""
         XCTAssertFalse(before.isEmpty, "the screen names the channel it carries")

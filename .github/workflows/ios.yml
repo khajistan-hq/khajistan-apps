@@ -75,6 +75,10 @@ jobs:
             sleep 15
           done
           echo 'simulator did not boot in two attempts' >&2; exit 1
+      - name: Pics/Vids store against stubbed answers
+        # Retries on a busy server, and the shuffle walk reaching every object once from any
+        # start, with no live data (ios/Tests/PnvRetry). About fifteen seconds.
+        run: sh ios/Tests/PnvRetry/run.sh '${{ steps.simulator.outputs.udid }}' "$PWD"
       - name: Build and test iOS app
         run: |
           set -euo pipefail

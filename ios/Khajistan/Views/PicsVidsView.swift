@@ -35,7 +35,7 @@ struct PicsVidsView: View {
         .task { await store.start() }
         // The store pages each feed only when asked; ask for the first page whenever the region,
         // the kind or the store's readiness changes and that feed has none yet.
-        .task(id: "\(model.pnvRegion)|\(store.kind?.rawValue ?? "all")|\(store.phase == .ready)") {
+        .task(id: "\(model.pnvRegion)|\(store.kind?.rawValue ?? "all")|\(store.shuffled)|\(store.phase == .ready)") {
             if store.phase == .ready, feed.isUntouched { await store.loadMore(region: model.pnvRegion) }
         }
         .fullScreenCover(item: $viewing) { row in
@@ -86,10 +86,23 @@ struct PicsVidsView: View {
             // The count, and the screen's own actions at the end of its line: the app draws its own
             // Back row with the system bar hidden, and beside the title they pushed its line to two.
             HStack(spacing: 4) {
-                Text(feed.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
+                // A shuffled walk counts nothing; it says it is shuffled instead.
+                Text(store.shuffled ? "Shuffled" : feed.total.map { "\($0.formatted()) \($0 == 1 ? "object" : "objects")" } ?? " ")
                     .kjSmall(faint: true)
                     .accessibilityIdentifier("pnvCount")
                 Spacer(minLength: 8)
+                // The site's Shuffle: the same objects, dealt again. Lit while on; a press deals anew,
+                // a long press goes back to the stream's own order.
+                Button { store.setShuffled(true) } label: {
+                    Image(systemName: "shuffle").font(.system(.title3, weight: .semibold)).frame(width: 44, height: 44)
+                        .foregroundStyle(store.shuffled ? palette.onBand : palette.ink)
+                        .background { if store.shuffled { Circle().fill(palette.band).padding(4) } }
+                        .animation(.kj, value: store.shuffled)
+                }
+                .buttonStyle(.plain)
+                .contextMenu { if store.shuffled { Button("Stream order", systemImage: "list.bullet") { store.setShuffled(false) } } }
+                .accessibilityLabel(store.shuffled ? "Shuffle again" : "Shuffle")
+                .accessibilityIdentifier("pnvShuffle")
                 if let first = feed.items.first {
                     // The stream as reels from its top, without choosing a tile first.
                     Button { viewing = first } label: {

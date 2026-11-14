@@ -4677,6 +4677,7 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 
 
 let tests: [(String, () throws -> Void)] = [
+    ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
     ("serverClockFloorKeepsAnAccurateDevice", serverClockFloorKeepsAnAccurateDevice),
     ("serverClockReadsTheHTTPDateHeader", serverClockReadsTheHTTPDateHeader),
@@ -5128,6 +5129,28 @@ func pnvImageKeyCarriesSize() throws {
     try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(url, maxPixel: 2400))
     try expectEqual(PnvMedia.imageKey(url, maxPixel: 400), PnvMedia.imageKey(URL(string: "https://example.org/a.jpg")!, maxPixel: 400))
     try expect(PnvMedia.imageKey(url, maxPixel: 400) != PnvMedia.imageKey(URL(string: "https://example.org/b.jpg")!, maxPixel: 400))
+}
+
+func pnvShuffleWalkWrapsOnce() throws {
+    let full = PnvAPI.shufflePageSize
+    // A full page reads on from its last key.
+    var s = PnvAPI.nextShuffleStep(start: 500, after: 499, end: nil, wrapped: false, lastKey: 900, rowCount: full)
+    try expect(s.after == 900 && !s.wrapped && !s.done && s.end == nil)
+    // The top reached: come round from 1, stopping where the walk began.
+    s = PnvAPI.nextShuffleStep(start: 500, after: 900, end: nil, wrapped: false, lastKey: 950, rowCount: 3)
+    try expect(s.after == 0 && s.end == 500 && s.wrapped && !s.done)
+    // Back where it began: every row has been reached once.
+    s = PnvAPI.nextShuffleStep(start: 500, after: 300, end: 500, wrapped: true, lastKey: 499, rowCount: 7)
+    try expect(s.done)
+    // A walk that started at 1 never wraps (negative case).
+    s = PnvAPI.nextShuffleStep(start: 1, after: 0, end: nil, wrapped: false, lastKey: 40, rowCount: 10)
+    try expect(s.done && !s.wrapped)
+    try expectEqual(PnvRegions.label("horn"), "Horn of Africa")
+    try expectEqual(PnvRegions.label("caucasus"), "Caucasus")
+    // The request walks the key, never widens the account filter.
+    let url = PnvAPI.shufflePageRequest(keys: ["a"], kind: .video, after: 10, end: 99).url!.absoluteString
+    try expect(url.contains("shuffle_key=gt.10") && url.contains("shuffle_key=lt.99") && url.contains("account_key=in.(a)")
+                && url.contains("kind=eq.video") && url.contains("order=shuffle_key.asc"))
 }
 
 var passed = 0, failed = 0, skipped = 0

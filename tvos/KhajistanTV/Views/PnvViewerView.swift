@@ -3,9 +3,11 @@ import SwiftUI
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
 /// sign-in sheet takes in place. Left and right move through the shelf the viewer came from
-/// (loading its next page at its end); play/pause pauses a video; menu goes back. Down lights Save,
+/// (loading its next page at its end, and coming round to its first once it has given everything,
+/// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
-/// one lit, Up or Menu lets go. Lit by the remote, never focused, as the Receiver's strip is.
+/// one lit, Up or Menu lets go. On a stream, Right goes on to Shuffle (deals the stream again
+/// from a random place, the site's Shuffle) and Region (steps All regions, then west to east). Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -24,7 +26,10 @@ struct PnvViewerView: View {
     @State private var saveNote: String?
     @State private var showCollections = false
 
-    private enum Control { case save, collection }
+    /// The strip's chips, left to right. Shuffle and Region are a stream's only, not a saved list's.
+    private enum Control: CaseIterable { case save, collection, shuffle, region }
+
+    private var controls: [Control] { list == nil ? Control.allCases : [.save, .collection] }
 
     private enum Phase: Equatable {
         case loading, ready, needsSignIn
@@ -33,18 +38,19 @@ struct PnvViewerView: View {
 
     /// The shelf the object was chosen from: left and right step through its region's stream, or
     /// through the saved list it was opened from.
-    private let region: String
+    /// The region the stream is read from: "" is every region. Changed in place from the strip.
+    @State private var region: String
     private let list: [PnvRow]?
 
     init(row: PnvRow, region: String) {
         _current = State(initialValue: row)
-        self.region = region
+        _region = State(initialValue: region)
         self.list = nil
     }
 
     init(row: PnvRow, list: [PnvRow]) {
         _current = State(initialValue: row)
-        self.region = ""
+        _region = State(initialValue: "")
         self.list = list
     }
 
@@ -76,6 +82,8 @@ struct PnvViewerView: View {
                 switch armed {
                 case .save: wake(); toggleSave()
                 case .collection: wake(); openCollections()
+                case .shuffle: wake(); restart { store.setShuffled(!store.shuffled) }
+                case .region: wake(); nextRegion()
                 case nil: if phase == .needsSignIn { showSignIn = true } else { wake() }
                 }
             } label: {
@@ -83,15 +91,17 @@ struct PnvViewerView: View {
             }
             .buttonStyle(SurfaceButtonStyle())
             .accessibilityIdentifier("pnvViewerSurface")
+            // The object on show, for UI tests that walk the stream.
+            .accessibilityValue(current.media_key)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
-            if let lit = armed {
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
-                case .right where lit == .save: armed = .collection
-                case .left where lit == .collection: armed = .save
+                case .right where index + 1 < controls.count: armed = controls[index + 1]
+                case .left where index > 0: armed = controls[index - 1]
                 case .up: armed = nil
                 default: break
                 }
@@ -193,6 +203,21 @@ struct PnvViewerView: View {
                 .accessibilityAddTraits(armed == .collection ? .isSelected : [])
                 .accessibilityIdentifier("pnvCollection")
                 .accessibilityAction { openCollections() }
+            if list == nil {
+                StripChipStyle.face(Text("Shuffle"), isOn: store.shuffled, selected: armed == .shuffle)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(armed == .shuffle ? .isSelected : [])
+                    .accessibilityValue(store.shuffled ? "On" : "Off")
+                    .accessibilityIdentifier("pnvReelShuffle")
+                    .accessibilityAction { restart { store.setShuffled(!store.shuffled) } }
+                StripChipStyle.face(Text(regionName), isOn: false, selected: armed == .region)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(armed == .region ? .isSelected : [])
+                    .accessibilityLabel("Region")
+                    .accessibilityValue(regionName)
+                    .accessibilityIdentifier("pnvReelRegion")
+                    .accessibilityAction { nextRegion() }
+            }
             if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("pnvSaveNote") }
         }
         // The strip's chips are drawn for a band; here they stand on one.
@@ -200,6 +225,31 @@ struct PnvViewerView: View {
         .padding(.horizontal, 8)
         .background(Palette(model.skin).band)
         .padding(.top, 8)
+    }
+
+    private var regionName: String { region.isEmpty ? "All regions" : PnvRegions.label(region) }
+
+    /// Select on the Region chip steps to the next region, west to east, then All regions again.
+    private func nextRegion() {
+        let order = [PicsVidsStore.allRegions] + store.regions
+        let next = order[((order.firstIndex(of: region) ?? 0) + 1) % order.count]
+        restart { region = next }
+    }
+
+    /// A new region or a new deal: the stream starts over and opens on its first object.
+    private func restart(_ change: () -> Void) {
+        stepTask?.cancel()
+        change()
+        saveNote = nil
+        let shelf = region
+        stepTask = Task {
+            if store.feed(shelf).items.isEmpty { await store.loadMore(region: shelf) }
+            guard !Task.isCancelled, let first = store.feed(shelf).items.first else {
+                if !Task.isCancelled { saveNote = store.feed(shelf).error ?? "Nothing filed under this yet." }
+                return
+            }
+            show(first)
+        }
     }
 
     /// Save, as the website's heart: on the account, with no title or picture kept, so an object
@@ -318,7 +368,14 @@ struct PnvViewerView: View {
             index += delta
             if index >= store.feed(region).items.count { await store.loadMore(region: region) }
             let items = store.feed(region).items
-            guard !Task.isCancelled, items.indices.contains(index) else { return }
+            guard !Task.isCancelled, !items.isEmpty else { return }
+            // The stream never ends: past its last object it comes round to its first, once the
+            // feed has given everything; Left from the first stays put.
+            if index >= items.count {
+                guard store.feed(region).isDone else { return }
+                index = 0
+            }
+            guard items.indices.contains(index) else { return }
             show(items[index])
         }
     }

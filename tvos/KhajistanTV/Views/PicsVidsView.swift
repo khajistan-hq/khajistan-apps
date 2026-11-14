@@ -103,6 +103,20 @@ struct PicsVidsView: View {
             ForEach(PnvKind.allCases, id: \.self) { kind in
                 kindTab(kind.label, kind: kind)
             }
+            // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
+            // and Shuffle are changed inside it.
+            Button {
+                Task {
+                    let all = PicsVidsStore.allRegions
+                    if store.feed(all).items.isEmpty { await store.loadMore(region: all) }
+                    if let first = store.feed(all).items.first { viewing = Viewing(row: first, region: all) }
+                }
+            } label: {
+                Label("Reel", systemImage: "play.rectangle.on.rectangle").kjKicker()
+            }
+            .buttonStyle(HouseTabStyle(isCurrent: false))
+            .padding(.leading, 28)
+            .accessibilityIdentifier("pnvReel")
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)
@@ -247,7 +261,7 @@ private struct PnvRegionShelf: View {
             .accessibilityIdentifier("pnv-shelf-\(region)")
             .accessibilityValue(String(feed.items.count))
             // The first page, again whenever the filter starts the shelves over.
-            .task(id: store.kind) { await store.loadMore(region: region) }
+            .task(id: "\(store.kind?.rawValue ?? "")|\(store.shuffled)") { await store.loadMore(region: region) }
         }
     }
 

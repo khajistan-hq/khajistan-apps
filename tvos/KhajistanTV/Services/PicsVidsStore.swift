@@ -26,6 +26,11 @@ struct PnvFeed: Equatable {
     var error: String?
     var offset = 0
     var seen = Set<String>()
+    /// A shuffled walk's place on the room's permutation (PnvAPI.shufflePageRequest).
+    var start = 0
+    var after = 0
+    var end: Int?
+    var wrapped = false
 
     /// True before the first page has been asked for.
     var isUntouched: Bool { offset == 0 && !isLoading && !isDone && error == nil }
@@ -51,11 +56,15 @@ final class PicsVidsStore {
     /// Each region's shelf, by region token. A shelf with no entry has not been asked for.
     private(set) var feeds: [String: PnvFeed] = [:]
     private(set) var kind: PnvKind?
+    /// The site's Shuffle: every shelf re-dealt along the room's permutation from a random place.
+    private(set) var shuffled = false
     private(set) var noticeVisible = false
 
     @ObservationIgnored private var roster: [PnvAccount] = []
     @ObservationIgnored private var accountsByKey: [String: PnvAccount] = [:]
     @ObservationIgnored private var generation = 0
+    /// The top of the room's permutation, asked for once, the first time Shuffle is pressed.
+    @ObservationIgnored private var roomSize: Int?
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
@@ -129,6 +138,17 @@ final class PicsVidsStore {
         feeds = [:]
     }
 
+    /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
+    /// Either way every shelf starts over, as a new kind does.
+    func setShuffled(_ on: Bool) {
+        guard on || shuffled else { return }
+        shuffled = on
+        generation += 1
+        feeds = [:]
+    }
+
+    private struct ShuffleKeyRow: Decodable { let shuffle_key: Int }
+
     func feed(_ region: String) -> PnvFeed {
         feeds[region] ?? PnvFeed()
     }
@@ -164,7 +184,20 @@ final class PicsVidsStore {
         }
         feed.isLoading = true
         feeds[region] = feed
-        let request = PnvAPI.pageRequest(keys: keys, kind: kind, offset: feed.offset, wantCount: feed.total == nil)
+        if shuffled && feed.start == 0 {
+            if roomSize == nil {
+                roomSize = (try? await fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
+            }
+            guard gen == generation else { return }
+            // No size (the probe failed): the walk starts at the top and still reaches every row.
+            feed.start = Int.random(in: 1...max(roomSize ?? 1, 1))
+            feed.after = feed.start - 1
+            feeds[region]?.start = feed.start
+            feeds[region]?.after = feed.after
+        }
+        let request = shuffled
+            ? PnvAPI.shufflePageRequest(keys: keys, kind: kind, after: feed.after, end: feed.end)
+            : PnvAPI.pageRequest(keys: keys, kind: kind, offset: feed.offset, wantCount: feed.total == nil)
         do {
             let (data, http) = try await page(request, generation: gen)
             guard gen == generation else { return }
@@ -176,9 +209,17 @@ final class PicsVidsStore {
             if let counted = PnvAPI.total(fromContentRange: http?.value(forHTTPHeaderField: "Content-Range")) { next.total = counted }
             for row in rows where next.seen.insert(row.media_key).inserted { next.items.append(row) }
             next.offset += rows.count
-            if rows.count < PnvAPI.pageSize { next.isDone = true }
+            if shuffled {
+                let step = PnvAPI.nextShuffleStep(start: next.start, after: next.after, end: next.end, wrapped: next.wrapped,
+                                                  lastKey: rows.last?.shuffle_key, rowCount: rows.count)
+                (next.after, next.end, next.wrapped, next.isDone) = step
+            } else if rows.count < PnvAPI.pageSize {
+                next.isDone = true
+            }
             next.isLoading = false
             feeds[region] = next
+            // A walk that just came round from 1 has nothing on screen to ask for it: read on now.
+            if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMore(region: region) }
         } catch {
             guard gen == generation, !Task.isCancelled else {
                 // A cancelled request leaves the shelf free to ask again.

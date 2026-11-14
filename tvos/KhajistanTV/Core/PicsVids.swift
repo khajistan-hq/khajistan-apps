@@ -27,6 +27,8 @@ struct PnvRow: Decodable, Identifiable, Hashable, Sendable {
     let taken_at: String?
     let corpus: String?
     let da_id: Int?
+    /// Only a shuffled page asks for it: the row's place on the room's permutation.
+    var shuffle_key: Int? = nil
 
     var id: String { media_key }
     var isVideo: Bool { kind == "video" }
@@ -177,6 +179,9 @@ enum PnvRegions {
         case "indus": return "Indus"
         case "egypt": return "Maghreb"
         case "anatolia": return "Anatolia"
+        // metadata.md §1 (owner, 2026-10-22): the storage tokens of two regions the atlas added.
+        case "caucasus", "qafqaz": return "Caucasus"
+        case "horn": return "Horn of Africa"
         default: return token
         }
     }
@@ -261,6 +266,35 @@ enum PnvAPI {
         var request = rest("pnv_media?" + parts.joined(separator: "&"))
         if wantCount { request.setValue("count=exact", forHTTPHeaderField: "Prefer") }
         return request
+    }
+
+    /// The site's Shuffle (kj-browse-archive.js query()): a keyset walk along the view's stored
+    /// shuffle_key, a 1..N permutation of the room, over the SAME filters, so it re-deals what is
+    /// shown and never widens it. It starts after `after`, stops before `end` once it has wrapped.
+    static let shufflePageSize = 120
+
+    static func shufflePageRequest(keys: [String], kind: PnvKind?, after: Int, end: Int?) -> URLRequest {
+        var parts = ["select=" + columns + ",shuffle_key", "account_key=in.(" + keys.map(listMember).joined(separator: ",") + ")"]
+        if let kind { parts.append("kind=eq.\(kind.rawValue)") }
+        parts.append("shuffle_key=gt.\(after)")
+        if let end { parts.append("shuffle_key=lt.\(end)") }
+        parts += ["order=shuffle_key.asc", "limit=\(shufflePageSize)"]
+        return rest("pnv_media?" + parts.joined(separator: "&"))
+    }
+
+    /// The top of the permutation: the room's size, which a walk's random start falls inside.
+    static func roomSizeRequest() -> URLRequest {
+        rest("pnv_media?select=shuffle_key&order=shuffle_key.desc&limit=1")
+    }
+
+    /// Where a shuffled walk goes next, given the page it just read (the page's loadMore()).
+    /// Top of the permutation reached: come round from 1 and stop where the walk began.
+    static func nextShuffleStep(start: Int, after: Int, end: Int?, wrapped: Bool, lastKey: Int?, rowCount: Int)
+        -> (after: Int, end: Int?, wrapped: Bool, done: Bool) {
+        let moved = lastKey ?? after
+        guard rowCount < shufflePageSize else { return (moved, end, wrapped, false) }
+        if !wrapped && start > 1 { return (0, start, true, false) }
+        return (moved, end, wrapped, true)
     }
 
     /// How long to wait before asking for a failed page again, or nil to give up. A busy database

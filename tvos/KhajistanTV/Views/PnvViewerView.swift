@@ -252,8 +252,14 @@ struct PnvViewerView: View {
         restartTask = Task {
             defer { if !Task.isCancelled { restartTask = nil } }
             if store.feed(shelf).items.isEmpty { await store.retry(region: shelf) }
-            guard !Task.isCancelled, let first = store.feed(shelf).items.first else {
-                if !Task.isCancelled { saveNote = store.feed(shelf).error ?? "Nothing filed under this yet." }
+            // The shelves behind the viewer may have asked for the same page first: retry then
+            // returns at once, and the answer is theirs to wait for.
+            while store.feed(shelf).items.isEmpty, store.feed(shelf).isLoading, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            guard !Task.isCancelled else { return }
+            guard let first = store.feed(shelf).items.first else {
+                phase = .failed(store.feed(shelf).error ?? "Nothing filed under this yet.")
                 return
             }
             show(first)

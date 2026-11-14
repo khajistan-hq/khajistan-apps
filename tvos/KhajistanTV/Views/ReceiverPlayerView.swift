@@ -523,6 +523,7 @@ struct ReceiverPlayerView: View {
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
         wake()
+        if isFailed { moveOnFromDeadSignal() }
     }
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
@@ -809,25 +810,27 @@ struct ReceiverPlayerView: View {
     /// account refusal is never moved past. Any press, the guide or Pause cancels the move.
     private func moveOnFromDeadSignal() {
         stopMovingOn()
-        guard isFailed, destination == nil, !leaving, !failedAtGate else { return }
+        // An open guide is the viewer choosing: closing it without a pick starts the move.
+        guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate else { return }
         deadHere.insert(current.id)
         let dead = current
-        let target: Channel?
-        if surfChoice != nil {
-            target = nil   // Surf's own walk picks, without repeats, when the pause ends.
+        let found: Channel?
+        if let surfChoice {
+            // Surf's walk starts a new cycle once the atlas is spent; a channel that already
+            // failed here ends the move instead of going round again.
+            found = model.surfHistory.next(for: surfChoice).flatMap { deadHere.contains($0.id) ? nil : $0 }
         } else {
-            guard let next = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere) else {
-                announce(list.count > 1 ? "No other channel in this list is reaching us right now." : nil)
-                return
-            }
-            target = next
+            found = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere)
         }
-        announce("\(dead.name) is off the air. Moving to \(target?.name ?? "another channel")\u{2026}")
+        guard let target = found else {
+            announce(surfChoice == nil && list.count < 2 ? nil : "No other channel here is reaching us right now.")
+            return
+        }
+        announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
         moveOnTask = Task {
             try? await Task.sleep(for: Self.deadSignalPause)
-            guard !Task.isCancelled, !leaving, current.id == dead.id, isFailed, destination == nil else { return }
+            guard !Task.isCancelled, !leaving, current.id == dead.id, isFailed, destination == nil, guideRow == nil else { return }
             moveOnNote = nil
-            guard let target else { return step(by: 1) }
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }

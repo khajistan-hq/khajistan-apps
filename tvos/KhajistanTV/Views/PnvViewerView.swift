@@ -3,9 +3,11 @@ import SwiftUI
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
 /// sign-in sheet takes in place. Left and right move through the shelf the viewer came from
-/// (loading its next page at its end); play/pause pauses a video; menu goes back. Down lights Save,
+/// (loading its next page at its end, and coming round to its first once it has given everything,
+/// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
-/// one lit, Up or Menu lets go. Lit by the remote, never focused, as the Receiver's strip is.
+/// one lit, Up or Menu lets go. On a stream, Right goes on to Shuffle (deals the stream again
+/// from a random place, the site's Shuffle) and Region (steps All regions, then west to east). Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -20,11 +22,19 @@ struct PnvViewerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
+    @State private var restartTask: Task<Void, Never>?
+    /// True from a restart until the new deal's first object is shown: the object in `current`
+    /// belongs to the old deal, so nothing of it is drawn.
+    @State private var stranded = false
     @State private var armed: Control?
     @State private var saveNote: String?
     @State private var showCollections = false
 
-    private enum Control { case save, collection }
+    /// The strip's chips, left to right. Shuffle and Region are a stream's only, not a saved list's.
+    private enum Control: CaseIterable { case save, collection, shuffle, region }
+
+    private var controls: [Control] { list == nil ? Control.allCases : [.save, .collection] }
 
     private enum Phase: Equatable {
         case loading, ready, needsSignIn
@@ -33,18 +43,19 @@ struct PnvViewerView: View {
 
     /// The shelf the object was chosen from: left and right step through its region's stream, or
     /// through the saved list it was opened from.
-    private let region: String
+    /// The region the stream is read from: "" is every region. Changed in place from the strip.
+    @State private var region: String
     private let list: [PnvRow]?
 
     init(row: PnvRow, region: String) {
         _current = State(initialValue: row)
-        self.region = region
+        _region = State(initialValue: region)
         self.list = nil
     }
 
     init(row: PnvRow, list: [PnvRow]) {
         _current = State(initialValue: row)
-        self.region = ""
+        _region = State(initialValue: "")
         self.list = list
     }
 
@@ -54,10 +65,11 @@ struct PnvViewerView: View {
         let palette = Palette(model.skin)
         ZStack {
             // Moving pictures letterbox on black (owner, 2026-10-05); a still keeps the ground.
-            (current.isVideo ? Color.black : palette.ground).ignoresSafeArea()
+            (current.isVideo && !stranded ? Color.black : palette.ground).ignoresSafeArea()
             // The poster stands in until the video is playing, then gives way to it: the two
             // frames need not have the same edges.
-            if let picture, !(current.isVideo && controller.state == .playing) {
+            // Nothing of the old deal is drawn between deals, whatever a late fetch writes.
+            if !stranded, let picture, !(current.isVideo && controller.state == .playing) {
                 Image(uiImage: picture)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -74,8 +86,11 @@ struct PnvViewerView: View {
             // The focus target: it draws nothing and holds focus so the remote's presses land.
             Button {
                 switch armed {
-                case .save: wake(); toggleSave()
-                case .collection: wake(); openCollections()
+                // Between deals the object in `current` is not on screen: nothing acts on it.
+                case .save: wake(); if !stranded { toggleSave() }
+                case .collection: wake(); if !stranded { openCollections() }
+                case .shuffle: wake(); restart { store.setShuffled(!store.shuffled) }
+                case .region: wake(); nextRegion()
                 case nil: if phase == .needsSignIn { showSignIn = true } else { wake() }
                 }
             } label: {
@@ -83,15 +98,17 @@ struct PnvViewerView: View {
             }
             .buttonStyle(SurfaceButtonStyle())
             .accessibilityIdentifier("pnvViewerSurface")
+            // The object on show, for UI tests that walk the stream.
+            .accessibilityValue(stranded ? "" : current.media_key)
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
-            if let lit = armed {
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
-                case .right where lit == .save: armed = .collection
-                case .left where lit == .collection: armed = .save
+                case .right where index + 1 < controls.count: armed = controls[index + 1]
+                case .left where index > 0: armed = controls[index - 1]
                 case .up: armed = nil
                 default: break
                 }
@@ -143,8 +160,8 @@ struct PnvViewerView: View {
 
     private func overlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            StatusBand(leading: ["Khajistan Pics/Vids", "@" + store.accountHandle(for: current)],
-                       trailing: [current.isVideo ? "Video" : "Picture"])
+            StatusBand(leading: ["Khajistan Pics/Vids", stranded ? regionName : "@" + store.accountHandle(for: current)],
+                       trailing: stranded ? [] : [current.isVideo ? "Video" : "Picture"])
             Spacer(minLength: 0)
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
@@ -158,9 +175,11 @@ struct PnvViewerView: View {
             if let state = stateText {
                 Kicker(state).accessibilityIdentifier("pnvViewerState")
             }
-            Text(PnvAPI.metaLine(for: current, regionToken: store.regionToken(for: current), date: Self.dateText))
-                .kjBody()
-            if let caption {
+            if !stranded {
+                Text(PnvAPI.metaLine(for: current, regionToken: store.regionToken(for: current), date: Self.dateText))
+                    .kjBody()
+            }
+            if !stranded, let caption {
                 Text(caption)
                     .kjSmall(faint: true)
                     .lineLimit(3)
@@ -179,7 +198,8 @@ struct PnvViewerView: View {
     /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
     /// place while nothing is lit, as the Receiver's strip cues its controls.
     private var saveControls: some View {
-        let saved = model.saves.isSaved(pnvKey: current.media_key)
+        // Between deals there is no object on screen to have saved.
+        let saved = !stranded && model.saves.isSaved(pnvKey: current.media_key)
         return HStack(spacing: 14) {
             StripChipStyle.face(Text((armed == nil ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
                 .accessibilityAddTraits(.isButton)
@@ -193,6 +213,21 @@ struct PnvViewerView: View {
                 .accessibilityAddTraits(armed == .collection ? .isSelected : [])
                 .accessibilityIdentifier("pnvCollection")
                 .accessibilityAction { openCollections() }
+            if list == nil {
+                StripChipStyle.face(Text("Shuffle"), isOn: store.shuffled, selected: armed == .shuffle)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(armed == .shuffle ? .isSelected : [])
+                    .accessibilityValue(store.shuffled ? "On" : "Off")
+                    .accessibilityIdentifier("pnvReelShuffle")
+                    .accessibilityAction { restart { store.setShuffled(!store.shuffled) } }
+                StripChipStyle.face(Text(regionName), isOn: false, selected: armed == .region)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAddTraits(armed == .region ? .isSelected : [])
+                    .accessibilityLabel("Region")
+                    .accessibilityValue(regionName)
+                    .accessibilityIdentifier("pnvReelRegion")
+                    .accessibilityAction { nextRegion() }
+            }
             if let saveNote { Text(saveNote).kjSmall(faint: true).accessibilityIdentifier("pnvSaveNote") }
         }
         // The strip's chips are drawn for a band; here they stand on one.
@@ -202,9 +237,51 @@ struct PnvViewerView: View {
         .padding(.top, 8)
     }
 
+    private var regionName: String { region.isEmpty ? "All regions" : PnvRegions.label(region) }
+
+    /// Select on the Region chip steps to the next region, west to east, then All regions again.
+    private func nextRegion() {
+        let order = [PicsVidsStore.allRegions] + store.regions
+        let next = order[((order.firstIndex(of: region) ?? 0) + 1) % order.count]
+        restart { region = next }
+    }
+
+    /// A new region or a new deal: the stream starts over and opens on its first object.
+    private func restart(_ change: () -> Void) {
+        stepTask?.cancel()
+        restartTask?.cancel()
+        // The object on screen stops now, not when the new deal arrives.
+        loadTask?.cancel()
+        controller.stop()
+        picture = nil
+        caption = nil
+        stranded = true
+        phase = .loading
+        change()
+        saveNote = nil
+        let shelf = region
+        restartTask = Task {
+            defer { if !Task.isCancelled { restartTask = nil } }
+            if store.feed(shelf).items.isEmpty { await store.retry(region: shelf) }
+            // The shelves behind the viewer may have asked for the same page first: retry then
+            // returns at once, and the answer is theirs to wait for.
+            while store.feed(shelf).items.isEmpty, store.feed(shelf).isLoading, !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            guard !Task.isCancelled else { return }
+            guard let first = store.feed(shelf).items.first else {
+                phase = .failed(store.feed(shelf).error ?? "Nothing filed under this yet.")
+                return
+            }
+            show(first)
+        }
+    }
+
     /// Save, as the website's heart: on the account, with no title or picture kept, so an object
     /// taken off the shelf leaves nothing of itself in a library.
     private func toggleSave() {
+        // Between deals `current` is not on screen; no route (remote, VoiceOver) acts on it.
+        guard !stranded else { return }
         guard model.saves.canSave else { saveNote = "Sign in under Account to save to your account."; return }
         guard PassportSaves.pnvRef(current.media_key) != nil else { saveNote = "This object cannot be saved yet."; return }
         let key = current.media_key
@@ -215,6 +292,7 @@ struct PnvViewerView: View {
     }
 
     private func openCollections() {
+        guard !stranded else { return }
         guard model.saves.canSave else { saveNote = "Sign in under Account to keep collections."; return }
         showCollections = true
     }
@@ -248,6 +326,7 @@ struct PnvViewerView: View {
         loadTask?.cancel()
         controller.stop()
         current = row
+        stranded = false
         picture = nil
         caption = nil
         phase = .loading
@@ -305,6 +384,10 @@ struct PnvViewerView: View {
 
     /// The neighbour in the stream. At the end of what is loaded the next page is asked for first.
     private func step(by delta: Int) {
+        // While a new deal loads there is no neighbour yet; the press waits for nothing.
+        guard restartTask == nil else { return }
+        // A deal that came back empty or failed: Left or Right asks for it again.
+        if stranded { restart {}; return }
         stepTask?.cancel()
         stepTask = Task {
             if let list {
@@ -318,7 +401,14 @@ struct PnvViewerView: View {
             index += delta
             if index >= store.feed(region).items.count { await store.loadMore(region: region) }
             let items = store.feed(region).items
-            guard !Task.isCancelled, items.indices.contains(index) else { return }
+            guard !Task.isCancelled, !items.isEmpty else { return }
+            // The stream never ends: past its last object it comes round to its first, once the
+            // feed has given everything; Left from the first stays put.
+            if index >= items.count {
+                guard store.feed(region).isDone else { return }
+                index = 0
+            }
+            guard items.indices.contains(index) else { return }
             show(items[index])
         }
     }
@@ -326,6 +416,7 @@ struct PnvViewerView: View {
     private func stopEverything() {
         loadTask?.cancel()
         stepTask?.cancel()
+        restartTask?.cancel()
         hideTask?.cancel()
         controller.stop()
     }

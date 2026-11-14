@@ -261,4 +261,51 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20))
     }
+
+    /// The reel (owner, 2026-11-14): Reel opens every region as one stream; on its strip Shuffle
+    /// turns on and Region steps to a region; Right never stops, coming round once a region's
+    /// objects are all given. Horn of Africa holds 19 objects (measured 2026-11-14).
+    func testReelShufflesPicksARegionAndNeverEnds() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        // Down lights Save; Right twice reaches Shuffle.
+        XCUIRemote.shared.press(.down); kjPause(0.5)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "off")
+        XCUIRemote.shared.press(.select); kjPause(4)
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Select turns Shuffle on")
+        kjScreenshot("pv-reel-01-shuffled", app: app)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        let region = app.descendants(matching: .any)["pnvReelRegion"]
+        for _ in 0..<12 where (region.value as? String)?.lowercased() != "horn of africa" {
+            XCUIRemote.shared.press(.select); kjPause(3)
+        }
+        XCTAssertEqual((region.value as? String)?.lowercased(), "horn of africa", "Region steps to Horn of Africa")
+        kjScreenshot("pv-reel-02-region", app: app)
+        XCUIRemote.shared.press(.up); kjPause(1)
+        var last = surface.value as? String
+        var seen = Set([last].compactMap { $0 })
+        for press in 1...22 {
+            XCUIRemote.shared.press(.right)
+            kjPause(1.5)
+            let now = surface.value as? String
+            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            if let now { seen.insert(now) }
+            last = now
+        }
+        // Every press moved on: past the region's end (19 objects on 2026-11-14) that is the wrap.
+        // The walk itself is proven without live data in ios/Tests/PnvRetry; no bound here rests
+        // on the region's count.
+        print("PNVREEL distinct \(seen.count) of 23 shown")
+        kjScreenshot("pv-reel-03-came-round", app: app)
+    }
 }

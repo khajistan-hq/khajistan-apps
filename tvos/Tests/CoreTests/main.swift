@@ -409,6 +409,41 @@ func eligibilityChannel(_ id: String, name: String? = nil, publication: String? 
     return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
 }
 
+func healthOlderThanTwoHoursIsNotFresh() throws {
+    let written = try require(ISO8601DateFormatter().date(from: "2026-11-01T13:23:05Z"))
+    func health(_ at: String?) throws -> Health {
+        let stamp = at.map { #","generatedAt":"\#($0)""# } ?? ""
+        return try decode(Health.self, #"{"results":[]"# + stamp + "}")
+    }
+    // The live file's form: six fractional digits.
+    let live = try health("2026-11-01T13:23:05.398418Z")
+    try expect(live.isFresh(at: written))
+    try expect(live.isFresh(at: written + Health.maximumAge - 1))
+    try expect(!live.isFresh(at: written + Health.maximumAge + 1))
+    // 13 days old, as the site served it on 2026-11-14.
+    try expect(!live.isFresh(at: written + 13 * 86_400))
+    try expect(try health("2026-11-01T13:23:05Z").isFresh(at: written + 60))
+    try expect(!(try health(nil)).isFresh(at: written))
+    try expect(!(try health("yesterday")).isFresh(at: written))
+    try expectEqual(Health.maximumAge, 7200)
+}
+
+func nextLiveSkipsDeadChannelsAndWraps() throws {
+    let list = try ["a", "b", "c", "d"].map { try eligibilityChannel($0) }
+    try expectEqual(ReceiverRules.nextLive(after: "a", in: list, dead: [])?.id, "b")
+    try expectEqual(ReceiverRules.nextLive(after: "a", in: list, dead: ["a", "b"])?.id, "c")
+    try expectEqual(ReceiverRules.nextLive(after: "c", in: list, dead: ["c", "d"])?.id, "a")
+    // Every other channel failed: nothing to move to, and never the dead one again.
+    try expect(ReceiverRules.nextLive(after: "b", in: list, dead: ["a", "b", "c", "d"]) == nil)
+    try expect(ReceiverRules.nextLive(after: "b", in: list, dead: ["a", "c", "d"]) == nil)
+    try expect(ReceiverRules.nextLive(after: "a", in: [list[0]], dead: []) == nil)
+    try expect(ReceiverRules.nextLive(after: "a", in: [], dead: []) == nil)
+    // A channel the list does not hold starts at the top.
+    try expectEqual(ReceiverRules.nextLive(after: "z", in: list, dead: ["a"])?.id, "b")
+    try expect(ReceiverRules.isAccountGate(httpStatus: 401) && ReceiverRules.isAccountGate(httpStatus: 403))
+    try expect(!ReceiverRules.isAccountGate(httpStatus: 404) && !ReceiverRules.isAccountGate(httpStatus: 500))
+}
+
 func eligibilityKeepsTheGoodAndDropsEachWithdrawal() throws {
     let channels: [Channel] = [
         // kept
@@ -4699,6 +4734,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Channel.place drops what is unknown", channelPlaceDropsWhatIsNotKnown),
     ("Channel.sourceLine is the attribution's first clause", channelSourceLineIsTheFirstClause),
     ("Eligibility keeps the good, drops each withdrawal", eligibilityKeepsTheGoodAndDropsEachWithdrawal),
+    ("Health older than two hours is not fresh", healthOlderThanTwoHoursIsNotFresh),
+    ("Next live channel skips dead ones and wraps", nextLiveSkipsDeadChannelsAndWraps),
     ("Eligibility: duplicates once, sorted by name", eligibilityKeepsADuplicateOnceAndSortsByName),
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),

@@ -816,9 +816,11 @@ struct ReceiverPlayerView: View {
         let dead = current
         let found: Channel?
         if let surfChoice {
-            // Surf's walk starts a new cycle once the atlas is spent; a channel that already
-            // failed here ends the move instead of going round again.
-            found = model.surfHistory.next(for: surfChoice).flatMap { deadHere.contains($0.id) ? nil : $0 }
+            // Asked of a copy: a move that is cancelled spends no visit. The walk starts a new
+            // cycle once the atlas is spent; a channel that already failed here ends the move
+            // instead of going round again.
+            var trial = model.surfHistory
+            found = trial.next(for: surfChoice).flatMap { deadHere.contains($0.id) ? nil : $0 }
         } else {
             found = ReceiverRules.nextLive(after: dead.id, in: list, dead: deadHere)
         }
@@ -831,6 +833,8 @@ struct ReceiverPlayerView: View {
             try? await Task.sleep(for: Self.deadSignalPause)
             guard !Task.isCancelled, !leaving, current.id == dead.id, isFailed, destination == nil, guideRow == nil else { return }
             moveOnNote = nil
+            // The visit is spent only now, as a pick in the guide spends it.
+            if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }

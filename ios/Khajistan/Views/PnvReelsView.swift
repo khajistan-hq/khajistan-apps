@@ -36,6 +36,8 @@ struct PnvReelsView: View {
     /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
     /// so the reader scrolls to it, as it does on arrival.
     @State private var jump = 0
+    /// Set by the first Shuffle or region change: from then the tapped object is no fallback.
+    @State private var restarted = false
 
     let start: PnvRow
     let source: Source
@@ -65,7 +67,9 @@ struct PnvReelsView: View {
     }
 
     private var isStream: Bool { if case .feed = source { return true } else { return false } }
-    private var currentId: String { position ?? ReelItem.id(lap: 0, start.id) }
+    /// The page on screen. Before any restart a missing position means the tapped object; after
+    /// one it means none, so a re-deal holding that same object still reopens on its first page.
+    private var currentId: String { position ?? (restarted ? "" : ReelItem.id(lap: 0, start.id)) }
     private var current: PnvRow? { reel.first { $0.id == currentId }?.row }
 
     var body: some View {
@@ -229,6 +233,7 @@ struct PnvReelsView: View {
         owner = nil
         activatedId = nil
         laps = []
+        restarted = true
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.

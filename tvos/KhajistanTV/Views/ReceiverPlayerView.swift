@@ -55,7 +55,7 @@ struct ReceiverPlayerView: View {
     @State private var failedAtGate = false
     /// The song on the channel on screen (NowPlaying), or "".
     @State private var song = ""
-    /// The guide, open over the left of the picture: the row the remote has lit, as an index in
+    /// The guide, risen over the bottom of the picture: the row the remote has lit, as an index in
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
     @State private var guideRow: Int?
@@ -136,7 +136,7 @@ struct ReceiverPlayerView: View {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
                               medium: (destination ?? current).mediaType, title: guideTitle,
                               turns: guideRegions.count > 1, loading: guideLoading)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
             StationClipLayer(clips: model.clips)

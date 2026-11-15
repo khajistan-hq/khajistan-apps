@@ -1,8 +1,8 @@
 #!/bin/sh
 # Re-records the answers UI tests read with -kjfixtures (KJFixtureProtocol in SupabaseRoute.swift):
-# the receiver's index, every region shard (Indus whole, the others cut to 20 channels: the set can
-# open on any region), the three feeds cut to the channels those name, the map shapes, and the chat
-# room list. Chat lines stay empty. Run from anywhere; commit what changes.
+# the receiver's index, every region shard, whole (the set can open on any region, and tests name
+# channels in Indus and Arabia), the three feeds cut to the channels those name, the map shapes, and
+# the chat room list. Chat lines stay empty. Run from anywhere; commit what changes.
 set -eu
 cd "$(dirname "$0")"
 site=https://khajistan-archive.pages.dev
@@ -22,8 +22,6 @@ for old in glob.glob(out + 'regions/*.json'):
 text = open(raw + '/receiver-index.json').read()
 for path in glob.glob(raw + '/regions/*.json'):
     shard = json.load(open(path))
-    if os.path.basename(path) != 'indus.json':
-        shard['channels'] = shard['channels'][:20]
     json.dump(shard, open(out + 'regions/' + os.path.basename(path), 'w'), ensure_ascii=False)
     text += json.dumps(shard)
 ids = set(re.findall(r'"id": ?"([^"]+)"', text))

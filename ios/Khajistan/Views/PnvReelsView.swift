@@ -264,7 +264,13 @@ struct PnvReelsView: View {
             } else {
                 let region = model.pnvRegion
                 Task {
-                    await store.loadMore(region: region)
+                    // A page that failed blocks loadMore until it is cleared: ask again, or the
+                    // reel stops at its end with nothing said.
+                    if store.feed(region).error != nil {
+                        await store.retry(region: region)
+                    } else {
+                        await store.loadMore(region: region)
+                    }
                     // The last page came back and the feed is done while the end is already on
                     // screen: activate() will not run again for this page, so deal the lap here,
                     // or the reel stops on its last object (a feed whose size is a page multiple).

@@ -282,6 +282,17 @@ enum PnvAPI {
         return rest("pnv_media?" + parts.joined(separator: "&"))
     }
 
+    /// A shelf's exact count under its filter, for a shuffled walk, whose pages carry none (their
+    /// `shuffle_key` bound would count only the rows past it). One row, the count in Content-Range.
+    static func countRequest(keys: [String], kind: PnvKind?) -> URLRequest {
+        var parts = ["select=media_key", "account_key=in.(" + keys.map(listMember).joined(separator: ",") + ")"]
+        if let kind { parts.append("kind=eq.\(kind.rawValue)") }
+        parts.append("limit=1")
+        var request = rest("pnv_media?" + parts.joined(separator: "&"))
+        request.setValue("count=exact", forHTTPHeaderField: "Prefer")
+        return request
+    }
+
     /// The top of the permutation: the room's size, which a walk's random start falls inside.
     static func roomSizeRequest() -> URLRequest {
         rest("pnv_media?select=shuffle_key&order=shuffle_key.desc&limit=1")

@@ -362,7 +362,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 - **Shelves** (owner, 2026-10-06: "Pics/Vids as shelves, grouped by region"): one for each region
   the roster carries, west to east (Maghreb, Mashriq, Anatolia, Persia, Khorasan, Indus), titled
   with the region and its exact count under the current filter. Each is its own stream
-  (`PicsVidsStore.feeds`): it asks for its first page of 60 when it comes on screen, and for the
+  (`PicsVidsStore.feeds`): it asks for its first page when it comes on screen (60 in stream order, 120 shuffled, with the
+  count asked for on its own), and for the
   next when focus is within eight cards of its end. A region with nothing under the filter has no
   shelf. Picking a filter starts every shelf over.
 - **Shuffle every visit** (owner, 2026-11-14: "shuffle everytime, the same photos are just there
@@ -372,7 +373,7 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
 - **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
-  opens on pictures. Its viewer walks the same mixed stream as Reel.
+  opens on pictures. Its viewer walks that mixed stream, pictures and videos both.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own
   dimensions, so nothing moves when the picture arrives), on a house-lift plate that holds its
   place until the picture fades in, never cropped; lifts under focus like any card. A video's

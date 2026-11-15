@@ -449,7 +449,8 @@ func surfPlanSkipsDeadChannelsWithoutSpendingTheWalk() throws {
     let choice = SurfChoice(medium: .all, scope: .main)
     var history = SurfHistory()
     history.update(SurfCatalogue(channels: channels, missingRegions: []), for: choice)
-    // A plan changes nothing: asking twice of an untouched walk gives a walk that still has all three.
+    // `plan` is non-mutating, so the compiler holds that it spends nothing; this shows the walk it
+    // leaves is still whole: all three channels, each once.
     let first = try require(history.plan(for: choice, skipping: []))
     var untouched = history
     try expectEqual(Set((0..<3).compactMap { _ in untouched.next(for: choice)?.id }), ["a", "b", "c"])

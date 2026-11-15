@@ -77,8 +77,8 @@ final class PicsVidsStore {
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
-    /// The page was left since the last deal: the next visit deals again (`pageLeft()`).
-    @ObservationIgnored private var dueForNewDeal = false
+    /// The one room-size probe, shared by every shelf that asks while it is in flight.
+    @ObservationIgnored private var roomSizeTask: Task<Int?, Never>?
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -97,10 +97,7 @@ final class PicsVidsStore {
     func start() async {
         switch phase {
         case .loading: return
-        case .ready:
-            // Back on the page: a new deal, so it never opens on the same pictures twice.
-            if dueForNewDeal { dueForNewDeal = false; setShuffled(true) }
-            return
+        case .ready: return
         case .idle, .failed: break
         }
         phase = .loading
@@ -154,8 +151,17 @@ final class PicsVidsStore {
         feeds = [:]
     }
 
-    /// The viewer went to another section. Not called while an object is open over the page.
-    func pageLeft() { dueForNewDeal = true }
+    /// The viewer went to another section (not called while an object is open over the page), or
+    /// the app came back from the background: deal again now, so the page never reopens on the
+    /// same pictures and no old picture paints first.
+    func pageLeft() { setShuffled(true) }
+
+    /// Drops one feed so its next ask starts over (the Reel, which deals afresh on every press).
+    /// A feed with a page in flight is left alone: that page would land in the emptied feed.
+    func discard(_ key: String) {
+        guard feeds[key]?.isLoading != true else { return }
+        feeds[key] = nil
+    }
 
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
@@ -213,7 +219,14 @@ final class PicsVidsStore {
         feeds[region] = feed
         if shuffled && feed.start == 0 {
             if roomSize == nil {
-                roomSize = (try? await fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
+                if roomSizeTask == nil {
+                    roomSizeTask = Task { [weak self] in
+                        guard let self else { return nil }
+                        return (try? await self.fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
+                    }
+                }
+                roomSize = await roomSizeTask?.value
+                if roomSize == nil { roomSizeTask = nil }
             }
             // A probe cancelled with its caller picks no start: the next ask probes again.
             guard gen == generation, !Task.isCancelled else {
@@ -225,6 +238,10 @@ final class PicsVidsStore {
             feed.after = feed.start - 1
             feeds[region]?.start = feed.start
             feeds[region]?.after = feed.after
+            // A shuffled page carries no count; the shelf heading asks for it on its own.
+            if feed.total == nil {
+                Task { [weak self] in await self?.loadCount(region: region, keys: keys, kind: kind, generation: gen) }
+            }
         }
         let request = shuffled
             ? PnvAPI.shufflePageRequest(keys: keys, kind: kind, after: feed.after, end: feed.end)
@@ -260,6 +277,14 @@ final class PicsVidsStore {
             feeds[region]?.isLoading = false
             feeds[region]?.error = "The archive did not answer."
         }
+    }
+
+    private func loadCount(region: String, keys: [String], kind: PnvKind?, generation gen: Int) async {
+        guard let (_, response) = try? await SupabaseRoute.data(for: PnvAPI.countRequest(keys: keys, kind: kind), session: urlSession),
+              gen == generation,
+              let total = PnvAPI.total(fromContentRange: (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range"))
+        else { return }
+        feeds[region]?.total = total
     }
 
     // MARK: - A row

@@ -26,6 +26,7 @@ struct PicsVidsView: View {
         var id: String { row.id }
     }
 
+    @Environment(\.scenePhase) private var scenePhase
     private var store: PicsVidsStore { model.pnv }
 
     var body: some View {
@@ -59,6 +60,10 @@ struct PicsVidsView: View {
             if let reelNote, reelNote != Self.reelLoading { AccessibilityNotification.Announcement(reelNote).post() }
         }
         .task(id: model.auth.email) { await model.saves.load() }
+        // Back from the background (the app left on this page overnight): a new deal too.
+        .onChange(of: scenePhase) { old, new in
+            if old == .background, new != .background, viewing == nil { store.pageLeft() }
+        }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
                 PnvViewerView(row: choice.row, list: list)
@@ -139,6 +144,8 @@ struct PicsVidsView: View {
                     defer { reelTask = nil }
                     // Videos only, every region (owner, 2026-11-14: "reel just needs to be of videos").
                     let all = PicsVidsStore.videosKey(PicsVidsStore.allRegions)
+                    // A new hand on every press, not the reel the last press dealt.
+                    store.discard(all)
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
                     // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
                     // then comes back with nothing, not done and no error.

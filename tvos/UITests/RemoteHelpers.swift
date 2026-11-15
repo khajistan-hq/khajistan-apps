@@ -22,9 +22,14 @@ extension XCTestCase {
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
         for attempt in 0..<tries {
+            // After Down, only the next channel playing counts: the one being left can still
+            // reach Playing before the cut (Bugbot on PR 66).
+            let left = attempt > 0 && current.exists ? current.label : nil
             if attempt > 0 { XCUIRemote.shared.press(.down); kjPause(1) }
             XCTAssertTrue(state.waitForExistence(timeout: 20), "the player opens")
-            let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Playing'"), object: state)
+            let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                state.label == "Playing" && (left == nil || (current.exists && current.label != left))
+            }, object: nil)
             if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
             tried.append("\(current.exists ? current.label : "?"): \(state.label)")
         }

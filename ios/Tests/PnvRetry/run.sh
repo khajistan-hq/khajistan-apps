@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs PicsVidsStore against stubbed answers, in a simulator: the region shelf must survive a 500
-# from a busy server and still give up on a refusal; the Receiver list gets one second try. Runs
-# offline: every request, the route probe included, is answered by the harness. About forty seconds.
+# from a busy server and still give up on a refusal, and the shuffle walk must reach every object
+# once from any start; the Receiver list gets one second try. Runs offline: every request, the
+# route probe included, is answered by the harness. About a minute.
 #   ios/Tests/PnvRetry/run.sh [SIMULATOR_UDID] [REPO_ROOT]
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)

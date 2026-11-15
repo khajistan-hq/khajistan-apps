@@ -200,6 +200,25 @@ struct SurfHistory {
     mutating func visit(_ channel: Channel, for choice: SurfChoice) {
         cycles[choice, default: SurfCycle()].visit(channel.id)
     }
+
+    /// The next channel not in `skipping`, and the walk as it would stand once it is visited,
+    /// asked without changing this walk. Skipped channels are spent in the plan, and a new cycle
+    /// the plan starts is in it. Nil when no channel is left, even after a new cycle.
+    func plan(for choice: SurfChoice, skipping: Set<String>) -> (channel: Channel, cycle: SurfCycle)? {
+        guard let catalogue = catalogues[choice] else { return nil }
+        var cycle = cycles[choice, default: SurfCycle()]
+        // Two passes: the rest of this cycle, then a whole new one, which reaches every channel.
+        for _ in 0..<(2 * catalogue.channels.count) {
+            guard let channel = cycle.next(in: catalogue.channels, allowNewCycle: catalogue.isComplete) else { return nil }
+            if !skipping.contains(channel.id) { return (channel, cycle) }
+        }
+        return nil
+    }
+
+    /// Carries out a plan: the walk becomes the one the plan left.
+    mutating func take(_ cycle: SurfCycle, for choice: SurfChoice) {
+        cycles[choice] = cycle
+    }
 }
 
 /// The Receiver's Cameras: every region with a camera list, the main atlas first, then the

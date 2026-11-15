@@ -246,7 +246,8 @@ final class PicsVidsStore {
                 roomSize = await roomSizeTask?.value
                 if roomSize == nil { roomSizeTask = nil }
             }
-            // A probe cancelled with its caller picks no start: the next ask probes again.
+            // A new deal while the probe ran (`generation` moved): this load is stale and stops.
+            // Caller cancellation no longer reaches here (loadMore runs this apart from it).
             guard gen == generation, !Task.isCancelled else {
                 if gen == generation { feeds[region]?.isLoading = false }
                 return
@@ -291,7 +292,7 @@ final class PicsVidsStore {
             if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMoreNow(region: region) }
         } catch {
             guard gen == generation, !Task.isCancelled else {
-                // A cancelled request leaves the shelf free to ask again.
+                // A new deal while the page was in flight: the old feed is gone, nothing to mark.
                 if gen == generation { feeds[region]?.isLoading = false }
                 return
             }

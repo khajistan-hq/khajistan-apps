@@ -46,6 +46,8 @@ struct PicsVidsView: View {
         .kjTopFade()
         // Down from the top bar lands on the first control, never on the tile under the bar item.
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
+        // A new hand if the page was left, dealt before the shelves' first loads ask.
+        .onAppear { store.dealIfLeft() }
         .task { await store.start() }
         // Left before the Reel's page came: the viewer must not open by itself later.
         .onDisappear {
@@ -62,7 +64,8 @@ struct PicsVidsView: View {
         .task(id: model.auth.email) { await model.saves.load() }
         // Back from the background (the app left on this page overnight): a new deal too.
         .onChange(of: scenePhase) { old, new in
-            if old == .background, new != .background, viewing == nil { store.pageLeft() }
+            // The page is on screen here, so the deal is made at once.
+            if old == .background, new != .background, viewing == nil { store.setShuffled(true) }
         }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {

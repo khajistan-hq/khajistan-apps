@@ -77,6 +77,8 @@ final class PicsVidsStore {
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
+    /// The page was left since the last deal: the next appearance deals first (`dealIfLeft()`).
+    @ObservationIgnored private var dueForNewDeal = false
     /// The one room-size probe, shared by every shelf that asks while it is in flight.
     @ObservationIgnored private var roomSizeTask: Task<Int?, Never>?
     private unowned let auth: AuthStore
@@ -151,10 +153,17 @@ final class PicsVidsStore {
         feeds = [:]
     }
 
-    /// The viewer went to another section (not called while an object is open over the page), or
-    /// the app came back from the background: deal again now, so the page never reopens on the
-    /// same pictures and no old picture paints first.
-    func pageLeft() { setShuffled(true) }
+    /// The viewer went to another section (not called while an object is open over the page).
+    /// Only marked here: dealing while the page tears down would start shelf loads that are then
+    /// cancelled, and a quick return could find them still "loading" and never ask again.
+    func pageLeft() { dueForNewDeal = true }
+
+    /// On the page's appearance, before its shelves ask for anything: a new deal if it was left.
+    func dealIfLeft() {
+        guard dueForNewDeal else { return }
+        dueForNewDeal = false
+        setShuffled(true)
+    }
 
     /// Drops one feed so its next ask starts over (the Reel, which deals afresh on every press).
     /// A feed with a page in flight is left alone: that page would land in the emptied feed.
@@ -202,6 +211,15 @@ final class PicsVidsStore {
     /// The next page of one region's shelf: the first when it has none yet. Safe to call as often
     /// as focus nears the end; a page in flight or a finished shelf is left alone.
     func loadMore(region: String) async {
+        // Run apart from the caller's cancellation. A shelf's task is cancelled whenever SwiftUI
+        // rebuilds or re-keys it; a load cancelled mid-flight cleared its "loading" mark after the
+        // new shelf had already been told a load was under way, and the shelf spun for good
+        // (Cursor Bugbot on PR 64; reproduced by leaving the page and coming straight back).
+        // A load from an old deal is still dropped: every write checks `generation`.
+        await Task { await self.loadMoreNow(region: region) }.value
+    }
+
+    private func loadMoreNow(region: String) async {
         guard phase == .ready else { return }
         var feed = feeds[region] ?? PnvFeed()
         guard !feed.isLoading, !feed.isDone, feed.error == nil else { return }
@@ -270,7 +288,7 @@ final class PicsVidsStore {
             next.isLoading = false
             feeds[region] = next
             // A walk that just came round from 1 has nothing on screen to ask for it: read on now.
-            if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMore(region: region) }
+            if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMoreNow(region: region) }
         } catch {
             guard gen == generation, !Task.isCancelled else {
                 // A cancelled request leaves the shelf free to ask again.

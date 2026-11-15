@@ -63,7 +63,9 @@ final class ReadingStore {
     /// closed while the room loads must not cancel the load every other screen is waiting on.
     @ObservationIgnored private var loading: Task<Void, Never>?
 
-    @ObservationIgnored private var loadContext = RRShelfLoadContext()
+    private var loadContext = RRShelfLoadContext()
+    /// Task identity changes on every explicit preview invalidation, including nil-to-nil Clear.
+    var loadRevision: Int { loadContext.generation }
 
     private unowned let auth: AuthStore
     private let urlSession: URLSession
@@ -87,6 +89,8 @@ final class ReadingStore {
         urlSession = URLSession(configuration: config)
         // Decoded pages, by their size in memory: about eight 2,000-pixel pages.
         pages.totalCostLimit = 200 * 1024 * 1024
+        // Initialize before views observe the revision: first start must not restart its own task.
+        _ = loadContext.update(authorization)
         Task.detached(priority: .background) { RRPageDisk.trim() }
     }
 

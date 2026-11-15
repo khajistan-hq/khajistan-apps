@@ -948,6 +948,25 @@ final class KhajistanUITests: XCTestCase {
         return ""
     }
 
+    func testEmptyPreviewSaveKeepsMountedReadingRoomUsable() {
+        let app = launch(skin: "day", extra: ["-kjtestsignedout", "YES"])
+        tapOnHome(app, "home-room-reading")
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the Reading Room loads before changing preview settings")
+        app.buttons["tab-library"].tap()
+        let set = app.buttons.matching(NSPredicate(format: "label ==[c] 'Set'")).firstMatch
+        for _ in 0..<12 where !set.exists || !set.isHittable { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(set.exists && set.isHittable, "the unset preview password offers Set")
+        set.tap()
+        let save = app.buttons.matching(NSPredicate(format: "label ==[c] 'Save'")).firstMatch
+        waitFor(save, 5, "preview settings offer Save")
+        save.tap() // Empty Save reaches Clear while the preview password is already nil.
+        app.buttons["tab-home"].tap()
+        tapOnHome(app, "home-room-reading")
+        waitFor(titles.firstMatch, 20, "the already-mounted Reading Room reloads after an empty preview Save")
+        shot("rr-after-empty-preview-save", app)
+    }
+
     /// The Reading Room on the phone: a free title opens to its first page full screen with the
     /// controls hidden, a tap in the middle brings them, its first issue reads page by page, and
     /// the place is kept; a members' title stops at the website's preview, two pages, and never

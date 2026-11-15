@@ -1,6 +1,11 @@
 // Exercises the production ReadingStore; only platform images, auth and HTTP boundaries are replaced.
 import Foundation
 import CoreGraphics
+import Observation
+
+private func wasSignalled(_ semaphore: DispatchSemaphore) -> Bool {
+    semaphore.wait(timeout: .now()) == .success
+}
 
 final class UIImage: NSObject, @unchecked Sendable {
     var cgImage: CGImage? { nil }
@@ -77,12 +82,28 @@ enum SupabaseRoute {
         seed()
         let auth = AuthStore()
         let store = ReadingStore(auth: auth, origin: KJConfig.site)
+        #if !KJ_READING_BASELINE
+        let initialRevision = store.loadRevision
+        #endif
         await store.start()
+        #if !KJ_READING_BASELINE
+        check(store.loadRevision == initialRevision, "initial start keeps its observed task identity stable")
+        #endif
         check(store.tabs.contains { $0.id == "arabic" }, "warm catalogue fetches missing module index")
         check(URLSession.requests.count == 1, "missing modules do not redownload public bulk catalogue")
         await store.start()
         check(URLSession.requests.count == 1, "ready shelf does not refetch on appearance")
         #if !KJ_READING_BASELINE
+        check(store.loadRevision == initialRevision, "ready reuse does not change task identity")
+        let changed = DispatchSemaphore(value: 0)
+        withObservationTracking { _ = store.loadRevision } onChange: { changed.signal() }
+        store.previewCredentialDidChange() // Empty Save reaches Clear when the password is already nil.
+        check(wasSignalled(changed) && store.loadRevision != initialRevision,
+              "nil-to-nil Clear observably changes the mounted shelf task identity")
+        let clearedRevision = store.loadRevision
+        await store.start()
+        check(store.phase == .ready && store.loadRevision == clearedRevision && URLSession.requests.count == 1,
+              "revision-triggered reload reuses the cached public shelf without another restart or download")
         // A gated index must never be accepted from disk, even if deletion failed or another process left one.
         let request = URLRequest(url: RRSite.modulesURL(origin: KJConfig.site))
         let gatedKey = RRShelfDisk.key(request) + " @" + KJConfig.site.absoluteString + " gated"

@@ -18,8 +18,11 @@ final class KhajistanUITests: XCTestCase {
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
         app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
-        app.launchArguments += ["-kjfixturemedia", "YES", "-kjfixtures", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path]
+        // Set TEST_RUNNER_KJ_LIVE_RECEIVER=1 for separate live integration probes.
+        if ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] != "1" {
+            app.launchArguments += ["-kjfixturemedia", "YES", "-kjfixtures", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path]
+        }
         app.launch()
         return app
     }

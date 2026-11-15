@@ -6,8 +6,11 @@ extension XCTestCase {
     /// Existing navigation fixtures keep the map visible; autoplay has its own acceptance test.
     func kjLaunch(_ app: XCUIApplication, autoplay: Bool = false) {
         if !autoplay { app.launchArguments += ["-kjnoautoplay", "YES"] }
-        app.launchArguments += ["-kjfixturemedia", "YES", "-kjfixtures", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/recorded").path]
+        // Set TEST_RUNNER_KJ_LIVE_RECEIVER=1 for separate live integration probes.
+        if ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] != "1" {
+            app.launchArguments += ["-kjfixturemedia", "YES", "-kjfixtures", URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .appendingPathComponent("Fixtures/recorded").path]
+        }
         app.launch()
     }
 

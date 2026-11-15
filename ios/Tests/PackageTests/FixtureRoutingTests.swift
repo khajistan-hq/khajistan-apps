@@ -4,6 +4,14 @@ import XCTest
 
 #if DEBUG
 final class FixtureRoutingTests: XCTestCase {
+    func testRecordedIndusRetainsRepresentativeCatalogueCoverage() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../../../tvos/UITests/Fixtures/recorded")
+        let data = try Data(contentsOf: root.appendingPathComponent("data/open-frequencies/regions/indus.json"))
+        let shard = try JSONDecoder().decode(RegionShard.self, from: data)
+        XCTAssertGreaterThan(shard.channels.count, 50, "the recorded fixture must retain broad catalogue coverage")
+    }
+
     func testExplicitRecordedRoutingAndMediaFailures() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("rest/v1"), withIntermediateDirectories: true)

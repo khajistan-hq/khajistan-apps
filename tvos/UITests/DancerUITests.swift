@@ -129,7 +129,7 @@ final class DancerUITests: XCTestCase {
     /// A Pakistani FM station on a live MP3 mount, played through LiveRadio: the signal must be
     /// readable, and the dancer comes on when what is playing carries a beat. Live radio may be
     /// talking at that minute, so the beat is recorded rather than required; the signal is required.
-    func testRadioDancer() {
+    func testRadioDancer() throws {
         let app = XCUIApplication()
         let id = openRadio(["pbc-fm-101-lahore", "radio-in-punjab-rocks-radio", "radio-pk-cityfm89"], skin: "day", app)
         XCTAssertNotNil(id, "a progressive radio channel must open")

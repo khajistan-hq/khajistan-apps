@@ -98,7 +98,10 @@ final class SubtitlesUITests: XCTestCase {
 
     func testReceiverCaptionsSignedOut() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
+        // ABN News by name, so the list is the recording (`-kjfixturesonly`): live, it left the dial
+        // on 2026-11-15 (CI 43756089230). Its stream is still live; kjTuneUntilPlaying moves past it.
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off",
+                               "-kjfixturesonly", "YES"]
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))

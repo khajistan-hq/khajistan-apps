@@ -4,7 +4,7 @@ import Observation
 
 @MainActor @Observable
 final class ArchiveBrowser: NSObject {
-    let webView: WKWebView
+    private(set) var webView: WKWebView
     var title = "Khajistan"
     var url: URL?
     var isLoading = false
@@ -24,17 +24,34 @@ final class ArchiveBrowser: NSObject {
     private var downloads: [ObjectIdentifier: URL] = [:]
     private var requestedURL: URL?
     private let previewPassword: () -> String?
+    private let previewQueue = PreviewNavigationQueue()
+    private var skinScript: String?
+    private let gateSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieStorage = nil
+        config.timeoutIntervalForRequest = 30
+        return URLSession(configuration: config, delegate: GateRedirectBlocker(), delegateQueue: nil)
+    }()
 
     init(previewPassword: @escaping () -> String?) {
         self.previewPassword = previewPassword
+        webView = Self.makeWebView()
+        super.init()
+        configureWebView()
+    }
+
+    private static func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.applicationNameForUserAgent = "Khajistan-iOS/1.0"
-        webView = WKWebView(frame: .zero, configuration: configuration)
-        super.init()
+        return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    private func configureWebView() {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -57,7 +74,71 @@ final class ArchiveBrowser: NSObject {
         requestedURL = url
         error = nil
         if webView.url != url { isStale = true }
-        webView.load(URLRequest(url: url))
+        let password = previewPassword()
+        previewQueue.replace { [weak self] isCurrent in
+            guard let self else { return }
+            let request = ArchiveURL.previewRequest(url, password: password)
+            if request.httpMethod == "POST" {
+                await self.removePreviewCookies()
+                guard isCurrent() else { return }
+                do {
+                    let (_, response) = try await self.gateSession.data(for: request)
+                    guard isCurrent() else { return }
+                    guard let response = response as? HTTPURLResponse, response.statusCode == 303,
+                          let responseURL = response.url, responseURL == request.url else {
+                        self.error = "Preview access could not be opened. Try again."
+                        return
+                    }
+                    let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+                        if let key = entry.key as? String, let value = entry.value as? String { result[key] = value }
+                    }
+                    let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: responseURL)
+                        .filter { self.isPreviewCookie($0) && $0.isSecure }
+                    for cookie in cookies {
+                        await self.webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+                    }
+                    guard isCurrent() else { return }
+                } catch {
+                    guard isCurrent() else { return }
+                    self.error = "Preview access could not be opened. Try again."
+                    return
+                }
+            }
+            guard isCurrent() else { return }
+            self.webView.load(URLRequest(url: KJURL.canonicalSitePage(url)))
+        }
+    }
+
+    /// Remove only preview access, keeping unrelated website account cookies. A fresh view
+    /// also removes protected pages from WebKit's back/forward snapshot cache.
+    func clearPreviewSession() {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        observations.removeAll()
+        webView = Self.makeWebView()
+        configureWebView()
+        if let skinScript { applySkin(script: skinScript) }
+        requestedURL = nil
+        url = nil
+        title = "Khajistan"
+        error = nil
+        isLoading = false
+        isStale = false
+        canGoBack = false
+        canGoForward = false
+        previewQueue.replace(alwaysRun: true) { [weak self] _ in await self?.removePreviewCookies() }
+    }
+
+    private func isPreviewCookie(_ cookie: HTTPCookie) -> Bool {
+        cookie.name == "kj_gate" && cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == KJConfig.site.host
+    }
+
+    private func removePreviewCookies() async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        for cookie in await store.allCookies() where isPreviewCookie(cookie) {
+            await store.deleteCookie(cookie)
+        }
     }
 
     /// Starts WebKit's page process at launch, so the first page opened does not wait for it.
@@ -67,6 +148,7 @@ final class ArchiveBrowser: NSObject {
 
     /// The website's skin keys, written before any of its scripts run, on every page.
     func applySkin(script: String) {
+        skinScript = script
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -234,5 +316,14 @@ extension ArchiveBrowser: WKDownloadDelegate {
         }
         activeDownloads = downloads.count
         downloadMessage = "Download failed: \(error.localizedDescription). Return to the page to try again."
+    }
+}
+
+/// Read the form's response cookie without following a redirect or storing it elsewhere.
+private final class GateRedirectBlocker: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

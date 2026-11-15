@@ -75,6 +75,13 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(captions.waitForNonExistence(timeout: 10), "the strip hides over a playing picture")
         XCUIRemote.shared.press(.right)
         XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        // It rises from the bottom (owner, 2026-11-14): the panel sits low, reaches the bottom
+        // edge and spans the screen, with the picture left in view above it.
+        kjPause(0.6)
+        let screen = app.frame
+        XCTAssertGreaterThan(guide.frame.minY, screen.height * 0.25, "the guide leaves the picture above it")
+        XCTAssertEqual(guide.frame.maxY, screen.maxY, accuracy: 2, "the guide reaches the bottom edge")
+        XCTAssertGreaterThan(guide.frame.width, screen.width * 0.9, "the guide spans the screen")
         let live = app.descendants(matching: .any)["guide-\(start)"]
         XCTAssertTrue(live.exists && live.label.contains("Live"), "LIVE marks the channel playing: \(live.label)")
         XCTAssertTrue(live.isSelected, "the guide opens on the channel playing")

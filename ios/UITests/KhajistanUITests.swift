@@ -13,8 +13,9 @@ final class KhajistanUITests: XCTestCase {
 
     /// Recorded answers for the receiver's list, feeds and map and for the chat room list
     /// (`tvos/UITests/Fixtures/recorded`, shared with the Apple TV tests and refreshed by its
-    /// `refresh.sh`). Read live, one TLS error on receiver-index.json failed pull requests that
-    /// never touched the Receiver (CI, 2026-11-14). Streams, stills and the rest stay live.
+    /// `refresh.sh`), used when the live request fails: one TLS error on receiver-index.json
+    /// failed pull requests that never touched the Receiver (CI, 2026-11-14). Live answers still
+    /// come first, so the list is today's; streams, stills and the rest stay live.
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path
 

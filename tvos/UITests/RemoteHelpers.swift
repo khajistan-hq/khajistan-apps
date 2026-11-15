@@ -4,9 +4,9 @@ import XCTest
 /// a walk toward an element by the Siri Remote's presses.
 extension XCTestCase {
     /// Existing navigation fixtures keep the map visible; autoplay has its own acceptance test.
-    /// The receiver's list, feeds and map and the chat room list are recorded answers
-    /// (`Fixtures/recorded`, shared with the iPhone tests): read live, one TLS error on
-    /// receiver-index.json failed pull requests that never touched the Receiver (CI, 2026-11-14).
+    /// The receiver's list, feeds and map and the chat room list fall back to recorded answers
+    /// (`Fixtures/recorded`, shared with the iPhone tests) when the live request fails: one TLS
+    /// error on receiver-index.json failed pull requests that never touched the Receiver (CI, 2026-11-14).
     func kjLaunch(_ app: XCUIApplication, autoplay: Bool = false) {
         if !autoplay { app.launchArguments += ["-kjnoautoplay", "YES"] }
         app.launchArguments += ["-kjfixtures", kjRecordedFixtures]

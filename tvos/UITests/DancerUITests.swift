@@ -82,14 +82,14 @@ final class DancerUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    private func openRadio(_ ids: [String], skin: String, _ app: XCUIApplication) -> String? {
+    private func openRadio(_ ids: [String], region: String = "indus", skin: String, _ app: XCUIApplication) -> String? {
         app.launchArguments = ["-kjskin", skin]
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
         XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
+        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-\(region)" {
             XCUIRemote.shared.press(.right)
         }
         print("DANCER nav region: \(focused(app))")
@@ -143,26 +143,43 @@ final class DancerUITests: XCTestCase {
         app.terminate()
     }
 
-    /// A channel the site marks `reverent: true`: the dancer must never appear, and no tap is made
-    /// at all. Indus's Quran station (pbc-saut-ul-quran) left the site with the rest of PBC on
-    /// 2026-11-14; the Sikh kirtan, gurbani and katha stations carry the flag on their records.
+    /// Quran recitation radio. The dancer must never appear, and no tap is made at all.
+    ///
+    /// The nightly stream probe takes silent stations off the dial (denylist.json), so no single
+    /// station can be named. These are Arabia's Quran stations that are reverent by name and were
+    /// published and off the denylist on 2026-11-14; the walk takes whichever it reaches first.
+    /// Indus's only one, Saut-ul-Quran, was denylisted that day for two silent nights.
+    static let recitation = [
+        "territory-saudi-arabia-quran-kareem-radio",
+        "uae-sharjah-quran-radio",
+        "state-qtv-qa-quraan-radio-2",
+        "radio-om-the-holy-quran-radio-fm-93-2",
+        "territory-saudi-arabia-nida-al-islam-radio",
+    ]
+
     func testReverentChannelHasNoDancer() throws {
         let app = XCUIApplication()
-        let reverent = ["radio-in-live-gurbani-sri-darbar-sahib-sgpc", "radio-in-live-kirtan-from-golden-temple",
-                        "radio-in-sikh-kirtan-radio", "radio-in-sikh-katha-radio", "radio-in-akhand-path-radio"]
-        let id = try XCTUnwrap(openRadio(reverent, skin: "day", app), "a reverent channel must open")
-        print("DANCER reverent channel: \(id)")
+        guard let id = openRadio(Self.recitation, region: "arabia", skin: "day", app) else {
+            // The radio shelf opened but none of the candidates is on it: nothing to test.
+            if app.descendants(matching: .any)["shelf-radio"].exists {
+                app.terminate()
+                throw XCTSkip("no recitation channel from the candidate list is on Arabia's dial")
+            }
+            XCTFail("the Arabia radio shelf must open")
+            return
+        }
+        XCTAssertTrue(Self.recitation.contains(id), "a recitation channel must open (\(id))")
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30))
-        // The negative case means something only while the channel is actually playing. When the
-        // carrier the walk reached first is off air, skip: "no dancer" over silence proves nothing.
-        // Only a player in its failed state skips (a dead carrier, or the simulator offline); one stuck connecting,
-        // paused or never opened is a failure.
+        // The negative case means something only while the recitation is actually playing. When
+        // the carrier the walk reached is off air, skip, because "no dancer" over silence proves
+        // nothing. Only a player in its failed state skips (a dead carrier, or the simulator
+        // offline); one stuck connecting, paused or never opened is a failure.
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
         let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
         if stuck {
-            XCTFail("\(id) neither plays nor fails: \(state.label)")
+            XCTFail("the recitation channel neither plays nor fails: \(state.label)")
             app.terminate()
             return
         }
@@ -178,7 +195,7 @@ final class DancerUITests: XCTestCase {
             if i == 5 || i == 19 { shot(String(format: "reverent-%02d", i), app) }
         }
         print("DANCER reverent: \(seen.sorted())")
-        XCTAssertTrue(seen.isSubset(of: ["stage=absent"]), "no tap and no dancer on \(id): \(seen.sorted())")
+        XCTAssertTrue(seen.isSubset(of: ["stage=absent"]), "no tap and no dancer on recitation: \(seen.sorted())")
         app.terminate()
     }
 }

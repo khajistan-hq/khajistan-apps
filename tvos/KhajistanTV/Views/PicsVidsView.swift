@@ -9,6 +9,10 @@ struct PicsVidsView: View {
     @Environment(AppModel.self) private var model
     @State private var viewing: Viewing?
     @State private var dontAskAgain = false
+    /// The Reel's first page on its way, or why it did not come.
+    @State private var reelTask: Task<Void, Never>?
+    @State private var reelNote: String?
+    private static let reelLoading = "Loading\u{2026}"
     @FocusState private var focus: Focus?
 
     private enum Focus: Hashable { case noticeOK, firstTab }
@@ -41,6 +45,13 @@ struct PicsVidsView: View {
         // Down from the top bar lands on the first control, never on the tile under the bar item.
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         .task { await store.start() }
+        // Left before the Reel's page came: the viewer must not open by itself later.
+        .onDisappear { reelTask?.cancel(); reelNote = nil }
+        // Only the outcome is announced; the Loading line stays on screen for sight and is
+        // reachable by VoiceOver's own exploring, as plain text.
+        .onChange(of: reelNote) {
+            if let reelNote, reelNote != Self.reelLoading { AccessibilityNotification.Announcement(reelNote).post() }
+        }
         .task(id: model.auth.email) { await model.saves.load() }
         .fullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
@@ -103,6 +114,42 @@ struct PicsVidsView: View {
             ForEach(PnvKind.allCases, id: \.self) { kind in
                 kindTab(kind.label, kind: kind)
             }
+            // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
+            // and Shuffle are changed inside it.
+            Button {
+                // A second press while the first page loads waits on the same load.
+                guard reelTask == nil else { return }
+                reelNote = Self.reelLoading
+                reelTask = Task {
+                    defer { reelTask = nil }
+                    let all = PicsVidsStore.allRegions
+                    // retry clears a failed load first; a feed that failed once would refuse loadMore.
+                    // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
+                    // then comes back with nothing, not done and no error.
+                    // A real failure (an error on the feed) is not asked again: its note shows at once.
+                    for pass in 0..<2 where store.feed(all).items.isEmpty && !store.feed(all).isDone && !Task.isCancelled
+                        && (pass == 0 || store.feed(all).error == nil) {
+                        await store.retry(region: all)
+                        // Another caller's load may be the one in flight.
+                        while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(150))
+                        }
+                    }
+                    guard !Task.isCancelled else { return }
+                    if let first = store.feed(all).items.first {
+                        reelNote = nil
+                        viewing = Viewing(row: first, region: all)
+                    } else {
+                        reelNote = store.feed(all).error ?? "Nothing filed yet."
+                    }
+                }
+            } label: {
+                Label("Reel", systemImage: "play.rectangle.on.rectangle").kjKicker()
+            }
+            .buttonStyle(HouseTabStyle(isCurrent: false))
+            .padding(.leading, 28)
+            .accessibilityIdentifier("pnvReel")
+            if let reelNote { Text(reelNote).kjSmall(faint: true).accessibilityIdentifier("pnvReelNote") }
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)
@@ -247,7 +294,7 @@ private struct PnvRegionShelf: View {
             .accessibilityIdentifier("pnv-shelf-\(region)")
             .accessibilityValue(String(feed.items.count))
             // The first page, again whenever the filter starts the shelves over.
-            .task(id: store.kind) { await store.loadMore(region: region) }
+            .task(id: store.deal) { await store.loadMore(region: region) }
         }
     }
 

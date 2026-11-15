@@ -5,6 +5,11 @@ import SwiftUI
 /// before, as a phone's short-video feed moves. A video plays when its page settles and loops; a
 /// tap pauses it. Save and Collection stay on the right rail, the account and the caption at the
 /// bottom left, so nothing waits behind a tap. A picture is fitted whole, never cropped.
+///
+/// The stream's reel never ends: when its feed has given every object, the reel deals the same
+/// objects again in a new order and carries on. The region and Shuffle sit at the top, over the
+/// reel, and change it in place (owner, 2026-11-14: "an infinite reel option wired to the region
+/// with shuffle button and all regions or specific region options").
 struct PnvReelsView: View {
     /// Where the pages come from: the live stream under the region filter, which grows as the
     /// viewer nears its end, or a fixed list (an account's saves).
@@ -26,6 +31,11 @@ struct PnvReelsView: View {
     @State private var owner: String?
     /// A saved list is fixed when the reels open: un-saving here must not pull the page away.
     @State private var fixed: [PnvRow]
+    /// The extra rounds dealt once the feed ran out, each the feed again in a new order.
+    @State private var laps: [[PnvRow]] = []
+    /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
+    /// so the reader scrolls to it, as it does on arrival.
+    @State private var jump = 0
 
     let start: PnvRow
     let source: Source
@@ -35,7 +45,7 @@ struct PnvReelsView: View {
         self.source = source
         // Seeded before the first paint, so a deep tile never shows the first reel for a frame;
         // the scrollTo on arrival corrects a lazy stack that lands a page off.
-        _position = State(initialValue: start.id)
+        _position = State(initialValue: ReelItem.id(lap: 0, start.id))
         if case .rows(let rows) = source { _fixed = State(initialValue: rows) } else { _fixed = State(initialValue: []) }
     }
 
@@ -48,8 +58,15 @@ struct PnvReelsView: View {
         }
     }
 
-    private var currentId: String { position ?? start.id }
-    private var current: PnvRow? { items.first { $0.id == currentId } }
+    /// The pages: the feed, then each lap after it. A page's id carries its lap, so the same
+    /// object dealt twice is two pages.
+    private var reel: [ReelItem] {
+        ([items] + laps).enumerated().flatMap { lap, rows in rows.map { ReelItem(lap: lap, row: $0) } }
+    }
+
+    private var isStream: Bool { if case .feed = source { return true } else { return false } }
+    private var currentId: String { position ?? ReelItem.id(lap: 0, start.id) }
+    private var current: PnvRow? { reel.first { $0.id == currentId }?.row }
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -60,15 +77,16 @@ struct PnvReelsView: View {
         ScrollViewReader { proxy in
         ScrollView(.vertical) {
             LazyVStack(spacing: 0) {
-                ForEach(items) { row in
-                    PnvReelPage(row: row, isCurrent: row.id == currentId, ownsPlayer: owner == row.id,
+                ForEach(reel) { item in
+                    let row = item.row
+                    PnvReelPage(row: row, isCurrent: item.id == currentId, ownsPlayer: owner == item.id,
                                 controller: controller, phase: phase, insets: insets,
                                 signIn: { showSignIn = true })
                         .containerRelativeFrame([.horizontal, .vertical])
                         // Only the reel on screen is read: a built neighbour's Save is not reachable
                         // off screen. Set here, where the current page is always known.
-                        .accessibilityHidden(row.id != currentId)
-                        .id(row.id)
+                        .accessibilityHidden(item.id != currentId)
+                        .id(item.id)
                 }
             }
             .scrollTargetLayout()
@@ -79,7 +97,10 @@ struct PnvReelsView: View {
         .ignoresSafeArea()
         // The seeded position can land a page off in a lazy stack that has not built the tapped
         // page yet; scrolling to it once on arrival puts the reel on the object that was tapped.
-        .onAppear { proxy.scrollTo(start.id, anchor: .top) }
+        .onAppear { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) }
+        // A counter, not the id: two regions can open on the same object, and the same id set
+        // twice would not change and would not scroll.
+        .onChange(of: jump) { if let position { proxy.scrollTo(position, anchor: .top) } }
         // On the pager itself, not the screen: on the screen it also renamed the Close button.
         .accessibilityIdentifier("pnvReels")
         // The account, which VoiceOver reads; the page's own identifier carries the key for tests.
@@ -88,7 +109,8 @@ struct PnvReelsView: View {
             Button("Next") { step(1) }
             Button("Previous") { step(-1) }
         }
-        .overlay(alignment: .topLeading) { closeButton }
+        .overlay(alignment: .top) { topBar }
+        .overlay { if items.isEmpty { emptyState } }
         }
         }
         .background(palette.ground.ignoresSafeArea())
@@ -98,6 +120,12 @@ struct PnvReelsView: View {
         .onAppear { activate() }
         .task { await model.saves.load() }
         .onChange(of: position) { activate() }
+        // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
+        .task(id: "\(model.pnvRegion)|\(store.deal)") {
+            guard isStream else { return }
+            if store.feed(model.pnvRegion).isUntouched { await store.loadMore(region: model.pnvRegion) }
+        }
+        .onChange(of: items.first?.id) { reopenIfLost() }
         .onDisappear { loadTask?.cancel(); controller.stop() }
         .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { activate(force: true) }) }
         // A keyboard or a trackpad pages too: a drag does not page a scroll view on the Mac.
@@ -106,15 +134,114 @@ struct PnvReelsView: View {
         .onKeyPress(.upArrow) { step(-1); return .handled }
     }
 
-    private var closeButton: some View {
-        Button { controller.stop(); dismiss() } label: {
-            Image(systemName: "xmark").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
+    /// Close on the left; on a stream, the region and Shuffle on the right. Plates in the ground
+    /// colour, as the rail's are, so they read over any picture.
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            Button { controller.stop(); dismiss() } label: {
+                Image(systemName: "xmark").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
+            }
+            .buttonStyle(ReelRailStyle())
+            .accessibilityLabel("Close")
+            .accessibilityIdentifier("closePlayer")
+            Spacer(minLength: 0)
+            if isStream {
+                regionMenu
+                // A tap shuffles, and while on deals again, as the grid's button and the website's
+                // "Shuffle again" do; a long press goes back to the stream's own order.
+                Button { deal(shuffled: true) } label: {
+                    Image(systemName: "shuffle").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
+                }
+                .buttonStyle(ReelRailStyle(isOn: store.shuffled))
+                .accessibilityLabel("Shuffle")
+                .accessibilityValue(store.shuffled ? "On" : "Off")
+                .accessibilityHint(store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
+                .accessibilityActions {
+                    if store.shuffled { Button("Stream order") { deal(shuffled: false) } }
+                }
+                .accessibilityIdentifier("pnvReelShuffle")
+                .contextMenu {
+                    if store.shuffled {
+                        Button("Stream order", systemImage: "list.bullet") { deal(shuffled: false) }
+                    }
+                }
+            }
         }
-        .buttonStyle(ReelRailStyle())
-        .padding(.leading, KJLayout.inset - 6)
+        .padding(.horizontal, KJLayout.inset - 6)
         .padding(.top, 6)
-        .accessibilityLabel("Close")
-        .accessibilityIdentifier("closePlayer")
+    }
+
+    /// All regions, or one: the same filter as the grid's chips, so the grid follows the reel.
+    private var regionMenu: some View {
+        Menu {
+            Picker("Region", selection: Binding(get: { model.pnvRegion }, set: { change(region: $0) })) {
+                Text("All regions").tag(PicsVidsStore.allRegions)
+                ForEach(store.regions, id: \.self) { Text(PnvRegions.label($0)).tag($0) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                // The grid's chip type, so the one filter reads the same in both places.
+                Text(model.pnvRegion.isEmpty ? "All regions" : PnvRegions.label(model.pnvRegion))
+                    .font(.system(.subheadline, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(.caption, weight: .bold))
+            }
+            .padding(.horizontal, 16)
+            .frame(height: 44)
+        }
+        .buttonStyle(ReelRailStyle(shape: .capsule))
+        .accessibilityLabel("Region")
+        .accessibilityValue(model.pnvRegion.isEmpty ? "All regions" : PnvRegions.label(model.pnvRegion))
+        .accessibilityIdentifier("pnvReelRegion")
+    }
+
+    /// While a new region or deal has nothing yet: the loader, or what went wrong.
+    @ViewBuilder
+    private var emptyState: some View {
+        let feed = store.feed(model.pnvRegion)
+        if let error = feed.error {
+            VStack(spacing: 12) {
+                Text(error).kjBody()
+                Button(kicker: "Try again") { Task { await store.retry(region: model.pnvRegion) } }
+                    .buttonStyle(HouseButtonStyle(solid: true))
+            }
+        } else if feed.isDone {
+            Text("Nothing filed under this yet.").kjBody()
+        } else {
+            TuningLoader("Loading\u{2026}")
+        }
+    }
+
+    private func change(region: String) {
+        guard region != model.pnvRegion else { return }
+        restart { model.pnvRegion = region }
+    }
+
+    private func deal(shuffled: Bool) {
+        // Off while already off would only throw the viewer back to the first page.
+        guard shuffled || store.shuffled else { return }
+        restart { store.setShuffled(shuffled) }
+    }
+
+    /// Stops what is playing and empties the reel; it reopens on the new feed's first page.
+    private func restart(_ change: () -> Void) {
+        loadTask?.cancel()
+        controller.stop()
+        owner = nil
+        activatedId = nil
+        laps = []
+        change()
+        // No page is current until the new feed has one: reopenIfLost() then opens on it, here
+        // if the feed is already loaded, or when its first page arrives.
+        position = ""
+        reopenIfLost()
+    }
+
+    /// The page on screen left the reel (a new region, a new deal): open on the first page.
+    private func reopenIfLost() {
+        guard isStream, let first = items.first, current == nil else { return }
+        position = ReelItem.id(lap: 0, first.id)
+        jump += 1
+        activate()
     }
 
     /// The page that settled: its video starts, whatever played before stops; near the end of the
@@ -126,13 +253,21 @@ struct PnvReelsView: View {
         controller.stop()
         owner = nil
         guard let row = current else { return }
-        if case .feed = source, let index = items.firstIndex(where: { $0.id == row.id }),
-           index >= items.count - 4, !store.feed(model.pnvRegion).isDone {
-            Task { await store.loadMore(region: model.pnvRegion) }
+        let pages = reel
+        if isStream, let index = pages.firstIndex(where: { $0.id == currentId }), index >= pages.count - 4 {
+            if store.feed(model.pnvRegion).isDone {
+                // The feed has given everything: deal it again, so the reel never ends.
+                // ponytail: every lap is kept and `reel` is rebuilt per render. A lap starts only
+                // once the whole feed has been shown and is the feed's size, so it costs what the
+                // feed already costs, after as many swipes; cap laps if a big region ever gets there.
+                if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
+            } else {
+                Task { await store.loadMore(region: model.pnvRegion) }
+            }
         }
         guard row.isVideo else { phase = .ready; return }
         phase = .loading
-        let key = row.id
+        let key = currentId
         loadTask = Task { [controller] in
             do {
                 // A flick past a page is not a visit: only a page still current after a moment
@@ -171,11 +306,20 @@ struct PnvReelsView: View {
 
     /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1).
     private func step(_ delta: Int) {
-        guard let index = items.firstIndex(where: { $0.id == currentId }) else { return }
+        let pages = reel
+        guard let index = pages.firstIndex(where: { $0.id == currentId }) else { return }
         let next = index + delta
-        guard items.indices.contains(next) else { return }
-        withAnimation(.kj) { position = items[next].id }
+        guard pages.indices.contains(next) else { return }
+        withAnimation(.kj) { position = pages[next].id }
     }
+}
+
+/// One page of the reel: an object, and the round it was dealt in.
+private struct ReelItem: Identifiable {
+    let lap: Int
+    let row: PnvRow
+    var id: String { Self.id(lap: lap, row.id) }
+    static func id(lap: Int, _ key: String) -> String { "\(lap)|\(key)" }
 }
 
 /// One reel: the object, and over it the rail and the caption. Only the current page holds the
@@ -371,13 +515,21 @@ private struct PnvReelPage: View {
 
 /// A round plate in the ground colour behind a rail icon, so it reads over any picture. A press
 /// turns it to the band, as every house control does.
+/// `isOn` holds it on the band, as a switch that is on: Shuffle while the reel is shuffled.
 private struct ReelRailStyle: ButtonStyle {
+    enum Shape { case circle, capsule }
+    var isOn = false
+    var shape: Shape = .circle
     @Environment(\.palette) private var palette
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(configuration.isPressed ? palette.onBand : palette.ink)
-            .background(configuration.isPressed ? palette.band : palette.ground.opacity(0.9), in: Circle())
-            .contentShape(Circle())
+        let lit = isOn || configuration.isPressed
+        let fill = lit ? palette.band : palette.ground.opacity(0.9)
+        return configuration.label
+            .foregroundStyle(lit ? palette.onBand : palette.ink)
+            .environment(\.palette, lit ? palette.onBandPlate : palette)
+            .background { if shape == .circle { Circle().fill(fill) } else { Capsule().fill(fill) } }
+            .contentShape(shape == .circle ? AnyShape(Circle()) : AnyShape(Capsule()))
+            .animation(.kj, value: isOn)
     }
 }

@@ -238,14 +238,33 @@ final class KhajistanUITests: XCTestCase {
         waitFor(map, 5, "the map is on screen")
         let title = app.descendants(matching: .any)["regionTitle"]
         waitFor(title, 10, "the region block is on screen")
-        // The receiver set sits above the map when it is off, so the map can start below the
-        // screen: bring it fully into view before tapping on it.
+        // The playing receiver is pinned above the catalogue. A map can be inside the window
+        // but hidden behind that player, so bring the actual tap point into the scroll viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
         let window = app.windows.firstMatch.frame
-        for _ in 0..<4 where map.frame.maxY > window.maxY - 60 || map.frame.minY < window.minY {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        func tapPoint() -> CGPoint {
+            let frame = map.frame
+            return CGPoint(x: frame.minX + frame.width * 0.25, y: frame.minY + frame.height * 0.48)
+        }
+        func visibleCatalogue() -> CGRect {
+            catalogue.frame.intersection(window).insetBy(dx: 8, dy: 16)
+        }
+        for _ in 0..<8 {
+            let visible = visibleCatalogue()
+            let point = tapPoint()
+            if visible.contains(point) { break }
+            let upper = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.25))
+            let lower = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.75))
+            if point.y < visible.minY {
+                upper.press(forDuration: 0.05, thenDragTo: lower)
+            } else {
+                lower.press(forDuration: 0.05, thenDragTo: upper)
+            }
             usleep(600_000)
         }
+        XCTAssertTrue(visibleCatalogue().contains(tapPoint()), "the map tap is inside the visible catalogue, below the pinned receiver")
         // The Maghreb is the map's western mass. Its label sits a quarter of the way across and just
         // under half way down, at the same place on every screen because the map is drawn from one
         // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map

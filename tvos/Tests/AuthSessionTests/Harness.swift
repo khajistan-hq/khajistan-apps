@@ -13,15 +13,19 @@ enum SupabaseRoute {
 }
 @MainActor final class URLSession {
     static var pending: [(URLRequest, CheckedContinuation<(Data, URLResponse), Error>)] = []
+    static var hasFactor = false
     init(configuration: URLSessionConfiguration) {}
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         if request.url!.path.hasSuffix("logout") {
             return (Data("{}".utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
         }
-        // The authenticator lookup a sign-in now makes (tv/mfa-code): no factor, answered at once,
-        // so the race scenarios below still release only the requests they are about.
+        // Answer setup requests at once so each race suspends only the response under test.
         if request.httpMethod == "GET" && request.url!.path.hasSuffix("/auth/v1/user") {
-            return (Data(#"{"factors":[]}"#.utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
+            let body = Self.hasFactor ? #"{"factors":[{"id":"factor-a","factor_type":"totp","status":"verified"}]}"# : #"{"factors":[]}"#
+            return (Data(body.utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
+        }
+        if request.url!.path.hasSuffix("/challenge") {
+            return (Data(#"{"id":"challenge-a"}"#.utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
         }
         return try await withCheckedThrowingContinuation { Self.pending.append((request,$0)) }
     }
@@ -94,6 +98,35 @@ struct Failure: Error { let message: String }
         try check(shared.session == nil && shared.previewPassword == "preview-fixture","a refused refresh keeps the preview password")
         await shared.signOut()
         try check(shared.previewPassword == nil && Keychain.read("preview") == nil,"sign-out clears the preview password")
-        print("PASS eight actual AuthStore scenarios; no external network")
+        // A delayed MFA response must not undo logout or a newer login, including the same user.
+        URLSession.hasFactor = true
+        for replacement in ["logout", "a", "b", "none"] {
+            let mfa = try store()
+            let login = Task { try await mfa.signIn(email:"a@example.invalid",password:"fixture") }
+            try await waitRequest(); URLSession.release("a"); try await login.value
+            try check(mfa.pendingFactorId == "factor-a", "MFA factor is armed")
+            let verification = Task { () -> Bool in
+                do { try await mfa.verifyCode("123456"); return true } catch { return false }
+            }
+            try await waitRequest()
+            try check(URLSession.pending.first?.0.url?.path.hasSuffix("/verify") == true, "MFA verification is suspended")
+            if replacement == "logout" { await mfa.signOut() }
+            else if replacement != "none" {
+                let newer = Task { try await mfa.signIn(email:replacement+"@example.invalid",password:"fixture") }
+                while URLSession.pending.count < 2 { try await Task.sleep(for:.milliseconds(5)) }
+                URLSession.pending.swapAt(0,1); URLSession.release(replacement); try await newer.value
+            }
+            let saved = Keychain.read("session")
+            URLSession.release("a")
+            let succeeded = await verification.value
+            if replacement == "none" {
+                try check(succeeded && mfa.session?.userId == "a" && mfa.pendingFactorId == nil, "current MFA succeeds")
+            } else {
+                try check(!succeeded && Keychain.read("session") == saved, "stale MFA cannot persist a session")
+                try check(mfa.session?.userId == (replacement == "logout" ? nil : replacement), "stale MFA cannot replace current account")
+                try check(mfa.pendingFactorId == (replacement == "logout" ? nil : "factor-a"), "stale MFA cannot clear a newer factor")
+            }
+        }
+        print("PASS twelve actual AuthStore scenarios; no external network")
     }
 }

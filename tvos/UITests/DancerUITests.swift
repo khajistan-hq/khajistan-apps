@@ -82,14 +82,14 @@ final class DancerUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    private func openRadio(_ ids: [String], skin: String, _ app: XCUIApplication) -> String? {
+    private func openRadio(_ ids: [String], region: String = "indus", skin: String, _ app: XCUIApplication) -> String? {
         app.launchArguments = ["-kjskin", skin]
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
         XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
+        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-\(region)" {
             XCUIRemote.shared.press(.right)
         }
         print("DANCER nav region: \(focused(app))")
@@ -143,47 +143,38 @@ final class DancerUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Why the receiver would not list `id` today, read from the site's own files: missing from its
-    /// region file, or named by the denylist or the off-air list. Nil when it is listed, and when
-    /// the site cannot be read (an offline simulator then fails or skips in the player as before).
-    private static func withdrawal(_ id: String, region: String) -> String? {
-        let base = URL(string: "https://khajistan-archive.pages.dev/data/open-frequencies/")!
-        let quoted = "\"\(id)\""
-        func read(_ file: String) -> String? {
-            // A URLSession task, not Data(contentsOf:), which XCTest flags as synchronous loading.
-            var body: String?
-            let done = DispatchSemaphore(value: 0)
-            URLSession.shared.dataTask(with: base.appendingPathComponent(file)) { data, response, _ in
-                if (response as? HTTPURLResponse)?.statusCode == 200, let data { body = String(decoding: data, as: UTF8.self) }
-                done.signal()
-            }.resume()
-            return done.wait(timeout: .now() + 20) == .success ? body : nil
-        }
-        guard let shard = read("regions/\(region).json") else { return nil }
-        if !shard.contains(quoted) { return "not in regions/\(region).json" }
-        for feed in ["denylist.json", "off-air-suspects.json"] where read(feed)?.contains(quoted) == true {
-            return "named in \(feed)"
-        }
-        return nil
-    }
+    /// Quran recitation radio. The dancer must never appear, and no tap is made at all.
+    ///
+    /// The nightly stream probe takes silent stations off the dial (denylist.json), so no single
+    /// station can be named. These are Arabia's Quran stations that are reverent by name and were
+    /// published and off the denylist on 2026-11-14; the walk takes whichever it reaches first.
+    /// Indus's only one, Saut-ul-Quran, was denylisted that day for two silent nights.
+    static let recitation = [
+        "territory-saudi-arabia-quran-kareem-radio",
+        "uae-sharjah-quran-radio",
+        "state-qtv-qa-quraan-radio-2",
+        "radio-om-the-holy-quran-radio-fm-93-2",
+        "territory-saudi-arabia-nida-al-islam-radio",
+    ]
 
-    /// Saut-ul-Quran: recitation. The dancer must never appear, and no tap is made at all.
     func testReverentChannelHasNoDancer() throws {
-        // A channel the site has withdrawn is not on the dial, so there is nothing to open: skip,
-        // as for a carrier off air. Saut-ul-Quran went on the denylist on 2026-11-14.
-        if let reason = Self.withdrawal("pbc-saut-ul-quran", region: "indus") {
-            throw XCTSkip("Saut-ul-Quran is not on the dial: \(reason)")
-        }
         let app = XCUIApplication()
-        let id = try XCTUnwrap(openRadio(["pbc-saut-ul-quran"], skin: "day", app), "the recitation channel must open")
-        XCTAssertEqual(id, "pbc-saut-ul-quran", "the recitation channel must open")
+        guard let id = openRadio(Self.recitation, region: "arabia", skin: "day", app) else {
+            // The radio shelf opened but none of the candidates is on it: nothing to test.
+            if app.descendants(matching: .any)["shelf-radio"].exists {
+                app.terminate()
+                throw XCTSkip("no recitation channel from the candidate list is on Arabia's dial")
+            }
+            XCTFail("the Arabia radio shelf must open")
+            return
+        }
+        XCTAssertTrue(Self.recitation.contains(id), "a recitation channel must open (\(id))")
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30))
-        // The negative case means something only while the recitation is actually playing. It is
-        // the Indus list's only reverent channel, so when its live carrier is off air there is no
-        // other to tune: skip, because "no dancer" over silence proves nothing. Only a player in
-        // its failed state skips (a dead carrier, or the simulator offline); one stuck connecting,
-        // paused or never opened is a failure.
+        // The negative case means something only while the recitation is actually playing. When
+        // the carrier the walk reached is off air, skip, because "no dancer" over silence proves
+        // nothing. Only a player in its failed state skips (a dead carrier, or the simulator
+        // offline); one stuck connecting, paused or never opened is a failure.
         let deadline = Date().addingTimeInterval(45)
         while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
         let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
@@ -195,7 +186,7 @@ final class DancerUITests: XCTestCase {
         if state.label != "Playing" {
             shot("reverent-not-playing", app)
             app.terminate()
-            throw XCTSkip("Saut-ul-Quran's live carrier is not playing (\(state.label)); the no-dancer check is meaningless without playback")
+            throw XCTSkip("\(id)'s live carrier is not playing (\(state.label)); the no-dancer check is meaningless without playback")
         }
         var seen = Set<String>()
         for i in 0..<20 {

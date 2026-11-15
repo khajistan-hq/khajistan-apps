@@ -25,15 +25,20 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// From the top bar (or Surf, where focus rests at launch) to the Receiver's region strip:
-    /// Down through the sidebar until a region card has focus. Since the front became two bands
-    /// (2026-10-29) the strip runs under the sidebar, so the old Right off the sidebar found
-    /// nothing. Never presses Select, so nothing on the way is switched.
+    /// Reach the Receiver's region strip with remote presses, including when focus has moved
+    /// into a channel shelf below it. Never selects or changes the highlighted channel.
     @discardableResult
     func kjFocusStrip(_ app: XCUIApplication) -> Bool {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<10 where !focused.exists { XCUIRemote.shared.press(.down); kjPause(0.35) }
+        for _ in 0..<10 {
+            if focused.exists { return true }
+            let current = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            let belowStrip = current.exists && !current.identifier.hasPrefix("nav-") && regions.firstMatch.exists
+                && current.frame.midY > regions.firstMatch.frame.midY
+            XCUIRemote.shared.press(belowStrip ? .up : .down)
+            kjPause(0.35)
+        }
         return focused.exists
     }
 

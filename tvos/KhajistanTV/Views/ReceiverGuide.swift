@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The Receiver's guide, as a live TV app lays one (YouTube TV's guide): every channel of the shelf
 /// the viewer came from as a row, its number, its medium's mark on a plate, the name and the place,
-/// and LIVE on the one playing. It opens over the left of the picture, which plays on beside it.
+/// and LIVE on the one playing. It rises from the bottom over the picture, which plays on above it
+/// (owner, 2026-11-14: "make the guide come from bottom up rather than from the left").
 /// The remote lights a row (the player's surface keeps focus, as it does for Captions and Like);
 /// Select tunes it behind the pigeon.
 struct ReceiverGuide: View {
@@ -17,7 +18,8 @@ struct ReceiverGuide: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 16) {
                 Kicker("Guide \u{00B7} " + ReceiverRules.mediumLabel(medium))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
@@ -42,19 +44,19 @@ struct ReceiverGuide: View {
                 .padding(.vertical, 8)
             }
             .padding(.horizontal, KJLayout.inset)
-            .padding(.vertical, 56)
-            .frame(width: 900, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.top, 40)
+            .padding(.bottom, 48)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: .all)
-            Spacer(minLength: 0)
+            // The panel itself carries the name, so a test can read where it sits.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("receiverGuide")
         }
         .allowsHitTesting(false)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("receiverGuide")
     }
 
     /// The rows on screen: `rows` of them with the lit one in the middle, held against the ends.
-    static func window(count: Int, lit: Int, rows: Int = 9) -> [Int] {
+    static func window(count: Int, lit: Int, rows: Int = 5) -> [Int] {
         guard count > 0 else { return [] }
         let start = max(0, min(lit - rows / 2, count - rows))
         return Array(start..<min(count, start + rows))

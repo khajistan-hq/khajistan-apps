@@ -238,8 +238,14 @@ final class PicsVidsStore {
             feed.after = feed.start - 1
             feeds[region]?.start = feed.start
             feeds[region]?.after = feed.after
-            // A shuffled page carries no count; the shelf heading asks for it on its own.
-            if feed.total == nil {
+            // A shuffled page carries no count; a TV shelf heading asks for it on its own. The
+            // phone's grid and the Reel's videos feed show no count, so they do not ask.
+            #if os(tvOS)
+            let showsCount = !videosOnly
+            #else
+            let showsCount = false
+            #endif
+            if showsCount, feed.total == nil {
                 Task { [weak self] in await self?.loadCount(region: region, keys: keys, kind: kind, generation: gen) }
             }
         }

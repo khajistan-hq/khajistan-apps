@@ -368,7 +368,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   shelf. Picking a filter starts every shelf over.
 - **Shuffle every visit** (owner, 2026-11-14: "shuffle everytime, the same photos are just there
   and look boring"): on the Apple TV Shuffle is on from the start, and leaving the page for another
-  section deals again on the way back. A Shuffle button beside Reel (the Receiver's Surf plate) deals
+  section deals again on the way back, and so does coming back from the background
+  (a screensaver that sent the app there included). A Shuffle button beside Reel (the Receiver's Surf plate) deals
   again at once. The phone keeps the feed's own order.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.

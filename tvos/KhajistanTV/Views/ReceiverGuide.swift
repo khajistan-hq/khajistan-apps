@@ -48,10 +48,11 @@ struct ReceiverGuide: View {
             .padding(.bottom, 48)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: .all)
+            // The panel itself carries the name, so a test can read where it sits.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("receiverGuide")
         }
         .allowsHitTesting(false)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("receiverGuide")
     }
 
     /// The rows on screen: `rows` of them with the lit one in the middle, held against the ends.

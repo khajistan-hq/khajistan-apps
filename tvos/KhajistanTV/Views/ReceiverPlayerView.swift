@@ -53,7 +53,7 @@ struct ReceiverPlayerView: View {
     @State private var moveOnNote: String?
     /// The last failure was an account refusal: the screen waits for the viewer, never moves past it.
     @State private var failedAtGate = false
-    /// The resolver could not reach the network at all: every channel would fail the same way,
+    /// The resolver could not reach our own host (no network, or our side down): every channel would fail the same way,
     /// so the screen waits rather than walking the list (Fable round 1, PR 64).
     @State private var failedOffline = false
     /// The dead channel a move is already pending for: a second call for it says nothing new.
@@ -185,7 +185,8 @@ struct ReceiverPlayerView: View {
             case .playing, .tuning:
                 pauseReceiver()
             case .idle, .paused, .failed:
-                if destination != nil { pauseReceiver() } else { tune(current) }
+                // A retune of the same channel replaces any move pending for it.
+                if destination != nil { pauseReceiver() } else { stopMovingOn(); tune(current) }
             }
             wake()
         }
@@ -694,7 +695,12 @@ struct ReceiverPlayerView: View {
                 if case ReceiverStoreError.http(let code) = error, ReceiverRules.isAccountGate(httpStatus: code) {
                     failedAtGate = true
                 }
-                if let urlError = error as? URLError, Self.offlineCodes.contains(urlError.code) {
+                // The resolver only ever asks our own host, so a URLError or a server error says
+                // nothing about this channel: the network or our side is down, and walking the list
+                // would mark every channel dead (Fable round 2, PR 64).
+                if let urlError = error as? URLError, urlError.code != .cancelled {
+                    failedOffline = true
+                } else if case ReceiverStoreError.http(let code) = error, code >= 500 {
                     failedOffline = true
                 }
                 player.state = .failed(PlayerController.unreachable)
@@ -838,6 +844,8 @@ struct ReceiverPlayerView: View {
             }
             announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
             moveOnTask = Task {
+                // Done, moved or not: a later failure of the same channel may move again.
+                defer { if !Task.isCancelled { moveOnTask = nil; movingOnFrom = nil } }
                 guard await pausedOnDeadSignal(dead) else { return }
                 model.surfHistory.take(cycle, for: surfChoice)
                 moveOnNote = nil
@@ -853,6 +861,7 @@ struct ReceiverPlayerView: View {
         }
         announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
         moveOnTask = Task {
+            defer { if !Task.isCancelled { moveOnTask = nil; movingOnFrom = nil } }
             guard await pausedOnDeadSignal(dead) else { return }
             moveOnNote = nil
             destination = target
@@ -874,11 +883,6 @@ struct ReceiverPlayerView: View {
         wake()
         if let line { UIAccessibility.post(notification: .announcement, argument: line) }
     }
-
-    /// No route to the network at all, as opposed to one channel's carrier refusing.
-    private static let offlineCodes: Set<URLError.Code> = [
-        .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff,
-    ]
 
     private func stopMovingOn() {
         moveOnTask?.cancel()

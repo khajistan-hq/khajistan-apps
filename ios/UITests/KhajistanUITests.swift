@@ -738,6 +738,74 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "close returns to the grid")
     }
 
+    /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
+    /// moves on every swipe, because the reel deals its objects again once the feed has given
+    /// them all. The region and Shuffle are changed from inside the reel.
+    func testPicsVidsReelIsEndless() {
+        let app = launch(skin: "grove", tab: "picsVids")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        let shuffle = app.buttons["pnvReelShuffle"]
+        waitFor(shuffle, 10, "Shuffle is at the top of the reel")
+        XCTAssertEqual(shuffle.value as? String, "Off")
+        shuffle.tap()
+        XCTAssertTrue(NSPredicate(format: "value == 'On'").evaluate(with: shuffle) || shuffle.waitForValue("On"), "Shuffle turns on")
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        func onScreen() -> String? {
+            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+        }
+        func reelOpens(_ note: String) {
+            XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed, note)
+        }
+        reelOpens("the shuffled reel opens")
+        // A second deal while Shuffle is on changes no flag; the reel must still load it.
+        shuffle.tap()
+        XCTAssertEqual(shuffle.value as? String, "On", "a tap while on deals again and stays on")
+        reelOpens("a new deal opens on a page")
+        shuffle.press(forDuration: 1.2)
+        app.buttons["Stream order"].tap()
+        XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
+        // Horn of Africa holds 19 objects (measured 2026-11-14): 24 swipes go past its end.
+        app.buttons["pnvReelRegion"].tap()
+        // The menu's item, not the grid's chip of the same name under the reel.
+        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        reelOpens("the region's reel opens")
+        XCTAssertEqual(app.buttons["pnvReelRegion"].value as? String, "Horn of Africa")
+        var last = onScreen()
+        var seen = Set([last].compactMap { $0 })
+        func moved(from last: String?) -> Bool {
+            XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let now = onScreen(); return now != nil && now != last }, object: nil)], timeout: 6) == .completed
+        }
+        for swipe in 1...24 {
+            app.swipeUp()
+            // CI's slower simulator can still be settling the last page and swallow the swipe
+            // (2026-11-14, swipe 15): one more swipe. A reel that is stuck fails either way.
+            if !moved(from: last) { app.swipeUp(); _ = moved(from: last) }
+            let now = onScreen()
+            XCTAssertNotNil(now, "a reel is on screen after swipe \(swipe)")
+            XCTAssertNotEqual(now, last, "swipe \(swipe) moved on")
+            if let now { seen.insert(now) }
+            last = now
+        }
+        // Every swipe moved on: past the region's end (19 objects on 2026-11-14) that is the lap.
+        // The walk itself (every object once, the wrap) is proven without live data in
+        // ios/Tests/PnvRetry; no bound here rests on the region's count.
+        print("PNVREEL distinct \(seen.count) of 25 shown")
+        // Back to All regions and to Horn of Africa again, a feed already loaded: the reel must
+        // land on a page, not between two.
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'All regions' AND identifier != 'pnvregion-all'")).firstMatch.tap()
+        reelOpens("All regions opens on a page")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        reelOpens("a region already loaded opens on a page")
+        shot("pnv-reel-endless", app)
+    }
+
     /// The skin control: a pick takes effect and Automatic hands back to the sky.
     func testSkinControl() {
         let app = XCUIApplication()
@@ -1339,5 +1407,12 @@ final class KhajistanUITests: XCTestCase {
         }
         walk(root, inScroll: false)
         return found
+    }
+}
+
+private extension XCUIElement {
+    func waitForValue(_ value: String, timeout: TimeInterval = 10) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: self)],
+                       timeout: timeout) == .completed
     }
 }

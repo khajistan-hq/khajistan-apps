@@ -264,11 +264,8 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20))
     }
 
-    /// The reel (owner, 2026-11-14): Reel opens every region as one stream; on its strip Shuffle
-    /// turns off and on and Region steps to a region; Right never stops, coming round once a region's
-    /// objects are all given. Horn of Africa holds 19 objects (measured 2026-11-14).
-    /// The Reel comes round at a stream's end rather than stopping. Anatolia held 48 videos on
-    /// 2026-11-14, so 60 presses must pass its end and show an object a second time.
+    /// The Reel comes round at a stream's end rather than stopping. It walks Anatolia (48 videos
+    /// on 2026-11-14) until an object comes back; the bound is presses, not the region's count.
     func testReelComesRoundAtTheEndOfASmallRegion() {
         let app = launch()
         dismissNotice(app)
@@ -288,19 +285,25 @@ final class PicsVidsUITests: XCTestCase {
         }
         XCTAssertEqual((region.value as? String)?.lowercased(), "anatolia", "Region steps to Anatolia")
         XCUIRemote.shared.press(.up); kjPause(1)
-        var shown: [String] = [surface.value as? String].compactMap { $0 }
-        for press in 1...60 {
+        var last = surface.value as? String
+        var seen = Set([last].compactMap { $0 })
+        var cameRound = false
+        // Until the first object seen twice: the region's end, passed. 200 presses holds until
+        // Anatolia has that many videos.
+        for press in 1...200 {
             XCUIRemote.shared.press(.right)
             kjPause(1.2)
             let now = surface.value as? String
-            XCTAssertNotEqual(now, shown.last, "Right \(press) moved on")
-            if let now { shown.append(now) }
+            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            last = now
+            if let now, !seen.insert(now).inserted { cameRound = true; break }
         }
-        let distinct = Set(shown).count
-        print("PNVREEL anatolia distinct \(distinct) of \(shown.count) shown")
-        XCTAssertLessThan(distinct, shown.count, "past the end the stream comes round and shows an object again")
+        print("PNVREEL anatolia came round after \(seen.count) distinct")
+        XCTAssertTrue(cameRound, "past the end the stream comes round and shows an object again")
     }
 
+    /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
+    /// Shuffle deals again and stays on, and Region steps to a region; Right keeps moving on.
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)

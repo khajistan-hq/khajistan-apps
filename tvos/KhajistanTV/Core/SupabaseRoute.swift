@@ -221,3 +221,57 @@ enum SupabaseRoute {
         return answers(status: http.statusCode, routeHeader: http.value(forHTTPHeaderField: "x-kj-route"), viaProxy: viaProxy)
     }
 }
+
+#if DEBUG
+/// `-kjfixtures <dir>`: a debug build answers a GET from `<dir>/<path>` when that file exists, so a
+/// UI test reads a recorded receiver list or chat room list instead of the live site. A request with
+/// no file goes to the network as before. CI, 2026-11-14: one TLS error on receiver-index.json
+/// failed a pull request that never touched the Receiver.
+final class KJFixtureProtocol: URLProtocol, @unchecked Sendable {
+    static let directory = UserDefaults.standard.string(forKey: "kjfixtures").map { URL(fileURLWithPath: $0) }
+
+    /// Explicit UI-test media: real AVPlayer decoding without an upstream carrier dependency.
+    /// Release builds have neither this switch nor the local-file route.
+    static func mediaURL(for medium: String) throws -> URL? {
+        guard UserDefaults.standard.bool(forKey: "kjfixturemedia") else { return nil }
+        guard let directory else { throw URLError(.fileDoesNotExist) }
+        let file = directory.appendingPathComponent("media/" + (medium == "radio" ? "sound.m4a" : "picture.mp4"))
+        guard FileManager.default.fileExists(atPath: file.path) else { throw URLError(.fileDoesNotExist) }
+        return file
+    }
+
+    /// The recorded answer for a URL: its path (off the `/sb/` proxy) under the fixture directory.
+    static func file(for request: URLRequest) -> URL? {
+        guard let directory, let url = request.url, (request.httpMethod ?? "GET") == "GET" else { return nil }
+        let path = SupabaseRoute.unrouted(url).path
+        guard path.count > 1, !path.contains("..") else { return nil }
+        let file = directory.appendingPathComponent(String(path.dropFirst()))
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { file(for: request) != nil }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        guard let url = request.url, let file = Self.file(for: request), let body = try? Data(contentsOf: file),
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1",
+                                             headerFields: ["Content-Type": "application/json"]) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.fileDoesNotExist))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+#endif
+
+extension URLSessionConfiguration {
+    /// Recorded answers first in a debug build launched with `-kjfixtures`; unchanged otherwise.
+    func answeringFromFixtures() -> URLSessionConfiguration {
+        #if DEBUG
+        if KJFixtureProtocol.directory != nil { protocolClasses = [KJFixtureProtocol.self] + (protocolClasses ?? []) }
+        #endif
+        return self
+    }
+}

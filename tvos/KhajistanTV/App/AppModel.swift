@@ -156,6 +156,7 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
+        auth.onPreviewPasswordChange = { [weak self] in self?.reading.previewCredentialDidChange() }
         watchTheSky()
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }

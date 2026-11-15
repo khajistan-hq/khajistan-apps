@@ -67,8 +67,9 @@ final class FilmsUITests: XCTestCase {
 
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "The film's player must show its state")
-        for _ in 0..<45 where state.label != "Playing" { kjPause(1) }
-        XCTAssertEqual(state.label, "Playing", "the preview must play")
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45),
+                       .completed, "the preview must play")
         kjScreenshot("vod-04-preview-with-panel", app: app)
         kjPause(5)
         kjScreenshot("vod-05-preview-picture", app: app)

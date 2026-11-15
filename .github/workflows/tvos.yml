@@ -43,6 +43,8 @@ jobs:
           sh tvos/scripts/test-caption-preference.sh
       - name: Account session race regressions
         run: KJ_AUTH_TEST_PLATFORMS=tvos sh tvos/scripts/test-auth-session.sh
+      - name: Reading Room cache regressions
+        run: sh tvos/scripts/test-reading-cache.sh
       - name: Select an Apple TV simulator
         id: simulator
         run: |

@@ -42,6 +42,8 @@ jobs:
         run: KJ_CAPTION_TEST_PLATFORMS=ios sh tvos/scripts/test-caption-session.sh
       - name: Account session race regressions
         run: KJ_AUTH_TEST_PLATFORMS=ios sh tvos/scripts/test-auth-session.sh
+      - name: Reading Room cache regressions
+        run: sh tvos/scripts/test-reading-cache.sh
       - name: Select an available iPhone simulator
         id: simulator
         run: |

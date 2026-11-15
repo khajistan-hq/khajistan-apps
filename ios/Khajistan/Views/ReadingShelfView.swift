@@ -51,7 +51,7 @@ struct ReadingShelfView: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .task { await store.start() }
+        .task(id: model.auth.previewPassword) { await store.start() }
         // Searching a thousand-odd titles waits for a pause in typing, as Search does.
         .task(id: query) {
             // A cleared field clears at once.
@@ -229,7 +229,7 @@ struct ReadingRowScreen: View {
             .frame(maxWidth: KJLayout.wideWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .task { await model.reading.start() }
+        .task(id: model.auth.previewPassword) { await model.reading.start() }
     }
 }
 
@@ -329,7 +329,7 @@ struct ReadingTitleScreen: View {
             .frame(maxWidth: KJLayout.wideWidth, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
-        .task { await store.start() }
+        .task(id: model.auth.previewPassword) { await store.start() }
         .task(id: store.phase == .ready) { openResumeIfAsked() }
         .fullScreenCover(item: $reading) { target in
             ReadingReaderScreen(title: target.title, issue: target.issue, startPage: target.page)

@@ -536,7 +536,12 @@ struct ReceiverPlayerView: View {
             list = guideList
             if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
         }
-        guard target.id != (destination ?? current).id else { return wake() }
+        guard target.id != (destination ?? current).id else {
+            // The channel already on screen: the same as leaving the guide with Back.
+            wake()
+            if isFailed { moveOnFromDeadSignal() }
+            return
+        }
         if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()

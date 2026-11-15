@@ -1,0 +1,11 @@
+[{"slug":"khajistan","label":"khajistan","kind":"house","region":null,"country":null,"category":"public","adult":false,"description":null,"status":"approved","slow_mode_seconds":0}, 
+ {"slug":"lip2lipkiss","label":"lip 2 lip kiss","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":null,"status":"approved","slow_mode_seconds":0}, 
+ {"slug":"spasialprogram","label":"spasial program","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":"The programme, and everything around it.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"t4t","label":"t4t","kind":"house","region":null,"country":null,"category":"public","adult":false,"description":"Trans seeking trans.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"daily-feelings","label":"daily feelings","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":"How the day went.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"food","label":"food","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":"What is cooking, what is eaten, where.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"sport","label":"sport","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":"Cricket, football, wrestling, the lot.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"fashion","label":"fashion","kind":"house","region":null,"country":null,"category":"themes","adult":false,"description":"What people wear and how.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"het4het","label":"het4het","kind":"house","region":null,"country":null,"category":"partners","adult":true,"description":"Men and women seeking each other.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"m4m","label":"m4m","kind":"house","region":null,"country":null,"category":"public","adult":false,"description":"Men seeking men.","status":"approved","slow_mode_seconds":0}, 
+ {"slug":"w4w","label":"w4w","kind":"house","region":null,"country":null,"category":"public","adult":false,"description":"Women seeking women.","status":"approved","slow_mode_seconds":0}]

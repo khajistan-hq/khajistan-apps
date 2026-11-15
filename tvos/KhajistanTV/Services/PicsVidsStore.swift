@@ -57,7 +57,13 @@ final class PicsVidsStore {
     private(set) var feeds: [String: PnvFeed] = [:]
     private(set) var kind: PnvKind?
     /// The site's Shuffle: every shelf re-dealt along the room's permutation from a random place.
+    /// On the Apple TV it is on from the start and dealt again on every visit (owner, 2026-11-14:
+    /// "shuffle everytime, the same photos are just there"). Off is the feed's own order, newest first.
+    #if os(tvOS)
+    private(set) var shuffled = true
+    #else
     private(set) var shuffled = false
+    #endif
     /// Counts the times every shelf was started over (a new kind, Shuffle on or off, a new deal).
     /// Views key their first-page loads on it: a re-deal changes no flag, only this.
     private(set) var deal = 0
@@ -71,6 +77,8 @@ final class PicsVidsStore {
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
+    /// The page was left since the last deal: the next visit deals again (`pageLeft()`).
+    @ObservationIgnored private var dueForNewDeal = false
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -88,7 +96,11 @@ final class PicsVidsStore {
     /// Loads the roster and the first page. Safe to call on every appearance: a page already open is left alone.
     func start() async {
         switch phase {
-        case .loading, .ready: return
+        case .loading: return
+        case .ready:
+            // Back on the page: a new deal, so it never opens on the same pictures twice.
+            if dueForNewDeal { dueForNewDeal = false; setShuffled(true) }
+            return
         case .idle, .failed: break
         }
         phase = .loading
@@ -142,6 +154,9 @@ final class PicsVidsStore {
         feeds = [:]
     }
 
+    /// The viewer went to another section. Not called while an object is open over the page.
+    func pageLeft() { dueForNewDeal = true }
+
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
     func setShuffled(_ on: Bool) {
@@ -174,6 +189,10 @@ final class PicsVidsStore {
     /// and the Apple TV's Reel (ios/ compiles this file too).
     static let allRegions = ""
 
+    /// A region's videos-only feed, for the Reel. Its own key, so the page's filter is untouched.
+    static let videosPrefix = "videos:"
+    static func videosKey(_ region: String) -> String { videosPrefix + region }
+
     /// The next page of one region's shelf: the first when it has none yet. Safe to call as often
     /// as focus nears the end; a page in flight or a finished shelf is left alone.
     func loadMore(region: String) async {
@@ -181,8 +200,11 @@ final class PicsVidsStore {
         var feed = feeds[region] ?? PnvFeed()
         guard !feed.isLoading, !feed.isDone, feed.error == nil else { return }
         let gen = generation
+        let videosOnly = region.hasPrefix(Self.videosPrefix)
+        let place = videosOnly ? String(region.dropFirst(Self.videosPrefix.count)) : region
+        let kind = videosOnly ? PnvKind.video : self.kind
         // No roster, or a region nobody is filed under: nothing to ask for.
-        guard let keys = PnvAPI.accountKeys(roster: roster, region: region == Self.allRegions ? nil : region) else {
+        guard let keys = PnvAPI.accountKeys(roster: roster, region: place == Self.allRegions ? nil : place) else {
             feed.isDone = true
             feeds[region] = feed
             return

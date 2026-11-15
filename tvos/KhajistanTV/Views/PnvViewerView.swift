@@ -46,17 +46,23 @@ struct PnvViewerView: View {
     /// The region the stream is read from: "" is every region. Changed in place from the strip.
     @State private var region: String
     private let list: [PnvRow]?
+    /// Reel: videos only, whatever the page's filter (owner, 2026-11-14: "reel just needs to be of videos").
+    private let videosOnly: Bool
+    /// The store's feed this viewer walks: the region's own, or its videos-only reel.
+    private var feedKey: String { videosOnly ? PicsVidsStore.videosKey(region) : region }
 
-    init(row: PnvRow, region: String) {
+    init(row: PnvRow, region: String, videosOnly: Bool = false) {
         _current = State(initialValue: row)
         _region = State(initialValue: region)
         self.list = nil
+        self.videosOnly = videosOnly
     }
 
     init(row: PnvRow, list: [PnvRow]) {
         _current = State(initialValue: row)
         _region = State(initialValue: "")
         self.list = list
+        self.videosOnly = false
     }
 
     private var store: PicsVidsStore { model.pnv }
@@ -259,7 +265,7 @@ struct PnvViewerView: View {
         phase = .loading
         change()
         saveNote = nil
-        let shelf = region
+        let shelf = feedKey
         restartTask = Task {
             defer { if !Task.isCancelled { restartTask = nil } }
             if store.feed(shelf).items.isEmpty { await store.retry(region: shelf) }
@@ -397,15 +403,15 @@ struct PnvViewerView: View {
                 return
             }
             saveNote = nil
-            guard var index = store.feed(region).items.firstIndex(where: { $0.id == current.id }) else { return }
+            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id }) else { return }
             index += delta
-            if index >= store.feed(region).items.count { await store.loadMore(region: region) }
-            let items = store.feed(region).items
+            if index >= store.feed(feedKey).items.count { await store.loadMore(region: feedKey) }
+            let items = store.feed(feedKey).items
             guard !Task.isCancelled, !items.isEmpty else { return }
             // The stream never ends: past its last object it comes round to its first, once the
             // feed has given everything; Left from the first stays put.
             if index >= items.count {
-                guard store.feed(region).isDone else { return }
+                guard store.feed(feedKey).isDone else { return }
                 index = 0
             }
             guard items.indices.contains(index) else { return }

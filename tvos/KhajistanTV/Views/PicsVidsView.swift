@@ -22,6 +22,7 @@ struct PicsVidsView: View {
         let row: PnvRow
         var region: String = ""
         var list: [PnvRow]? = nil
+        var videosOnly = false
         var id: String { row.id }
     }
 
@@ -46,7 +47,12 @@ struct PicsVidsView: View {
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         .task { await store.start() }
         // Left before the Reel's page came: the viewer must not open by itself later.
-        .onDisappear { reelTask?.cancel(); reelNote = nil }
+        .onDisappear {
+            reelTask?.cancel(); reelNote = nil
+            // Left for another section (not for an object opened over the page): the next visit
+            // deals again (owner, 2026-11-14: "shuffle everytime").
+            if viewing == nil { store.pageLeft() }
+        }
         // Only the outcome is announced; the Loading line stays on screen for sight and is
         // reachable by VoiceOver's own exploring, as plain text.
         .onChange(of: reelNote) {
@@ -57,7 +63,7 @@ struct PicsVidsView: View {
             if let list = choice.list {
                 PnvViewerView(row: choice.row, list: list)
             } else {
-                PnvViewerView(row: choice.row, region: choice.region)
+                PnvViewerView(row: choice.row, region: choice.region, videosOnly: choice.videosOnly)
             }
         }
     }
@@ -114,6 +120,15 @@ struct PicsVidsView: View {
             ForEach(PnvKind.allCases, id: \.self) { kind in
                 kindTab(kind.label, kind: kind)
             }
+            // A new deal now, every shelf from a new random place, as the Receiver's Surf.
+            Button {
+                store.setShuffled(true)
+            } label: {
+                Label("Shuffle", systemImage: "shuffle").kjKicker()
+            }
+            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
+            .padding(.leading, 28)
+            .accessibilityIdentifier("pnvShuffle")
             // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
             // and Shuffle are changed inside it.
             Button {
@@ -122,7 +137,8 @@ struct PicsVidsView: View {
                 reelNote = Self.reelLoading
                 reelTask = Task {
                     defer { reelTask = nil }
-                    let all = PicsVidsStore.allRegions
+                    // Videos only, every region (owner, 2026-11-14: "reel just needs to be of videos").
+                    let all = PicsVidsStore.videosKey(PicsVidsStore.allRegions)
                     // retry clears a failed load first; a feed that failed once would refuse loadMore.
                     // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
                     // then comes back with nothing, not done and no error.
@@ -138,7 +154,7 @@ struct PicsVidsView: View {
                     guard !Task.isCancelled else { return }
                     if let first = store.feed(all).items.first {
                         reelNote = nil
-                        viewing = Viewing(row: first, region: all)
+                        viewing = Viewing(row: first, region: PicsVidsStore.allRegions, videosOnly: true)
                     } else {
                         reelNote = store.feed(all).error ?? "Nothing filed yet."
                     }
@@ -147,7 +163,7 @@ struct PicsVidsView: View {
                 Label("Reel", systemImage: "play.rectangle.on.rectangle").kjKicker()
             }
             .buttonStyle(HouseTabStyle(isCurrent: false))
-            .padding(.leading, 28)
+            .padding(.leading, 12)
             .accessibilityIdentifier("pnvReel")
             if let reelNote { Text(reelNote).kjSmall(faint: true).accessibilityIdentifier("pnvReelNote") }
         }
@@ -190,6 +206,12 @@ struct PicsVidsView: View {
                             viewing = Viewing(row: row, list: list)
                         }
                     }
+                }
+                // Every region mixed, large, first: the page opens on pictures, a new hand each
+                // visit (owner, 2026-11-14: "the same photos are just there and look boring").
+                PnvRegionShelf(region: PicsVidsStore.allRegions, title: "All regions",
+                               tileHeight: PnvRegionShelf.largeTileHeight) { row in
+                    viewing = Viewing(row: row, region: PicsVidsStore.allRegions)
                 }
                 ForEach(store.regions, id: \.self) { region in
                     PnvRegionShelf(region: region) { row in
@@ -256,10 +278,14 @@ private struct PnvSavedShelf: View {
 /// when focus is within a few cards of its end. A region with nothing under the filter has no shelf.
 private struct PnvRegionShelf: View {
     let region: String
+    var title: String? = nil
+    var tileHeight: CGFloat = PnvRegionShelf.tileHeight
     let open: (PnvRow) -> Void
     @Environment(AppModel.self) private var model
 
     static let tileHeight: CGFloat = 300
+    /// The all-regions shelf at the top of the page.
+    static let largeTileHeight: CGFloat = 460
     static let captionHeight: CGFloat = 72
 
     private var store: PicsVidsStore { model.pnv }
@@ -270,7 +296,7 @@ private struct PnvRegionShelf: View {
             EmptyView()
         } else {
             let nearEnd = Set(feed.items.suffix(8).map(\.id))
-            Shelf(PnvRegions.label(region), count: feed.total.map { $0.formatted() }) {
+            Shelf(title ?? PnvRegions.label(region), count: feed.total.map { $0.formatted() }) {
                 if feed.items.isEmpty {
                     placeholder(feed)
                 } else {
@@ -285,7 +311,7 @@ private struct PnvRegionShelf: View {
                     } else if feed.isLoading {
                         TuningLoader(nil)
                             .scaleEffect(0.5)
-                            .frame(width: 160, height: Self.tileHeight)
+                            .frame(width: 160, height: tileHeight)
                     }
                 }
             }
@@ -308,7 +334,7 @@ private struct PnvRegionShelf: View {
                 TuningLoader("Loading\u{2026}", bird: 120)
             }
         }
-        .frame(width: 600, height: Self.tileHeight + 12 + Self.captionHeight, alignment: .leading)
+        .frame(width: 600, height: tileHeight + 12 + Self.captionHeight, alignment: .leading)
     }
 
     private func retry(_ message: String) -> some View {
@@ -322,11 +348,11 @@ private struct PnvRegionShelf: View {
             .buttonStyle(HouseButtonStyle())
             .accessibilityIdentifier("pnvRetry")
         }
-        .frame(width: 600, height: Self.tileHeight, alignment: .leading)
+        .frame(width: 600, height: tileHeight, alignment: .leading)
     }
 
     private func tile(_ row: PnvRow) -> some View {
-        PnvTile(row: row, handle: store.accountHandle(for: row)) { open(row) }
+        PnvTile(row: row, handle: store.accountHandle(for: row), height: tileHeight) { open(row) }
             .accessibilityIdentifier("tile-\(row.media_key)")
     }
 }
@@ -336,12 +362,13 @@ private struct PnvRegionShelf: View {
 private struct PnvTile: View {
     let row: PnvRow
     let handle: String
+    var height: CGFloat = PnvRegionShelf.tileHeight
     let open: () -> Void
 
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 12) {
-                PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, height: PnvRegionShelf.tileHeight, maxPixel: 900)
+                PnvPicture(urls: [PnvMedia.tile(row), PnvMedia.thumb(row)].compactMap { $0 }, aspect: row.aspect, height: height, maxPixel: 900)
                     .kjCardArt()
                 // The caption takes the picture's width and is cut to it.
                 Color.clear

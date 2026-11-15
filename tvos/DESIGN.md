@@ -165,7 +165,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   RADIO, the station's name in display type, and its place and broadcaster. A channel change is
   described under Motion.
 - **Guide** (2026-10-27, after YouTube TV's live guide): Guide is the strip's third control, after
-  CC and Like, reached with Right. Select opens it over the left of the picture, which plays on:
+  CC and Like, reached with Right. Select raises it from the bottom over the picture, which plays on above it (owner, 2026-11-14: "make the guide come from bottom up rather than from the left"):
   every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
   and the place, hairlines between, ● LIVE on the one playing. Up and down light a row (the focus
   plate, 1.03), Select tunes it behind the pigeon, Left or Menu closes it. Like CC and Like it is
@@ -365,6 +365,14 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   (`PicsVidsStore.feeds`): it asks for its first page of 60 when it comes on screen, and for the
   next when focus is within eight cards of its end. A region with nothing under the filter has no
   shelf. Picking a filter starts every shelf over.
+- **Shuffle every visit** (owner, 2026-11-14: "shuffle everytime, the same photos are just there
+  and look boring"): on the Apple TV Shuffle is on from the start, and leaving the page for another
+  section deals again on the way back. A Shuffle button beside Reel (the Receiver's Surf plate) deals
+  again at once. The phone keeps the feed's own order.
+- **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
+  videos, every region, whatever the page's filter says; its Region chip steps regions as before.
+- **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
+  opens on pictures. Its viewer walks the same mixed stream as Reel.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own
   dimensions, so nothing moves when the picture arrives), on a house-lift plate that holds its
   place until the picture fades in, never cropped; lifts under focus like any card. A video's

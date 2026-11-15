@@ -263,7 +263,7 @@ final class PicsVidsUITests: XCTestCase {
     }
 
     /// The reel (owner, 2026-11-14): Reel opens every region as one stream; on its strip Shuffle
-    /// turns on and Region steps to a region; Right never stops, coming round once a region's
+    /// turns off and on and Region steps to a region; Right never stops, coming round once a region's
     /// objects are all given. Horn of Africa holds 19 objects (measured 2026-11-14).
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
@@ -280,9 +280,12 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.right); kjPause(0.5)
         XCUIRemote.shared.press(.right); kjPause(0.5)
         let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
-        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "off")
+        // Shuffle is on from the start on the Apple TV (owner, 2026-11-14: "shuffle everytime").
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Shuffle starts on")
         XCUIRemote.shared.press(.select); kjPause(4)
-        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Select turns Shuffle on")
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "off", "Select turns Shuffle off")
+        XCUIRemote.shared.press(.select); kjPause(4)
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Select turns Shuffle on again")
         kjScreenshot("pv-reel-01-shuffled", app: app)
         XCUIRemote.shared.press(.right); kjPause(0.5)
         let region = app.descendants(matching: .any)["pnvReelRegion"]

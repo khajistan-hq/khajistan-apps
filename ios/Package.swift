@@ -7,7 +7,7 @@ let package = Package(
     products: [.library(name: "KhajistanCore", targets: ["KhajistanCore"])],
     targets: [
         .target(name: "KhajistanCore", path: "Khajistan/Core"),
-        .testTarget(name: "KhajistanCorePackageTests", dependencies: ["KhajistanCore"], path: "Tests/PackageTests")
+        .testTarget(name: "KhajistanCoreTests", dependencies: ["KhajistanCore"], path: "Tests/PackageTests")
     ],
     swiftLanguageModes: [.v5]
 )

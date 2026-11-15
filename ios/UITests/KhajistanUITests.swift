@@ -367,8 +367,9 @@ final class KhajistanUITests: XCTestCase {
             catalogue.swipeDown()
             usleep(400_000)
         }
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
@@ -560,8 +561,9 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'Paused'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
         app.buttons["receiverOff"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
         waitForHome(app, 5, "One edge tap selects Home")
@@ -1287,8 +1289,9 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["nowPlayingOff"].tap()
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off leaves nothing playing and nothing on screen")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// A channel left on plays while reading, and its small player is in the reader too, which
@@ -1339,8 +1342,9 @@ final class KhajistanUITests: XCTestCase {
         openRooms(app)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// "Keep playing" off, the viewer leaves while the launch Surf is still choosing: the Surf is

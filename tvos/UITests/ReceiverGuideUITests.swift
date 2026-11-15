@@ -9,11 +9,11 @@ final class ReceiverGuideUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testDay() { walk("day") }
-    func testGrove() { walk("grove") }
-    func testSmut() { walk("smut") }
+    func testDay() throws { try walk("day") }
+    func testGrove() throws { try walk("grove") }
+    func testSmut() throws { try walk("smut") }
 
-    private func walk(_ skin: String) {
+    private func walk(_ skin: String) throws {
         let app = XCUIApplication()
         app.launchArguments += ["-kjskin", skin]
         kjLaunch(app)
@@ -39,6 +39,8 @@ final class ReceiverGuideUITests: XCTestCase {
 
         let current = app.staticTexts["currentChannel"]
         XCTAssertTrue(current.waitForExistence(timeout: 15))
+        // A dead carrier puts its own control on the strip, and Right then falls short of Guide.
+        try kjTuneUntilPlaying(app)
         let start = current.label
         let guideControl = app.buttons["guideControl"]
         XCTAssertTrue(guideControl.waitForExistence(timeout: 30), "the strip offers the guide once the channel plays")

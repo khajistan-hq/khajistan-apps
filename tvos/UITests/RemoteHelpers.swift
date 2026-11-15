@@ -13,6 +13,24 @@ extension XCTestCase {
         app.launch()
     }
 
+    /// Waits for the channel just opened to play. When it does not, Down tunes the next channel,
+    /// as the player's own line says, up to `tries` channels; then the test is skipped, naming what
+    /// each said. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
+    /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
+    func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4) throws {
+        let state = app.staticTexts["playerState"]
+        let current = app.staticTexts["currentChannel"]
+        var tried: [String] = []
+        for attempt in 0..<tries {
+            if attempt > 0 { XCUIRemote.shared.press(.down); kjPause(1) }
+            XCTAssertTrue(state.waitForExistence(timeout: 20), "the player opens")
+            let playing = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Playing'"), object: state)
+            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
+            tried.append("\(current.exists ? current.label : "?"): \(state.label)")
+        }
+        throw XCTSkip("No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))")
+    }
+
     var kjRecordedFixtures: String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/recorded").path
     }

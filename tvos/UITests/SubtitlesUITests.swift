@@ -96,7 +96,7 @@ final class SubtitlesUITests: XCTestCase {
         }
     }
 
-    func testReceiverCaptionsSignedOut() {
+    func testReceiverCaptionsSignedOut() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
         kjLaunch(app)
@@ -117,7 +117,9 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
-        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "ABN News must be playing for the strip to offer its controls: \(state.label)")
+        // The strip offers its controls over a playing channel: ABN News, or when its carrier does
+        // not reach the runner, the next Indus channel down.
+        try kjTuneUntilPlaying(app)
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)

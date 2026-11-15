@@ -267,6 +267,40 @@ final class PicsVidsUITests: XCTestCase {
     /// The reel (owner, 2026-11-14): Reel opens every region as one stream; on its strip Shuffle
     /// turns off and on and Region steps to a region; Right never stops, coming round once a region's
     /// objects are all given. Horn of Africa holds 19 objects (measured 2026-11-14).
+    /// The Reel comes round at a stream's end rather than stopping. Anatolia held 48 videos on
+    /// 2026-11-14, so 60 presses must pass its end and show an object a second time.
+    func testReelComesRoundAtTheEndOfASmallRegion() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        // Down lights Save; Right three times reaches Region.
+        XCUIRemote.shared.press(.down); kjPause(0.5)
+        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        let region = app.descendants(matching: .any)["pnvReelRegion"]
+        for _ in 0..<12 where (region.value as? String)?.lowercased() != "anatolia" {
+            XCUIRemote.shared.press(.select); kjPause(3)
+        }
+        XCTAssertEqual((region.value as? String)?.lowercased(), "anatolia", "Region steps to Anatolia")
+        XCUIRemote.shared.press(.up); kjPause(1)
+        var shown: [String] = [surface.value as? String].compactMap { $0 }
+        for press in 1...60 {
+            XCUIRemote.shared.press(.right)
+            kjPause(1.2)
+            let now = surface.value as? String
+            XCTAssertNotEqual(now, shown.last, "Right \(press) moved on")
+            if let now { shown.append(now) }
+        }
+        let distinct = Set(shown).count
+        print("PNVREEL anatolia distinct \(distinct) of \(shown.count) shown")
+        XCTAssertLessThan(distinct, shown.count, "past the end the stream comes round and shows an object again")
+    }
+
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)

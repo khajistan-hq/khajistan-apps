@@ -141,7 +141,7 @@ struct ReceiverPlayerView: View {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
                               medium: (destination ?? current).mediaType, title: guideTitle,
                               turns: guideRegions.count > 1, loading: guideLoading)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.move(edge: .bottom))
             }
             CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
@@ -455,7 +455,7 @@ struct ReceiverPlayerView: View {
         guideList = list.filter { $0.mediaType == medium }
         // A region page's list is titled by its region; a cross-region shelf and Surf by name.
         guideRegion = surfChoice == nil && listTitle == nil ? homeRegion : nil
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) {
             guideRow = guideList.firstIndex { $0.id == (destination ?? current).id } ?? 0
         }
         prefetchGuide(around: guideRegion ?? homeRegion)
@@ -528,7 +528,7 @@ struct ReceiverPlayerView: View {
     private func closeGuide() {
         guideLoad?.cancel()
         cancelPrefetches()
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         armed = nil
         wake()
         if isFailed { moveOnFromDeadSignal() }
@@ -537,7 +537,7 @@ struct ReceiverPlayerView: View {
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
     private func pick(_ target: Channel) {
         stopMovingOn()
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         armed = nil
         // Up and down then step through the region chosen from. Surf keeps its own walk.
         if surfChoice == nil, guideList.count > 1 {
@@ -1072,6 +1072,6 @@ private struct OnBandFace<Face: View>: View {
             .foregroundStyle(isFocused ? palette.band : palette.onBand)
             .background(isFocused ? palette.onBand : Color.clear)
             .scaleEffect(isFocused && !isPressed ? 1.03 : 1)
-            .animation(.easeOut(duration: 0.15), value: isFocused)
+            .animation(CardMotion.spring, value: isFocused)
     }
 }

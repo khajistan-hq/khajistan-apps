@@ -195,7 +195,7 @@ struct TransmissionPlayerView: View {
             overlay(air)
             if let guideRow {
                 TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.move(edge: .bottom))
             }
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
@@ -454,13 +454,13 @@ struct TransmissionPlayerView: View {
             return .init(number: number, name: store.channelName(number), now: line,
                          soundOnly: air?.programme?.audio_only == true)
         }
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) {
             guideRow = guideRows.firstIndex { $0.number == store.channelNumber } ?? 0
         }
     }
 
     private func closeGuide() {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         wake()
     }
 

@@ -64,6 +64,11 @@ final class ReadingStore {
     @ObservationIgnored private var loading: Task<Void, Never>?
 
     private var loadContext = RRShelfLoadContext()
+    /// The shelf painted without its module index because the quick fetch missed; the next
+    /// screen to open the room loads it again.
+    @ObservationIgnored private var modulesMissed = false
+    /// How long a first paint waits on the gated module index, which is never kept on the device.
+    private static let modulesPaintWait: TimeInterval = 2
     /// Task identity changes on every explicit preview invalidation, including nil-to-nil Clear.
     var loadRevision: Int { loadContext.generation }
 
@@ -112,6 +117,11 @@ final class ReadingStore {
             loading = nil
             phase = .idle
         }
+        // Not under a viewer already looking at the shelf: only as a screen opens it.
+        if phase == .ready, modulesMissed {
+            modulesMissed = false
+            phase = .idle
+        }
         switch phase {
         case .ready: return
         case .loading: await loading?.value; return
@@ -133,6 +143,7 @@ final class ReadingStore {
         loading = nil
         tabs = []
         phase = .idle
+        modulesMissed = false
         clearModuleCache()
     }
 
@@ -205,8 +216,13 @@ final class ReadingStore {
         guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
         // A fresh bulk catalogue does not mean this origin/credential's module index was read.
         // Fetch only the missing small index, preserving the cached catalogue and rights.
+        // The first paint waits a couple of seconds at most. A gated index is never kept on the
+        // device, so one that missed is asked for again as the room next opens; an open one is
+        // kept by keepAFreshCopy and read from the device next time.
         if fromDevice, modules == nil {
-            modules = await loadModules(fromDevice: false, ticket: ticket, credential: credential)
+            modules = await loadModules(fromDevice: false, ticket: ticket, credential: credential,
+                                        timeout: Self.modulesPaintWait)
+            modulesMissed = modules == nil && credential != nil
         }
         guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
         clock("modules")
@@ -294,8 +310,10 @@ final class ReadingStore {
     }
 
     /// data/rr-modules.json. Without the preview password the site answers 401 and the room is one tab of every title.
-    private func loadModules(fromDevice: Bool, ticket: Int, credential: String?) async -> RRModuleIndex? {
+    private func loadModules(fromDevice: Bool, ticket: Int, credential: String?,
+                             timeout: TimeInterval? = nil) async -> RRModuleIndex? {
         var request = URLRequest(url: RRSite.modulesURL(origin: origin))
+        if let timeout { request.timeoutInterval = timeout }
         // Kept per site and per gate state: the index is behind the site password, and a copy read
         // with the password must not stand in once it is gone (nor a test server's for the site's).
         let key = moduleKey(gated: credential != nil)

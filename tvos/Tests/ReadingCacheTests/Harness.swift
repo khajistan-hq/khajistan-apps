@@ -144,6 +144,20 @@ enum SupabaseRoute {
         await second.value
         check(store.phase == .ready && store.tabs.contains { $0.id == "arabic" }, "current credential alone publishes module tabs")
         check(RRShelfDisk.read(gatedKey) == nil, "accepted gated modules stay in memory only")
+        // A gated index that misses at first paint does not hold the shelf; the next open asks again.
+        URLSession.suspend = false
+        auth.previewPassword = "test-only-fifth"
+        store.previewCredentialDidChange()
+        URLSession.status = 503
+        await store.start()
+        check(store.phase == .ready && !store.tabs.contains { $0.id == "arabic" },
+              "a missed gated index paints the shelf without it")
+        URLSession.status = 200
+        await store.start()
+        check(store.tabs.contains { $0.id == "arabic" }, "the next open asks for the missed gated index again")
+        let afterRetry = URLSession.requests.count
+        await store.start()
+        check(URLSession.requests.count == afterRetry, "an index in hand is not asked for again")
         #endif
     }
 }

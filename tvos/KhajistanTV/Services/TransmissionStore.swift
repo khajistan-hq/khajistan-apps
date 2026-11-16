@@ -375,9 +375,13 @@ final class TransmissionStore {
     private(set) var accessRevision = 0
 
     func accessDidChange() {
+        let watching = phase != .idle
         accessRevision += 1
         signed.removeAll()
         stop()
+        // A refused refresh clears the session from inside `carrier`, whose answer the
+        // generation bump above then drops: say so here, or the screen waits on a loader.
+        if watching, auth.session == nil { phase = .needsSignIn }
     }
 
     func stop() {

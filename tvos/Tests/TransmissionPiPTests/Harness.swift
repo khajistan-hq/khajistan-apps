@@ -31,7 +31,7 @@ final class TransmissionStore {
         get { playerA }
         set { playerA = newValue }
     }
-    enum Phase { case idle, onAir }
+    enum Phase { case idle, onAir, needsSignIn }
     var phase = Phase.onAir
     var offAirWatch: Watch? = Watch()
     var slotWatch: Watch? = Watch()
@@ -187,6 +187,20 @@ preview.model.auth.onPreviewPasswordChange?()
 let repeatedClear = preview.store.accessRevision == 2 && preview.model.reading.invalidations == 2
 print("\(repeatedClear ? "PASS" : "FAIL") repeated preview Clear invalidates again")
 if !repeatedClear { failures += 1 }
+// A refresh the server refuses clears the session mid-tune: the screen asks for sign-in.
+let refused = Probe()
+refused.model.auth.session = nil
+refused.model.auth.revokeAccess()
+let asksSignIn = refused.store.phase == .needsSignIn
+print("\(asksSignIn ? "PASS" : "FAIL") session cleared while watching asks for sign-in")
+if !asksSignIn { failures += 1 }
+let notWatching = Probe()
+notWatching.store.phase = .idle
+notWatching.model.auth.session = nil
+notWatching.model.auth.revokeAccess()
+let staysIdle = notWatching.store.phase == .idle
+print("\(staysIdle ? "PASS" : "FAIL") session cleared while not watching stays idle")
+if !staysIdle { failures += 1 }
 let idle = Probe()
 idle.store.playerA.state = .idle
 idle.store.playerB.state = .idle

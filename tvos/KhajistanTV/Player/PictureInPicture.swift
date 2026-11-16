@@ -33,7 +33,10 @@ final class PictureInPicture: NSObject {
         // AVKit answers isPictureInPicturePossible with false on any session but playback, so
         // the session is set before the controller is made, not when the viewer asks: set in
         // start(), it came after the check and the window never opened (Apple TV HD, 2026-11-16).
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        // Only when not already playback: a radio playing under the screens set it, and changing
+        // the mode under a live session can drop its sound for a moment.
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playback { try? session.setCategory(.playback, mode: .moviePlayback) }
         guard let pip = AVPictureInPictureController(playerLayer: layer) else { return }
         pip.delegate = self
         controllers[ObjectIdentifier(layer)] = pip

@@ -97,13 +97,13 @@ extension XCTestCase {
     }
 }
 
-/// The recorded lists and local media by default, so a navigation test reads no live list and
-/// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
-/// with the recording behind them, streams live.
 /// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
 /// default local media may not.
 var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
 
+/// The recorded lists and local media by default, so a navigation test reads no live list and
+/// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
+/// with the recording behind them, streams live.
 func kjFixtureArguments(_ directory: String) -> [String] {
     if kjLiveMedia { return ["-kjfixtures", directory] }
     return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]

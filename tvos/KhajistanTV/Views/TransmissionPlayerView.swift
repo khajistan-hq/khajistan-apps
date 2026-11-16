@@ -592,7 +592,13 @@ struct TransmissionPlayerView: View {
                (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
                 tried = item
                 await subtitles.attach(item, listed: SubtitleChoice.house)
-                if subtitles.tracks.isEmpty, !Task.isCancelled { await loadFile(air); return }
+                // Fall back only when this item is still the one playing: a previous Stream
+                // programme's item without tracks is no reason to give up on this one. A read that
+                // fails on the playing item does fall back, to the same English text.
+                if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
+                    await loadFile(air)
+                    return
+                }
             }
             try? await Task.sleep(for: .milliseconds(500))
         }

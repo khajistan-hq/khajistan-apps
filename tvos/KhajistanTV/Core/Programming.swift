@@ -53,6 +53,8 @@ struct Programming: Decodable, Sendable {
         var display_title: String? = nil
         /// The year the record carries; shown after the country on the strip (owner, 2026-11-15).
         var year: Int? = nil
+        /// "Part 4 of 5": the tape or part number, moved off the title (owner, 2026-11-16).
+        var part: String? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {

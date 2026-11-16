@@ -233,23 +233,27 @@ final class ReadingStore {
         rights = held
         titles = built
         provenance = ranked
-        var shelf = ordered
+        let shelf = heldFirstForTests(ordered)
+        tabs = shelf
+        phase = .ready
+        clock("ready")
+        if fetchLate { Task { await lateModules(ticket: ticket, credential: credential) } }
+        return true
+    }
+
+    /// UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
+    /// row, past where a remote walking down the shelf can see it, so the test brings it forward.
+    private func heldFirstForTests(_ ordered: [RRTab]) -> [RRTab] {
         #if DEBUG
-        // UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
-        // row, past where a remote walking down the shelf can see it, so the test brings it forward.
         if UserDefaults.standard.bool(forKey: "kjrrheldfirst") {
-            shelf = shelf.map { tab in
+            return ordered.map { tab in
                 RRTab(id: tab.id, name: tab.name, native: tab.native, depth: tab.depth, rows: tab.rows.map { row in
                     RRRow(id: row.id, name: row.name, titles: row.titles.filter { isRights($0) } + row.titles.filter { !isRights($0) })
                 })
             }
         }
         #endif
-        tabs = shelf
-        phase = .ready
-        clock("ready")
-        if fetchLate { Task { await lateModules(ticket: ticket, credential: credential) } }
-        return true
+        return ordered
     }
 
     /// The gated index that missed the first paint, asked for once with the full timeout; a second
@@ -264,7 +268,7 @@ final class ReadingStore {
         }.value
         guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled, phase == .ready else { return }
         let shown = tabs
-        tabs = shown + ordered.filter { tab in !shown.contains { $0.id == tab.id } }
+        tabs = shown + heldFirstForTests(ordered).filter { tab in !shown.contains { $0.id == tab.id } }
         clock("module index laid over the shelf")
     }
 

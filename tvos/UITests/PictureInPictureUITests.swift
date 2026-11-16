@@ -71,4 +71,54 @@ final class PictureInPictureUITests: XCTestCase {
         after.lifetime = .keepAlways
         add(after)
     }
+
+    /// A radio left playing under the screens set the session to playback with its own mode. A
+    /// television channel opened after it must still go to the corner (Fable round 3).
+    func testPictureAfterARadio() throws {
+        let app = XCUIApplication()
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
+            XCUIRemote.shared.press(.right)
+        }
+        XCUIRemote.shared.press(.select)
+
+        let radio = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-radio-'")).firstMatch
+        XCTAssertTrue(radio.waitForExistence(timeout: 60), "the region carries a radio")
+        XCTAssertTrue(kjFocus(radio, app: app), "the remote reaches the radio")
+        XCUIRemote.shared.press(.select)
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20), "the radio opens")
+        let playing = NSPredicate { _, _ in state.label == "Playing" }
+        guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 30) == .completed else {
+            throw XCTSkip("the radio did not play on this runner (\(state.label))")
+        }
+        kjPause(3)
+        XCUIRemote.shared.press(.menu)   // the radio keeps playing under the screens
+
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND NOT (identifier BEGINSWITH 'channel-radio-') AND label CONTAINS 'live picture'")).firstMatch
+        XCTAssertTrue(tv.waitForExistence(timeout: 20), "the region page is back with its television")
+        XCTAssertTrue(kjFocus(tv, app: app), "the remote reaches a television channel")
+        XCUIRemote.shared.press(.select)
+        let current = app.staticTexts["currentChannel"]
+        XCTAssertTrue(current.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["captionsControl"].waitForExistence(timeout: 30), "the strip shows once the channel plays")
+        let pipControl = app.buttons["pipControl"]
+        guard pipControl.exists else { throw XCTSkip("this device has no picture in picture") }
+        kjPause(3)
+        XCUIRemote.shared.press(.select)
+        kjPause(0.6)
+        for _ in 0..<5 where !pipControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(pipControl.isSelected, "Right walks the strip to PiP")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(current.waitForNonExistence(timeout: 15), "the window opens after a radio, and the player closes behind it")
+        kjPause(3)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "pip-after-radio"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
 }

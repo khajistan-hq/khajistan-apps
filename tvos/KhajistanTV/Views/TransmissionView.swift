@@ -64,6 +64,11 @@ struct TransmissionView: View {
                 // cancellation does not reach.
                 model.link = nil
                 await store.loadSchedule()
+                // Full screen from picture in picture that cannot open the player here (not on
+                // the schedule, or signed out) stops the channel, rather than leave it sounding
+                // under a page with no way to stop it.
+                let opens = store.channelNumbers.contains(number) && (model.auth.isSignedIn || store.isScheduleFile)
+                if model.transmissionPiP != nil, !opens { model.silenceRadio() }
                 if store.channelNumbers.contains(number) {
                     choose(number)
                 }

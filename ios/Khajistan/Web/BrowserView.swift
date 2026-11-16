@@ -9,7 +9,7 @@ struct ArchiveWebView: UIViewRepresentable {
 
 /// The live website, in the house's own chrome: a bar with back, the page's name, share, save and
 /// close, the load as a rule of accent across it, and the page's own alerts drawn as house panels.
-/// The web view is one for the life of the app (ArchiveBrowser), so it opens warm.
+/// The web view stays warm until preview access changes, when its protected snapshots are discarded.
 struct BrowserView: View {
     let model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -23,6 +23,7 @@ struct BrowserView: View {
             ZStack {
                 palette.ground
                 ArchiveWebView(browser: browser)
+                    .id(ObjectIdentifier(browser.webView))
                     .opacity(browser.isStale ? 0 : 1)
                     .accessibilityIdentifier("archiveWebView")
                 if browser.isStale && browser.error == nil {

@@ -1403,7 +1403,13 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day")
         waitForHome(app, 15, "HOME is up")
         sleep(6)   // the shelves load a moment after Home
-        let wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+        var wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+#if KJ_APP_STORE
+        wanted.removeAll { $0 == "home-shelf-chat" }
+#if !KJ_FRIENDS
+        wanted.removeAll { $0 == "home-shelf-picsvids" }
+#endif
+#endif
         var seen = Set<String>()
         for step in 0..<14 {
             for shelf in wanted where app.descendants(matching: .any)[shelf].exists { seen.insert(shelf) }
@@ -1423,6 +1429,12 @@ final class KhajistanUITests: XCTestCase {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         var overflow: [String] = []
         for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
+#if KJ_APP_STORE
+            if room == "chat" { continue }
+#if !KJ_FRIENDS
+            if room == "picsVids" { continue }
+#endif
+#endif
             // Bar destinations and Chat intentionally do not open through -kjroom.
             let tab = room == "receiver" ? "receiver" : room == "yours" ? "library" : room == "chat" ? "rooms" : "home"
             let app = launch(skin: "day", tab: tab, extra: ["-kjroom", room, "-kjtestsignedout", "YES"])

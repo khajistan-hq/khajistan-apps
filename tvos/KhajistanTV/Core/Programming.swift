@@ -51,6 +51,8 @@ struct Programming: Decodable, Sendable {
         /// shows the show's name, as every surface did before. Last, with a default, so the
         /// memberwise initialiser the tests use is unchanged.
         var display_title: String? = nil
+        /// The year the record carries; shown after the country on the strip (owner, 2026-11-15).
+        var year: Int? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {

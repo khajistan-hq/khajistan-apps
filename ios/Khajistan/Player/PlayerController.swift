@@ -322,6 +322,9 @@ final class PlayerController {
         let gen = generation
         state = .tuning
         timeoutTask?.cancel()
+        // The old item is done with: a late error from it must not fail the signal and call the
+        // retune off during its grace.
+        removeItemObservers()
         // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
         // back has a moment. ponytail: fixed wait, not a network path monitor.
         timeoutTask = Task { [weak self] in

@@ -3300,6 +3300,10 @@ func filmSubtitleChoice() throws {
     try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: nil, preferred: ["de"]), "en")
     try expect(SubtitleChoice.desired(available: ["fa", "ur"], stored: nil, preferred: ["de"]) == nil, "nothing else is guessed")
     try expect(SubtitleChoice.desired(available: [], stored: "en", preferred: ["en"]) == nil)
+    // A choice stays with its film: Persian picked on one film is not read for another.
+    let iranian = SubtitleChoice.filmKey("gav-1969"), razia = SubtitleChoice.filmKey("razia-phas-gayi-ghundon-main-2015-khajistan")
+    try expect(iranian != razia, "each film keeps its own choice")
+    try expect(iranian != SubtitleChoice.storeKey && razia != SubtitleChoice.storeKey, "the old shared choice is not read")
     let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
     try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
     try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")

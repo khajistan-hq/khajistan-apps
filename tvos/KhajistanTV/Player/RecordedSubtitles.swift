@@ -33,6 +33,8 @@ final class RecordedSubtitles {
     @ObservationIgnored private var output: AVPlayerItemLegibleOutput?
     @ObservationIgnored private let relay = LegibleRelay()
     @ObservationIgnored private var generation = 0
+    /// The film's own key for the remembered choice, while a film's tracks are attached.
+    @ObservationIgnored private var choiceKey: String?
 
     /// "Subtitles · English", "Subtitles · Off": the receiver's recorded-subtitle picker, as one control.
     var label: String {
@@ -52,6 +54,7 @@ final class RecordedSubtitles {
         tracks = []
         current = nil
         text = nil
+        choiceKey = nil
     }
 
     /// True while the tracks shown are this item's.
@@ -94,8 +97,9 @@ final class RecordedSubtitles {
     // MARK: - A film's manifest tracks
 
     /// Lists the legible options of `item`, one per language, labelled from the film's record, and
-    /// switches on the remembered or device language, else English, else none (desiredSubtitle()).
-    func attach(_ item: AVPlayerItem, listed: [SubtitleLanguage]) async {
+    /// switches on the language remembered for this film, or the device's, else English, else
+    /// none (desiredSubtitle()).
+    func attach(_ item: AVPlayerItem, film handle: String, listed: [SubtitleLanguage]) async {
         clear()
         let gen = generation
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
@@ -121,13 +125,15 @@ final class RecordedSubtitles {
         legible.setDelegate(relay, queue: .main)
         item.add(legible)
         output = legible
-        let stored = UserDefaults.standard.string(forKey: SubtitleChoice.storeKey)
+        let key = SubtitleChoice.filmKey(handle)
+        choiceKey = key
+        let stored = UserDefaults.standard.string(forKey: key)
         apply(SubtitleChoice.desired(available: order.map(\.code), stored: stored, preferred: Locale.preferredLanguages))
     }
 
-    /// The viewer's choice, remembered as the site remembers it ("off" or the code).
+    /// The viewer's choice, remembered for this film ("off" or the code).
     private func select(_ code: String?) {
-        if group != nil { UserDefaults.standard.set(code ?? "off", forKey: SubtitleChoice.storeKey) }
+        if group != nil, let choiceKey { UserDefaults.standard.set(code ?? "off", forKey: choiceKey) }
         apply(code)
     }
 

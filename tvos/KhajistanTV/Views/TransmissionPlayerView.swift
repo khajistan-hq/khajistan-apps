@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// One channel of Khajistan Transmission, full screen. The first time in a launch the station signs
 /// on (the wing, the ident, the wing), then the channel is joined where the clock has reached.
@@ -40,6 +41,11 @@ struct TransmissionPlayerView: View {
     @State private var stripHeight: CGFloat = 0
     /// The song playing inside the programme, from songs.json (HouseSongs), or "".
     @State private var song = ""
+    /// The channel number in the top corner, while it shows.
+    @State private var plateChannel: Int?
+    /// Set when the channel changes (and at the first tune): the number shows once it plays.
+    @State private var plateOwed = true
+    @State private var plateTask: Task<Void, Never>?
     @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
@@ -48,6 +54,14 @@ struct TransmissionPlayerView: View {
         ZStack {
             palette.ground.ignoresSafeArea()
             content
+            if let number = plateChannel {
+                ChannelNumberOSD(number: number, overPicture: !isOffAirNow)
+                    .padding(.top, 64)
+                    .padding(.trailing, KJLayout.inset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .allowsHitTesting(false)
+                    .transition(.identity)
+            }
             // On air the focus target sits inside the picture's layers, under the strip, so the
             // Subtitles control in the strip can take focus; a view covered by the picture cannot.
             if holdsFocus && !isOnAir {
@@ -92,7 +106,13 @@ struct TransmissionPlayerView: View {
         .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
         // Off air or re-tuning: the guide and the strip's controls go with the picture.
         .onChange(of: isOnAir) { _, onAir in if !onAir { guideRow = nil; armed = nil } }
-        .onChange(of: store.player.state) { wake() }
+        .onChange(of: store.player.state) { wake(); showNumberWhenTuned() }
+        .onChange(of: store.channelNumber) { plateOwed = true; showNumberWhenTuned() }
+        .onChange(of: store.phase) { showNumberWhenTuned() }
+        // The number waits for the channel change, the bird and the sign-on cover to be done.
+        .onChange(of: switching) { showNumberWhenTuned() }
+        .onChange(of: model.pigeon.isFlying) { showNumberWhenTuned() }
+        .onChange(of: model.clips.coverage) { showNumberWhenTuned() }
         // A schedule that now needs the preview password, or is not published, is answered on
         // the station page, which carries the password step. The player goes back to it.
         .onChange(of: store.schedule) { _, schedule in
@@ -521,6 +541,34 @@ struct TransmissionPlayerView: View {
         wake()
     }
 
+    // MARK: - The channel number
+
+    /// Once the channel changed to is on screen (playing, or off air with its return), its number
+    /// shows in the top corner for three seconds, as an old set's did: on and off at once.
+    private func showNumberWhenTuned() {
+        guard plateOwed, !switching, !model.pigeon.isFlying, model.clips.coverage == 0 else { return }
+        let ready: Bool
+        switch store.phase {
+        case .offAir: ready = true
+        // A sound-only programme puts the channel in that corner already, with the dancer.
+        case .onAir(let air) where air.programme?.audio_only == true:
+            plateOwed = false
+            return
+        case .onAir: ready = store.player.state == .playing || store.isScheduleFile
+        default: ready = false
+        }
+        guard ready else { return }
+        plateOwed = false
+        plateTask?.cancel()
+        plateChannel = store.channelNumber
+        UIAccessibility.post(notification: .announcement, argument: "Channel \(store.channelNumber)")
+        plateTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            plateChannel = nil
+        }
+    }
+
     /// A line in the strip for a few seconds.
     private func say(_ line: String) {
         note = line
@@ -730,8 +778,15 @@ struct TransmissionPlayerView: View {
         left || Task.isCancelled
     }
 
+    private var isOffAirNow: Bool {
+        if case .offAir = store.phase { return true }
+        return false
+    }
+
     private func leave() {
         left = true
+        plateTask?.cancel()
+        plateChannel = nil
         // The bird is on the window, over every screen: it goes with the player.
         model.pigeon.clear()
         hideTask?.cancel()

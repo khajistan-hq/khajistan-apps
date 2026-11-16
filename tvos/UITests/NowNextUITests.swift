@@ -117,4 +117,24 @@ final class NowNextUITests: XCTestCase {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
     }
+
+    /// The channel number pops up in the top corner when the channel changes, as on a 1980s set,
+    /// and goes again by itself (owner, 2026-11-15).
+    func testChannelNumberPopsUpOnAChange() {
+        for skin in ["day", "grove", "smut"] {
+            let app = open(channel: 5, skin: skin)
+            let osd = app.descendants(matching: .any)["channelNumberOSD"]
+            XCTAssertTrue(osd.waitForExistence(timeout: 30), "the number shows once the channel is on (\(skin))")
+            XCTAssertEqual(osd.label, "Channel 5")
+            XCTAssertTrue(osd.frame.minY < app.frame.height * 0.25 && osd.frame.minX > app.frame.width * 0.5, "top right: \(osd.frame)")
+            kjScreenshot("channel-number-c5-\(skin)", app: app)
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !osd.exists }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 6), .completed, "and goes by itself")
+            XCUIRemote.shared.press(.up)
+            let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'channelNumberOSD' AND label != 'Channel 5'")).firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 30), "Channel Up shows the next number")
+            kjScreenshot("channel-number-up-\(skin)", app: app)
+            app.terminate()
+        }
+    }
 }

@@ -143,6 +143,11 @@ enum SubtitleChoice {
     /// The site's stored choice, "off" or a two-letter code (open-frequencies.js SUBS_KEY).
     static let storeKey = "kj-of-subtitles"
 
+    /// Where one film's choice is kept. A choice stays with the film it was made on: Persian
+    /// picked for an Iranian film turned Persian on for Razia Phans Gayi, an Urdu film that
+    /// carries a Persian track too (owner, 2026-11-15).
+    static func filmKey(_ handle: String) -> String { "\(storeKey).\(handle)" }
+
     static func langOf(_ value: String?) -> String { String((value ?? "").prefix(2)).lowercased() }
 
     /// One entry per language, the first announcement winning (availableSubtitles()).
@@ -159,8 +164,8 @@ enum SubtitleChoice {
         return fallback ?? code.uppercased()
     }
 
-    /// Which language starts on when the viewer has not said (desiredSubtitle()): the remembered
-    /// choice, then the device's languages, then English, else none. Nothing else is guessed.
+    /// Which language starts on (desiredSubtitle()): the choice remembered for this film, then the
+    /// device's languages, then English, else none. Nothing else is guessed.
     static func desired(available: [String], stored: String?, preferred: [String]) -> String? {
         if stored == "off" { return nil }
         if let stored, available.contains(stored) { return stored }

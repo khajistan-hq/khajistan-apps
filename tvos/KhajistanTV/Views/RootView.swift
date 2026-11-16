@@ -54,6 +54,14 @@ struct RootView: View {
             model.radioAway = bar
             reopened = away
         }
+        // Full screen from the film's corner window: the film opens again over whatever is on top
+        // and asks for its token afresh; the player that opens closes the window and resumes from
+        // the kept place.
+        .onChange(of: model.restoringFilm?.handle) {
+            guard let film = model.restoringFilm else { return }
+            model.restoringFilm = nil
+            FilmRestore.present(film, model: model)
+        }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)

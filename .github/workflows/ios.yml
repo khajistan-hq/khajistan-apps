@@ -36,6 +36,8 @@ jobs:
           lfs: false
       - name: Core behavior tests
         run: ios/scripts/test-core.sh
+      - name: Swift package regressions
+        run: swift test --package-path ios
       - name: Caption session failure regressions
         run: KJ_CAPTION_TEST_PLATFORMS=ios sh tvos/scripts/test-caption-session.sh
       - name: Account session race regressions

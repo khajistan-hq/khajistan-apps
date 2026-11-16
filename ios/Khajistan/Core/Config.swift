@@ -23,6 +23,18 @@ enum KJConfig {
 
 /// URL building shared by the Core files.
 enum KJURL {
+    /// Pages redirects .html requests to extensionless URLs. Foundation drops Basic auth on
+    /// that redirect, so protected site pages must be requested at their final URL directly.
+    /// Local fixtures and every other origin keep their original paths.
+    static func canonicalSitePage(_ url: URL) -> URL {
+        guard url.scheme == KJConfig.site.scheme, url.host == KJConfig.site.host,
+              url.port == nil || url.port == 443, url.user == nil, url.password == nil,
+              var parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.percentEncodedPath.hasSuffix(".html") else { return url }
+        parts.percentEncodedPath = String(parts.percentEncodedPath.dropLast(5))
+        return parts.url ?? url
+    }
+
     /// Percent-encodes everything except RFC 3986 unreserved characters, so `+`, `&`, `=`,
     /// `#` and `/` inside an opaque id can never be read as query syntax. `URLQueryItem`
     /// leaves some of those alone, which is why it is not used for ids.

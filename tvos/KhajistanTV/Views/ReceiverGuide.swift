@@ -18,8 +18,7 @@ struct ReceiverGuide: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Keyed by channel, so a press slides the rows along as a list scrolls, and a region turn
-    /// fades one set of channels into the next.
+    /// Keyed by channel, so a press slides the rows along as a list scrolls.
     private var keys: [GuideKey] {
         Self.window(count: list.count, lit: lit).map { GuideKey(index: $0, id: list[$0].id) }
     }
@@ -59,6 +58,10 @@ struct ReceiverGuide: View {
             .padding(.bottom, 48)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: .all)
+            // A region turn empties the list until the next region loads, so it cuts rather
+            // than running the rows out to an empty panel and back (Bugbot on PR 79). Inner to
+            // the animations below, so it wins when `loading` changes.
+            .transaction(value: loading) { $0.animation = nil }
             // On the whole panel, so its ground grows and shrinks with the rows it holds.
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)

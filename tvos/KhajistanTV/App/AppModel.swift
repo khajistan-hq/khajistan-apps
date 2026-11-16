@@ -159,7 +159,11 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
-        auth.onPreviewPasswordChange = { [weak self] in self?.reading.previewCredentialDidChange() }
+        auth.onPreviewPasswordChange = { [weak self] in
+            self?.reading.previewCredentialDidChange()
+            self?.invalidateTransmissionAccess()
+        }
+        observeTransmissionAccess()
         watchTheSky()
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
@@ -177,6 +181,18 @@ final class AppModel {
             pip.stop()
             transmission.stop()
         }
+    }
+
+    /// Access changes revoke Transmission without interrupting public Receiver playback.
+    private func observeTransmissionAccess() {
+        _ = auth.observeAccess { [weak self] in self?.invalidateTransmissionAccess() }
+    }
+
+    private func invalidateTransmissionAccess() {
+        let pip = transmissionPiP
+        transmissionPiP = nil
+        pip?.stop()
+        transmission.accessDidChange()
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

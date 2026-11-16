@@ -371,10 +371,21 @@ final class TransmissionStore {
         await tune(channel: channelNumber)
     }
 
+    /// Changes only when account or preview access is invalidated, not at programme handovers.
+    private(set) var accessRevision = 0
+
+    func accessDidChange() {
+        accessRevision += 1
+        signed.removeAll()
+        stop()
+    }
+
     func stop() {
         _ = beginTune()
-        playerA.stop()
-        playerB.stop()
+        // An idle controller has already released its item; stopping it again would clear
+        // the shared Now Playing metadata owned by a public Receiver playing elsewhere.
+        if playerA.state != .idle { playerA.stop() }
+        if playerB.state != .idle { playerB.stop() }
         phase = .idle
     }
 
@@ -432,17 +443,19 @@ final class TransmissionStore {
 
     /// Signs one channel's programme. Quiet: a failure here changes nothing on screen.
     private func warm(channel target: Int) async {
+        let access = accessRevision
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return }
         if case .direct = route { return }
-        guard let token = try? await auth.validAccessToken(), let viewer = auth.session?.userId else { return }
+        guard let token = try? await auth.validAccessToken(), access == accessRevision,
+              let viewer = auth.session?.userId else { return }
         let key = "\(route)|\(viewer)"
         if let held = signed[key], held.until > Date() { return }
         guard let request = Transmission.request(for: route, accessToken: token),
               let reply = try? await send(request, refusingRedirects: true), reply.status == 200,
               let url = try? Transmission.carrier(from: reply.data, route: route),
-              auth.session?.userId == viewer else { return }
+              access == accessRevision, auth.session?.userId == viewer else { return }
         signed[key] = (url, Date().addingTimeInterval(Self.signedLife))
     }
 

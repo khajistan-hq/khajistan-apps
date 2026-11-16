@@ -45,6 +45,8 @@ jobs:
         run: KJ_AUTH_TEST_PLATFORMS=tvos sh tvos/scripts/test-auth-session.sh
       - name: Reading Room cache regressions
         run: sh tvos/scripts/test-reading-cache.sh
+      - name: Transmission picture-in-picture session regressions
+        run: sh tvos/scripts/test-transmission-pip.sh
       - name: Select an Apple TV simulator
         id: simulator
         run: |

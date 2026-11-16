@@ -31,9 +31,10 @@ extension XCTestCase {
             XCTAssertTrue(state.waitForExistence(timeout: 20), "the player opens")
             let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
-                    && accept(current.exists ? current.label : "")
             }, object: nil)
-            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
+            // A channel that plays but fails `accept` moves on at once, not after the timeout.
+            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed,
+               accept(current.exists ? current.label : "") { return }
             tried.append("\(current.exists ? current.label : "?"): \(state.label)")
         }
         throw XCTSkip("No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))")

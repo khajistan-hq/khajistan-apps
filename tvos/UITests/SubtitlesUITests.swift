@@ -97,6 +97,16 @@ final class SubtitlesUITests: XCTestCase {
     }
 
     func testReceiverCaptionsSignedOut() {
+        // Urdu television, which the live recogniser takes (country alone is not language
+        // evidence), and Kashmiri television, which it does not.
+        let indusTV = kjLiveChannels(region: "indus").filter { $0["mediaType"] as? String == "tv" && $0["captionsDenied"] as? Bool != true }
+        // The registry's language, as the app reads it before any detected-language row.
+        func speaking(_ code: String) -> [String] {
+            indusTV.filter { (($0["languageCode"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? ($0["languageCodes"] as? [String])?.first) == code }.compactMap { $0["id"] as? String }
+        }
+        let candidates = speaking("ur")
+        XCTAssertFalse(candidates.isEmpty, "the site's Indus region offers Urdu television")
+        guard let kashmiriTV = speaking("ks").first else { return XCTFail("the site's Indus region offers no Kashmiri television") }
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
         kjLaunch(app)
@@ -110,14 +120,27 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertEqual(focusedRegion.identifier, "region-indus")
         XCUIRemote.shared.press(.select)
 
-        // ABN News, the first television channel by name: Pakistan, so Urdu by the country rule, so offered.
-        let abn = app.buttons["channel-swept-pk-abn-news"]
-        XCTAssertTrue(abn.waitForExistence(timeout: 60))
-        XCTAssertTrue(kjFocus(abn, app: app), "ABN News must take focus")
+        // An Urdu television channel, so captions are offered.
+        // The app also drops channels its health feed marks offline, and the row builds only the
+        // cards near the screen, so focus walks right along Television to the first Urdu one.
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        func focusedChannel() -> String? {
+            guard focused.exists, focused.identifier.hasPrefix("channel-") else { return nil }
+            return String(focused.identifier.dropFirst("channel-".count))
+        }
+        XCTAssertTrue(waitFor(60) { focusedChannel() != nil }, "the Indus list loads with a channel focused")
+        for _ in 0..<40 where !candidates.contains(focusedChannel() ?? "") {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        guard let urduTV = focusedChannel(), candidates.contains(urduTV) else {
+            return XCTFail("no Urdu television in the Indus row, last focus \(focused.identifier)")
+        }
+        let live = app.buttons["channel-\(urduTV)"]
         XCUIRemote.shared.press(.select)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
-        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "ABN News must be playing for the strip to offer its controls: \(state.label)")
+        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "\(urduTV) must be playing for the strip to offer its controls: \(state.label)")
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)
@@ -151,19 +174,24 @@ final class SubtitlesUITests: XCTestCase {
         }
         XCTAssertTrue(state.waitForNonExistence(timeout: 10), "Back leaves the player")
 
-        // DD Kashir: Kashmiri is not on the live recogniser, so one line and no control. Its card
+        // Kashmiri is not on the live recogniser, so one line and no control. Its card
         // is drawn only once the shelf scrolls near it.
-        let kashir = app.buttons["channel-india-dd-kashir"]
-        XCTAssertTrue(kjFocus(abn, app: app), "ABN News takes focus again")
+        let kashir = app.buttons["channel-\(kashmiriTV)"]
+        XCTAssertTrue(kjFocus(live, app: app), "\(urduTV) takes focus again")
+        // Kashmiri may sit either side of the Urdu channel: back to the row's start, then along it.
         for _ in 0..<20 where !kashir.exists {
+            XCUIRemote.shared.press(.left)
+            kjPause(0.4)
+        }
+        for _ in 0..<40 where !kashir.exists {
             XCUIRemote.shared.press(.right)
             kjPause(0.4)
         }
-        XCTAssertTrue(kashir.waitForExistence(timeout: 10), "DD Kashir is on the Indus television shelf")
+        XCTAssertTrue(kashir.waitForExistence(timeout: 10), "\(kashmiriTV) is on the Indus television shelf")
         XCTAssertTrue(kjFocus(kashir, app: app))
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(state.waitForExistence(timeout: 20))
-        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "DD Kashir must be playing for the strip to offer its controls: \(state.label)")
+        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "\(kashmiriTV) must be playing for the strip to offer its controls: \(state.label)")
         kjPause(8)
         let kashirControl = app.buttons["captionsControl"]
         lightCaptions(kashirControl)

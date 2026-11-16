@@ -4,8 +4,16 @@ import XCTest
 /// channels on homepage for an account so they are easily accessible"). A Debug build takes the
 /// likes from `-kjlikedrefs`, so no account is signed in here.
 final class LikedShelfUITests: XCTestCase {
-    /// Newest first. The last ref names no channel and must not be drawn.
-    private static let refs = "channel:al-arabiya,channel:24-news-hd,channel:radio-srood,channel:afghanistan-international,channel:afaq-fm-98-7,channel:no-such-channel"
+    /// Newest first: five channels the Arabia region offers today, then a ref that names no
+    /// channel and must not be drawn.
+    private static func liveRefs() -> (refs: String, newestName: String)? {
+        // Television first, so Select opens a picture rather than a radio.
+        let arabia = kjLiveChannels(region: "arabia")
+        let live = (arabia.filter { $0["mediaType"] as? String == "tv" } + arabia.filter { $0["mediaType"] as? String != "tv" }).prefix(5)
+        guard live.count == 5, live.first?["mediaType"] as? String == "tv", let name = live.first?["name"] as? String else { return nil }
+        let ids = live.compactMap { $0["id"] as? String }.map { "channel:" + $0 }
+        return ((ids + ["channel:no-such-channel"]).joined(separator: ","), name)
+    }
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -17,8 +25,9 @@ final class LikedShelfUITests: XCTestCase {
     }
 
     func testLikedShelfIsOnePressDownFromTheMap() {
+        guard let live = Self.liveRefs() else { return XCTFail("the site's Arabia region did not give five channels with television first") }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs]
+        app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", live.refs]
         kjLaunch(app)
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "the front carries a Liked shelf")
@@ -27,7 +36,7 @@ final class LikedShelfUITests: XCTestCase {
         let heading = app.staticTexts["shelf-liked"]
         XCTAssertTrue(heading.exists, "the shelf has its heading")
         XCTAssertEqual(heading.label, "Liked, 5 live", "five liked channels drawn, the unknown ref left out")
-        XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix("Al Arabiya"), "newest like first, got \(cards.element(boundBy: 0).label)")
+        XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix(live.newestName), "newest like first, got \(cards.element(boundBy: 0).label)")
         XCTAssertFalse(cards.element(boundBy: 0).label.contains("Liked"), "no second 'Liked' on a card of the Liked shelf")
 
         XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
@@ -60,9 +69,10 @@ final class LikedShelfUITests: XCTestCase {
 
     /// The shelf, focused, in the two night skins (day is photographed above).
     func testLikedShelfInEverySkin() {
+        guard let live = Self.liveRefs() else { return XCTFail("the site's Arabia region did not give five channels with television first") }
         for skin in ["grove", "smut"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-kjskin", skin, "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs]
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", live.refs]
             kjLaunch(app)
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")

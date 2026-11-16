@@ -57,3 +57,53 @@ extension XCTestCase {
         return element.exists && element.hasFocus
     }
 }
+
+/// The channels one region offers on the site right now, read the way the app reads them and
+/// filtered by the app's own rules (ReceiverRules.eligible): published, not switched off, not on
+/// the denylist or off-air list, not graded offline or blocked by a health file under two hours
+/// old, at least half the expected stream, with a stream. Tests that name a channel take it from
+/// here, because channels leave the dial: 24 News HD and ABN News did, and two tests that named
+/// them failed on data rather than on code.
+func kjLiveChannels(region: String) -> [[String: Any]] {
+    let site = "https://khajistan-archive.pages.dev"
+    func json(_ path: String) -> [String: Any] {
+        var request = URLRequest(url: URL(string: site + path)!)
+        request.setValue("Mozilla/5.0 kj-uitest", forHTTPHeaderField: "User-Agent")
+        var result: [String: Any] = [:]
+        let done = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { data, response, _ in
+            if (response as? HTTPURLResponse)?.statusCode == 200 {
+                result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            }
+            done.signal()
+        }.resume()
+        _ = done.wait(timeout: .now() + 30)
+        return result
+    }
+    let dir = "/data/open-frequencies/"
+    let files = json(dir + "receiver-index.json")["regionFiles"] as? [String: String] ?? [:]
+    guard let path = files[region] else { return [] }
+    var denied = Set(json(dir + "denylist.json")["disabledChannelIds"] as? [String] ?? [])
+    denied.formUnion(json(dir + "off-air-suspects.json")["offAirChannelIds"] as? [String] ?? [])
+    var health: [String: [String: Any]] = [:]
+    let healthFile = json(dir + "health.json")
+    let iso = ISO8601DateFormatter()
+    iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let at = healthFile["generatedAt"] as? String,
+       let written = iso.date(from: at) ?? ISO8601DateFormatter().date(from: at),
+       Date().timeIntervalSince(written) <= 2 * 60 * 60 {
+        for row in healthFile["results"] as? [[String: Any]] ?? [] {
+            if let id = row["channelId"] as? String { health[id] = row }
+        }
+    }
+    var seen = Set<String>()
+    return (json(path)["channels"] as? [[String: Any]] ?? []).filter { channel in
+        guard let id = channel["id"] as? String else { return false }
+        if let published = channel["publicationStatus"] as? String, published != "published" { return false }
+        if channel["manualDisabled"] as? Bool == true || denied.contains(id) { return false }
+        let status = health[id]?["status"] as? String ?? channel["healthStatus"] as? String
+        if status == "offline" || status == "blocked" { return false }
+        if (health[id]?["deliveryRatio"] as? Double ?? 1) < 0.5 { return false }
+        return channel["activeStreamId"] is String && seen.insert(id).inserted
+    }
+}

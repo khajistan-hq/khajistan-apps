@@ -56,6 +56,9 @@ enum SupabaseRoute {
     static func reply(_ request: URLRequest, status: Int = 200) -> (Data, URLResponse) {
         (status == 200 ? Harness.modules : Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
+    static func timeOutFirst() {
+        pending.removeFirst().1.resume(throwing: URLError(.timedOut))
+    }
     static func resumeFirst(status: Int = 200) {
         let (request, continuation) = pending.removeFirst()
         continuation.resume(returning: reply(request, status: status))
@@ -156,11 +159,13 @@ enum SupabaseRoute {
         await painting.value
         check(store.phase == .ready && !store.tabs.contains { $0.id == "arabic" },
               "a missed gated index paints the shelf without it")
+        let painted = store.tabs.map(\.id)
         await awaitPending()
         check(store.phase == .ready, "the shelf stays ready while the missed index is asked for again")
         URLSession.resumeFirst()
         for _ in 0..<500 where !store.tabs.contains(where: { $0.id == "arabic" }) { try? await Task.sleep(for: .milliseconds(10)) }
         check(store.phase == .ready && store.tabs.contains { $0.id == "arabic" }, "the late index lands on the ready shelf")
+        check(Array(store.tabs.map(\.id).prefix(painted.count)) == painted, "the late tabs are added after the painted ones, not in their place")
         let afterLate = URLSession.requests.count
         URLSession.suspend = false
         await store.start()
@@ -175,7 +180,20 @@ enum SupabaseRoute {
         check(store.phase == .ready && URLSession.requests.count == beforeRefusal + 1, "a refused index is not asked for again")
         await store.start()
         check(URLSession.requests.count == beforeRefusal + 1, "opening the room again after a refusal asks nothing")
+        // The right password after a refusal: its missed first fetch still gets the late one.
         URLSession.status = 200
+        auth.previewPassword = "test-only-right"
+        store.previewCredentialDidChange()
+        URLSession.suspend = true
+        let again = Task { await store.start() }
+        await awaitPending()
+        URLSession.timeOutFirst() // No answer at all, so nothing rewrites the old refusal.
+        await again.value
+        await awaitPending()
+        URLSession.resumeFirst()
+        for _ in 0..<500 where !store.tabs.contains(where: { $0.id == "arabic" }) { try? await Task.sleep(for: .milliseconds(10)) }
+        check(store.tabs.contains { $0.id == "arabic" }, "a new password after a refusal gets its late index")
+        URLSession.suspend = false
         #endif
     }
 }

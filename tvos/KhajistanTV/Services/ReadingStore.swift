@@ -115,6 +115,7 @@ final class ReadingStore {
             if hadContext { clearModuleCache() }
             loading?.cancel()
             loading = nil
+            modulesRefused = false
             phase = .idle
         }
         switch phase {
@@ -138,6 +139,7 @@ final class ReadingStore {
         loading = nil
         tabs = []
         phase = .idle
+        modulesRefused = false
         clearModuleCache()
     }
 
@@ -250,9 +252,10 @@ final class ReadingStore {
         return true
     }
 
-    /// The gated index that missed the first paint, asked for once with the full timeout. The
-    /// shelf stays ready while it is asked for; if it lands, the module tabs are laid over the
-    /// shelf already built, with no loader.
+    /// The gated index that missed the first paint, asked for once with the full timeout; a second
+    /// miss leaves the shelf as painted until the next load. The shelf stays ready while it is
+    /// asked for. If it lands, the module tabs are added after the tabs already on screen, never in
+    /// place of them, so the tab, row or card the viewer is on stays where it is.
     private func lateModules(ticket: Int, credential: String?) async {
         guard let index = await loadModules(fromDevice: false, ticket: ticket, credential: credential) else { return }
         let (built, held, ranked) = (titles, rights, provenance)
@@ -260,7 +263,8 @@ final class ReadingStore {
             RRRank.ranked(RRShelves.tabs(titles: built, index: index, rights: held), provenance: ranked)
         }.value
         guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled, phase == .ready else { return }
-        tabs = ordered
+        let shown = tabs
+        tabs = shown + ordered.filter { tab in !shown.contains { $0.id == tab.id } }
         clock("module index laid over the shelf")
     }
 

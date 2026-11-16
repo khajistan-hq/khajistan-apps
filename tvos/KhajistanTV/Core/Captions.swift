@@ -154,6 +154,7 @@ enum SubtitleChoice {
         .init(code: "pa", name: "Punjabi", native: "پنجابی"),
         .init(code: "ar", name: "Arabic", native: "العربية"),
         .init(code: "ps", name: "Pashto", native: "پښتو"),
+        .init(code: "he", name: "Hebrew", native: "עברית"),
     ]
 
     /// The language of a prepared file, from its name: `<id>.fa.vtt` is Persian. A name without

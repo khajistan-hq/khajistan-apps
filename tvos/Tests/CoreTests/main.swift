@@ -3318,6 +3318,7 @@ func transmissionSubtitleFileLanguage() throws {
     try expectEqual(SubtitleChoice.fileLanguage(""), "en")
     try expectEqual(SubtitleChoice.label("pa", listed: SubtitleChoice.house, fallback: nil), "Punjabi \u{00B7} پنجابی")
     try expectEqual(SubtitleChoice.label("en", listed: SubtitleChoice.house, fallback: nil), "English")
+    try expectEqual(SubtitleChoice.label("he", listed: SubtitleChoice.house, fallback: "Hebrew (device)"), "Hebrew \u{00B7} עברית")
 }
 
 func filmSubtitleLanguagesDecode() throws {

@@ -163,6 +163,7 @@ final class DancerUITests: XCTestCase {
         if state.label != "Playing" {
             shot("\(id)-not-playing", app)
             app.terminate()
+            guard kjLiveMedia else { XCTFail("\(id): the local test video did not play (\(state.label))"); return false }
             throw XCTSkip("\(id)'s live carrier is not playing (\(state.label)); the check is meaningless without playback")
         }
         return true

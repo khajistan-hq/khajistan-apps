@@ -127,6 +127,8 @@ final class KhajistanUITests: XCTestCase {
         }
         let report = tried.joined(separator: "; ")
         if playedBlack >= 2 { XCTFail("Channels played with no picture on the set: \(report)"); return }
+        // The local test video always plays: if it did not, the test media is broken.
+        guard kjLiveMedia else { XCTFail("The local test video did not play: \(report)"); return }
         throw XCTSkip("No channel played on this runner in \(limit) tries: \(report)")
     }
 
@@ -1521,10 +1523,14 @@ private extension XCUIElement {
     }
 }
 
+/// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
+/// default local media may not.
+var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
+
 /// The recorded lists and local media by default, so a navigation test reads no live list and
 /// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
 /// with the recording behind them, streams live.
 func kjFixtureArguments(_ directory: String) -> [String] {
-    if ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" { return ["-kjfixtures", directory] }
+    if kjLiveMedia { return ["-kjfixtures", directory] }
     return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]
 }

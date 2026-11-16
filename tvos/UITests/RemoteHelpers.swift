@@ -33,7 +33,10 @@ extension XCTestCase {
             if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
             tried.append("\(current.exists ? current.label : "?"): \(state.label)")
         }
-        throw XCTSkip("No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))")
+        let why = "No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
+        // The local test video always plays: if it did not, the test media is broken.
+        guard kjLiveMedia else { XCTFail(why); return }
+        throw XCTSkip(why)
     }
 
     var kjRecordedFixtures: String {
@@ -97,7 +100,11 @@ extension XCTestCase {
 /// The recorded lists and local media by default, so a navigation test reads no live list and
 /// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
 /// with the recording behind them, streams live.
+/// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
+/// default local media may not.
+var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
+
 func kjFixtureArguments(_ directory: String) -> [String] {
-    if ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" { return ["-kjfixtures", directory] }
+    if kjLiveMedia { return ["-kjfixtures", directory] }
     return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]
 }

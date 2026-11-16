@@ -17,7 +17,9 @@ extension XCTestCase {
     /// as the player's own line says, up to `tries` channels; then the test is skipped, naming what
     /// each said. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
     /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
-    func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4) throws {
+    /// `accept` narrows which channel counts, by id: a captions test needs a language the
+    /// recogniser takes, and Down can bring up DD Kashir, which plays but is Kashmiri.
+    func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4, accept: @escaping (String) -> Bool = { _ in true }) throws {
         let state = app.staticTexts["playerState"]
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
@@ -29,6 +31,7 @@ extension XCTestCase {
             XCTAssertTrue(state.waitForExistence(timeout: 20), "the player opens")
             let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
+                    && accept(current.exists ? current.label : "")
             }, object: nil)
             if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
             tried.append("\(current.exists ? current.label : "?"): \(state.label)")

@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The Receiver's guide, as a live TV app lays one (YouTube TV's guide): every channel of the shelf
 /// the viewer came from as a row, its number, its medium's mark on a plate, the name and the place,
-/// and LIVE on the one playing. It opens over the left of the picture, which plays on beside it.
+/// and LIVE on the one playing. It rises from the bottom over the picture, which plays on above it
+/// (owner, 2026-11-14: "make the guide come from bottom up rather than from the left").
 /// The remote lights a row (the player's surface keeps focus, as it does for Captions and Like);
 /// Select tunes it behind the pigeon.
 struct ReceiverGuide: View {
@@ -17,7 +18,8 @@ struct ReceiverGuide: View {
     @Environment(\.palette) private var palette
 
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: 16) {
                 Kicker("Guide \u{00B7} " + ReceiverRules.mediumLabel(medium))
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
@@ -35,36 +37,87 @@ struct ReceiverGuide: View {
                 // and drawing them all on every press made the guide slow (owner, 2026-11-04).
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Self.window(count: list.count, lit: lit), id: \.self) { index in
-                        GuideRow(number: index + 1, channel: list[index], live: list[index].id == current.id, lit: index == lit)
+                        GuideRow(number: index + 1, name: list[index].name, place: list[index].place,
+                                 medium: list[index].mediaType, id: list[index].id,
+                                 live: list[index].id == current.id, lit: index == lit)
                         Hairline()
                     }
                 }
                 .padding(.vertical, 8)
             }
             .padding(.horizontal, KJLayout.inset)
-            .padding(.vertical, 56)
-            .frame(width: 900, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(.top, 40)
+            .padding(.bottom, 48)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: .all)
-            Spacer(minLength: 0)
+            // The panel itself carries the name, so a test can read where it sits.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("receiverGuide")
         }
         .allowsHitTesting(false)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("receiverGuide")
     }
 
     /// The rows on screen: `rows` of them with the lit one in the middle, held against the ends.
-    static func window(count: Int, lit: Int, rows: Int = 9) -> [Int] {
+    static func window(count: Int, lit: Int, rows: Int = 5) -> [Int] {
         guard count > 0 else { return [] }
         let start = max(0, min(lit - rows / 2, count - rows))
         return Array(start..<min(count, start + rows))
     }
 }
 
-/// One channel in the guide. The lit row takes the focus plate and its text the plate's colours.
-private struct GuideRow: View {
+/// Transmission's guide: every channel of the station, its number, its name and what the clock
+/// has on it now, LIVE on the one tuned. It rises from the bottom over the picture as the
+/// Receiver's does (owner, 2026-11-14), and the remote walks it the same way.
+struct TransmissionGuide: View {
+    struct Row: Hashable {
+        let number: Int
+        let name: String
+        /// What is on now, or when the channel returns.
+        let now: String
+        let soundOnly: Bool
+    }
+    let rows: [Row]
+    let current: Int
+    let lit: Int
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 16) {
+                Kicker("Guide \u{00B7} Khajistan Transmission")
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(ReceiverGuide.window(count: rows.count, lit: lit), id: \.self) { index in
+                        let row = rows[index]
+                        GuideRow(number: row.number, name: row.name, place: row.now,
+                                 medium: row.soundOnly ? "radio" : "tv", id: "ch\(row.number)",
+                                 live: row.number == current, lit: index == lit)
+                        Hairline()
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            .padding(.horizontal, KJLayout.inset)
+            .padding(.top, 40)
+            .padding(.bottom, 48)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.ground, ignoresSafeAreaEdges: .all)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("transmissionGuide")
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// One channel in a guide (the Receiver's or Transmission's). The lit row takes the focus plate
+/// and its text the plate's colours.
+struct GuideRow: View {
     let number: Int
-    let channel: Channel
+    let name: String
+    /// The line under the name: the place, or on Transmission what is on now.
+    let place: String
+    let medium: String
+    let id: String
     let live: Bool
     let lit: Bool
     @Environment(\.palette) private var palette
@@ -73,10 +126,10 @@ private struct GuideRow: View {
         let look = lit ? palette.onFocusPlate : palette
         HStack(spacing: 22) {
             Text("\(number)").kjKicker().monospacedDigit().frame(width: 60, alignment: .trailing)
-            MediumMark(medium: channel.mediaType)
+            MediumMark(medium: medium)
             VStack(alignment: .leading, spacing: 4) {
-                Text(channel.name).kjName(30).lineLimit(1)
-                if !channel.place.isEmpty { Text(channel.place).kjSmall(faint: true).lineLimit(1) }
+                Text(name).kjName(30).lineLimit(1)
+                if !place.isEmpty { Text(place).kjSmall(faint: true).lineLimit(1) }
             }
             Spacer(minLength: 12)
             if live { Kicker("\u{25CF} Live").fixedSize() }
@@ -87,7 +140,7 @@ private struct GuideRow: View {
         .foregroundStyle(look.ink)
         .background(lit ? palette.focusPlate : .clear)
         .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("guide-\(channel.id)")
+        .accessibilityIdentifier("guide-\(id)")
         .accessibilityAddTraits(lit ? .isSelected : [])
     }
 }

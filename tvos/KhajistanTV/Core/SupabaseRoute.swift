@@ -221,3 +221,84 @@ enum SupabaseRoute {
         return answers(status: http.statusCode, routeHeader: http.value(forHTTPHeaderField: "x-kj-route"), viaProxy: viaProxy)
     }
 }
+
+#if DEBUG
+/// `-kjfixtures <dir>`: a debug build asks the network first and, when that fails or answers
+/// anything but 200, answers a GET from `<dir>/<path>`. CI, 2026-11-14: one TLS error on
+/// receiver-index.json failed a pull request that never touched the Receiver. Live first because a
+/// recording goes stale: by 11-15 the nightly probe had taken four Indus news channels the 11-14
+/// recording still listed off the dial, and a test that played them found them dead.
+/// `-kjfixturesonly YES` skips the network, so a test can prove the recording is what it reads.
+final class KJFixtureProtocol: URLProtocol, @unchecked Sendable {
+    static let directory = UserDefaults.standard.string(forKey: "kjfixtures").map { URL(fileURLWithPath: $0) }
+    static let only = UserDefaults.standard.bool(forKey: "kjfixturesonly")
+    /// The network, without this protocol, and short enough that a dead connection still leaves
+    /// the caller's own timeout time to read the recording.
+    private static let live: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 15
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+    private var liveTask: URLSessionDataTask?
+
+    /// The recorded answer for a URL: its path (off the `/sb/` proxy) under the fixture directory.
+    static func file(for request: URLRequest) -> URL? {
+        guard let directory, let url = request.url, (request.httpMethod ?? "GET") == "GET" else { return nil }
+        let path = SupabaseRoute.unrouted(url).path
+        guard path.count > 1, !path.contains("..") else { return nil }
+        let file = directory.appendingPathComponent(String(path.dropFirst()))
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { file(for: request) != nil }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() { liveTask?.cancel() }
+
+    // ponytail: the live answer reaches the client from the session's queue, not the loading
+    // thread; fine for tests, not for a shipping protocol.
+    override func startLoading() {
+        if Self.only { return answerFromFile() }
+        liveTask = Self.live.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            if (error as? URLError)?.code == .cancelled { return }
+            if let data, let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                self.answer(data, headers: ["Content-Type": http.value(forHTTPHeaderField: "Content-Type") ?? "application/json"])
+            } else {
+                self.answerFromFile()
+            }
+        }
+        liveTask?.resume()
+    }
+
+    private func answerFromFile() {
+        guard let file = Self.file(for: request), let body = try? Data(contentsOf: file) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.fileDoesNotExist))
+            return
+        }
+        answer(body, headers: ["Content-Type": "application/json"])
+    }
+
+    private func answer(_ body: Data, headers: [String: String]) {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+#endif
+
+extension URLSessionConfiguration {
+    /// Recorded answers behind the network in a debug build launched with `-kjfixtures`; unchanged otherwise.
+    func answeringFromFixtures() -> URLSessionConfiguration {
+        #if DEBUG
+        if KJFixtureProtocol.directory != nil { protocolClasses = [KJFixtureProtocol.self] + (protocolClasses ?? []) }
+        #endif
+        return self
+    }
+}

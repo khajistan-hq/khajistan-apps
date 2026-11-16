@@ -7,6 +7,11 @@ on:
   pull_request:
     paths: ['ios/**', 'tvos/**', '.github/workflows/ios.yml']
   workflow_dispatch:
+    inputs:
+      live:
+        description: 'Live channels instead of the local test video (TEST_RUNNER_KJ_LIVE_RECEIVER=1)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -80,6 +85,9 @@ jobs:
           done
           echo 'simulator did not boot in two attempts' >&2; exit 1
       - name: Build and test iOS app
+        env:
+          # A manual run with "live" on plays live carriers; every other run plays the local video.
+          TEST_RUNNER_KJ_LIVE_RECEIVER: ${{ inputs.live && '1' || '0' }}
         run: |
           set -euo pipefail
           xcodebuild test -project ios/Khajistan.xcodeproj -scheme Khajistan \

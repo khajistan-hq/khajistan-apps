@@ -52,6 +52,9 @@ final class PlayerController {
     @ObservationIgnored private var tuned: Tuned?
     /// When the last retune was: a failure within `retuneSpacing` of it is shown, not retuned.
     @ObservationIgnored private var retunedAt: ContinuousClock.Instant?
+    /// Set during a retune's grace, so the item it replaces cannot fail the signal meanwhile.
+    @ObservationIgnored private var retunePending = false
+    @ObservationIgnored private var retuneToken = 0
     /// Two failures this close together are "in a row": a carrier that keeps dying is not
     /// retuned for ever.
     private static let retuneSpacing: Duration = .seconds(60)
@@ -82,6 +85,7 @@ final class PlayerController {
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
         tuned = Tuned(url: url, seekTo: seekTo, title: title, subtitle: subtitle, isLive: isLive, listen: listen, live: live)
         retunedAt = nil
+        retunePending = false
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         generation += 1
@@ -473,6 +477,8 @@ final class PlayerController {
     /// (SupabaseRoute.retunesPlayback) is retuned once with a fresh item, at the same live
     /// position; a refusal, or a second failure within a minute of the retune, is shown.
     private func fail(error: Error?, stalled: Bool = false) {
+        // A late error from the item a retune is about to replace must not call the retune off.
+        guard !retunePending else { return }
         let logged = (player.currentItem?.errorLog()?.events ?? []).map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
         let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
         // A signal the viewer paused is never brought back by a retune: it fails as it is.
@@ -492,14 +498,18 @@ final class PlayerController {
         let gen = generation
         state = .tuning
         timeoutTask?.cancel()
-        // The old item is done with: a late error from it must not fail the signal and call the
-        // retune off during its grace.
-        removeItemObservers()
+        retuneToken += 1
+        let token = retuneToken
+        retunePending = true
         // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
         // back has a moment. ponytail: fixed wait, not a network path monitor.
         timeoutTask = Task { [weak self] in
             try? await Task.sleep(for: SupabaseRoute.droppedRetryDelay)
-            guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            guard let self else { return }
+            // However the grace ends (a retune, the item playing again, a pause, a new tuning),
+            // the item's own observers are still on it and fail as before.
+            if token == self.retuneToken { self.retunePending = false }
+            guard !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
             let elapsed = (ContinuousClock.now - tuned.at) / .seconds(1)
             let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite ? position : tuned.seekTo)
             self.attach(url: tuned.url, seekTo: seekTo, title: tuned.title, subtitle: tuned.subtitle,

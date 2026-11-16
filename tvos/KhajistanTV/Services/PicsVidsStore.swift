@@ -57,7 +57,13 @@ final class PicsVidsStore {
     private(set) var feeds: [String: PnvFeed] = [:]
     private(set) var kind: PnvKind?
     /// The site's Shuffle: every shelf re-dealt along the room's permutation from a random place.
+    /// On the Apple TV it is on from the start and dealt again on every visit (owner, 2026-11-14:
+    /// "shuffle everytime, the same photos are just there"). Off is the feed's own order, newest first.
+    #if os(tvOS)
+    private(set) var shuffled = true
+    #else
     private(set) var shuffled = false
+    #endif
     /// Counts the times every shelf was started over (a new kind, Shuffle on or off, a new deal).
     /// Views key their first-page loads on it: a re-deal changes no flag, only this.
     private(set) var deal = 0
@@ -71,6 +77,10 @@ final class PicsVidsStore {
     /// "ok" for this launch only, the session store of the site's notice. Never again is the
     /// device store: UserDefaults under the same key.
     @ObservationIgnored private var sessionAck: String?
+    /// The page was left since the last deal: the next appearance deals first (`dealIfLeft()`).
+    @ObservationIgnored private var dueForNewDeal = false
+    /// The one room-size probe, shared by every shelf that asks while it is in flight.
+    @ObservationIgnored private var roomSizeTask: Task<Int?, Never>?
     private unowned let auth: AuthStore
     private let urlSession: URLSession
 
@@ -88,7 +98,8 @@ final class PicsVidsStore {
     /// Loads the roster and the first page. Safe to call on every appearance: a page already open is left alone.
     func start() async {
         switch phase {
-        case .loading, .ready: return
+        case .loading: return
+        case .ready: return
         case .idle, .failed: break
         }
         phase = .loading
@@ -142,6 +153,25 @@ final class PicsVidsStore {
         feeds = [:]
     }
 
+    /// The viewer went to another section (not called while an object is open over the page).
+    /// Only marked here: dealing while the page tears down would start shelf loads that are then
+    /// cancelled, and a quick return could find them still "loading" and never ask again.
+    func pageLeft() { dueForNewDeal = true }
+
+    /// On the page's appearance, before its shelves ask for anything: a new deal if it was left.
+    func dealIfLeft() {
+        guard dueForNewDeal else { return }
+        dueForNewDeal = false
+        setShuffled(true)
+    }
+
+    /// Drops one feed so its next ask starts over (the Reel, which deals afresh on every press).
+    /// A feed with a page in flight is left alone: that page would land in the emptied feed.
+    func discard(_ key: String) {
+        guard feeds[key]?.isLoading != true else { return }
+        feeds[key] = nil
+    }
+
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
     func setShuffled(_ on: Bool) {
@@ -174,15 +204,31 @@ final class PicsVidsStore {
     /// and the Apple TV's Reel (ios/ compiles this file too).
     static let allRegions = ""
 
+    /// A region's videos-only feed, for the Reel. Its own key, so the page's filter is untouched.
+    static let videosPrefix = "videos:"
+    static func videosKey(_ region: String) -> String { videosPrefix + region }
+
     /// The next page of one region's shelf: the first when it has none yet. Safe to call as often
     /// as focus nears the end; a page in flight or a finished shelf is left alone.
     func loadMore(region: String) async {
+        // Run apart from the caller's cancellation. A shelf's task is cancelled whenever SwiftUI
+        // rebuilds or re-keys it; a load cancelled mid-flight cleared its "loading" mark after the
+        // new shelf had already been told a load was under way, and the shelf spun for good
+        // (Cursor Bugbot on PR 64; reproduced by leaving the page and coming straight back).
+        // A load from an old deal is still dropped: every write checks `generation`.
+        await Task { await self.loadMoreNow(region: region) }.value
+    }
+
+    private func loadMoreNow(region: String) async {
         guard phase == .ready else { return }
         var feed = feeds[region] ?? PnvFeed()
         guard !feed.isLoading, !feed.isDone, feed.error == nil else { return }
         let gen = generation
+        let videosOnly = region.hasPrefix(Self.videosPrefix)
+        let place = videosOnly ? String(region.dropFirst(Self.videosPrefix.count)) : region
+        let kind = videosOnly ? PnvKind.video : self.kind
         // No roster, or a region nobody is filed under: nothing to ask for.
-        guard let keys = PnvAPI.accountKeys(roster: roster, region: region == Self.allRegions ? nil : region) else {
+        guard let keys = PnvAPI.accountKeys(roster: roster, region: place == Self.allRegions ? nil : place) else {
             feed.isDone = true
             feeds[region] = feed
             return
@@ -191,9 +237,17 @@ final class PicsVidsStore {
         feeds[region] = feed
         if shuffled && feed.start == 0 {
             if roomSize == nil {
-                roomSize = (try? await fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
+                if roomSizeTask == nil {
+                    roomSizeTask = Task { [weak self] in
+                        guard let self else { return nil }
+                        return (try? await self.fetch([ShuffleKeyRow].self, PnvAPI.roomSizeRequest()))?.first?.shuffle_key
+                    }
+                }
+                roomSize = await roomSizeTask?.value
+                if roomSize == nil { roomSizeTask = nil }
             }
-            // A probe cancelled with its caller picks no start: the next ask probes again.
+            // A new deal while the probe ran (`generation` moved): this load is stale and stops.
+            // Caller cancellation no longer reaches here (loadMore runs this apart from it).
             guard gen == generation, !Task.isCancelled else {
                 if gen == generation { feeds[region]?.isLoading = false }
                 return
@@ -203,6 +257,13 @@ final class PicsVidsStore {
             feed.after = feed.start - 1
             feeds[region]?.start = feed.start
             feeds[region]?.after = feed.after
+            // A shuffled page carries no count; a TV shelf heading asks for it on its own. The
+            // phone's grid and the Reel's videos feed show no count, so they do not ask.
+            #if os(tvOS)
+            if !videosOnly, feed.total == nil {
+                Task { [weak self] in await self?.loadCount(region: region, keys: keys, kind: kind, generation: gen) }
+            }
+            #endif
         }
         let request = shuffled
             ? PnvAPI.shufflePageRequest(keys: keys, kind: kind, after: feed.after, end: feed.end)
@@ -228,16 +289,24 @@ final class PicsVidsStore {
             next.isLoading = false
             feeds[region] = next
             // A walk that just came round from 1 has nothing on screen to ask for it: read on now.
-            if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMore(region: region) }
+            if shuffled, rows.count < PnvAPI.shufflePageSize, !next.isDone { await loadMoreNow(region: region) }
         } catch {
             guard gen == generation, !Task.isCancelled else {
-                // A cancelled request leaves the shelf free to ask again.
+                // A new deal while the page was in flight: the old feed is gone, nothing to mark.
                 if gen == generation { feeds[region]?.isLoading = false }
                 return
             }
             feeds[region]?.isLoading = false
             feeds[region]?.error = "The archive did not answer."
         }
+    }
+
+    private func loadCount(region: String, keys: [String], kind: PnvKind?, generation gen: Int) async {
+        guard let (_, response) = try? await SupabaseRoute.data(for: PnvAPI.countRequest(keys: keys, kind: kind), session: urlSession),
+              gen == generation,
+              let total = PnvAPI.total(fromContentRange: (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Range"))
+        else { return }
+        feeds[region]?.total = total
     }
 
     // MARK: - A row

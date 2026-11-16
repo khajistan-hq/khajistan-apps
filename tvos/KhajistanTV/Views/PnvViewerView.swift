@@ -7,7 +7,8 @@ import SwiftUI
 /// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
 /// one lit, Up or Menu lets go. On a stream, Right goes on to Shuffle (deals the stream again
-/// from a random place, the site's Shuffle) and Region (steps All regions, then west to east). Lit by the remote, never focused, as the Receiver's strip is.
+/// from a random place, the site's Shuffle; on the Apple TV it stays on) and Region (steps All
+/// regions, then west to east; the Reel passes over a region with no videos). Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -27,6 +28,8 @@ struct PnvViewerView: View {
     /// True from a restart until the new deal's first object is shown: the object in `current`
     /// belongs to the old deal, so nothing of it is drawn.
     @State private var stranded = false
+    /// Regions passed over in a row because their reel had no videos; bounded by the region count.
+    @State private var emptySkips = 0
     @State private var armed: Control?
     @State private var saveNote: String?
     @State private var showCollections = false
@@ -46,17 +49,23 @@ struct PnvViewerView: View {
     /// The region the stream is read from: "" is every region. Changed in place from the strip.
     @State private var region: String
     private let list: [PnvRow]?
+    /// Reel: videos only, whatever the page's filter (owner, 2026-11-14: "reel just needs to be of videos").
+    private let videosOnly: Bool
+    /// The store's feed this viewer walks: the region's own, or its videos-only reel.
+    private var feedKey: String { videosOnly ? PicsVidsStore.videosKey(region) : region }
 
-    init(row: PnvRow, region: String) {
+    init(row: PnvRow, region: String, videosOnly: Bool = false) {
         _current = State(initialValue: row)
         _region = State(initialValue: region)
         self.list = nil
+        self.videosOnly = videosOnly
     }
 
     init(row: PnvRow, list: [PnvRow]) {
         _current = State(initialValue: row)
         _region = State(initialValue: "")
         self.list = list
+        self.videosOnly = false
     }
 
     private var store: PicsVidsStore { model.pnv }
@@ -89,7 +98,7 @@ struct PnvViewerView: View {
                 // Between deals the object in `current` is not on screen: nothing acts on it.
                 case .save: wake(); if !stranded { toggleSave() }
                 case .collection: wake(); if !stranded { openCollections() }
-                case .shuffle: wake(); restart { store.setShuffled(!store.shuffled) }
+                case .shuffle: wake(); restart { store.setShuffled(true) }
                 case .region: wake(); nextRegion()
                 case nil: if phase == .needsSignIn { showSignIn = true } else { wake() }
                 }
@@ -218,8 +227,9 @@ struct PnvViewerView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAddTraits(armed == .shuffle ? .isSelected : [])
                     .accessibilityValue(store.shuffled ? "On" : "Off")
+                    .accessibilityHint("Deals the stream again from a random place")
                     .accessibilityIdentifier("pnvReelShuffle")
-                    .accessibilityAction { restart { store.setShuffled(!store.shuffled) } }
+                    .accessibilityAction { restart { store.setShuffled(true) } }
                 StripChipStyle.face(Text(regionName), isOn: false, selected: armed == .region)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAddTraits(armed == .region ? .isSelected : [])
@@ -259,7 +269,7 @@ struct PnvViewerView: View {
         phase = .loading
         change()
         saveNote = nil
-        let shelf = region
+        let shelf = feedKey
         restartTask = Task {
             defer { if !Task.isCancelled { restartTask = nil } }
             if store.feed(shelf).items.isEmpty { await store.retry(region: shelf) }
@@ -270,9 +280,18 @@ struct PnvViewerView: View {
             }
             guard !Task.isCancelled else { return }
             guard let first = store.feed(shelf).items.first else {
+                // A region with no videos is passed over on the Reel (Horn of Africa had none on
+                // 2026-11-14), so the Region chip never lands on an empty stream.
+                if videosOnly, store.feed(shelf).isDone, store.feed(shelf).error == nil, emptySkips < store.regions.count {
+                    emptySkips += 1
+                    nextRegion()
+                    return
+                }
+                emptySkips = 0
                 phase = .failed(store.feed(shelf).error ?? "Nothing filed under this yet.")
                 return
             }
+            emptySkips = 0
             show(first)
         }
     }
@@ -397,15 +416,23 @@ struct PnvViewerView: View {
                 return
             }
             saveNote = nil
-            guard var index = store.feed(region).items.firstIndex(where: { $0.id == current.id }) else { return }
+            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id }) else { return }
             index += delta
-            if index >= store.feed(region).items.count { await store.loadMore(region: region) }
-            let items = store.feed(region).items
+            if index >= store.feed(feedKey).items.count {
+                // A page that failed blocks loadMore until it is cleared: ask again, or the
+                // "endless" stream stops at its end with nothing said.
+                if store.feed(feedKey).error != nil {
+                    await store.retry(region: feedKey)
+                } else {
+                    await store.loadMore(region: feedKey)
+                }
+            }
+            let items = store.feed(feedKey).items
             guard !Task.isCancelled, !items.isEmpty else { return }
             // The stream never ends: past its last object it comes round to its first, once the
             // feed has given everything; Left from the first stays put.
             if index >= items.count {
-                guard store.feed(region).isDone else { return }
+                guard store.feed(feedKey).isDone else { return }
                 index = 0
             }
             guard items.indices.contains(index) else { return }

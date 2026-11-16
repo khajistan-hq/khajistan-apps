@@ -12,6 +12,8 @@ final class Stub: URLProtocol, @unchecked Sendable {
     /// `roomSize`, or a 500 when it is nil.
     nonisolated(unsafe) static var shuffleKeys: [Int]?
     nonisolated(unsafe) static var roomSize: Int?
+    /// Seconds before pnv_media answers, so a caller can be cancelled while its page is in flight.
+    nonisolated(unsafe) static var mediaDelay: Double = 0
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -36,6 +38,18 @@ final class Stub: URLProtocol, @unchecked Sendable {
                 let rows = page.map { "{\"media_key\":\"k\($0)\",\"kind\":\"image\",\"account_key\":\"a\",\"shuffle_key\":\($0)}" }
                 body = Data(("[" + rows.joined(separator: ",") + "]").utf8)
             }
+        } else if path.hasSuffix("/pnv_media"), Stub.mediaDelay > 0 {
+            Stub.mediaRequests += 1
+            let request = self.request
+            DispatchQueue.global().asyncAfter(deadline: .now() + Stub.mediaDelay) { [self] in
+                let body = Data(#"[{"media_key":"m1","kind":"image","width":10,"height":10,"account_key":"a"}]"#.utf8)
+                let response = HTTPURLResponse(url: request.url!, statusCode: 206, httpVersion: "HTTP/1.1",
+                                               headerFields: ["Content-Type": "application/json", "Content-Range": "0-0/1"])!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: body)
+                client?.urlProtocolDidFinishLoading(self)
+            }
+            return
         } else if path.hasSuffix("/pnv_media") {
             Stub.mediaRequests += 1
             status = Stub.mediaAnswers.isEmpty ? 206 : Stub.mediaAnswers.removeFirst()
@@ -85,6 +99,32 @@ struct PnvRetryHarness {
         await run([500, 500, 500], expectItems: 0, expectRequests: 3, "three in a row: the shelf says so")
         await run([404], expectItems: 0, expectRequests: 1, "a refusal is not asked again")
         await run([0], expectItems: 1, expectRequests: 2, "a timed-out connection is asked again")
+
+        // A shelf whose first-page task is cancelled mid-flight (SwiftUI re-keying or rebuilding
+        // it) and asked again at once must still fill: the second ask finds a load under way,
+        // so that load has to finish (PR 64, a quick return to Pics/Vids left shelves spinning).
+        do {
+            Stub.mediaAnswers = []
+            Stub.mediaRequests = 0
+            Stub.mediaDelay = 0.5
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [Stub.self]
+            let auth = AuthStore()
+            let store = PicsVidsStore(auth: auth, configuration: config)
+            await store.start()
+            let first = Task { await store.loadMore(region: "egypt") }
+            // Until the page is in flight, then the shelf's task goes away.
+            for _ in 0..<200 where Stub.mediaRequests == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+            first.cancel()
+            await store.loadMore(region: "egypt")
+            for _ in 0..<300 where store.feed("egypt").isLoading { try? await Task.sleep(for: .milliseconds(10)) }
+            let feed = store.feed("egypt")
+            let ok = Stub.mediaRequests == 1 && feed.items.count == 1 && !feed.isLoading && feed.error == nil
+            print((ok ? "PASS " : "FAIL ") + "a cancelled first page still fills its shelf (rows \(feed.items.count), requests \(Stub.mediaRequests), loading \(feed.isLoading))")
+            if !ok { failures += 1 }
+            Stub.mediaDelay = 0
+            withExtendedLifetime(auth) {}
+        }
 
         // The shuffle walk, against a room of 1,000 slots holding 250 objects (more than two
         // pages of 120): from any start, every object once, in one rotation of key order.

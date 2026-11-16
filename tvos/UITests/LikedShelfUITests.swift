@@ -5,6 +5,8 @@ import XCTest
 /// likes from `-kjlikedrefs`, so no account is signed in here.
 final class LikedShelfUITests: XCTestCase {
     /// Newest first. The last ref names no channel and must not be drawn.
+    /// The lists are the recording only (`-kjfixturesonly`): live, 24 News HD left the dial on
+    /// 2026-11-15 and five liked became four (CI 43756089230).
     private static let refs = "channel:al-arabiya,channel:24-news-hd,channel:radio-srood,channel:afghanistan-international,channel:afaq-fm-98-7,channel:no-such-channel"
 
     override func setUpWithError() throws {
@@ -18,7 +20,7 @@ final class LikedShelfUITests: XCTestCase {
 
     func testLikedShelfIsOnePressDownFromTheMap() {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs]
+        app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs, "-kjfixturesonly", "YES"]
         kjLaunch(app)
         let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
         XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "the front carries a Liked shelf")
@@ -62,7 +64,7 @@ final class LikedShelfUITests: XCTestCase {
     func testLikedShelfInEverySkin() {
         for skin in ["grove", "smut"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-kjskin", skin, "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs]
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs, "-kjfixturesonly", "YES"]
             kjLaunch(app)
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")

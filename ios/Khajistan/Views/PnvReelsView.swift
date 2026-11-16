@@ -267,7 +267,23 @@ struct PnvReelsView: View {
                 // feed already costs, after as many swipes; cap laps if a big region ever gets there.
                 if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
             } else {
-                Task { await store.loadMore(region: model.pnvRegion) }
+                let region = model.pnvRegion
+                Task {
+                    // A page that failed blocks loadMore until it is cleared: ask again, or the
+                    // reel stops at its end with nothing said.
+                    if store.feed(region).error != nil {
+                        await store.retry(region: region)
+                    } else {
+                        await store.loadMore(region: region)
+                    }
+                    // The last page came back and the feed is done while the end is already on
+                    // screen: activate() will not run again for this page, so deal the lap here,
+                    // or the reel stops on its last object (a feed whose size is a page multiple).
+                    guard isStream, region == model.pnvRegion, store.feed(region).isDone, !items.isEmpty else { return }
+                    let now = reel
+                    guard let at = now.firstIndex(where: { $0.id == currentId }), at >= now.count - 4 else { return }
+                    laps.append(PnvReel.nextLap(items, after: now.last?.row.id))
+                }
             }
         }
         guard row.isVideo else { phase = .ready; return }

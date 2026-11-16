@@ -48,7 +48,7 @@ final class ReceiverStore {
         config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        urlSession = URLSession(configuration: config.answeringFromFixtures())
     }
 
     private nonisolated static func dataURL(_ file: String) -> URL {
@@ -203,7 +203,9 @@ final class ReceiverStore {
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
         let (denied, suspects, graded) = await (denylist, offAir, health)
         guard !Task.isCancelled else { return }
-        controls = Controls(denylist: denied, offAir: suspects, health: graded)
+        // A stale health file is ignored as a missing one is: it would withdraw channels on old news.
+        let fresh = graded.flatMap { $0.isFresh(at: Date()) ? $0 : nil }
+        controls = Controls(denylist: denied, offAir: suspects, health: fresh)
         if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
     }
 

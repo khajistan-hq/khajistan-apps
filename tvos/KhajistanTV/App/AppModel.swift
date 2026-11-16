@@ -46,6 +46,9 @@ final class AppModel {
     var surfFocusedOnce = false
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
+    /// A Transmission channel playing in the picture-in-picture window. The store keeps the
+    /// channel running (handovers included) while the player screen is closed.
+    var transmissionPiP: PictureInPicture?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -169,6 +172,11 @@ final class AppModel {
         radioAway = nil
         away?.pip?.stop()
         away?.controller.stop()
+        if let pip = transmissionPiP {
+            transmissionPiP = nil
+            pip.stop()
+            transmission.stop()
+        }
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

@@ -7,6 +7,10 @@ import SwiftUI
 ///
 /// A programme that carries a prepared subtitle file (`subtitle_url`) shows it, on by default as on
 /// the website, and the strip ends in the Subtitles control: right moves to it, left comes back.
+///
+/// The strip also carries Guide and PiP, as the Receiver's does. The guide rises from the bottom
+/// with every channel and what is on it now; picture in picture keeps the channel playing in a
+/// corner while the viewer browses, handovers included.
 struct TransmissionPlayerView: View {
     /// The channel the viewer chose. The store holds the channel now on air, which Up and Down change.
     let channel: Int
@@ -22,7 +26,17 @@ struct TransmissionPlayerView: View {
     /// Set when the viewer leaves, so a sequence that is part-way through does not start the next step.
     @State private var left = false
     @State private var subtitles = RecordedSubtitles()
-    @State private var captionArmed = false
+    /// The strip control the remote has lit, if any.
+    @State private var armed: Chip?
+    private enum Chip { case subtitles, guide, pip }
+    /// The guide's lit row, as an index into `guideRows`; nil while it is closed.
+    @State private var guideRow: Int?
+    @State private var guideRows: [TransmissionGuide.Row] = []
+    @State private var pip = PictureInPicture()
+    /// Set when the picture went to the corner window: the screen closes, the channel plays on.
+    @State private var handedToPiP = false
+    /// A short line the strip shows in place of its detail, such as PiP not opening.
+    @State private var note: String?
     @State private var stripHeight: CGFloat = 0
     /// The song playing inside the programme, from songs.json (HouseSongs), or "".
     @State private var song = ""
@@ -49,12 +63,16 @@ struct TransmissionPlayerView: View {
             playPause()
         }
         .onExitCommand {
-            // Back lets go of a lit control first, as the Receiver does.
+            // Back closes the guide, then lets go of a lit control, as the Receiver does.
+            if guideRow != nil {
+                closeGuide()
+                return
+            }
             var soundOnly = false
             if case .onAir(let air) = store.phase { soundOnly = air.programme?.audio_only == true }
             let hidesStrip = stripShown && !soundOnly && store.player.state == .playing && !switching && OverlayTiming.hidesItself
-            if captionArmed {
-                captionArmed = false
+            if armed != nil {
+                armed = nil
                 if hidesStrip { hideTask?.cancel(); overlayVisible = false } else { wake() }
                 return
             }
@@ -69,6 +87,11 @@ struct TransmissionPlayerView: View {
             dismiss()
         }
         .onChange(of: store.phase) { wake() }
+        // A control cannot stay lit once it is gone from the strip.
+        .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
+        .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
+        // Off air or re-tuning: the guide and the strip's controls go with the picture.
+        .onChange(of: isOnAir) { _, onAir in if !onAir { guideRow = nil; armed = nil } }
         .onChange(of: store.player.state) { wake() }
         // A schedule that now needs the preview password, or is not published, is answered on
         // the station page, which carries the password step. The player goes back to it.
@@ -156,10 +179,10 @@ struct TransmissionPlayerView: View {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
                 Color.black.ignoresSafeArea()
                 // Both signals keep a layer of their own; the cut is which one shows.
-                PlayerLayerView(player: store.playerA.player)
+                PlayerLayerView(player: store.playerA.player, onLayer: pip.bind)
                     .ignoresSafeArea()
                     .opacity(store.aIsFront ? 1 : 0)
-                PlayerLayerView(player: store.playerB.player)
+                PlayerLayerView(player: store.playerB.player, onLayer: pip.bind)
                     .ignoresSafeArea()
                     .opacity(store.aIsFront ? 0 : 1)
             }
@@ -170,7 +193,13 @@ struct TransmissionPlayerView: View {
             }
             focusTarget
             overlay(air)
+            if let guideRow {
+                TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
+                // Not over the guide's rows: the guide covers the lower part of the picture.
+                .opacity(guideRow == nil ? 1 : 0)
             HandoverNotice(
                 air: air,
                 next: store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(), count: 1).first,
@@ -224,7 +253,7 @@ struct TransmissionPlayerView: View {
                     trailing: ["\u{25CF} " + store.channelName(store.channelNumber)],
                     // The station clock's answer (StationClock.withNextProgramme, the site's rule).
                     upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, name) } },
-                    accessory: subtitles.tracks.isEmpty ? nil : AnyView(subtitlesControl)
+                    accessory: chips.isEmpty ? nil : AnyView(stripControls)
                 )
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
@@ -285,6 +314,7 @@ struct TransmissionPlayerView: View {
     /// programme already carries both on the ground.
     private func stripDetail(_ air: OnAir, soundOnly: Bool) -> String {
         // The country is not a playback state: it stays through a pause. A failure's message stands alone.
+        if let note { return note }
         if case .failed = store.player.state { return stateText(air) }
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
@@ -333,12 +363,7 @@ struct TransmissionPlayerView: View {
     /// button of the screen's own (Sign in, Try again) is the thing to focus.
     private var focusTarget: some View {
         Button {
-            if captionArmed {
-                // Focus never leaves this button: see ReceiverPlayerView's surface (2026-10-06).
-                subtitles.cycle()
-            } else {
-                wake()
-            }
+            selectOnSurface()
         } label: {
             Color.clear
         }
@@ -349,11 +374,161 @@ struct TransmissionPlayerView: View {
 
     /// Right lights it, Select on the picture works it, left lets it go.
     private var subtitlesControl: some View {
-        StripChipStyle.face(Text(subtitles.label), isOn: subtitles.current != nil, selected: captionArmed)
+        StripChipStyle.face(Text(subtitles.label), isOn: subtitles.current != nil, selected: armed == .subtitles)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier("subtitlesControl")
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
-            .accessibilityAddTraits(captionArmed ? .isSelected : [])
+            .accessibilityAddTraits(armed == .subtitles ? .isSelected : [])
+    }
+
+    // MARK: - Strip controls, the guide and picture in picture
+
+    /// The strip's controls, left to right, as the remote walks them.
+    private var chips: [Chip] {
+        [subtitles.tracks.isEmpty ? nil : .subtitles, guideOffered ? .guide : nil, pipOffered ? .pip : nil]
+            .compactMap { $0 }
+    }
+
+    private var stripControls: some View {
+        HStack(spacing: 14) {
+            if !subtitles.tracks.isEmpty { subtitlesControl }
+            if guideOffered {
+                StripChipStyle.face(Text("Guide"), isOn: guideRow != nil, selected: armed == .guide)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Guide")
+                    .accessibilityIdentifier("guideControl")
+                    .accessibilityAction { openGuide() }
+                    .accessibilityAddTraits(armed == .guide ? .isSelected : [])
+            }
+            if pipOffered {
+                StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("Picture in picture")
+                    .accessibilityIdentifier("pipControl")
+                    .accessibilityAction { startPictureInPicture() }
+                    .accessibilityAddTraits(armed == .pip ? .isSelected : [])
+            }
+        }
+    }
+
+    /// Select on the picture: tunes the lit guide row, works the lit control, or, with the strip
+    /// up, lights its first control (the Receiver's rule).
+    private func selectOnSurface() {
+        if let guideRow {
+            if guideRows.indices.contains(guideRow) { pick(guideRows[guideRow].number) }
+            return
+        }
+        switch armed {
+        // Focus never leaves the surface: see ReceiverPlayerView's surface (2026-10-06).
+        case .subtitles: subtitles.cycle()
+        case .guide: return openGuide()
+        case .pip: return startPictureInPicture()
+        case nil: if stripShown, !isFailed { armed = chips.first }
+        }
+        wake()
+    }
+
+    private var isFailed: Bool { if case .failed = store.player.state { return true } else { return false } }
+
+    /// Not while a change, a handover or the sign-on tunes: the control shows only when it works.
+    private var guideOffered: Bool {
+        isOnAir && store.channelNumbers.count > 1 && !switching && store.player.state != .tuning
+    }
+
+    /// Every channel, with what the clock has on it now, the tuned one lit.
+    private func openGuide() {
+        guard guideOffered else { return }
+        hideTask?.cancel()
+        armed = nil
+        let now = TransmissionStore.now()
+        guideRows = store.channelNumbers.map { number in
+            let air = store.nowOn(channel: number, at: now)
+            let line: String
+            if let air {
+                line = air.nowName ?? air.show?.name ?? ""
+            } else if let back = store.returnTime(channel: number, at: now) {
+                line = "Off air \u{00B7} returns at \(back) \(StationClock.tzLabel)"
+            } else {
+                line = "Off air"
+            }
+            return .init(number: number, name: store.channelName(number), now: line,
+                         soundOnly: air?.programme?.audio_only == true)
+        }
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+            guideRow = guideRows.firstIndex { $0.number == store.channelNumber } ?? 0
+        }
+    }
+
+    private func closeGuide() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        wake()
+    }
+
+    /// A channel chosen in the guide: the same change as Up or Down, behind the pigeon.
+    private func pick(_ number: Int) {
+        // A change already under way: the guide stays open with the choice still lit.
+        guard !switching else { return }
+        closeGuide()
+        guard number != store.channelNumber, holdsFocus else { return }
+        switching = true
+        Task {
+            await switchUnderThePigeon(to: number)
+            switching = false
+        }
+    }
+
+    /// Picture in picture: a picture playing, with no change under way. A sound-only programme
+    /// has no picture to put in the corner.
+    private var pipOffered: Bool {
+        guard PictureInPicture.isSupported, !switching, store.player.state == .playing,
+              case .onAir(let air) = store.phase else { return false }
+        return air.programme?.audio_only != true
+    }
+
+    /// The picture goes to a corner and the screen closes behind it; the store keeps the channel
+    /// on air, handing over programme to programme. Full screen from the window opens the channel
+    /// again; closing the window stops it; any other player starting closes it (silenceRadio).
+    private func startPictureInPicture() {
+        guard pipOffered else { return }
+        armed = nil
+        let store = store, model = model, pip = pip
+        pip.onStart = {
+            // A channel change between Select and the window opening stopped this picture.
+            guard store.player.state == .playing || store.player.state == .tuning else { pip.stop(); return }
+            model.transmissionPiP = pip
+            handedToPiP = true
+            dismiss()
+        }
+        pip.onFail = { say($0) }
+        pip.onRestore = {
+            guard model.transmissionPiP === pip else { return }
+            // transmissionPiP stays set: the player that opens clears it as it starts
+            // (silenceRadio). If it cannot open (signed out, a cover in the way), the next
+            // signal to start still stops this one rather than playing over it.
+            // The station page opens the channel again, as a Top Shelf link does.
+            model.section = .transmission
+            model.link = .channel(store.channelNumber)
+        }
+        pip.onEnd = {
+            guard model.transmissionPiP === pip else { return }
+            model.transmissionPiP = nil
+            store.stop()
+        }
+        if !pip.start(store.player.player) {
+            pip.letGo()
+            say("Picture in picture is not ready yet. Try again in a moment.")
+        }
+        wake()
+    }
+
+    /// A line in the strip for a few seconds.
+    private func say(_ line: String) {
+        note = line
+        wake()
+        Task {
+            try? await Task.sleep(for: .seconds(4))
+            if note == line { note = nil }
+        }
     }
 
     // MARK: - Subtitles
@@ -420,25 +595,51 @@ struct TransmissionPlayerView: View {
     /// Up and down switch channel behind the pigeon. While a change is under way they skip it; one
     /// made while the sign-on flies switches under that bird.
     private func move(_ direction: MoveCommandDirection) {
+        // Read before wake() shows the strip: right on the bare picture opens the guide, right
+        // with the strip up walks its controls (the Receiver's rule, owner 2026-11-08).
+        let stripWasUp = stripShown
         wake()
-        if direction == .right, !subtitles.tracks.isEmpty, stripShown {
-            hideTask?.cancel()
-            captionArmed = true
+        // Inside the guide up and down walk the rows.
+        if let row = guideRow {
+            let count = guideRows.count
+            if count > 0, direction == .up { guideRow = (row - 1 + count) % count }
+            if count > 0, direction == .down { guideRow = (row + 1) % count }
             return
         }
-        if direction == .left, captionArmed {
-            captionArmed = false
-            wake()
+        switch direction {
+        case .right:
+            hideTask?.cancel()
+            if let armed, let at = chips.firstIndex(of: armed) {
+                if at + 1 < chips.count { self.armed = chips[at + 1] }
+            } else if stripWasUp, !isFailed, let first = chips.first {
+                armed = first
+            } else {
+                openGuide()
+            }
             return
+        case .left:
+            if let armed {
+                let at = chips.firstIndex(of: armed) ?? 0
+                self.armed = at > 0 ? chips[at - 1] : nil
+                if self.armed == nil { wake() }
+            } else if !stripWasUp {
+                openGuide()
+            }
+            return
+        default:
+            break
         }
         guard direction == .up || direction == .down else { return }
-        captionArmed = false
+        armed = nil
         guard holdsFocus, !switching else { return }
         switching = true
         // Up is Channel Up, to the next number; down is Channel Down. Both go round the dial.
         let step = direction == .up ? 1 : -1
         Task {
-            await switchUnderThePigeon(step: step)
+            // Resolved after the schedule, from the channel tuned by then (the sign-on may still
+            // be setting it at the press).
+            await store.loadSchedule()
+            await switchUnderThePigeon(to: store.channel(step: step))
             switching = false
         }
     }
@@ -447,9 +648,9 @@ struct TransmissionPlayerView: View {
     /// over it, and cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the
     /// channel plays, with the bird flying on over it (2026-10-07).
     /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
-    private func switchUnderThePigeon(step: Int) async {
+    private func switchUnderThePigeon(to target: Int) async {
         let pigeon = model.pigeon
-        let key = "transmission-\(store.channel(step: step))"
+        let key = "transmission-\(target)"
         if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
             guard !left else { return }
@@ -457,7 +658,7 @@ struct TransmissionPlayerView: View {
         }
         async let quiet: Void = store.player.fadeOut()
         let started = ContinuousClock.now
-        if let pending = await store.switchBehind(step: step), !left {
+        if let pending = await store.switchBehind(to: target), !left {
             let next = store.incoming
             // The channel's own tune time, signing included, to its first frame; never the bird.
             TuneTimes.recordWhenPlaying(key, player: next, since: started) { !left }
@@ -482,7 +683,7 @@ struct TransmissionPlayerView: View {
                 try? await Task.sleep(for: .milliseconds(30))
             }
         } else if !left {
-            await store.switchChannel(step: step)
+            await store.tune(channel: target)
         }
         await quiet
     }
@@ -535,7 +736,8 @@ struct TransmissionPlayerView: View {
         model.pigeon.clear()
         hideTask?.cancel()
         subtitles.clear()
-        store.stop()
+        // A picture in the corner window plays on: the store keeps it until the window closes.
+        if !handedToPiP { store.stop() }
         model.clips.clear()
     }
 
@@ -549,10 +751,9 @@ struct TransmissionPlayerView: View {
         guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
-            // The strip stays while the viewer is on its Subtitles control.
-            if !Task.isCancelled, !captionArmed {
+            // The strip stays while a control is lit or the guide is open.
+            if !Task.isCancelled, armed == nil, guideRow == nil {
                 overlayVisible = false
-                captionArmed = false
             }
         }
     }

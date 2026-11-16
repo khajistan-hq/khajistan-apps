@@ -268,7 +268,9 @@ struct ReceiverPlayerView: View {
                     // Radio carries its name in display type on the ground; the strip leaves it out.
                     name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
                     detail: stripDetail,
-                    attribution: shown.sourceLine,
+                    // No "broadcast by" line on the television: it stays on the website (owner,
+                    // 2026-11-16: "i dont want info like 'regional broadcast by...' the apple tv").
+                    attribution: nil,
                     trailing: stripTrailing,
                     accessory: AnyView(stripControls)
                 )

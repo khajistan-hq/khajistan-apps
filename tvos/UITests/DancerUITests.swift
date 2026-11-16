@@ -149,14 +149,16 @@ final class DancerUITests: XCTestCase {
             XCTAssertTrue(state.waitForExistence(timeout: 30))
             let tuned = Date().addingTimeInterval(45)
             while Date() < tuned, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
-            if state.label != "Playing" {
+            // Read once, before the app is closed: a terminated app's label reads empty.
+            let label = state.label
+            if label != "Playing" {
                 shot("\(id)-not-playing", app)
                 app.terminate()
                 // As playsOrSkips: a player stuck connecting, paused or never opened is a failure,
                 // and so is the local test media not playing. Only a dead live carrier moves on.
-                let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
-                guard kjLiveMedia, !stuck else { XCTFail("\(id) did not play: '\(state.label)'"); return }
-                tried.append("\(id): \(state.label)")
+                let stuck = label == "Connecting…" || label == "Paused" || label.isEmpty
+                guard kjLiveMedia, !stuck else { XCTFail("\(id) did not play: '\(label)'"); return }
+                tried.append("\(id): \(label)")
                 continue
             }
             XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))

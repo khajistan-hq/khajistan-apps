@@ -1046,3 +1046,27 @@ enum RRPrivateFiles {
         return folder
     }
 }
+
+/// A shelf load belongs to one preview credential context. Returning to an earlier password
+/// still creates a new generation, so an older request cannot publish into a newer shelf.
+struct RRShelfLoadContext {
+    private(set) var generation = 0
+    private var credential: String??
+
+    var isInitialized: Bool { credential != nil }
+
+    mutating func invalidate(_ value: String?) {
+        credential = .some(value)
+        generation += 1
+    }
+
+    mutating func update(_ value: String?) -> Bool {
+        guard credential != .some(value) else { return false }
+        invalidate(value)
+        return true
+    }
+
+    func accepts(_ ticket: Int, credential value: String?) -> Bool {
+        generation == ticket && credential == .some(value)
+    }
+}

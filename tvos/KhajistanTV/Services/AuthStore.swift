@@ -28,6 +28,7 @@ final class AuthStore {
         for observer in Array(accessObservers.values) { observer() }
     }
     private(set) var previewPassword: String?
+    @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -182,13 +183,16 @@ final class AuthStore {
             clearPreviewPassword()
             return
         }
+        let changed = previewPassword != password
         previewPassword = password
+        if changed { onPreviewPasswordChange?() }
         _ = try? Keychain.write(Data(password.utf8), account: Account.preview, shared: true)
         Self.topShelfChanged()
     }
 
     func clearPreviewPassword() {
         previewPassword = nil
+        onPreviewPasswordChange?()
         Keychain.delete(Account.preview)
         Self.topShelfChanged()
     }

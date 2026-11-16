@@ -13,9 +13,8 @@ final class KhajistanUITests: XCTestCase {
 
     /// Recorded answers for the receiver's list, feeds and map and for the chat room list
     /// (`tvos/UITests/Fixtures/recorded`, shared with the Apple TV tests and refreshed by its
-    /// `refresh.sh`), used when the live request fails: one TLS error on receiver-index.json
-    /// failed pull requests that never touched the Receiver (CI, 2026-11-14). Live answers still
-    /// come first, so the list is today's; streams, stills and the rest stay live.
+    /// `refresh.sh`), read instead of the live list (see `kjFixtureArguments`): one TLS error on
+    /// receiver-index.json failed pull requests that never touched the Receiver (CI, 2026-11-14).
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path
 
@@ -25,8 +24,8 @@ final class KhajistanUITests: XCTestCase {
         let app = XCUIApplication()
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO",
-                               "-kjfixtures", Self.fixtures] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"]
+            + kjFixtureArguments(Self.fixtures) + extra
         app.launch()
         return app
     }
@@ -128,6 +127,8 @@ final class KhajistanUITests: XCTestCase {
         }
         let report = tried.joined(separator: "; ")
         if playedBlack >= 2 { XCTFail("Channels played with no picture on the set: \(report)"); return }
+        // The local test video always plays: if it did not, the test media is broken.
+        guard kjLiveMedia else { XCTFail("The local test video did not play: \(report)"); return }
         throw XCTSkip("No channel played on this runner in \(limit) tries: \(report)")
     }
 
@@ -265,14 +266,33 @@ final class KhajistanUITests: XCTestCase {
         waitFor(map, 5, "the map is on screen")
         let title = app.descendants(matching: .any)["regionTitle"]
         waitFor(title, 10, "the region block is on screen")
-        // The receiver set sits above the map when it is off, so the map can start below the
-        // screen: bring it fully into view before tapping on it.
+        // The playing receiver is pinned above the catalogue. A map can be inside the window
+        // but hidden behind that player, so bring the actual tap point into the scroll viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
         let window = app.windows.firstMatch.frame
-        for _ in 0..<4 where map.frame.maxY > window.maxY - 60 || map.frame.minY < window.minY {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        func tapPoint() -> CGPoint {
+            let frame = map.frame
+            return CGPoint(x: frame.minX + frame.width * 0.25, y: frame.minY + frame.height * 0.48)
+        }
+        func visibleCatalogue() -> CGRect {
+            catalogue.frame.intersection(window).insetBy(dx: 8, dy: 16)
+        }
+        for _ in 0..<8 {
+            let visible = visibleCatalogue()
+            let point = tapPoint()
+            if visible.contains(point) { break }
+            let upper = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.25))
+            let lower = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.75))
+            if point.y < visible.minY {
+                upper.press(forDuration: 0.05, thenDragTo: lower)
+            } else {
+                lower.press(forDuration: 0.05, thenDragTo: upper)
+            }
             usleep(600_000)
         }
+        XCTAssertTrue(visibleCatalogue().contains(tapPoint()), "the map tap is inside the visible catalogue, below the pinned receiver")
         // The Maghreb is the map's western mass. Its label sits a quarter of the way across and just
         // under half way down, at the same place on every screen because the map is drawn from one
         // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map
@@ -606,10 +626,8 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
 
-    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids, Chat and the Wall
-    /// out: none of their doors in ROOMS or on HOME, and a stored Pics/Vids launch opens ROOMS
-    /// without it. Builds for our own devices keep all of them. The same test runs in both builds and
-    /// asserts the opposite in each.
+    /// App Store builds leave Pics/Vids, Chat and Wall out; Friends builds retain Pics/Vids.
+    /// Builds for our own devices keep all three. Check the stored launch and ROOMS doors.
     func testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly() {
         let app = launch(skin: "day", tab: "picsVids")
         waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
@@ -620,7 +638,7 @@ final class KhajistanUITests: XCTestCase {
         // The first BAZAAR door follows WALL in the menu in every build: reaching it means the
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
-#if KJ_APP_STORE
+#if KJ_APP_STORE && !KJ_FRIENDS
         if app.buttons["tab-rooms"].exists {
             XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
         } else {
@@ -640,10 +658,16 @@ final class KhajistanUITests: XCTestCase {
         if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(marker.exists, "ROOMS scrolled past the Chat and Wall doors")
-        XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
+        XCTAssertTrue(pnvDoor.exists, "this build keeps the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
+#if KJ_APP_STORE
+        XCTAssertFalse(chatDoor.exists, "a Friends build has no Chat door")
+        XCTAssertFalse(wallDoor.exists, "a Friends build has no Wall door")
+        shot("friends-build-rooms", app)
+#else
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")
         XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door")
+#endif
 #endif
     }
 
@@ -974,6 +998,25 @@ final class KhajistanUITests: XCTestCase {
         }
         XCTFail("no free title with several issues on the first rows of the shelf")
         return ""
+    }
+
+    func testEmptyPreviewSaveKeepsMountedReadingRoomUsable() {
+        let app = launch(skin: "day", extra: ["-kjtestsignedout", "YES"])
+        tapOnHome(app, "home-room-reading")
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the Reading Room loads before changing preview settings")
+        app.buttons["tab-library"].tap()
+        let set = app.buttons.matching(NSPredicate(format: "label ==[c] 'Set'")).firstMatch
+        for _ in 0..<12 where !set.exists || !set.isHittable { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(set.exists && set.isHittable, "the unset preview password offers Set")
+        set.tap()
+        let save = app.buttons.matching(NSPredicate(format: "label ==[c] 'Save'")).firstMatch
+        waitFor(save, 5, "preview settings offer Save")
+        save.tap() // Empty Save reaches Clear while the preview password is already nil.
+        app.buttons["tab-home"].tap()
+        tapOnHome(app, "home-room-reading")
+        waitFor(titles.firstMatch, 20, "the already-mounted Reading Room reloads after an empty preview Save")
+        shot("rr-after-empty-preview-save", app)
     }
 
     /// The Reading Room on the phone: a free title opens to its first page full screen with the
@@ -1391,7 +1434,13 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day")
         waitForHome(app, 15, "HOME is up")
         sleep(6)   // the shelves load a moment after Home
-        let wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+        var wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+#if KJ_APP_STORE
+        wanted.removeAll { $0 == "home-shelf-chat" }
+#if !KJ_FRIENDS
+        wanted.removeAll { $0 == "home-shelf-picsvids" }
+#endif
+#endif
         var seen = Set<String>()
         for step in 0..<14 {
             for shelf in wanted where app.descendants(matching: .any)[shelf].exists { seen.insert(shelf) }
@@ -1411,8 +1460,30 @@ final class KhajistanUITests: XCTestCase {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         var overflow: [String] = []
         for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
-            let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
-            waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+#if KJ_APP_STORE
+            if room == "chat" { continue }
+#if !KJ_FRIENDS
+            if room == "picsVids" { continue }
+#endif
+#endif
+            // Bar destinations and Chat intentionally do not open through -kjroom.
+            let tab = room == "receiver" ? "receiver" : room == "yours" ? "library" : room == "chat" ? "rooms" : "home"
+            let app = launch(skin: "day", tab: tab, extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
+            switch room {
+            case "receiver":
+                waitFor(app.scrollViews["receiverCatalogue"], 30, "the actual Receiver is open")
+            case "yours":
+                waitFor(app.buttons["accountSignIn"], 15, "the signed-out Account is open")
+            case "chat":
+                let door = app.buttons["destination-chat"]
+                for _ in 0..<8 where !door.exists { app.swipeUp() }
+                waitFor(door, 10, "ROOMS offers Chat")
+                door.tap()
+                waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch,
+                        30, "the actual Chat room list is open")
+            default:
+                waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+            }
             for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
                 XCUIDevice.shared.orientation = orientation
                 sleep(6)
@@ -1450,4 +1521,16 @@ private extension XCUIElement {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: self)],
                        timeout: timeout) == .completed
     }
+}
+
+/// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
+/// default local media may not.
+var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
+
+/// The recorded lists and local media by default, so a navigation test reads no live list and
+/// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
+/// with the recording behind them, streams live.
+func kjFixtureArguments(_ directory: String) -> [String] {
+    if kjLiveMedia { return ["-kjfixtures", directory] }
+    return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]
 }

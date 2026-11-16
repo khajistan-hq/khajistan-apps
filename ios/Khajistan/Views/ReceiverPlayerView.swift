@@ -92,9 +92,7 @@ struct ReceiverPlayerView: View {
                 if current.mediaType == "tv", let song = NowPlaying.caption(song: tuner.song, mediaType: "tv") {
                     Text(song).kjBody().lineLimit(2)
                 }
-                if let attribution = current.sourceLine {
-                    Text(attribution).kjSmall(faint: true).lineLimit(3)
-                }
+                // No "broadcast by" line in the app: it stays on the website (owner, 2026-11-16).
             }
             HStack {
                 Button { overlay.wake(settled: false); model.captions.toggle() } label: {

@@ -1700,7 +1700,10 @@ func realReceiverIndexDecodes() throws {
 func realShardsAndWithdrawalFeedsDecode() throws {
     let indus = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/indus.json"))
     try expectEqual(indus.region, "indus")
-    try expect(indus.channels.count > 50, "only \(indus.channels.count) channels")
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: try realFile("data/open-frequencies/receiver-index.json"))
+    let expected = index.regionCounts["indus"]?.channels ?? 0
+    try expect(expected > 0, "the current registry must count Indus channels")
+    try expectEqual(indus.channels.count, expected, "Indus shard matches the current registry after withdrawals")
     try expect(indus.channels.allSatisfy { $0.mediaType == "tv" || $0.mediaType == "radio" })
     let cameras = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/anatolia-camera.json"))
     try expectEqual(cameras.region, "anatolia")

@@ -82,8 +82,10 @@ final class DancerUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    private func openRadio(_ ids: [String], region: String = "indus", skin: String, _ app: XCUIApplication) -> String? {
-        app.launchArguments = ["-kjskin", skin]
+    private func openRadio(_ ids: [String], region: String = "indus", skin: String, recorded: Bool = false, _ app: XCUIApplication) -> String? {
+        // `recorded` reads the recorded list, not the live one: the live Indus radio shelf fell to
+        // two Indian stations on 2026-11-16, and none of the three Pakistani FM stations was on it.
+        app.launchArguments = ["-kjskin", skin] + (recorded ? ["-kjfixturesonly", "YES"] : [])
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
@@ -101,24 +103,26 @@ final class DancerUITests: XCTestCase {
         // A region is shelves, television above radio. Focus may start in the top bar; down enters
         // the first shelf. Each shelf is lazy: a card far along does not exist until focus brings
         // it on screen, so the walk reads the focused identifier rather than looking the card up.
-        // It goes right along a shelf to its end, down to the next, and back left along that.
+        // It goes right along each shelf to its end and then left to its start, so a row is read
+        // whole wherever Down lands in it: Down from the end of television can land on the first
+        // radio card, where a walk only leftward read one card (CI on PR 79, 2026-11-16).
         let wanted = Set(ids.map { "channel-\($0)" })
         for _ in 0..<3 where !focused(app).hasPrefix("channel-") { XCUIRemote.shared.press(.down); kjPause(0.5) }
         var found: String?
-        var press: XCUIRemote.Button = .right
         walk: for _ in 0..<4 {
-            var last = ""
-            for _ in 0..<80 {
-                let now = focused(app)
-                if wanted.contains(now) { found = now; break walk }
-                if now == last { break }
-                last = now
-                XCUIRemote.shared.press(press)
-                kjPause(0.45)
+            for press in [XCUIRemote.Button.right, .left] {
+                var last = ""
+                for _ in 0..<80 {
+                    let now = focused(app)
+                    if wanted.contains(now) { found = now; break walk }
+                    if now == last { break }
+                    last = now
+                    XCUIRemote.shared.press(press)
+                    kjPause(0.45)
+                }
             }
             XCUIRemote.shared.press(.down)
             kjPause(0.6)
-            press = press == .right ? .left : .right
         }
         guard let hit = found else { print("DANCER nav lost at \(focused(app))"); shot("nav-lost", app); return nil }
         let id = String(hit.dropFirst("channel-".count))
@@ -133,11 +137,12 @@ final class DancerUITests: XCTestCase {
     /// one not playing in 45 s gives way to the next, three at most, then the test skips (CI
     /// 2026-11-01, 11-12). A station that plays and is not readable still fails.
     func testRadioDancer() throws {
+        // The recorded list: the live Indus radio shelf fell to two Indian stations on 2026-11-16.
         var left = ["radio-in-punjab-rocks-radio", "radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4"]
         var tried: [String] = []
         for _ in 0..<3 {
             let app = XCUIApplication()
-            let id = try XCTUnwrap(openRadio(left, skin: "day", app), "a progressive radio channel must open")
+            let id = try XCTUnwrap(openRadio(left, skin: "day", recorded: true, app), "a progressive radio channel must open")
             left.removeAll { $0 == id }
             let state = app.staticTexts["playerState"]
             XCTAssertTrue(state.waitForExistence(timeout: 30))
@@ -180,6 +185,7 @@ final class DancerUITests: XCTestCase {
         if state.label != "Playing" {
             shot("\(id)-not-playing", app)
             app.terminate()
+            guard kjLiveMedia else { XCTFail("\(id): the local test video did not play (\(state.label))"); return false }
             throw XCTSkip("\(id)'s live carrier is not playing (\(state.label)); the check is meaningless without playback")
         }
         return true

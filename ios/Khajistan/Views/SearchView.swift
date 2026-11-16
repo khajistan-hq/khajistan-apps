@@ -32,8 +32,9 @@ struct SearchView: View {
             .padding(.vertical, 16)
         }
         .scrollDismissesKeyboard(.interactively)
-        // The rooms' data is read once, when Search is first opened.
-        .task(id: model.auth.previewPassword) {
+        // The rooms' data is read when Search is first opened, and again after every Clear or
+        // password change (the shelf revision moves on both, a nil-to-nil Clear included).
+        .task(id: model.reading.loadRevision) {
             async let reading: Void = model.reading.start()
             async let films: Void = model.films.load()
             async let bazaar: Void = model.bazaar.load()

@@ -169,11 +169,27 @@ enum StationClock {
 
     /// The first strip that starts after `minute` (or `second`) today, else the first strip of
     /// the next calendar day, else nil (the month's grid ends).
+    /// The first strip that starts after the moment: today's strips AND yesterday's strips filed
+    /// at or past 86400 (an evening pushed past midnight is filed on the day it began; see
+    /// lateStrips), read in today's seconds by taking 86400 off. Reading today's alone said
+    /// "back at 03:06" at 00:20 while yesterday's chain had a strip at 02:07. Port of
+    /// kj-station-clock.js nextSlot (archive 6463ddcc7).
     static func nextSlot(_ p: Programming, channel: String, iso: String, minute: Int, second: Double? = nil) -> (slot: Programming.Slot, date: String)? {
-        guard let today = day(p, iso: iso) else { return nil }
-        if let slot = earliest(today.channels[channel] ?? [], startingAfter: second ?? Double(minute * 60)) {
-            return (slot, iso)
+        let at = second ?? Double(minute * 60)
+        let today = day(p, iso: iso)
+        var best: (slot: Programming.Slot, date: String)? = nil
+        var bestAt = Double.infinity
+        for slot in today?.channels[channel] ?? [] where slot.startSecond > at && slot.startSecond < bestAt {
+            best = (slot, iso); bestAt = slot.startSecond
         }
+        if let yesterdayIso = isoDay(iso, offset: -1) {
+            for slot in lateStrips(p, channel: channel, iso: iso) {
+                let s = slot.startSecond - 86_400
+                if s > at && s < bestAt { best = (slot, yesterdayIso); bestAt = s }
+            }
+        }
+        if let best { return best }
+        guard today != nil else { return nil }
         guard let tomorrowIso = isoDay(iso, offset: 1), let tomorrow = day(p, iso: tomorrowIso),
               let first = earliest(tomorrow.channels[channel] ?? [], startingAfter: -.infinity) else { return nil }
         return (first, tomorrowIso)

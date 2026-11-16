@@ -127,6 +127,16 @@ struct Failure: Error { let message: String }
                 try check(mfa.pendingFactorId == (replacement == "logout" ? nil : "factor-a"), "stale MFA cannot clear a newer factor")
             }
         }
+        let preview = try store()
+        var observed: [String?] = []
+        preview.onPreviewPasswordChange = { observed.append(preview.previewPassword) }
+        preview.setPreviewPassword("fixture-preview-one")
+        preview.setPreviewPassword("fixture-preview-one")
+        preview.setPreviewPassword("fixture-preview-two")
+        preview.clearPreviewPassword()
+        preview.clearPreviewPassword()
+        try check(observed == ["fixture-preview-one", "fixture-preview-two", nil, nil],
+                  "preview callbacks see updated state; unchanged save is quiet and every Clear invalidates")
         print("PASS twelve actual AuthStore scenarios; no external network")
     }
 }

@@ -11,13 +11,22 @@ final class KhajistanUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Recorded answers for the receiver's list, feeds and map and for the chat room list
+    /// (`tvos/UITests/Fixtures/recorded`, shared with the Apple TV tests and refreshed by its
+    /// `refresh.sh`), used when the live request fails: one TLS error on receiver-index.json
+    /// failed pull requests that never touched the Receiver (CI, 2026-11-14). Live answers still
+    /// come first, so the list is today's; streams, stills and the rest stay live.
+    static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path
+
     /// `-kjstorefront USA` stands in for the App Store storefront the simulator does not have; a
     /// test of another storefront passes its own in `extra`, which comes later and wins.
     private func launch(skin: String, tab: String = "home", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO",
+                               "-kjfixtures", Self.fixtures] + extra
         app.launch()
         return app
     }
@@ -97,6 +106,29 @@ final class KhajistanUITests: XCTestCase {
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
         return channel
+    }
+
+    /// Tunes channels in list order, by the set's own Next, until one plays and, given
+    /// `lit`, shows a lit picture there. A live stream can be down on the runner (CoreMedia
+    /// -12312, CI 2026-11-14) or open on a black frame, so after `limit` channels the test is
+    /// skipped, naming what each channel said, instead of failing a change that did not touch it.
+    /// Two channels that play and stay black are the app's picture, not the streams: that fails.
+    private func tuneUntilPlaying(_ app: XCUIApplication, limit: Int = 5, lit: (() -> CGRect)? = nil) throws {
+        let state = app.staticTexts["screenState"]
+        var tried: [String] = []
+        var playedBlack = 0
+        for attempt in 0..<limit {
+            let previous = state.value as? String ?? ""
+            if attempt > 0 { app.buttons["nextChannel"].tap() }
+            let playing = NSPredicate(format: "label == 'Playing' AND value != %@", attempt > 0 ? previous : "")
+            let played = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: state)], timeout: 30) == .completed
+            if played, lit.map({ becomesLit($0(), app) }) ?? true { return }
+            if played { playedBlack += 1 }
+            tried.append("\(state.value as? String ?? "?"): \(played ? "Playing, no picture" : state.label)")
+        }
+        let report = tried.joined(separator: "; ")
+        if playedBlack >= 2 { XCTFail("Channels played with no picture on the set: \(report)"); return }
+        throw XCTSkip("No channel played on this runner in \(limit) tries: \(report)")
     }
 
     /// The house bar is the app's own: no system tab bar anywhere.
@@ -282,7 +314,7 @@ final class KhajistanUITests: XCTestCase {
     /// A channel plays on the receiver set at the top of the Receiver and goes full screen only
     /// when full screen is chosen (owner, 2026-10-08). Next tunes the next channel behind the
     /// pigeon; closing full screen leaves the same channel playing; power puts it on standby.
-    func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() {
+    func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() throws {
         // The full-screen controls stay up (-kjcontrolsstay, debug only): on the iOS 26 runner the
         // close button never reports a hit point, so it is tapped by its frame, and a hide racing
         // the tap would turn that tap into a wake.
@@ -293,9 +325,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(state, 10, "the receiver is on the page")
         XCTAssertFalse(app.buttons["closePlayer"].exists, "a channel does not open full screen by itself")
         XCTAssertTrue(app.buttons["tab-receiver"].isHittable, "the tab bar stays on screen")
-        let playing = NSPredicate(format: "label == 'Playing'")
-        expectation(for: playing, evaluatedWith: state)
-        waitForExpectations(timeout: 60)
+        try tuneUntilPlaying(app)
         shot("player-playing", app)
         let before = state.value as? String ?? ""
         XCTAssertFalse(before.isEmpty, "the screen names the channel it carries")
@@ -337,8 +367,9 @@ final class KhajistanUITests: XCTestCase {
             catalogue.swipeDown()
             usleep(400_000)
         }
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
@@ -455,22 +486,23 @@ final class KhajistanUITests: XCTestCase {
     /// "Play with the app closed" (DECISIONS 24): the picture lets go of the player while the app
     /// is away, so a television channel's sound carries on. Back in the app, the picture comes
     /// back, full screen and then docked; Bugbot found both black while the state said Playing.
-    func testReceiverPictureComesBackAfterTheBackground() {
+    func testReceiverPictureComesBackAfterTheBackground() throws {
         let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let first = firstReceiverChannel(app)
         first.tap()
         let state = app.staticTexts["screenState"]
         waitFor(state, 10, "the receiver is on the page")
-        expectation(for: NSPredicate(format: "label == 'Playing'"), evaluatedWith: state)
-        waitForExpectations(timeout: 60)
-        sleep(4)
         // The docked screen sits on the remote, 16:9 across the set; the middle of it is read.
-        let surf = app.buttons["surf"].frame
-        let set = app.descendants(matching: .any)["receiverScreen"].frame
-        let dockHeight = (set.width - 12) * 9 / 16
-        let dock = CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
-                          width: set.width * 0.6, height: dockHeight * 0.6)
-        XCTAssertTrue(becomesLit(dock, app), "the docked picture shows before the background")
+        let docked = { () -> CGRect in
+            let surf = app.buttons["surf"].frame
+            let set = app.descendants(matching: .any)["receiverScreen"].frame
+            let dockHeight = (set.width - 12) * 9 / 16
+            return CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
+                         width: set.width * 0.6, height: dockHeight * 0.6)
+        }
+        // A channel that plays and shows a lit picture docked: the precondition, not the check.
+        try tuneUntilPlaying(app, lit: docked)
+        let dock = docked()
 
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 10, "full screen opens")
@@ -529,8 +561,9 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'Paused'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
         app.buttons["receiverOff"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
         waitForHome(app, 5, "One edge tap selects Home")
@@ -1256,8 +1289,9 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["nowPlayingOff"].tap()
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off leaves nothing playing and nothing on screen")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// A channel left on plays while reading, and its small player is in the reader too, which
@@ -1308,8 +1342,9 @@ final class KhajistanUITests: XCTestCase {
         openRooms(app)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// "Keep playing" off, the viewer leaves while the launch Surf is still choosing: the Surf is

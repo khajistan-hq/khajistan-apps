@@ -129,34 +129,60 @@ final class DancerUITests: XCTestCase {
     /// A Pakistani or Punjabi FM station on a live MP3 mount, played through LiveRadio: the signal
     /// must be readable, and the dancer comes on when what is playing carries a beat. Live radio may
     /// be talking at that minute, so the beat is recorded rather than required; the signal is required.
-    /// The stations are live third-party mounts, and one can be down from the CI runner, so a station
-    /// whose signal is not readable in 45 s gives way to the next, three at most.
-    func testRadioDancer() {
+    /// A mount is read only while the station plays, and the stations are live third-party carriers:
+    /// one not playing in 45 s gives way to the next, three at most, then the test skips (CI
+    /// 2026-11-01, 11-12). A station that plays and is not readable still fails.
+    func testRadioDancer() throws {
         var left = ["radio-in-punjab-rocks-radio", "radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4"]
         var tried: [String] = []
         for _ in 0..<3 {
             let app = XCUIApplication()
-            guard let id = openRadio(left, skin: "day", app) else {
-                XCTFail("a progressive radio channel must open (tried \(tried))")
-                return
-            }
+            let id = try XCTUnwrap(openRadio(left, skin: "day", app), "a progressive radio channel must open")
             left.removeAll { $0 == id }
-            XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
-            let deadline = Date().addingTimeInterval(45)
-            while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
-            if status(app).hasPrefix("stage=absent") {
-                tried.append("\(id): \(app.staticTexts["playerState"].label)")
-                shot("radio-unreadable-\(id)", app)
+            let state = app.staticTexts["playerState"]
+            XCTAssertTrue(state.waitForExistence(timeout: 30))
+            let tuned = Date().addingTimeInterval(45)
+            while Date() < tuned, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
+            if state.label != "Playing" {
+                tried.append("\(id): \(state.label)")
+                shot("\(id)-not-playing", app)
                 app.terminate()
                 continue
             }
+            XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
+            let deadline = Date().addingTimeInterval(45)
+            while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
+            XCTAssertFalse(status(app).hasPrefix("stage=absent"), "a playing radio mount must be readable (\(status(app)))")
             let first = waitForDancing(app, timeout: 40)
             print("DANCER radio \(id) first: \(first)")
             _ = photograph("radio-\(id)", app)
             app.terminate()
             return
         }
-        XCTFail("a live radio mount must be readable; none of three was in 45 s: \(tried)")
+        throw XCTSkip("no radio station played within 45 s, three tried: \(tried)")
+    }
+
+    /// Waits up to 45 s for the station opened to play. When its live carrier is off air the test
+    /// is skipped, because a check over silence proves nothing. Only a player in its failed state
+    /// skips (a dead carrier, or the simulator offline); one stuck connecting, paused or never
+    /// opened is a failure, and returns false.
+    private func playsOrSkips(_ id: String, _ app: XCUIApplication) throws -> Bool {
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30))
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
+        let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
+        if stuck {
+            XCTFail("\(id) neither plays nor fails: \(state.label)")
+            app.terminate()
+            return false
+        }
+        if state.label != "Playing" {
+            shot("\(id)-not-playing", app)
+            app.terminate()
+            throw XCTSkip("\(id)'s live carrier is not playing (\(state.label)); the check is meaningless without playback")
+        }
+        return true
     }
 
     /// Quran recitation radio. The dancer must never appear, and no tap is made at all.
@@ -185,25 +211,8 @@ final class DancerUITests: XCTestCase {
             return
         }
         XCTAssertTrue(Self.recitation.contains(id), "a recitation channel must open (\(id))")
-        let state = app.staticTexts["playerState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 30))
-        // The negative case means something only while the recitation is actually playing. When
-        // the carrier the walk reached is off air, skip, because "no dancer" over silence proves
-        // nothing. Only a player in its failed state skips (a dead carrier, or the simulator
-        // offline); one stuck connecting, paused or never opened is a failure.
-        let deadline = Date().addingTimeInterval(45)
-        while Date() < deadline, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
-        let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
-        if stuck {
-            XCTFail("the recitation channel neither plays nor fails: \(state.label)")
-            app.terminate()
-            return
-        }
-        if state.label != "Playing" {
-            shot("reverent-not-playing", app)
-            app.terminate()
-            throw XCTSkip("\(id)'s live carrier is not playing (\(state.label)); the no-dancer check is meaningless without playback")
-        }
+        // The negative case means something only while the recitation is actually playing.
+        guard try playsOrSkips(id, app) else { return }
         var seen = Set<String>()
         for i in 0..<20 {
             Thread.sleep(forTimeInterval: 1)

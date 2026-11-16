@@ -80,4 +80,41 @@ final class NowNextUITests: XCTestCase {
         check(channel: 15, name: "Home Movies",
               titles: ["Kessar's Birthday", "Kotmoman 01", "Kotmoman 02", "Kotmoman 03"], skin: "smut")
     }
+
+    /// The guide on Transmission rises from the bottom, as the Receiver's does (owner, 2026-11-15:
+    /// "guide not showing from bottom up in transmission"): left on the bare picture opens it over
+    /// the lower part of the screen with the tuned channel lit, down lights the next, Select tunes it.
+    func testGuideRisesFromTheBottomAndTunes() {
+        let app = open(channel: 5, skin: "day")
+        kjPause(12)
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertEqual(tuned.label, "5")
+        XCUIRemote.shared.press(.left)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "left on the picture opens the guide")
+        kjPause(0.6)
+        kjScreenshot("transmission-guide-day", app: app)
+        XCTAssertGreaterThan(guide.frame.minY, app.frame.height / 3, "the guide sits over the bottom of the picture")
+        XCTAssertEqual(guide.frame.maxY, app.frame.maxY, accuracy: 2, "the guide reaches the foot of the screen")
+        XCTAssertTrue(app.descendants(matching: .any)["guide-ch5"].isSelected, "the tuned channel is lit")
+        // Channel 8 is the next one the fixture programmes; 6 and 7 are off air in it.
+        for _ in 0..<3 { XCUIRemote.shared.press(.down); kjPause(0.4) }
+        XCTAssertTrue(app.descendants(matching: .any)["guide-ch8"].isSelected, "three downs light channel 8")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Select closes the guide")
+        let moved = NSPredicate { _, _ in tuned.exists && tuned.label == "8" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 30), .completed,
+                       "Select tunes the lit channel")
+        // Back on the bare picture: right opens the guide too, Back closes it.
+        kjPause(8)   // the strip hides 2.6 s after the tune, so right meets the bare picture
+        XCUIRemote.shared.press(.right)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the bare picture opens the guide")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+    }
+
+    private func waitUntilGone(_ element: XCUIElement, _ timeout: TimeInterval) -> Bool {
+        let gone = NSPredicate(format: "exists == false")
+        return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
+    }
 }

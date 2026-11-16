@@ -26,7 +26,8 @@ struct HomeShelves: View {
             if ArchiveDestination.all.first(where: { $0.id == "chat" }).map({ StoreBuild.includes($0) }) == true { chat }
         }
         // The channel the app opens on comes first: the shelves load a moment after Home.
-        .task {
+        // Keyed on the shelf revision: a Clear or a new password empties the shelf, and this reloads it.
+        .task(id: model.reading.loadRevision) {
             try? await Task.sleep(for: .seconds(2))
             if StoreBuild.includes(.picsVids) {
                 await model.pnv.start()

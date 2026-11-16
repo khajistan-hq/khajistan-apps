@@ -86,7 +86,7 @@ struct YoursView: View {
                 }
             }
         }
-        .task(id: model.auth.email) {
+        .task(id: [model.auth.email ?? "", String(model.reading.loadRevision)]) {
             guard model.auth.isSignedIn else { return }
             await model.saves.load()
             await model.reading.start()

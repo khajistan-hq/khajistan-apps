@@ -65,6 +65,23 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertNotEqual(app.state, .runningForeground, "Back from the atlas, with nothing behind it, leaves the app")
     }
 
+    /// The focus helper must also recover after the remote has moved below the region strip.
+    func testRegionStripCanBeReachedFromTheShelfBelow() {
+        let app = XCUIApplication()
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        let genre = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-' AND hasFocus == true")).firstMatch
+        for _ in 0..<12 where !genre.exists {
+            XCUIRemote.shared.press(.down)
+            kjPause(0.35)
+        }
+        XCTAssertTrue(genre.exists, "start on a channel shelf below the region strip")
+        XCTAssertTrue(kjFocusStrip(app), "focus must return upward to the region strip")
+        XCTAssertTrue(regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists,
+                      "an actual region card must have focus")
+    }
+
     /// Back pressed in the top bar while a region is open pops to the map. The top bar sits
     /// outside the Receiver's stack, and this press used to leave the app (QA, 2026-10-06).
     func testBackFromTheTopBarOverARegionPopsToTheMap() {

@@ -94,7 +94,10 @@ final class PictureInPictureUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 20), "the radio opens")
         let playing = NSPredicate { _, _ in state.label == "Playing" }
         guard XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 30) == .completed else {
-            throw XCTSkip("the radio did not play on this runner (\(state.label))")
+            let why = "the radio did not play on this runner (\(state.label))"
+            // The local test sound always plays: if it did not, the test media is broken.
+            guard kjLiveMedia else { XCTFail(why); return }
+            throw XCTSkip(why)
         }
         kjPause(3)
         XCUIRemote.shared.press(.menu)   // the radio keeps playing under the screens

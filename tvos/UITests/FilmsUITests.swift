@@ -67,14 +67,9 @@ final class FilmsUITests: XCTestCase {
 
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "The film's player must show its state")
-        // Stop at the first "Playing": the panel hides 2.6 seconds after the preview starts, and a
-        // `where` filter would keep reading the label past that until the element is gone.
-        var playing = false
-        for _ in 0..<45 {
-            if state.exists, state.label == "Playing" { playing = true; break }
-            kjPause(1)
-        }
-        XCTAssertTrue(playing, "the preview must play")
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45),
+                       .completed, "the preview must play")
         kjScreenshot("vod-04-preview-with-panel", app: app)
         kjPause(5)
         kjScreenshot("vod-05-preview-picture", app: app)

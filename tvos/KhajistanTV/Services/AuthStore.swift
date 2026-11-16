@@ -28,6 +28,7 @@ final class AuthStore {
         for observer in Array(accessObservers.values) { observer() }
     }
     private(set) var previewPassword: String?
+    @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -37,9 +38,14 @@ final class AuthStore {
 
     func verifyCode(_ typed: String) async throws {
         guard let factorId = pendingFactorId else { throw AuthError.server("Sign in again.") }
+        let operation = authOperation
         _ = try await validAccessToken()
+        guard operation == authOperation, pendingFactorId == factorId else { throw AuthStoreError.unavailable }
         guard let current = session else { throw AuthError.server("Sign in again.") }
         let fresh = try await AuthAPI.verify(typed, factorId: factorId, session: current, using: urlSession)
+        // A newer sign-in or sign-out must win over this delayed verification.
+        guard operation == authOperation, session == current, pendingFactorId == factorId,
+              fresh.userId == current.userId else { throw AuthStoreError.unavailable }
         session = fresh
         persist(fresh)
         pendingFactorId = nil
@@ -177,13 +183,16 @@ final class AuthStore {
             clearPreviewPassword()
             return
         }
+        let changed = previewPassword != password
         previewPassword = password
+        if changed { onPreviewPasswordChange?() }
         _ = try? Keychain.write(Data(password.utf8), account: Account.preview, shared: true)
         Self.topShelfChanged()
     }
 
     func clearPreviewPassword() {
         previewPassword = nil
+        onPreviewPasswordChange?()
         Keychain.delete(Account.preview)
         Self.topShelfChanged()
     }

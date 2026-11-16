@@ -159,13 +159,13 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   Receiver keeps no copy.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
-  (state kicker, the name as headline, the place, the attribution line in small type). The
+  (state kicker, the name as headline, the place). The
   screen opens on the ground with TUNING and the channel's name, which fades off as the picture
   arrives. Radio shows its Now Playing on the ground: the radio mark large, ● NOW PLAYING · LIVE
   RADIO, the station's name in display type, and its place and broadcaster. A channel change is
   described under Motion.
 - **Guide** (2026-10-27, after YouTube TV's live guide): Guide is the strip's third control, after
-  CC and Like, reached with Right. Select opens it over the left of the picture, which plays on:
+  CC and Like, reached with Right. Select raises it from the bottom over the picture, which plays on above it (owner, 2026-11-14: "make the guide come from bottom up rather than from the left"):
   every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
   and the place, hairlines between, ● LIVE on the one playing. Up and down light a row (the focus
   plate, 1.03), Select tunes it behind the pigeon, Left or Menu closes it. Like CC and Like it is
@@ -362,9 +362,19 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 - **Shelves** (owner, 2026-10-06: "Pics/Vids as shelves, grouped by region"): one for each region
   the roster carries, west to east (Maghreb, Mashriq, Anatolia, Persia, Khorasan, Indus), titled
   with the region and its exact count under the current filter. Each is its own stream
-  (`PicsVidsStore.feeds`): it asks for its first page of 60 when it comes on screen, and for the
+  (`PicsVidsStore.feeds`): it asks for its first page when it comes on screen (60 in stream order, 120 shuffled, with the
+  count asked for on its own), and for the
   next when focus is within eight cards of its end. A region with nothing under the filter has no
   shelf. Picking a filter starts every shelf over.
+- **Shuffle every visit** (owner, 2026-11-14: "shuffle everytime, the same photos are just there
+  and look boring"): on the Apple TV Shuffle is on from the start, and leaving the page for another
+  section deals again on the way back, and so does coming back from the background
+  (a screensaver that sent the app there included). A Shuffle button beside Reel (the Receiver's Surf plate) deals
+  again at once. The phone keeps the feed's own order.
+- **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
+  videos, every region, whatever the page's filter says; its Region chip steps regions as before.
+- **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
+  opens on pictures. Its viewer walks that mixed stream, pictures and videos both.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own
   dimensions, so nothing moves when the picture arrives), on a house-lift plate that holds its
   place until the picture fades in, never cropped; lifts under focus like any card. A video's
@@ -430,9 +440,11 @@ and back to the centre when he stops (owner, 2026-10-06).
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
 along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
-the attribution or the show's line under them in small type, the medium at the right, and on
+on Transmission the show's line under them in small type, the medium at the right, and on
 Transmission UP NEXT with its time and show. It rises 40pt and fades in over 0.35 s, and goes
-the same way 2.6 s into playback. It waits while a signal tunes: the ground says so.
+the same way 2.6 s into playback. It waits while a signal tunes: the ground says so. The
+Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
+"i dont want info like 'regional broadcast by...' the apple tv").
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no

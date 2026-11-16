@@ -55,7 +55,7 @@ final class SiteFeed<Value: Sendable> {
         urlSession = URLSession(configuration: config)
     }
 
-    func url(_ path: String) -> URL { origin.appendingPathComponent(path) }
+    func url(_ path: String) -> URL { KJURL.canonicalSitePage(origin.appendingPathComponent(path)) }
 
     /// The preview gate's header, when a password is held and the origin is the site itself.
     var authorization: String? { header(auth.previewPassword) }

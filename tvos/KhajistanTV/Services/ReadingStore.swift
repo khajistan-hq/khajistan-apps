@@ -63,10 +63,17 @@ final class ReadingStore {
     /// closed while the room loads must not cancel the load every other screen is waiting on.
     @ObservationIgnored private var loading: Task<Void, Never>?
 
+    private var loadContext = RRShelfLoadContext()
+    /// The site refused the module index for this credential (a wrong or old password): asking
+    /// again cannot help, so no late fetch follows.
+    @ObservationIgnored private var modulesRefused = false
+    /// How long a first paint waits on the gated module index, which is never kept on the device.
+    private static let modulesPaintWait: TimeInterval = 2
+    /// Task identity changes on every explicit preview invalidation, including nil-to-nil Clear.
+    var loadRevision: Int { loadContext.generation }
+
     private unowned let auth: AuthStore
     private let urlSession: URLSession
-    /// Seconds the module index is waited for when a kept shelf opens with no answer kept for it.
-    private static let modulesAskOnOpen: TimeInterval = 4
     private let origin: URL
 
     private struct Job {
@@ -87,6 +94,8 @@ final class ReadingStore {
         urlSession = URLSession(configuration: config)
         // Decoded pages, by their size in memory: about eight 2,000-pixel pages.
         pages.totalCostLimit = 200 * 1024 * 1024
+        // Initialize before views observe the revision: first start must not restart its own task.
+        _ = loadContext.update(authorization)
         Task.detached(priority: .background) { RRPageDisk.trim() }
     }
 
@@ -100,16 +109,50 @@ final class ReadingStore {
 
     /// Loads the shelf. Safe to call on every appearance: a shelf already open is left alone.
     func start() async {
+        let credential = authorization
+        let hadContext = loadContext.isInitialized
+        if loadContext.update(credential) {
+            if hadContext { clearModuleCache() }
+            loading?.cancel()
+            loading = nil
+            modulesRefused = false
+            phase = .idle
+        }
         switch phase {
         case .ready: return
         case .loading: await loading?.value; return
         case .idle, .failed: break
         }
         phase = .loading
-        let task = Task { await load() }
+        let ticket = loadContext.generation
+        let task = Task { await load(ticket: ticket, credential: credential) }
         loading = task
         await task.value
+        if loadContext.accepts(ticket, credential: authorization) { loading = nil }
+    }
+
+    /// Preview changes clear only the protected module index, not the public bulk catalogue.
+    /// Invalidate before deleting so a suspended old request cannot restore the cleared file.
+    func previewCredentialDidChange() {
+        loadContext.invalidate(authorization)
+        loading?.cancel()
         loading = nil
+        tabs = []
+        phase = .idle
+        modulesRefused = false
+        clearModuleCache()
+    }
+
+    private func moduleKey(gated: Bool) -> String {
+        let request = URLRequest(url: RRSite.modulesURL(origin: origin))
+        return RRShelfDisk.key(request) + " @" + origin.absoluteString + (gated ? " gated" : " open")
+    }
+
+    private func clearModuleCache() {
+        RRShelfDisk.remove(moduleKey(gated: true))
+        // Remove the previous host-only key as well, without touching the catalogue cache.
+        let request = URLRequest(url: RRSite.modulesURL(origin: origin))
+        RRShelfDisk.remove(RRShelfDisk.key(request) + " @" + (origin.host ?? "") + " gated")
     }
 
     /// `-kjclock YES` prints how long each step of opening the room took, from the first call.
@@ -121,35 +164,39 @@ final class ReadingStore {
         FileHandle.standardError.write(Data("RRCLOCK \(step) \(ContinuousClock.now - clockStart)\n".utf8))
     }
 
-    private func load() async {
+    private func load(ticket: Int, credential: String?) async {
         clock("start")
         // The shelf as this device last read it, at once; a fresh copy is read behind it for the
         // next open when the kept one is old (RRShelfDisk). Access stays the page server's answer.
-        if await build(fromDevice: true) {
+        if await build(fromDevice: true, ticket: ticket, credential: credential) {
             clock("ready from the device")
             if RRShelfDisk.isStale {
-                Task { await keepAFreshCopy() }
+                Task { await keepAFreshCopy(ticket: ticket, credential: credential) }
             }
             return
         }
         // Which way the database answers: direct, the site's proxy, or neither (said at once).
-        guard await SupabaseRoute.ready() != .unreachable else {
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return }
+        let route = await SupabaseRoute.ready()
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return }
+        guard route != .unreachable else {
             clock("route unreachable")
             phase = .failed(SupabaseRoute.unreachableText)
             return
         }
         clock("route \(SupabaseRoute.path.rawValue)")
-        if !(await build(fromDevice: false)) {
+        if !(await build(fromDevice: false, ticket: ticket, credential: credential)),
+           loadContext.accepts(ticket, credential: authorization), !Task.isCancelled {
             phase = .failed(SupabaseRoute.path == .unreachable ? SupabaseRoute.unreachableText : "The Reading Room did not answer.")
         }
     }
 
     /// Builds the shelf from the network, or from the copy kept on the device. False when the
     /// feed (or, kept, any of the shelf's inputs) is not there.
-    private func build(fromDevice: Bool) async -> Bool {
+    private func build(fromDevice: Bool, ticket: Int, credential: String?) async -> Bool {
         async let feed = loadFeed(fromDevice: fromDevice)
         async let rightsHeld = loadRights(fromDevice: fromDevice)
-        async let index = loadModules(fromDevice: fromDevice)
+        async let index = loadModules(fromDevice: fromDevice, ticket: ticket, credential: credential)
         async let ranks = loadProvenance(fromDevice: fromDevice)
         let fetched = await feed
         clock(fromDevice ? "feed from the device" : "feed")
@@ -157,12 +204,23 @@ final class ReadingStore {
         let held = await rightsHeld
         guard let collections = fetched, !collections.isEmpty, let held = held ?? (fromDevice ? nil : []) else { return false }
         // Rights first and awaited, as the site does: the room's figures must not count what the reader cannot open.
-        rights = held
         clock("rights")
         // Ranked before the first paint, so a shelf never reorders under the viewer.
         let ranked = await ranks
         clock("provenance")
-        let modules = await index
+        var modules = await index
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
+        // A fresh bulk catalogue does not mean this origin/credential's module index was read.
+        // Fetch only the missing small index, preserving the cached catalogue and rights.
+        // The first paint waits a couple of seconds at most. A gated index is never kept on the
+        // device, so one that missed is fetched once more behind the painted shelf (lateModules);
+        // an open one is kept by keepAFreshCopy and read from the device next time.
+        if fromDevice, modules == nil {
+            modules = await loadModules(fromDevice: false, ticket: ticket, credential: credential,
+                                        timeout: Self.modulesPaintWait)
+        }
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
+        let fetchLate = fromDevice && modules == nil && credential != nil && !modulesRefused
         clock("modules")
         // Built off the main thread: a thousand-odd rows grouped, shelved and ranked would hold
         // the remote's focus still while the room opens.
@@ -171,32 +229,55 @@ final class ReadingStore {
             return (built, RRRank.ranked(RRShelves.tabs(titles: built, index: modules, rights: held), provenance: ranked))
         }.value
         clock("titles built and ranked")
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
+        rights = held
         titles = built
         provenance = ranked
-        var shelf = ordered
+        let shelf = heldFirstForTests(ordered)
+        tabs = shelf
+        phase = .ready
+        clock("ready")
+        if fetchLate { Task { await lateModules(ticket: ticket, credential: credential) } }
+        return true
+    }
+
+    /// UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
+    /// row, past where a remote walking down the shelf can see it, so the test brings it forward.
+    private func heldFirstForTests(_ ordered: [RRTab]) -> [RRTab] {
         #if DEBUG
-        // UI tests only (`-kjrrheldfirst YES`): a rights-held title ranks at the far end of a long
-        // row, past where a remote walking down the shelf can see it, so the test brings it forward.
         if UserDefaults.standard.bool(forKey: "kjrrheldfirst") {
-            shelf = shelf.map { tab in
+            return ordered.map { tab in
                 RRTab(id: tab.id, name: tab.name, native: tab.native, depth: tab.depth, rows: tab.rows.map { row in
                     RRRow(id: row.id, name: row.name, titles: row.titles.filter { isRights($0) } + row.titles.filter { !isRights($0) })
                 })
             }
         }
         #endif
-        tabs = shelf
-        phase = .ready
-        clock("ready")
-        return true
+        return ordered
+    }
+
+    /// The gated index that missed the first paint, asked for once with the full timeout; a second
+    /// miss leaves the shelf as painted until the next load. The shelf stays ready while it is
+    /// asked for. If it lands, the module tabs are added after the tabs already on screen, never in
+    /// place of them, so the tab, row or card the viewer is on stays where it is.
+    private func lateModules(ticket: Int, credential: String?) async {
+        guard let index = await loadModules(fromDevice: false, ticket: ticket, credential: credential) else { return }
+        let (built, held, ranked) = (titles, rights, provenance)
+        let ordered = await Task.detached(priority: .userInitiated) {
+            RRRank.ranked(RRShelves.tabs(titles: built, index: index, rights: held), provenance: ranked)
+        }.value
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled, phase == .ready else { return }
+        let shown = tabs
+        tabs = shown + heldFirstForTests(ordered).filter { tab in !shown.contains { $0.id == tab.id } }
+        clock("module index laid over the shelf")
     }
 
     /// Reads the shelf's inputs again and keeps them for the next open. Nothing on screen changes:
     /// a shelf never reorders under the viewer.
-    private func keepAFreshCopy() async {
+    private func keepAFreshCopy(ticket: Int, credential: String?) async {
         async let feed = loadFeed(fromDevice: false)
         async let rightsHeld = loadRights(fromDevice: false)
-        async let index = loadModules(fromDevice: false)
+        async let index = loadModules(fromDevice: false, ticket: ticket, credential: credential)
         async let ranks = loadProvenance(fromDevice: false)
         _ = await (feed, rightsHeld, index, ranks)
         clock("fresh copy kept")
@@ -246,39 +327,32 @@ final class ReadingStore {
     }
 
     /// data/rr-modules.json. Without the preview password the site answers 401 and the room is one tab of every title.
-    private func loadModules(fromDevice: Bool) async -> RRModuleIndex? {
+    private func loadModules(fromDevice: Bool, ticket: Int, credential: String?,
+                             timeout: TimeInterval? = nil) async -> RRModuleIndex? {
         var request = URLRequest(url: RRSite.modulesURL(origin: origin))
+        if let timeout { request.timeoutInterval = timeout }
         // Kept per site and per gate state: the index is behind the site password, and a copy read
         // with the password must not stand in once it is gone (nor a test server's for the site's).
-        let key = RRShelfDisk.key(request) + " @" + (origin.host ?? "") + (authorization == nil ? " open" : " gated")
-        // A refusal is kept too (an empty file), so a kept shelf knows the index was asked for under this
-        // site and gate. With nothing kept, the shelf was kept under another (before the password, or a
-        // test server's) and the index is asked for now; else the room stays one tab until the feed is stale.
+        let key = moduleKey(gated: credential != nil)
         if fromDevice {
-            if let index = await Task.detached(priority: .userInitiated, operation: { () -> RRModuleIndex?? in
-                RRShelfDisk.read(key).map(RRModuleIndex.parse)
-            }).value {
-                return index
-            }
-            // Asked while the kept shelf waits to open, so never for long.
-            request.timeoutInterval = Self.modulesAskOnOpen
+            // Gated modules are kept only in this store's accepted in-memory generation.
+            // A failed file deletion or a new process must never reuse an older password's index.
+            guard credential == nil else { return nil }
+            return await Task.detached(priority: .userInitiated) { RRShelfDisk.read(key).flatMap(RRModuleIndex.parse) }.value
         }
-        if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+        if let credential { request.setValue(credential, forHTTPHeaderField: "Authorization") }
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await urlSession.data(for: request),
-              let status = (response as? HTTPURLResponse)?.statusCode else { return nil }
-        guard status == 200 else {
-            // Only the gate's answer with no password is kept: the gated key is the same for every
-            // password, so a wrong one's refusal must not stand in for the right one. An outage is
-            // asked again on the next open.
-            if authorization == nil, status == 401 || status == 404 { RRShelfDisk.write(Data(), key) }
-            return nil
+        guard let (data, response) = try? await urlSession.data(for: request) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if credential != nil, loadContext.accepts(ticket, credential: authorization) {
+            modulesRefused = status == 401 || status == 403
         }
-        return await Task.detached(priority: .userInitiated) {
-            guard let index = RRModuleIndex.parse(data) else { return nil }
-            RRShelfDisk.write(data, key)
-            return index
-        }.value
+        guard status == 200 else { return nil }
+        let index = await Task.detached(priority: .userInitiated) { RRModuleIndex.parse(data) }.value
+        guard let index, loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return nil }
+        // No suspension between the generation check and write: Clear cannot race this write.
+        if credential == nil { RRShelfDisk.write(data, key) }
+        return index
     }
 
     private func loadProvenance(fromDevice: Bool) async -> [String: RRProvenanceRow] {
@@ -734,6 +808,8 @@ enum RRShelfDisk {
     }
 
     static func read(_ key: String) -> Data? { try? Data(contentsOf: file(key)) }
+
+    static func remove(_ key: String) { try? FileManager.default.removeItem(at: file(key)) }
 
     static func write(_ data: Data, _ key: String) { try? data.write(to: file(key), options: .atomic) }
 

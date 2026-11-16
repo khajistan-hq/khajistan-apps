@@ -87,7 +87,8 @@ final class PlayerController {
         ]
         startTimeout(gen)
 
-        if live && listen {
+        // Local recordings use AVPlayer's audio tap; LiveRadio accepts HTTP radio mounts only.
+        if live && listen && !url.isFileURL {
             player.replaceCurrentItem(with: nil)
             fadeTask?.cancel()
             fadeInPending = true

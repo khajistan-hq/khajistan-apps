@@ -32,7 +32,8 @@ struct HomeRows: View {
             if StoreBuild.includes(.chat) { chatRow }
         }
         // The channel the app opens on comes first: the shelves load a moment after the front.
-        .task {
+        // Keyed on the shelf revision: a Clear or a new password empties the shelf, and this reloads it.
+        .task(id: model.reading.loadRevision) {
             try? await Task.sleep(for: .seconds(2))
             await model.transmission.loadSchedule()
             if StoreBuild.includes(.picsvids) {

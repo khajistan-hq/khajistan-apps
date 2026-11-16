@@ -121,8 +121,9 @@ final class SubtitlesUITests: XCTestCase {
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
         // The strip offers its controls over a playing channel: ABN News, or when its carrier does
-        // not reach the runner, the next Indus channel down.
-        try kjTuneUntilPlaying(app)
+        // not reach the runner, the next Pakistani channel down (Urdu by the country rule). DD
+        // Kashir also plays on the runner, and Kashmiri offers no captions (CI on PR 79, 2026-11-16).
+        try kjTuneUntilPlaying(app, tries: 10) { $0.hasPrefix("swept-pk-") || $0.hasPrefix("indus-") }
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)

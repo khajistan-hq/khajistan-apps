@@ -64,9 +64,9 @@ final class ReadingStore {
     @ObservationIgnored private var loading: Task<Void, Never>?
 
     private var loadContext = RRShelfLoadContext()
-    /// The shelf painted without its module index because the quick fetch missed; the next
-    /// screen to open the room loads it again.
-    @ObservationIgnored private var modulesMissed = false
+    /// The site refused the module index for this credential (a wrong or old password): asking
+    /// again cannot help, so no late fetch follows.
+    @ObservationIgnored private var modulesRefused = false
     /// How long a first paint waits on the gated module index, which is never kept on the device.
     private static let modulesPaintWait: TimeInterval = 2
     /// Task identity changes on every explicit preview invalidation, including nil-to-nil Clear.
@@ -117,11 +117,6 @@ final class ReadingStore {
             loading = nil
             phase = .idle
         }
-        // Not under a viewer already looking at the shelf: only as a screen opens it.
-        if phase == .ready, modulesMissed {
-            modulesMissed = false
-            phase = .idle
-        }
         switch phase {
         case .ready: return
         case .loading: await loading?.value; return
@@ -143,7 +138,6 @@ final class ReadingStore {
         loading = nil
         tabs = []
         phase = .idle
-        modulesMissed = false
         clearModuleCache()
     }
 
@@ -217,14 +211,14 @@ final class ReadingStore {
         // A fresh bulk catalogue does not mean this origin/credential's module index was read.
         // Fetch only the missing small index, preserving the cached catalogue and rights.
         // The first paint waits a couple of seconds at most. A gated index is never kept on the
-        // device, so one that missed is asked for again as the room next opens; an open one is
-        // kept by keepAFreshCopy and read from the device next time.
+        // device, so one that missed is fetched once more behind the painted shelf (lateModules);
+        // an open one is kept by keepAFreshCopy and read from the device next time.
         if fromDevice, modules == nil {
             modules = await loadModules(fromDevice: false, ticket: ticket, credential: credential,
                                         timeout: Self.modulesPaintWait)
-            modulesMissed = modules == nil && credential != nil
         }
         guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return false }
+        let fetchLate = fromDevice && modules == nil && credential != nil && !modulesRefused
         clock("modules")
         // Built off the main thread: a thousand-odd rows grouped, shelved and ranked would hold
         // the remote's focus still while the room opens.
@@ -252,7 +246,22 @@ final class ReadingStore {
         tabs = shelf
         phase = .ready
         clock("ready")
+        if fetchLate { Task { await lateModules(ticket: ticket, credential: credential) } }
         return true
+    }
+
+    /// The gated index that missed the first paint, asked for once with the full timeout. The
+    /// shelf stays ready while it is asked for; if it lands, the module tabs are laid over the
+    /// shelf already built, with no loader.
+    private func lateModules(ticket: Int, credential: String?) async {
+        guard let index = await loadModules(fromDevice: false, ticket: ticket, credential: credential) else { return }
+        let (built, held, ranked) = (titles, rights, provenance)
+        let ordered = await Task.detached(priority: .userInitiated) {
+            RRRank.ranked(RRShelves.tabs(titles: built, index: index, rights: held), provenance: ranked)
+        }.value
+        guard loadContext.accepts(ticket, credential: authorization), !Task.isCancelled, phase == .ready else { return }
+        tabs = ordered
+        clock("module index laid over the shelf")
     }
 
     /// Reads the shelf's inputs again and keeps them for the next open. Nothing on screen changes:
@@ -325,8 +334,12 @@ final class ReadingStore {
         }
         if let credential { request.setValue(credential, forHTTPHeaderField: "Authorization") }
         request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
-        guard let (data, response) = try? await urlSession.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        guard let (data, response) = try? await urlSession.data(for: request) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if credential != nil, loadContext.accepts(ticket, credential: authorization) {
+            modulesRefused = status == 401 || status == 403
+        }
+        guard status == 200 else { return nil }
         let index = await Task.detached(priority: .userInitiated) { RRModuleIndex.parse(data) }.value
         guard let index, loadContext.accepts(ticket, credential: authorization), !Task.isCancelled else { return nil }
         // No suspension between the generation check and write: Clear cannot race this write.

@@ -56,9 +56,9 @@ enum SupabaseRoute {
     static func reply(_ request: URLRequest, status: Int = 200) -> (Data, URLResponse) {
         (status == 200 ? Harness.modules : Data(), HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
     }
-    static func resumeFirst() {
+    static func resumeFirst(status: Int = 200) {
         let (request, continuation) = pending.removeFirst()
-        continuation.resume(returning: reply(request))
+        continuation.resume(returning: reply(request, status: status))
     }
 }
 
@@ -144,20 +144,38 @@ enum SupabaseRoute {
         await second.value
         check(store.phase == .ready && store.tabs.contains { $0.id == "arabic" }, "current credential alone publishes module tabs")
         check(RRShelfDisk.read(gatedKey) == nil, "accepted gated modules stay in memory only")
-        // A gated index that misses at first paint does not hold the shelf; the next open asks again.
+        // A gated index that misses at first paint does not hold the shelf. It is asked for once
+        // more behind the shelf, which stays ready, and lands without a loader.
         URLSession.suspend = false
         auth.previewPassword = "test-only-fifth"
         store.previewCredentialDidChange()
-        URLSession.status = 503
-        await store.start()
+        URLSession.suspend = true
+        let painting = Task { await store.start() }
+        await awaitPending()
+        URLSession.resumeFirst(status: 503)
+        await painting.value
         check(store.phase == .ready && !store.tabs.contains { $0.id == "arabic" },
               "a missed gated index paints the shelf without it")
+        await awaitPending()
+        check(store.phase == .ready, "the shelf stays ready while the missed index is asked for again")
+        URLSession.resumeFirst()
+        for _ in 0..<500 where !store.tabs.contains(where: { $0.id == "arabic" }) { try? await Task.sleep(for: .milliseconds(10)) }
+        check(store.phase == .ready && store.tabs.contains { $0.id == "arabic" }, "the late index lands on the ready shelf")
+        let afterLate = URLSession.requests.count
+        URLSession.suspend = false
+        await store.start()
+        check(URLSession.requests.count == afterLate, "an index in hand is not asked for again")
+        // A refused password is final: no late fetch, and opening again asks nothing.
+        auth.previewPassword = "test-only-wrong"
+        store.previewCredentialDidChange()
+        URLSession.status = 401
+        let beforeRefusal = URLSession.requests.count
+        await store.start()
+        try? await Task.sleep(for: .milliseconds(200))
+        check(store.phase == .ready && URLSession.requests.count == beforeRefusal + 1, "a refused index is not asked for again")
+        await store.start()
+        check(URLSession.requests.count == beforeRefusal + 1, "opening the room again after a refusal asks nothing")
         URLSession.status = 200
-        await store.start()
-        check(store.tabs.contains { $0.id == "arabic" }, "the next open asks for the missed gated index again")
-        let afterRetry = URLSession.requests.count
-        await store.start()
-        check(URLSession.requests.count == afterRetry, "an index in hand is not asked for again")
         #endif
     }
 }

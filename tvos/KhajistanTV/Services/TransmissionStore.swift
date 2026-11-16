@@ -311,7 +311,12 @@ final class TransmissionStore {
     /// ordinary way and the phase says why.
     func switchBehind(step: Int) async -> PendingSwitch? {
         await loadSchedule()
-        let target = channel(step: step)
+        return await switchBehind(to: channel(step: step))
+    }
+
+    /// `switchBehind(step:)` for a channel chosen by number, as the guide chooses one.
+    func switchBehind(to target: Int) async -> PendingSwitch? {
+        await loadSchedule()
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return nil }

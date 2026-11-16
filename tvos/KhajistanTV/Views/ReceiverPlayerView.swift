@@ -53,9 +53,14 @@ struct ReceiverPlayerView: View {
     @State private var moveOnNote: String?
     /// The last failure was an account refusal: the screen waits for the viewer, never moves past it.
     @State private var failedAtGate = false
+    /// The resolver could not reach our own host (no network, or our side down): every channel would fail the same way,
+    /// so the screen waits rather than walking the list (Fable round 1, PR 64).
+    @State private var failedOffline = false
+    /// The dead channel a move is already pending for: a second call for it says nothing new.
+    @State private var movingOnFrom: String?
     /// The song on the channel on screen (NowPlaying), or "".
     @State private var song = ""
-    /// The guide, open over the left of the picture: the row the remote has lit, as an index in
+    /// The guide, risen over the bottom of the picture: the row the remote has lit, as an index in
     /// `list`. Up and down walk it, Select tunes, Left or Menu closes it. Like the strip's
     /// controls, it is lit by the remote and never takes focus.
     @State private var guideRow: Int?
@@ -136,9 +141,11 @@ struct ReceiverPlayerView: View {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
                               medium: (destination ?? current).mediaType, title: guideTitle,
                               turns: guideRegions.count > 1, loading: guideLoading)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
+                // Not over the guide's rows: the guide covers the lower part of the picture.
+                .opacity(guideRow == nil ? 1 : 0)
             StationClipLayer(clips: model.clips)
         }
         .environment(\.palette, palette)
@@ -178,7 +185,8 @@ struct ReceiverPlayerView: View {
             case .playing, .tuning:
                 pauseReceiver()
             case .idle, .paused, .failed:
-                if destination != nil { pauseReceiver() } else { tune(current) }
+                // A retune of the same channel replaces any move pending for it.
+                if destination != nil { pauseReceiver() } else { stopMovingOn(); tune(current) }
             }
             wake()
         }
@@ -666,6 +674,7 @@ struct ReceiverPlayerView: View {
         player.holdsSound = behind
         player.state = .tuning
         failedAtGate = false
+        failedOffline = false
         if !behind { current = target }
         wake()
         tuneTask = Task {
@@ -690,6 +699,14 @@ struct ReceiverPlayerView: View {
                 PlayerController.log.error("resolve \(target.id, privacy: .public): \(String(describing: error), privacy: .public)")
                 if case ReceiverStoreError.http(let code) = error, ReceiverRules.isAccountGate(httpStatus: code) {
                     failedAtGate = true
+                }
+                // The resolver only ever asks our own host, so a URLError or a server error says
+                // nothing about this channel: the network or our side is down, and walking the list
+                // would mark every channel dead (Fable round 2, PR 64).
+                if let urlError = error as? URLError, urlError.code != .cancelled {
+                    failedOffline = true
+                } else if case ReceiverStoreError.http(let code) = error, code >= 500 {
+                    failedOffline = true
                 }
                 player.state = .failed(PlayerController.unreachable)
             }
@@ -814,9 +831,12 @@ struct ReceiverPlayerView: View {
     /// Each channel is tried once per screen, so a list of dead channels ends, not loops. An
     /// account refusal is never moved past. Any press, the guide or Pause cancels the move.
     private func moveOnFromDeadSignal() {
+        // The cut and the state change can both report the same dead channel: one move, one line.
+        if moveOnTask != nil, movingOnFrom == current.id { return }
         stopMovingOn()
         // An open guide is the viewer choosing: closing it without a pick starts the move.
-        guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate else { return }
+        guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate, !failedOffline else { return }
+        movingOnFrom = current.id
         deadHere.insert(current.id)
         let dead = current
         let stopLine = "No other channel here is reaching us right now."
@@ -829,6 +849,8 @@ struct ReceiverPlayerView: View {
             }
             announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
             moveOnTask = Task {
+                // Done, moved or not: a later failure of the same channel may move again.
+                defer { if !Task.isCancelled { moveOnTask = nil; movingOnFrom = nil } }
                 guard await pausedOnDeadSignal(dead) else { return }
                 model.surfHistory.take(cycle, for: surfChoice)
                 moveOnNote = nil
@@ -844,6 +866,7 @@ struct ReceiverPlayerView: View {
         }
         announce("\(dead.name) is off the air. Moving to \(target.name)\u{2026}")
         moveOnTask = Task {
+            defer { if !Task.isCancelled { moveOnTask = nil; movingOnFrom = nil } }
             guard await pausedOnDeadSignal(dead) else { return }
             moveOnNote = nil
             destination = target
@@ -869,6 +892,7 @@ struct ReceiverPlayerView: View {
     private func stopMovingOn() {
         moveOnTask?.cancel()
         moveOnTask = nil
+        movingOnFrom = nil
         moveOnNote = nil
     }
 

@@ -48,7 +48,7 @@ final class ReceiverStore {
         config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        urlSession = URLSession(configuration: config.answeringFromFixtures())
     }
 
     private nonisolated static func dataURL(_ file: String) -> URL {

@@ -252,7 +252,7 @@ struct TransmissionPlayerView: View {
                     // channel's (owner, 2026-11-08: "qawalli as chanel name doesnt make sense").
                     trailing: ["\u{25CF} " + store.channelName(store.channelNumber)],
                     // The station clock's answer (StationClock.withNextProgramme, the site's rule).
-                    upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, name) } },
+                    upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, upNextName(name, air)) } },
                     accessory: chips.isEmpty ? nil : AnyView(stripControls)
                 )
             }
@@ -286,14 +286,22 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// One small line under the name: the show's own line, else the custodian and the transfer.
+    /// One small line under the name: the custodian and the transfer, a person's credit or
+    /// nothing. The show's own line is not shown here (owner, 2026-11-15: "i dont want any
+    /// subtitle it looks AI").
     private func credit(_ air: OnAir) -> String? {
-        if let line = nonEmpty(air.show?.line) { return line }
         let parts = [air.programme?.custodian, air.programme?.transfer].compactMap { nonEmpty($0) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Words
+
+    /// Up next carries the country too, as Now does.
+    private func upNextName(_ name: String, _ air: OnAir) -> String {
+        guard let id = air.nextProgrammeId,
+              let country = nonEmpty(store.programming?.programmes[id]?.country) else { return name }
+        return name + " \u{00B7} " + country
+    }
 
     /// Now playing: the programme, by the standardized name the schedule carries (owner,
     /// 2026-11-08: "add now playing and up next ... names need to be standardized"). Where a
@@ -318,7 +326,8 @@ struct TransmissionPlayerView: View {
         if case .failed = store.player.state { return stateText(air) }
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
-        return [showUnderTitle(air), stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        // Country first, then year (owner, 2026-11-15: "country is imp").
+        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 

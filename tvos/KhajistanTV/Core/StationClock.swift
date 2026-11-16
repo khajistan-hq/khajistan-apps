@@ -129,9 +129,10 @@ enum StationClock {
         locate(p, channel: channel, iso: iso, second: second ?? Double(minute * 60))?.slot
     }
 
-    /// Where a strip ends, as the site labels it: the minute, rounded up.
+    /// Where a strip ends: the minute, rounded down, the same rounding Up next uses for the
+    /// programme that starts there (owner, 2026-11-15: "Now 08:46–10:03" beside "Up next 10:02").
     static func endLabel(_ slot: Programming.Slot) -> String {
-        clockLabel(Int((slot.endSecond / 60).rounded(.up)))
+        clockLabel(Int((slot.endSecond / 60).rounded(.down)))
     }
 
     /// How long a programme runs ON AIR. `seconds` is the whole file; `nominal_minutes` is the

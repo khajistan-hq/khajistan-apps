@@ -1419,8 +1419,24 @@ final class KhajistanUITests: XCTestCase {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         var overflow: [String] = []
         for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
-            let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
-            waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+            // Bar destinations and Chat intentionally do not open through -kjroom.
+            let tab = room == "receiver" ? "receiver" : room == "yours" ? "library" : room == "chat" ? "rooms" : "home"
+            let app = launch(skin: "day", tab: tab, extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
+            switch room {
+            case "receiver":
+                waitFor(app.scrollViews["receiverCatalogue"], 30, "the actual Receiver is open")
+            case "yours":
+                waitFor(app.buttons["accountSignIn"], 15, "the signed-out Account is open")
+            case "chat":
+                let door = app.buttons["destination-chat"]
+                for _ in 0..<8 where !door.exists { app.swipeUp() }
+                waitFor(door, 10, "ROOMS offers Chat")
+                door.tap()
+                waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch,
+                        30, "the actual Chat room list is open")
+            default:
+                waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+            }
             for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
                 XCUIDevice.shared.orientation = orientation
                 sleep(6)

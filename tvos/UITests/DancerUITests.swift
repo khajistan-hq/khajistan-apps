@@ -134,8 +134,9 @@ final class DancerUITests: XCTestCase {
     /// must be readable, and the dancer comes on when what is playing carries a beat. Live radio may
     /// be talking at that minute, so the beat is recorded rather than required; the signal is required.
     /// A mount is read only while the station plays, and the stations are live third-party carriers:
-    /// one not playing in 45 s gives way to the next, three at most, then the test skips (CI
-    /// 2026-11-01, 11-12). A station that plays and is not readable still fails.
+    /// with live media (KJ_LIVE_RECEIVER=1) one not playing in 45 s gives way to the next, three at
+    /// most, then the test skips (CI 2026-11-01, 11-12). With the local test media, a station that
+    /// does not play fails, as does a station that plays and is not readable.
     func testRadioDancer() throws {
         // The recorded list: the live Indus radio shelf fell to two Indian stations on 2026-11-16.
         var left = ["radio-in-punjab-rocks-radio", "radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4"]
@@ -149,9 +150,13 @@ final class DancerUITests: XCTestCase {
             let tuned = Date().addingTimeInterval(45)
             while Date() < tuned, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
             if state.label != "Playing" {
-                tried.append("\(id): \(state.label)")
                 shot("\(id)-not-playing", app)
                 app.terminate()
+                // As playsOrSkips: a player stuck connecting, paused or never opened is a failure,
+                // and so is the local test media not playing. Only a dead live carrier moves on.
+                let stuck = state.label == "Connecting…" || state.label == "Paused" || state.label.isEmpty
+                guard kjLiveMedia, !stuck else { XCTFail("\(id) did not play: '\(state.label)'"); return }
+                tried.append("\(id): \(state.label)")
                 continue
             }
             XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))

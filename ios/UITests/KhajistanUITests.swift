@@ -597,10 +597,8 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
 
-    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids, Chat and the Wall
-    /// out: none of their doors in ROOMS or on HOME, and a stored Pics/Vids launch opens ROOMS
-    /// without it. Builds for our own devices keep all of them. The same test runs in both builds and
-    /// asserts the opposite in each.
+    /// App Store builds leave Pics/Vids, Chat and Wall out; Friends builds retain Pics/Vids.
+    /// Builds for our own devices keep all three. Check the stored launch and ROOMS doors.
     func testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly() {
         let app = launch(skin: "day", tab: "picsVids")
         waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
@@ -611,7 +609,7 @@ final class KhajistanUITests: XCTestCase {
         // The first BAZAAR door follows WALL in the menu in every build: reaching it means the
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
-#if KJ_APP_STORE
+#if KJ_APP_STORE && !KJ_FRIENDS
         if app.buttons["tab-rooms"].exists {
             XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
         } else {
@@ -631,10 +629,16 @@ final class KhajistanUITests: XCTestCase {
         if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(marker.exists, "ROOMS scrolled past the Chat and Wall doors")
-        XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
+        XCTAssertTrue(pnvDoor.exists, "this build keeps the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
+#if KJ_APP_STORE
+        XCTAssertFalse(chatDoor.exists, "a Friends build has no Chat door")
+        XCTAssertFalse(wallDoor.exists, "a Friends build has no Wall door")
+        shot("friends-build-rooms", app)
+#else
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")
         XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door")
+#endif
 #endif
     }
 

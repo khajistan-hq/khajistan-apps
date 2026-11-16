@@ -315,7 +315,7 @@ final class ChatFeed {
         self.account = account
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
-        session = URLSession(configuration: config)
+        session = URLSession(configuration: config.answeringFromFixtures())
     }
 
     /// The newest lines, then a check every three seconds until `stop()`. Safe to call again.

@@ -18,8 +18,11 @@ final class FixtureRoutingTests: XCTestCase {
         try Data("[{\"id\":\"fixture-room\"}]".utf8).write(to: directory.appendingPathComponent("rest/v1/chat_rooms"))
         UserDefaults.standard.set(directory.path, forKey: "kjfixtures")
         UserDefaults.standard.set(false, forKey: "kjfixturemedia")
+        // The recording alone, so the last request below cannot reach the live site.
+        UserDefaults.standard.set(true, forKey: "kjfixturesonly")
         defer {
             UserDefaults.standard.removeObject(forKey: "kjfixtures")
+            UserDefaults.standard.removeObject(forKey: "kjfixturesonly")
             UserDefaults.standard.removeObject(forKey: "kjfixturemedia")
             try? FileManager.default.removeItem(at: directory)
         }

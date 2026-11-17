@@ -245,9 +245,9 @@ final class SubtitlesUITests: XCTestCase {
         if caption.exists { kjScreenshot("film-2-subtitle-alone", app: app) }
     }
 
-    /// "Text only" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
+    /// "Yellow text" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
     /// film's preview. The look is checked on the screenshot.
-    func testTextOnlySubtitlesOnAFilm() throws {
+    func testYellowTextSubtitlesOnAFilm() throws {
         guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
@@ -268,7 +268,7 @@ final class SubtitlesUITests: XCTestCase {
         let caption = app.descendants(matching: .any)["caption"]
         XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text reaches the house view")
         // The caption reports the look it is drawn in: over a film's picture, the viewer's choice.
-        XCTAssertEqual(caption.value as? String, "bare", "Text only is drawn over the picture")
+        XCTAssertEqual(caption.value as? String, "bare", "Yellow text is drawn over the picture")
         kjPause(4)   // the panel hides, so the text sits on the picture
         kjScreenshot("film-subtitles-text-only", app: app)
     }
@@ -312,6 +312,8 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.down)
         kjPause(0.6)
         XCTAssertTrue(subtitles.isSelected, "Down lights Subtitles")
+        kjPause(3.5)
+        XCTAssertTrue(subtitles.isSelected, "a lit control stays past the panel's 2.6 s, so Select can still work it")
         XCUIRemote.shared.press(.select)
         kjPause(0.8)
         XCTAssertEqual(subtitles.label, "Subtitles · English", "Select on the lit control moves to the next choice")
@@ -319,13 +321,15 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(stop.isSelected, "Right walks to Stop")
         kjScreenshot("film-full-controls-stop-lit", app: app)
 
-        // Back lets go of the lit control; the next Back stops the film and closes the screen.
+        // Back closes the bottom bar, letting go of the lit control (owner, 2026-11-17); with the
+        // bar closed, the next Back stops the film and closes the screen.
         XCUIRemote.shared.press(.menu)
-        kjPause(0.6)
-        XCTAssertTrue(app.staticTexts["playerState"].exists, "the first Back only lets go of the control")
+        kjPause(0.8)
+        XCTAssertFalse(app.staticTexts["playerState"].exists, "the first Back closes the bottom bar")
+        XCTAssertTrue(app.descendants(matching: .any)["filmPicture"].exists, "and the film is still on")
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "one Back stops the film")
-        XCTAssertFalse(app.staticTexts["playerState"].exists, "the player is gone")
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "the next Back stops the film")
+        XCTAssertFalse(app.descendants(matching: .any)["filmPicture"].exists, "the player is gone")
     }
 
     /// The full film moves as Apple's player moves it (owner, 2026-11-17: "all controls should work
@@ -379,22 +383,21 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.left)
         waitUntil("a click left goes back ten seconds") { $0 == still }
 
-        #if targetEnvironment(simulator)
-        // The simulator's remote reaches SwiftUI only, not GameController, so a held arrow is one
-        // click here. The scan is checked on the Apple TV (`xcodebuild test` on the device).
-        #else
-        // Paused, so playback adds nothing: a hold must move further than any click can.
-        let before = at()
-        XCUIRemote.shared.press(.right, forDuration: 2.5)
-        waitUntil("holding right fast-forwards") { $0 >= before + 18 }
-        kjScreenshot("film-scanned-forward", app: app)
-        let scanned = at()
-        XCUIRemote.shared.press(.left, forDuration: 1.5)
-        waitUntil("holding left rewinds, and the release is not also a click") { $0 >= 0 && $0 <= scanned - 8 && $0 > scanned - 20 }
-        #endif
+        // A held arrow is read through GameController, which XCUIRemote does not reach, on the
+        // simulator or on the Apple TV (measured 2026-11-17: a 2.5 s hold on the device came in as
+        // one click). Hold-to-scan and swipe-to-scrub are checked by hand with the Siri Remote.
 
         XCUIRemote.shared.press(.playPause)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays again")
+
+        #if !targetEnvironment(simulator)
+        // Playing, quick clicks add up as Apple's do: the next is not lost while the last buffers.
+        // Device only: on the simulator the stream does not buffer after a seek, so this passed
+        // with the old rule too (measured twice) and could not fail there.
+        let rolling = at()
+        for _ in 0..<3 { XCUIRemote.shared.press(.right) }
+        waitUntil("three quick clicks right go thirty seconds on") { $0 >= rolling + 28 }
+        #endif
     }
 
     /// Full screen from the corner window opens the film over whatever is on top: here, over the

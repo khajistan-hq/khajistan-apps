@@ -3310,7 +3310,7 @@ func filmSubtitleChoice() throws {
     // The viewer's subtitle look: the plate until one is chosen, and one press moves to the other.
     try expectEqual(CaptionStyle.plate.next, .bare)
     try expectEqual(CaptionStyle.bare.next, .plate)
-    try expectEqual(CaptionStyle.bare.label, "Text only")
+    try expectEqual(CaptionStyle.bare.label, "Yellow text")
     try expectEqual(Skin.argb(Skin.bareCaptionHex), Skin.argb(0xF3FB04))
     // The full film moves under the remote as Apple's player moves it.
     try expectEqual(FilmTransport.scanSpeed(heldFor: 0.5), 8)

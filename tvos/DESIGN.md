@@ -242,7 +242,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   panel carries Stop beside Watch the full film. In the full film the picture keeps focus, so the
   panel's Subtitles · PiP · Stop are lit by the remote as the strip's are: Down lights the first
   (it carries a ↓ while none is lit), left and right walk them, Select works the lit one, Up or
-  Back lets go, and a lit control lets go when the panel hides. One Back stops the film.
+  Back lets go, and a lit control lets go 6 s after the panel would have hidden (8.6 s with no
+  press), long enough to read it and press Select. In the full film Back closes the bottom bar, and
+  with the bar closed stops the film (owner, 2026-11-17: "a back button shoud exit the bottom bar");
+  in the preview one Back stops it.
   Subtitles start in the language chosen for that film, else the device's, else English: a
   choice made on one film is not carried to another (Persian chosen for an Iranian film opened
   Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,
@@ -478,9 +481,10 @@ over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal 
 says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
 "i dont want info like 'regional broadcast by...' the apple tv").
 
-**Subtitles: Plate or Text only** (owner, 2026-11-17: "a caption option without the background
+**Subtitles: Plate or Yellow text** (owner, 2026-11-17: "a caption option without the background
 (only yellow text) that one can choose"). Account carries one button, as the colours do. The
-plate below is the default. Text only is the house yellow `#F3FB04` in every skin, with a 2pt black
+plate below is the default. Yellow text (the website's name for it) is the house yellow `#F3FB04`
+in every skin, with a 2pt black
 edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
 The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
 sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,

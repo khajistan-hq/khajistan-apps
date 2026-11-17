@@ -15,7 +15,8 @@ import UIKit
 /// In the full film the picture (FilmRemote) keeps the remote's focus. The panel's controls
 /// (Subtitles, PiP, Stop) are lit as the Transmission strip's are: Down lights the first, left and
 /// right walk them, Select works the lit one. With none lit the remote moves the film as Apple's
-/// player does (FilmTransport). One Back stops the film (owner, 2026-11-15: "why cant you stop on
+/// player does (FilmTransport). Back closes the bottom bar, and with it closed stops the film
+/// (owner, 2026-11-17); the preview's one Back stops it (owner, 2026-11-15: "why cant you stop on
 /// demand movies").
 struct FilmPlayerView: View {
     let film: Film
@@ -70,17 +71,24 @@ struct FilmPlayerView: View {
     @State private var scan: (direction: Int, speed: Int)?
     @State private var scanTask: Task<Void, Never>?
     @State private var remoteHold = RemoteHold()
-    /// Whether the player was muted before a scan, which is silent as Apple's is.
-    @State private var scanWasMuted = false
+    /// Whether the film was playing when a scan began: a scan pauses it and steps it, as the scrub
+    /// does, so it is silent as Apple's is and the player never buffers between steps.
+    @State private var scanWasPlaying = false
     /// When a swipe last moved the scrub.
     @State private var lastSwipe: ContinuousClock.Instant?
+    /// Moves still landing; the position poll waits for them.
+    @State private var seeksInFlight = 0
+    /// The full film has played on this screen, so its kept place has been reached.
+    @State private var fullPlayed = false
 
     var body: some View {
         let palette = Palette(model.skin)
         ZStack {
             // A picture that does not fill the screen sits on black, whatever the skin (owner,
             // 2026-10-05). Before and after the picture the screen keeps the skin's ground.
-            (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
+            // The full film keeps its black while a move buffers, so a caption in the lower bar
+            // never sits on the day's yellow.
+            (showsPicture || (full != nil && duration != nil) ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player, onLayer: pip.bind)
                 .ignoresSafeArea()
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: overlayVisible ? panelHeight : 0)
@@ -107,7 +115,8 @@ struct FilmPlayerView: View {
         // RemoteHold, and the move that ends it is not counted as a click as well.
         .onMoveCommand { direction in
             guard full != nil else { return wake() }
-            // A swipe can arrive as a move too: it scrubs, and is not also a skip or a Down.
+            // A swipe can arrive as a move too: it scrubs, and is not also a skip or a Down. Any
+            // move in the half second after a swipe is dropped, a real click included.
             if let lastSwipe, ContinuousClock.now - lastSwipe < .milliseconds(500) { return }
             switch direction {
             case .left: if !remoteHold.swallows(-1) { click(-1) }
@@ -128,7 +137,10 @@ struct FilmPlayerView: View {
         }
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: subtitles.tracks.isEmpty) { _, empty in if empty, armed == .subtitles { armed = nil } }
-        .onChange(of: controller.state) {
+        .onChange(of: controller.state) { _, state in
+            if full != nil, state == .playing { fullPlayed = true }
+            // A stopped player has no seek left to land; the poll must not wait on one for good.
+            if state == .idle { seeksInFlight = 0 }
             wake()
             followTracks()
         }
@@ -347,6 +359,8 @@ struct FilmPlayerView: View {
     /// Play/Pause: plays from a scrubbed place, or pauses and plays.
     private func playPause() {
         wake()
+        // A scan has paused the film and plays it on at release; playing under it would buffer.
+        if scan != nil { return }
         if scrub != nil { return endScrub(play: true) }
         switch controller.state {
         case .playing, .paused: controller.toggle()
@@ -357,11 +371,23 @@ struct FilmPlayerView: View {
         }
     }
 
-    /// Back puts a scrubbed film back where it was, as Apple's player does; then it lets go of a
-    /// lit control; otherwise one Back stops the film and closes the screen. It used to hide the
-    /// panel first, which read as Back doing nothing.
+    /// Back, in order: puts a scrubbed film back where it was; closes the full film's bottom bar
+    /// over its picture; lets go of a lit control (under VoiceOver, where the bar stays); otherwise
+    /// stops the film and closes the screen. With no picture under the bar (connecting, ended,
+    /// failed, refused) it stops at once, since the bar is then all there is to read.
     private func back() {
         if scrub != nil { return endScrub(play: false) }
+        // In the full film Back closes the bottom bar first, as Apple's player does (owner,
+        // 2026-11-17: "a back button shoud exit the bottom bar"); with the bar closed, Back stops
+        // the film. Not under VoiceOver, where the bar never hides: there Back lets go of a lit control,
+        // then stops the film.
+        // `movable`: a picture is on, playing, paused or catching up after a skip.
+        if movable, overlayVisible, refusal == nil, OverlayTiming.hidesItself {
+            armed = nil
+            hideTask?.cancel()
+            withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
+            return
+        }
         if armed != nil {
             armed = nil
             wake()
@@ -590,8 +616,16 @@ struct FilmPlayerView: View {
     // MARK: - The remote, as Apple's player reads it
 
     /// The film is on screen and can be moved.
+    /// Playing or paused, or catching up after a move (tuning) once its length is known, so quick
+    /// clicks add up as Apple's do rather than the next one waiting for the last to buffer.
     private var movable: Bool {
-        full != nil && (controller.state == .playing || controller.state == .paused)
+        guard full != nil else { return false }
+        switch controller.state {
+        case .playing, .paused: return true
+        // Not before the full film has first played: the move would land before its kept place.
+        case .tuning: return duration != nil && fullPlayed
+        default: return false
+        }
     }
 
     /// Puts the film at `seconds`. `exact` for a place the viewer stops on; a scan or a scrub in
@@ -599,7 +633,12 @@ struct FilmPlayerView: View {
     private func place(_ seconds: Double, exact: Bool) {
         let target = FilmTransport.clamp(seconds, duration: duration)
         let tolerance = exact ? CMTime.zero : CMTime(seconds: 1, preferredTimescale: 600)
-        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
+        // Counted until it lands: meanwhile the player's clock still reads the old place, and the
+        // half-second poll would undo this move before the next click adds to it.
+        seeksInFlight += 1
+        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+            DispatchQueue.main.async { seeksInFlight = max(seeksInFlight - 1, 0) }
+        }
         position = target
     }
 
@@ -633,7 +672,7 @@ struct FilmPlayerView: View {
             scanTask = nil
             if scanning {
                 place(position, exact: true)
-                controller.player.isMuted = scanWasMuted
+                if scanWasPlaying { controller.resume() }
             }
             scan = nil
             return scanning
@@ -642,8 +681,10 @@ struct FilmPlayerView: View {
         scanTask?.cancel()
         let started = ContinuousClock.now
         var at = position
-        scanWasMuted = controller.player.isMuted
-        controller.player.isMuted = true
+        // Paused, a seek does not make the player wait to play: playing, each step buffered, the
+        // film fell out of `movable` and the scan stopped (Fable, 2026-11-17).
+        scanWasPlaying = controller.state != .paused
+        if scanWasPlaying { controller.pause() }
         scanTask = Task {
             while !Task.isCancelled, movable {
                 let held = (ContinuousClock.now - started) / .seconds(1)
@@ -667,7 +708,7 @@ struct FilmPlayerView: View {
         if scrub == nil {
             // A small touch is a rest of the thumb, not a swipe.
             guard abs(points) > 40 else { return }
-            let wasPlaying = controller.state == .playing
+            let wasPlaying = controller.state != .paused
             if wasPlaying { controller.pause() }
             scrub = (position, wasPlaying, position)
         }
@@ -693,7 +734,7 @@ struct FilmPlayerView: View {
         while !Task.isCancelled {
             let now = controller.player.currentTime().seconds
             // A scan or a scrub sets the place itself; the clock catches up when it ends.
-            if now.isFinite, scan == nil, scrub == nil { position = now }
+            if now.isFinite, scan == nil, scrub == nil, seeksInFlight == 0 { position = now }
             let length = controller.player.currentItem?.duration.seconds
             duration = (length?.isFinite == true && (length ?? 0) > 0) ? length : nil
             try? await Task.sleep(for: .milliseconds(500))
@@ -722,7 +763,6 @@ struct FilmPlayerView: View {
         }
         hideTask?.cancel()
         armed = nil
-        if scanTask != nil { controller.player.isMuted = scanWasMuted }
         scanTask?.cancel()
         scanTask = nil
         remoteHold.stop()
@@ -746,8 +786,11 @@ struct FilmPlayerView: View {
         guard OverlayTiming.hidesItself else { return }
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
-            // A lit control lets go after the same idle, so a stray swipe Down does not leave
-            // left and right walking controls instead of skipping.
+            // A lit control stays long enough to read its label and press Select: at the plain idle
+            // it let go before the press, and Select only woke the panel (Fable, 2026-11-17). It
+            // still lets go in the end, so a stray swipe Down does not leave left and right walking
+            // controls instead of skipping.
+            if !Task.isCancelled, armed != nil { try? await Task.sleep(for: OverlayTiming.armedIdle) }
             if !Task.isCancelled { armed = nil; withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false } }
         }
     }

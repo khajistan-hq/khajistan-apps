@@ -782,6 +782,8 @@ private struct SwitchLabel: View {
 /// reach anything.
 enum OverlayTiming {
     static let idle: Duration = .seconds(2.6)
+    /// Added to `idle` while a film control is lit, so the viewer can read it and press Select.
+    static let armedIdle: Duration = .seconds(6)
     static var hidesItself: Bool { !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning }
 }
 

@@ -63,6 +63,10 @@ struct FilmPlayerView: View {
     @State private var scanWasPlaying = false
     /// When a swipe last moved the scrub.
     @State private var lastSwipe: ContinuousClock.Instant?
+    /// Moves still landing; the position poll waits for them.
+    @State private var seeksInFlight = 0
+    /// The full film has played on this screen, so its kept place has been reached.
+    @State private var fullPlayed = false
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -120,7 +124,8 @@ struct FilmPlayerView: View {
         }
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: subtitles.tracks.isEmpty) { _, empty in if empty, armed == .subtitles { armed = nil } }
-        .onChange(of: controller.state) {
+        .onChange(of: controller.state) { _, state in
+            if full != nil, state == .playing { fullPlayed = true }
             wake()
             followTracks()
         }
@@ -339,6 +344,8 @@ struct FilmPlayerView: View {
     /// Play/Pause: plays from a scrubbed place, or pauses and plays.
     private func playPause() {
         wake()
+        // A scan has paused the film and plays it on at release; playing under it would buffer.
+        if scan != nil { return }
         if scrub != nil { return endScrub(play: true) }
         switch controller.state {
         case .playing, .paused: controller.toggle()
@@ -561,7 +568,8 @@ struct FilmPlayerView: View {
         guard full != nil else { return false }
         switch controller.state {
         case .playing, .paused: return true
-        case .tuning: return duration != nil
+        // Not before the full film has first played: the move would land before its kept place.
+        case .tuning: return duration != nil && fullPlayed
         default: return false
         }
     }
@@ -571,7 +579,12 @@ struct FilmPlayerView: View {
     private func place(_ seconds: Double, exact: Bool) {
         let target = FilmTransport.clamp(seconds, duration: duration)
         let tolerance = exact ? CMTime.zero : CMTime(seconds: 1, preferredTimescale: 600)
-        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
+        // Counted until it lands: meanwhile the player's clock still reads the old place, and the
+        // half-second poll would undo this move before the next click adds to it.
+        seeksInFlight += 1
+        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance) { _ in
+            DispatchQueue.main.async { seeksInFlight = max(seeksInFlight - 1, 0) }
+        }
         position = target
     }
 
@@ -667,7 +680,7 @@ struct FilmPlayerView: View {
         while !Task.isCancelled {
             let now = controller.player.currentTime().seconds
             // A scan or a scrub sets the place itself; the clock catches up when it ends.
-            if now.isFinite, scan == nil, scrub == nil { position = now }
+            if now.isFinite, scan == nil, scrub == nil, seeksInFlight == 0 { position = now }
             let length = controller.player.currentItem?.duration.seconds
             duration = (length?.isFinite == true && (length ?? 0) > 0) ? length : nil
             try? await Task.sleep(for: .milliseconds(500))

@@ -381,19 +381,9 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.left)
         waitUntil("a click left goes back ten seconds") { $0 == still }
 
-        #if targetEnvironment(simulator)
-        // The simulator's remote reaches SwiftUI only, not GameController, so a held arrow is one
-        // click here. The scan is checked on the Apple TV (`xcodebuild test` on the device).
-        #else
-        // Paused, so playback adds nothing: a hold must move further than any click can.
-        let before = at()
-        XCUIRemote.shared.press(.right, forDuration: 2.5)
-        waitUntil("holding right fast-forwards") { $0 >= before + 18 }
-        kjScreenshot("film-scanned-forward", app: app)
-        let scanned = at()
-        XCUIRemote.shared.press(.left, forDuration: 1.5)
-        waitUntil("holding left rewinds, and the release is not also a click") { $0 >= 0 && $0 <= scanned - 8 && $0 > scanned - 20 }
-        #endif
+        // A held arrow is read through GameController, which XCUIRemote does not reach, on the
+        // simulator or on the Apple TV (measured 2026-11-17: a 2.5 s hold on the device came in as
+        // one click). Hold-to-scan and swipe-to-scrub are checked by hand with the Siri Remote.
 
         XCUIRemote.shared.press(.playPause)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays again")
@@ -405,12 +395,6 @@ final class SubtitlesUITests: XCTestCase {
         let rolling = at()
         for _ in 0..<3 { XCUIRemote.shared.press(.right) }
         waitUntil("three quick clicks right go thirty seconds on") { $0 >= rolling + 28 }
-
-        // A hold while the film plays scans too, and the film plays on after it.
-        let playingFrom = at()
-        XCUIRemote.shared.press(.left, forDuration: 2.5)
-        waitUntil("holding left while playing rewinds") { $0 >= 0 && $0 <= playingFrom - 14 }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays on")
         #endif
     }
 

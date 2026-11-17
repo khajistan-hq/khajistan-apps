@@ -405,6 +405,9 @@ struct FilmPlayerView: View {
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
         model.silenceRadio()
+        // The film's own subtitle language is turned on by RecordedSubtitles. Left automatic, the
+        // player can put the device's subtitle setting over it once the item is ready.
+        controller.player.appliesMediaSelectionCriteriaAutomatically = false
         if startsFull {
             await watchFull()
             if full == nil { watchFocused = true } else { surfaceFocused = true }
@@ -443,7 +446,6 @@ struct FilmPlayerView: View {
             checking = false
             full = ("test", nil)
             surfaceFocused = true
-            controller.player.appliesMediaSelectionCriteriaAutomatically = false
             controller.onEnded = { [weak controller, model] in
                 if let controller, model.filmPiP?.controller === controller { model.silenceRadio() }
                 controller?.stop()
@@ -468,9 +470,6 @@ struct FilmPlayerView: View {
             // and with focus nowhere Play/Pause, left, right and Down reached nothing (owner's
             // Apple TV, 2026-11-16: no pause, no skipping, no other languages).
             surfaceFocused = true
-            // The film's own language is turned on by RecordedSubtitles. Left automatic, the player
-            // can put the device's subtitle setting over it once the item is ready.
-            controller.player.appliesMediaSelectionCriteriaAutomatically = false
             model.clips.cover(caption: Films.displayTitle(film))
             // Watched to the end: it leaves Up Next. Ended in the corner window, the window closes.
             controller.onEnded = { [weak controller, handle = film.handle, model] in
@@ -483,6 +482,9 @@ struct FilmPlayerView: View {
                               title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
             await controller.settled()
             model.clips.uncover()
+            // Again once the picture is on: the first focus write can land before the picture's
+            // button exists.
+            if full != nil, refusal == nil { surfaceFocused = true }
         case .refused(let status):
             if status == 403 { await model.auth.rearmCode() }
             refusal = status
@@ -546,7 +548,8 @@ struct FilmPlayerView: View {
         }
         // In the full film the picture is the only thing to focus; a press that finds focus
         // elsewhere puts it back there.
-        if full != nil, !surfaceFocused { surfaceFocused = true }
+        // Not while a refusal or Sign in is on screen: their buttons need the focus.
+        if full != nil, refusal == nil, !showSignIn, !surfaceFocused { surfaceFocused = true }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }
         guard OverlayTiming.hidesItself else { return }

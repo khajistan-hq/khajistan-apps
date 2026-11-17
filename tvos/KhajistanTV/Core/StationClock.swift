@@ -59,6 +59,12 @@ struct ScheduleStrip: Equatable, Sendable {
 enum StationClock {
     static let utcOffsetMinutes = 300
     static let daySeconds = 86_400.0
+    /// How close to a strip's end a programme may finish and still count as the roster's last
+    /// (kj-station-clock.js HANDOVER_TOLERANCE). The builder writes a strip's length as the sum of
+    /// its programmes, and the clock adds the same lengths in another order: 216.6 + ... + 552.4 is
+    /// 2979.7999999999997 against a strip of 2979.8, which read as the roster going round again and
+    /// put the strip's own opener in Up next (Fable, 2026-11-16).
+    static let handoverTolerance = 0.5
     static let tzLabel = "PKT"
 
     // MARK: Station time
@@ -362,7 +368,8 @@ enum StationClock {
         let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second)
         out.nextShow = next.flatMap { p.shows[$0.slot.show] }
         out.nextStart = next?.slot.start
-        if endsAt < slot.endSecond, slot.programmes.count > 1 {
+        let rosterEnd = slot.endSecond - handoverTolerance
+        if endsAt < rosterEnd, slot.programmes.count > 1 {
             let index = slot.programmes[(air.rosterIndex + 1) % slot.programmes.count]
             out.nextProgrammeId = programmeId(p, index: index)
             out.nextProgrammeStart = clockLabel(Int(endsAt / 60))
@@ -384,7 +391,7 @@ enum StationClock {
         let count = slot.programmes.count
         var t = endsAt
         var k = 1
-        while k < count, t < slot.endSecond {
+        while k < count, t < rosterEnd {
             let id = programmeId(p, index: slot.programmes[(air.rosterIndex + k) % count])
             let name = title(id)                 // an untitled programme is walked past, not named
             if !said(name) {

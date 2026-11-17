@@ -1355,6 +1355,38 @@ func followingReadsUpNextFromTheClock() throws {
     try expectEqual([handed.nextStart, handed.nextShow?.name], [fresh.nextStart, fresh.nextShow?.name])
 }
 
+/// The 01:39 strip on channel `radio`, 1 November 2026, from programming-2026-11.json (Fable,
+/// 2026-11-16): its six programmes add up to 2979.7999999999997 s, a hair under the strip's
+/// 2979.8, and the last one named the strip's own opener as Up next. The same case as archive
+/// tests/station_clock_next_test.mjs.
+func radioStripJSON(length: String = "2979.8", nextStart: String = "8943.9") -> String {
+    let titles = ["Khawree Mi Zargai Sha", "Tapey — Zeeshan", "Dhola Lamhy Na Wanj Way — Mansoor Ali Malangi",
+                  "Dhola Way Dhola Chana Jia — Ashraf Litti", "Jenda Jahan He — Ashraf Litti", "Jenda Jahan He — Ashraf Litti", "الحب اللي كان"]
+    let seconds = ["216.6", "304.1", "750.3", "604.1", "552.3", "552.4", "246.8"]
+    let ids = ["P1", "P2", "P3", "P4", "P5", "P6", "B1"]
+    let programmes = (0..<7).map { #""\#(ids[$0])":{"id":"\#(ids[$0])","title":"t","display_title":"\#(titles[$0])","seconds":\#(seconds[$0])}"# }
+    return #"{"_meta":{"channels":[{"id":"radio","number":13,"name":"Channel 13 · Radio"}]},"shows":{"punjab":{"slug":"punjab","name":"Punjab Side"},"baghdad":{"slug":"baghdad","name":"Baghdad"}},"programme_order":["P1","P2","P3","P4","P5","P6","B1"],"programmes":{"# + programmes.joined(separator: ",") + #"},"days":[{"date":"2026-11-01","channels":{"radio":[{"start":"01:39","start_minute":99,"minutes":51,"start_second":5964.1,"seconds":\#(length),"show":"punjab","programmes":[0,1,2,3,4,5]},{"start":"02:29","start_minute":149,"minutes":90,"start_second":\#(nextStart),"seconds":5369.8,"show":"baghdad","programmes":[6]}]}}]}"#
+}
+
+func lastProgrammeHandsOverWhateverTheFloatSum() throws {
+    let p = try decode(Programming.self, radioStripJSON())
+    let air = try require(StationClock.onAir(p, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0)))
+    try expectEqual(air.programmeId, "P6")
+    try expectEqual([air.nextProgrammeId, air.nextProgrammeStart, air.nextName, air.nextAt], ["B1", "02:29", "الحب اللي كان", "02:29"])
+    try expectEqual(air.nextInSlot, false)
+    // The same answer when the player hands P5 over to P6, the second P6 starts (02:19:51.5).
+    let p5 = try require(StationClock.onAir(p, channel: 13, at: pkt(2026, 11, 1, 2, 19, 0)))
+    try expectEqual(p5.programmeId, "P5")
+    let handed = try require(StationClock.following(p5, in: p, at: pkt(2026, 11, 1, 2, 19, 52)))
+    try expectEqual(handed.programmeId, "P6")
+    try expectEqual([handed.nextProgrammeId, handed.nextName, handed.nextAt], ["B1", "الحب اللي كان", "02:29"])
+    // Negative: a roster a second short of its strip still runs round to its opener.
+    let short = try decode(Programming.self, radioStripJSON(length: "2980.8", nextStart: "8944.9"))
+    let round = try require(StationClock.onAir(short, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0)))
+    try expectEqual([round.programmeId, round.nextProgrammeId, round.nextName], ["P6", "P1", "Khawree Mi Zargai Sha"])
+    try expectEqual(round.nextInSlot, true)
+}
+
 func returnTimeWeighsEachStripByItsOwnDay() throws {
     // Filed on the 5th at 25:00 (01:00 on the 6th), and the 6th's own 00:30: the 6th's is first.
     let late = #"{"date":"2026-11-05","channels":{"g":[{"start":"01:00","start_minute":1500,"minutes":10,"start_second":90000,"seconds":600,"show":"open","programmes":[2]}]}}"#
@@ -1521,6 +1553,47 @@ func realUpcomingAgreesWithOnAir() throws {
         }
     }
     print("      \(checked) instants across \(key)")
+}
+
+/// At every handover inside a strip of the real November file, the programme following() hands
+/// over to says what a fresh onAir says at that second: the same programme, and the same Up next.
+/// The last programme of a full roster named the strip's own opener from onAir and the next
+/// strip's from following(), on about 2% of readings (Fable, 2026-11-16). The minute labels are
+/// not compared: following() starts the file from its head at the whole second it is asked, so
+/// its "ends at" can be up to a second later than the schedule's, and on 658 of these handovers
+/// that second crosses a minute.
+func realFollowingAgreesWithOnAirAtEveryHandover() throws {
+    let p = try realProgramming("2026-11")
+    var checked = 0, lastOfRoster = 0, mismatches: [String] = []
+    for day in p.days {
+        let parts = day.date.split(separator: "-").compactMap { Int($0) }
+        let midnight = pkt(parts[0], parts[1], parts[2])
+        for (channel, strips) in day.channels {
+            for slot in strips where slot.programmes.count > 1 {
+                var h = slot.startSecond
+                for i in 1..<slot.programmes.count {
+                    h += StationClock.runSeconds(p.programmes[p.programme_order[slot.programmes[i - 1]]])
+                    // The second before the handover, and the first whole second after it.
+                    let before = midnight.addingTimeInterval((h - 1).rounded(.down))
+                    let after = midnight.addingTimeInterval(h.rounded(.up))
+                    guard let current = StationClock.onAir(p, channelId: channel, at: before),
+                          current.slot == slot, current.rosterIndex == i - 1,
+                          let fresh = StationClock.onAir(p, channelId: channel, at: after),
+                          fresh.slot == slot, fresh.rosterIndex == i else { continue }
+                    let handed = try require(StationClock.following(current, in: p, at: after))
+                    let a = [handed.programmeId, handed.nextProgrammeId, handed.nextName, handed.nextStart, handed.nextInSlot ? "in" : "out"]
+                    let b = [fresh.programmeId, fresh.nextProgrammeId, fresh.nextName, fresh.nextStart, fresh.nextInSlot ? "in" : "out"]
+                    if a != b, mismatches.count < 5 { mismatches.append("\(day.date) \(channel) \(slot.start) #\(i): \(a) vs \(b)") }
+                    if a != b { mismatches.append("") }
+                    checked += 1
+                    if i == slot.programmes.count - 1 { lastOfRoster += 1 }
+                }
+            }
+        }
+    }
+    print("      \(checked) handovers (\(lastOfRoster) onto a roster's last), \(mismatches.filter(\.isEmpty).count) disagree")
+    try expect(mismatches.isEmpty, mismatches.filter { !$0.isEmpty }.joined(separator: "\n"))
+    try expect(checked >= 10_000, "only \(checked) handovers checked")
 }
 
 // MARK: - Station clock: differential against the site's own JS
@@ -4934,10 +5007,12 @@ let tests: [(String, () throws -> Void)] = [
     ("Return time weighs each strip by its own day", returnTimeWeighsEachStripByItsOwnDay),
     ("Up next names only a strip under a day away", upNextNamesOnlyAStripUnderADayAway),
     ("following() reads Up next from the clock", followingReadsUpNextFromTheClock),
+    ("The last programme of a full roster hands over, whatever the float sum", lastProgrammeHandsOverWhateverTheFloatSum),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
     ("Real schedule: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
+    ("Real schedule: following() agrees with onAir at every handover", realFollowingAgreesWithOnAirAtEveryHandover),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),

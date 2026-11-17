@@ -97,6 +97,15 @@ enum StationClock {
         String(stationNow(date).iso.prefix(7))
     }
 
+    /// Seconds until the station month turns, when that is at most `lead` away; else nil. A file
+    /// that ends this close to the month's end hands over into the next month's file, which this
+    /// one does not hold, so the player waits for the turn and tunes (both TransmissionStores).
+    static func monthTurns(after date: Date, within lead: Double) -> Double? {
+        guard stationMonth(date.addingTimeInterval(lead)) != stationMonth(date) else { return nil }
+        let epoch = date.timeIntervalSince1970
+        return daySeconds - Double(stationNow(date).seconds) - (epoch - epoch.rounded(.down))
+    }
+
     // MARK: Schedule lookups
 
     static func channelId(_ p: Programming, number: Int) -> String? {
@@ -358,9 +367,8 @@ enum StationClock {
         let whole = date.timeIntervalSince1970.rounded(.down)
         let exact = at + (date.timeIntervalSince1970 - whole)
         // The clock at the first whole second past the end, as a whole epoch second (no float
-        // drift). In another month this file holds nothing there, and the roster walks on as it
-        // always did: on Apple TV the slot watch then tunes the next month's file; the iPhone has
-        // no slot watch and plays the opener out.
+        // drift). In another month this file holds nothing there: the stores wait for the turn
+        // and tune before they ask (monthTurns), and the roster walk below is only a fallback.
         let end = slot.endSecond.rounded(.up)
         let then = Date(timeIntervalSince1970: whole + (end - at))
         // Only after the roster's last entry: an ident under two seconds that closes the roster

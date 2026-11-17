@@ -1463,6 +1463,16 @@ func shortStripTunedEarlyHandsOnward() throws {
     try expectEqual(after.into, 0)
 }
 
+/// The month's last file ending on time: the stores wait for the turn, then tune into the next
+/// month's file (written figures, not read from handoverLead).
+func monthTurnsOnlyWithinTheLead() throws {
+    try expectClose(try require(StationClock.monthTurns(after: pkt(2026, 11, 30, 23, 59, 58).addingTimeInterval(0.5), within: 2)), 1.5, tolerance: 1e-6)
+    try expectClose(try require(StationClock.monthTurns(after: pkt(2026, 12, 31, 23, 59, 59), within: 2)), 1, tolerance: 1e-6)
+    try expectEqual(StationClock.monthTurns(after: pkt(2026, 11, 30, 23, 59, 57), within: 2), nil)
+    try expectEqual(StationClock.monthTurns(after: pkt(2026, 11, 29, 23, 59, 59), within: 2), nil)
+    try expectEqual(StationClock.monthTurns(after: pkt(2026, 12, 1, 0, 0, 0), within: 2), nil)
+}
+
 /// A strip ending at midnight hands over to the next day's first strip, whose end watch counts
 /// from the day before.
 func lastFileAtMidnightTunesTomorrowsStrip() throws {
@@ -5197,6 +5207,7 @@ let tests: [(String, () throws -> Void)] = [
     ("The last file ending on time tunes the next strip, with its end watch", lastFileEndingOnTimeTunesTheNextStrip),
     ("The last file at midnight tunes the next day's strip", lastFileAtMidnightTunesTomorrowsStrip),
     ("A short strip tuned early hands onward, not back", shortStripTunedEarlyHandsOnward),
+    ("The month turns within the lead, and only then", monthTurnsOnlyWithinTheLead),
     ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),

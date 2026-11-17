@@ -118,9 +118,11 @@ final class RecordedSubtitles {
         let gen = generation
         // The house view draws the text full screen. In the picture-in-picture window AVPlayer
         // draws it (handOff()), and these rules give it the skin's caption plate there too.
+        let bare = CaptionStyle.current == .bare
         item.textStyleRules = [AVTextStyleRule(textMarkupAttributes: [
-            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
-            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(bare ? Skin.bareCaptionHex : skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: bare ? [0, 0, 0, 0] : Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_CharacterEdgeStyle as String: bare ? kCMTextMarkupCharacterEdgeStyle_Uniform as String : kCMTextMarkupCharacterEdgeStyle_None as String,
             kCMTextMarkupAttribute_BoldStyle as String: true,
         ])].compactMap { $0 }
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }

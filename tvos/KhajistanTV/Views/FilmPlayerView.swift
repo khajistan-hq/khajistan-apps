@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreImage
+import GameController
 import SwiftUI
 import UIKit
 
@@ -46,11 +47,17 @@ struct FilmPlayerView: View {
     @State private var pip = PictureInPicture()
     /// A short line in the panel, such as PiP not opening.
     @State private var note: String?
-
-    /// Left and right skip ten seconds, as Apple's player does.
-    private static let jump: Double = 10
     /// The picture holds focus under the overlay, so a press always has somewhere to land.
     @FocusState private var surfaceFocused: Bool
+    /// A swipe's scrub: where the film was when it began, whether it was playing, and the place
+    /// shown. Select or Play/Pause plays from the place, Back puts the film back (Apple's player).
+    @State private var scrub: (from: Double, wasPlaying: Bool, to: Double)?
+    /// Where this swipe starts from: a second swipe carries on from the place the first reached.
+    @State private var swipeBase: Double?
+    /// A held arrow's scan: its direction and speed, while the arrow is held.
+    @State private var scan: (direction: Int, speed: Int)?
+    @State private var scanTask: Task<Void, Never>?
+    @State private var remoteHold = RemoteHold()
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -64,7 +71,11 @@ struct FilmPlayerView: View {
             // Under the overlay in the full film, which has no button of its own there, so focus
             // always has somewhere to go and Play and Back are not lost. Over the preview the
             // offer's buttons hold focus, and the surface waits until the overlay hides.
-            if full != nil || !overlayVisible {
+            if full != nil {
+                // The full film's picture: it holds the focus, and a swipe across the remote scrubs.
+                FilmRemote(onSelect: selectOnSurface, onSwipe: swipe)
+                    .ignoresSafeArea()
+            } else if !overlayVisible {
                 Button { selectOnSurface() } label: { Color.clear }
                     .buttonStyle(SurfaceButtonStyle())
                     .focused($surfaceFocused)
@@ -76,48 +87,27 @@ struct FilmPlayerView: View {
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
+        // tvOS hands each press to SwiftUI once, at its release: a click. A held edge is read by
+        // RemoteHold, and the move that ends it is not counted as a click as well.
         .onMoveCommand { direction in
-            wake()
-            // In the full film the picture holds focus: left and right skip, Down lights the
-            // panel's controls, and with one lit left and right walk them. On a lit button (the
-            // preview's offer) they move focus instead.
-            guard surfaceFocused, full != nil else { return }
-            if let lit = armed, let index = controls.firstIndex(of: lit) {
-                switch direction {
-                case .right where index + 1 < controls.count: armed = controls[index + 1]
-                case .left where index > 0: armed = controls[index - 1]
-                case .up: armed = nil; wake()
-                default: break
-                }
-                return
-            }
+            guard full != nil else { return wake() }
             switch direction {
-            case .left: seek(by: -Self.jump)
-            case .right: seek(by: Self.jump)
-            case .down:
-                armed = controls.first
-            default: break
+            case .left: if !remoteHold.swallows(-1) { click(-1) }
+            case .right: if !remoteHold.swallows(1) { click(1) }
+            case .up: vertical(-1)
+            case .down: vertical(1)
+            @unknown default: break
             }
         }
-        .onPlayPauseCommand {
-            wake()
-            switch controller.state {
-            case .playing, .paused: controller.toggle()
-            // Not while connecting: a pause then drops the seek to the place the film resumes from.
-            case .tuning: break
-            // After the full film ends, Play plays it again from the start.
-            case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
+        .onPlayPauseCommand { playPause() }
+        .onExitCommand { back() }
+        .onChange(of: full != nil) { _, on in
+            if on {
+                remoteHold.onHold = { hold($0, $1) }
+                remoteHold.start()
+            } else {
+                remoteHold.stop()
             }
-        }
-        .onExitCommand {
-            // Back lets go of a lit control; otherwise one Back stops the film and closes the
-            // screen. It used to hide the panel first, which read as Back doing nothing.
-            if armed != nil {
-                armed = nil
-                wake()
-                return
-            }
-            stop()
         }
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: subtitles.tracks.isEmpty) { _, empty in if empty, armed == .subtitles { armed = nil } }
@@ -179,10 +169,8 @@ struct FilmPlayerView: View {
             } else if let offer = Films.offer(film) {
                 Kicker(offer)
             }
-            if full != nil, controller.state == .playing || controller.state == .paused {
-                Text(duration.map { "\(Mixes.clock(position)) / \(Mixes.clock($0))" } ?? Mixes.clock(position))
-                    .kjSmall()
-                    .monospacedDigit()
+            if movable {
+                progress
             }
             Text(Films.attribution)
                 .kjSmall(faint: true)
@@ -264,6 +252,41 @@ struct FilmPlayerView: View {
         }
     }
 
+    // MARK: - The bar
+
+    /// Where the film is, as Apple's bar shows it: the time played, the bar, the time left, and
+    /// the scan speed or the scrub's way out while either is going on.
+    private var progress: some View {
+        let ink = Palette(model.skin).ink
+        let fraction = duration.map { $0 > 0 ? min(max(position / $0, 0), 1) : 0 } ?? 0
+        return VStack(alignment: .leading, spacing: 10) {
+            GeometryReader { bar in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(ink.opacity(0.22))
+                    Capsule().fill(ink).frame(width: bar.size.width * fraction)
+                }
+            }
+            .frame(height: 8)
+            HStack(spacing: 24) {
+                Text(Mixes.clock(position))
+                if let scan {
+                    Text((scan.direction < 0 ? "\u{25C0}\u{25C0} " : "\u{25B6}\u{25B6} ") + "\(scan.speed)\u{00D7}")
+                } else if scrub != nil {
+                    Text("Select plays from here \u{00B7} Back returns")
+                }
+                Spacer(minLength: 0)
+                if let duration { Text(FilmTransport.remaining(position, of: duration)) }
+            }
+            .kjSmall()
+            .monospacedDigit()
+        }
+        .frame(maxWidth: 1200)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(Mixes.clock(position)) of \(duration.map(Mixes.clock) ?? "unknown")")
+        .accessibilityValue("\(Int(position))")
+        .accessibilityIdentifier("filmProgress")
+    }
+
     // MARK: - The full film's controls
 
     /// The controls, left to right, as the remote walks them.
@@ -304,8 +327,42 @@ struct FilmPlayerView: View {
         }
     }
 
-    /// Select on the picture works the lit control, else shows the panel.
+    /// Play/Pause: plays from a scrubbed place, or pauses and plays.
+    private func playPause() {
+        wake()
+        if scrub != nil { return endScrub(play: true) }
+        switch controller.state {
+        case .playing, .paused: controller.toggle()
+        // Not while connecting: a pause then drops the seek to the place the film resumes from.
+        case .tuning: break
+        // After the full film ends, Play plays it again from the start.
+        case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
+        }
+    }
+
+    /// Back puts a scrubbed film back where it was, as Apple's player does; then it lets go of a
+    /// lit control; otherwise one Back stops the film and closes the screen. It used to hide the
+    /// panel first, which read as Back doing nothing.
+    private func back() {
+        if scrub != nil { return endScrub(play: false) }
+        if armed != nil {
+            armed = nil
+            wake()
+            return
+        }
+        stop()
+    }
+
+    /// Up lets go of a lit control; Down lights the first.
+    private func vertical(_ direction: Int) {
+        wake()
+        if direction < 0, armed != nil { armed = nil }
+        if direction > 0, armed == nil, scrub == nil { armed = controls.first }
+    }
+
+    /// Select on the picture plays from a scrubbed place, works the lit control, else shows the panel.
     private func selectOnSurface() {
+        if scrub != nil { return endScrub(play: true) }
         switch armed {
         case .subtitles: subtitles.cycle()
         case .pip: return startPictureInPicture()
@@ -491,18 +548,102 @@ struct FilmPlayerView: View {
         }
     }
 
-    private func seek(by seconds: Double) {
-        guard controller.state == .playing || controller.state == .paused else { return }
-        var target = max(position + seconds, 0)
-        if let duration { target = min(target, max(duration - 1, 0)) }
-        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    // MARK: - The remote, as Apple's player reads it
+
+    /// The film is on screen and can be moved.
+    private var movable: Bool {
+        full != nil && (controller.state == .playing || controller.state == .paused)
+    }
+
+    /// Puts the film at `seconds`. `exact` for a place the viewer stops on; a scan or a scrub in
+    /// progress takes the nearest frame a second either side, which answers faster.
+    private func place(_ seconds: Double, exact: Bool) {
+        let target = FilmTransport.clamp(seconds, duration: duration)
+        let tolerance = exact ? CMTime.zero : CMTime(seconds: 1, preferredTimescale: 600)
+        controller.player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: tolerance, toleranceAfter: tolerance)
         position = target
+    }
+
+    /// A click left or right: with a control lit, walks the controls; in a scrub, moves the place
+    /// ten seconds; otherwise skips ten seconds.
+    private func click(_ direction: Int) {
+        guard full != nil else { return }
+        wake()
+        if let lit = armed, let index = controls.firstIndex(of: lit) {
+            if controls.indices.contains(index + direction) { armed = controls[index + direction] }
+            return
+        }
+        guard movable else { return }
+        if let current = scrub {
+            let to = FilmTransport.clamp(current.to + Double(direction) * FilmTransport.skip, duration: duration)
+            scrub = (current.from, current.wasPlaying, to)
+            place(to, exact: false)
+            return
+        }
+        place(position + Double(direction) * FilmTransport.skip, exact: true)
+    }
+
+    /// A held arrow scans the film, faster the longer it is held; letting go plays from there.
+    private func hold(_ direction: Int, _ began: Bool) {
+        guard full != nil, armed == nil, scrub == nil else { return }
+        scanTask?.cancel()
+        scanTask = nil
+        guard began else {
+            if scan != nil { place(position, exact: true) }
+            scan = nil
+            return
+        }
+        guard movable else { return }
+        let started = ContinuousClock.now
+        var at = position
+        scanTask = Task {
+            while !Task.isCancelled {
+                let held = (ContinuousClock.now - started) / .seconds(1)
+                at = FilmTransport.clamp(at + Double(direction) * FilmTransport.scanStep(heldFor: held), duration: duration)
+                scan = (direction, FilmTransport.scanSpeed(heldFor: held))
+                place(at, exact: false)
+                wake()
+                try? await Task.sleep(for: .seconds(FilmTransport.scanTick))
+            }
+        }
+    }
+
+    /// A swipe across the touch surface scrubs: the film pauses on the place the swipe reaches.
+    /// The place is kept until Select or Play/Pause plays from it, or Back puts the film back.
+    private func swipe(_ state: UIGestureRecognizer.State, _ points: CGFloat) {
+        guard full != nil, armed == nil, scan == nil, movable else { return }
+        if state == .began { swipeBase = scrub?.to }
+        guard state == .changed else { return }
+        if scrub == nil {
+            // A small touch is a rest of the thumb, not a swipe.
+            guard abs(points) > 40 else { return }
+            let wasPlaying = controller.state == .playing
+            if wasPlaying { controller.pause() }
+            scrub = (position, wasPlaying, position)
+        }
+        guard let current = scrub else { return }
+        let base = swipeBase ?? current.from
+        let to = FilmTransport.clamp(base + FilmTransport.scrubSeconds(points: Double(points), duration: duration), duration: duration)
+        scrub = (current.from, current.wasPlaying, to)
+        place(to, exact: false)
+        wake()
+    }
+
+    /// Ends a scrub: plays from the place reached, or puts the film back where it was.
+    private func endScrub(play: Bool) {
+        guard let current = scrub else { return }
+        scrub = nil
+        swipeBase = nil
+        place(play ? current.to : current.from, exact: true)
+        if play || current.wasPlaying { controller.resume() }
+        wake()
     }
 
     private func trackPosition() async {
         while !Task.isCancelled {
             let now = controller.player.currentTime().seconds
-            if now.isFinite { position = now }
+            // A scan or a scrub sets the place itself; the clock catches up when it ends.
+            if now.isFinite, scan == nil, scrub == nil { position = now }
             let length = controller.player.currentItem?.duration.seconds
             duration = (length?.isFinite == true && (length ?? 0) > 0) ? length : nil
             try? await Task.sleep(for: .milliseconds(500))
@@ -531,6 +672,9 @@ struct FilmPlayerView: View {
         }
         hideTask?.cancel()
         armed = nil
+        scanTask?.cancel()
+        scanTask = nil
+        remoteHold.stop()
         // The film handed to the corner window keeps playing.
         if model.filmPiP?.controller !== controller {
             subtitles.clear()
@@ -616,5 +760,135 @@ enum FilmRestore {
         controller.modalPresentationStyle = .fullScreen
         host = controller
         top.present(controller, animated: true)
+    }
+}
+
+/// The full film's picture: the one thing on screen that takes focus, and the place a swipe across
+/// the remote's touch surface lands, which scrubs the film as Apple's player does. Select is read
+/// here; the arrows, Play/Pause and Back are SwiftUI's (tvOS hands the arrows to SwiftUI first).
+struct FilmRemote: UIViewRepresentable {
+    var onSelect: () -> Void
+    /// A swipe's state and its travel across, in remote points.
+    var onSwipe: (UIGestureRecognizer.State, CGFloat) -> Void
+
+    func makeUIView(context: Context) -> Surface { Surface() }
+
+    func updateUIView(_ view: Surface, context: Context) {
+        view.remote = self
+    }
+
+    final class Surface: UIView {
+        var remote: FilmRemote?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            let swipe = UIPanGestureRecognizer(target: self, action: #selector(pan))
+            swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+            addGestureRecognizer(swipe)
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        override var canBecomeFocused: Bool { true }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            guard window != nil else { return }
+            // After this layout pass, when the screen's views are all in place.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil, let focus = UIFocusSystem.focusSystem(for: self) else { return }
+                focus.requestFocusUpdate(to: self)
+                focus.updateFocusIfNeeded()
+            }
+        }
+
+        // Select reaches the focused view, as Play/Pause does; the arrows do not.
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            let others = presses.filter { $0.type != .select }
+            if !others.isEmpty { super.pressesBegan(others, with: event) }
+        }
+
+        override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            if presses.contains(where: { $0.type == .select }) { remote?.onSelect() }
+            let others = presses.filter { $0.type != .select }
+            if !others.isEmpty { super.pressesEnded(others, with: event) }
+        }
+
+        @objc private func pan(_ recognizer: UIPanGestureRecognizer) {
+            remote?.onSwipe(recognizer.state, recognizer.translation(in: self).x)
+        }
+    }
+}
+
+/// A press held on the left or right edge of the Siri Remote's clickpad, read through
+/// GameController. tvOS gives SwiftUI one move when a press is let go and nothing while it is
+/// held, so Apple's hold-to-scan cannot be built on the move commands. The clickpad is the
+/// remote's button A, and the touch surface its dpad: a press with the thumb past half way to an
+/// edge, held, is a scan.
+@MainActor
+final class RemoteHold {
+    var onHold: ((Int, Bool) -> Void)?
+    /// How long a press is held before it scans instead of skipping.
+    private static let after: Duration = .milliseconds(450)
+    private var timer: Task<Void, Never>?
+    private var holding: Int?
+    private var ended: (direction: Int, at: ContinuousClock.Instant)?
+    private var observer: NSObjectProtocol?
+
+    func start() {
+        stop()
+        GCController.controllers().forEach(attach)
+        observer = NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
+            guard let controller = note.object as? GCController else { return }
+            MainActor.assumeIsolated { self?.attach(controller) }
+        }
+    }
+
+    func stop() {
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+        for controller in GCController.controllers() { controller.microGamepad?.buttonA.pressedChangedHandler = nil }
+        timer?.cancel()
+        timer = nil
+        if let held = holding {
+            holding = nil
+            onHold?(held, false)
+        }
+    }
+
+    /// True for the move tvOS sends when a held press is let go: it is not also a click.
+    func swallows(_ direction: Int) -> Bool {
+        guard let ended, ended.direction == direction else { return false }
+        return ContinuousClock.now - ended.at < .milliseconds(700)
+    }
+
+    private func attach(_ controller: GCController) {
+        guard let pad = controller.microGamepad else { return }
+        pad.reportsAbsoluteDpadValues = true
+        pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
+            let x = pad.dpad.xAxis.value
+            MainActor.assumeIsolated { self?.pressed(pressed, x: x) }
+        }
+    }
+
+    private func pressed(_ down: Bool, x: Float) {
+        timer?.cancel()
+        timer = nil
+        guard down else {
+            if let held = holding {
+                holding = nil
+                ended = (held, .now)
+                onHold?(held, false)
+            }
+            return
+        }
+        guard abs(x) > 0.5 else { return }
+        let direction = x < 0 ? -1 : 1
+        timer = Task { [weak self] in
+            try? await Task.sleep(for: Self.after)
+            guard let self, !Task.isCancelled else { return }
+            self.holding = direction
+            self.onHold?(direction, true)
+        }
     }
 }

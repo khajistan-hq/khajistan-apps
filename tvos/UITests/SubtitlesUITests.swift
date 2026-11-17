@@ -245,6 +245,31 @@ final class SubtitlesUITests: XCTestCase {
         if caption.exists { kjScreenshot("film-2-subtitle-alone", app: app) }
     }
 
+    /// "Text only" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
+    /// film's preview. The look is checked on the screenshot.
+    func testTextOnlySubtitlesOnAFilm() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kj-caption-style", "bare",
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "en"]
+        kjLaunch(app)
+        let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCUIRemote.shared.press(.select)
+        let caption = app.descendants(matching: .any)["caption"]
+        XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text reaches the house view")
+        kjPause(4)   // the panel hides, so the text sits on the picture
+        kjScreenshot("film-subtitles-text-only", app: app)
+    }
+
     /// The full film's controls, reached with the remote while the picture keeps focus (owner,
     /// 2026-11-15: no CC on Razia, no way to stop). The preview plays as the full film here.
     func testFullFilmControlsAreLitWithTheRemote() throws {
@@ -298,6 +323,75 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "one Back stops the film")
         XCTAssertFalse(app.staticTexts["playerState"].exists, "the player is gone")
+    }
+
+    /// The full film moves as Apple's player moves it (owner, 2026-11-17: "all controls should work
+    /// like apple tv player"): a click skips ten seconds, a held arrow scans, Play/Pause pauses. A
+    /// swipe cannot be sent from XCUIRemote; the scrub is checked on the Apple TV.
+    func testFullFilmMovesLikeApplesPlayer() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjfilmasfull", "YES"]
+        kjLaunch(app)
+        let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCTAssertTrue(film.exists && film.hasFocus, "the film must take focus")
+        XCUIRemote.shared.press(.select)
+        let watch = app.buttons["watchFullFilm"]
+        XCTAssertTrue(watch.waitForExistence(timeout: 45), "the offer opens")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in watch.hasFocus }, object: nil)], timeout: 30),
+                       .completed, "Watch the full film takes focus")
+        XCUIRemote.shared.press(.select)
+
+        let state = app.staticTexts["playerState"]
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45), .completed, "the film plays")
+
+        // The bar's value is the second the film is at; any press brings the panel and the bar up.
+        let bar = app.descendants(matching: .any)["filmProgress"]
+        func at() -> Int { Int(((try? bar.snapshot())?.value as? String) ?? "") ?? -1 }
+        func waitUntil(_ why: String, timeout: TimeInterval = 10, _ test: @escaping (Int) -> Bool) {
+            let met = NSPredicate { _, _ in test(at()) }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: met, object: nil)], timeout: timeout), .completed,
+                           "\(why) (at \(at()))")
+        }
+        // Paused first, so playback adds nothing and each move must land exactly.
+        XCUIRemote.shared.press(.playPause)
+        let paused = NSPredicate { _, _ in (try? state.snapshot())?.label == "Paused" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: paused, object: nil)], timeout: 10), .completed, "Play/Pause pauses")
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "the bar shows with the panel")
+        let still = at()
+        kjPause(2)
+        XCTAssertEqual(at(), still, "a paused film stays where it is")
+        XCUIRemote.shared.press(.right)
+        waitUntil("a click right goes forward ten seconds") { $0 == still + 10 }
+        XCUIRemote.shared.press(.left)
+        waitUntil("a click left goes back ten seconds") { $0 == still }
+
+        #if targetEnvironment(simulator)
+        // The simulator's remote reaches SwiftUI only, not GameController, so a held arrow is one
+        // click here. The scan is checked on the Apple TV (`xcodebuild test` on the device).
+        #else
+        // Paused, so playback adds nothing: a hold must move further than any click can.
+        let before = at()
+        XCUIRemote.shared.press(.right, forDuration: 2.5)
+        waitUntil("holding right fast-forwards") { $0 >= before + 18 }
+        kjScreenshot("film-scanned-forward", app: app)
+        let scanned = at()
+        XCUIRemote.shared.press(.left, forDuration: 1.5)
+        waitUntil("holding left rewinds, and the release is not also a click") { $0 >= 0 && $0 <= scanned - 8 && $0 > scanned - 20 }
+        #endif
+
+        XCUIRemote.shared.press(.playPause)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays again")
     }
 
     /// Full screen from the corner window opens the film over whatever is on top: here, over the

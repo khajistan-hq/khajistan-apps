@@ -13,6 +13,7 @@ struct CaptionView: View {
     var status: String? = nil
 
     private static let size: CGFloat = 52   // 2.7% of 1920
+    @AppStorage(CaptionStyle.key) private var styleRaw = CaptionStyle.plate.rawValue
 
     var body: some View {
         if let text, !text.isEmpty {
@@ -25,12 +26,37 @@ struct CaptionView: View {
                 }
             }
             .font(.system(size: Self.size, weight: .semibold))
-            .foregroundStyle(Color(hex: skin.captionTextHex))
-            .padding(.horizontal, Self.size * 0.4)
-            .padding(.vertical, Self.size * 0.12)
-            .background(Color(hex: skin.captionPlateHex))
+            .modifier(CaptionLook(skin: skin, style: CaptionStyle(rawValue: styleRaw) ?? .plate, size: Self.size))
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("caption")
+        }
+    }
+}
+
+/// The plate (the house default), or yellow text with a thin black edge and no box: the edge is
+/// four hard shadows two points out, and a soft one under them, so the text reads on a white shirt
+/// as well as on a dark room (archive PR #164 draws the website's the same way).
+private struct CaptionLook: ViewModifier {
+    let skin: Skin
+    let style: CaptionStyle
+    let size: CGFloat
+
+    func body(content: Content) -> some View {
+        switch style {
+        case .plate:
+            content
+                .foregroundStyle(Color(hex: skin.captionTextHex))
+                .padding(.horizontal, size * 0.4)
+                .padding(.vertical, size * 0.12)
+                .background(Color(hex: skin.captionPlateHex))
+        case .bare:
+            content
+                .foregroundStyle(Color(hex: Skin.bareCaptionHex))
+                .shadow(color: .black, radius: 0, x: 2, y: 2)
+                .shadow(color: .black, radius: 0, x: -2, y: -2)
+                .shadow(color: .black, radius: 0, x: 2, y: -2)
+                .shadow(color: .black, radius: 0, x: -2, y: 2)
+                .shadow(color: .black.opacity(0.6), radius: 6)
         }
     }
 }

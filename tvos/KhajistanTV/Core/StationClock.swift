@@ -97,13 +97,20 @@ enum StationClock {
         String(stationNow(date).iso.prefix(7))
     }
 
-    /// Seconds until the station month turns, when that is at most `lead` away; else nil. A file
-    /// that ends this close to the month's end hands over into the next month's file, which this
-    /// one does not hold, so the player waits for the turn and tunes (both TransmissionStores).
+    /// Seconds until the station month turns, when that is at most `lead` away; else nil.
     static func monthTurns(after date: Date, within lead: Double) -> Double? {
         guard stationMonth(date.addingTimeInterval(lead)) != stationMonth(date) else { return nil }
         let epoch = date.timeIntervalSince1970
         return daySeconds - Double(stationNow(date).seconds) - (epoch - epoch.rounded(.down))
+    }
+
+    /// How long the player waits before tuning, when `current`'s file ends with the month about to
+    /// turn: the roster's last entry, within `handoverLead` of the turn. What follows is in next
+    /// month's file, which this one does not hold; tuning after the turn loads it (both
+    /// TransmissionStore.handover()). Nil otherwise, so a file ending mid-roster walks on at once.
+    static func monthHandoverWait(after current: OnAir, at date: Date) -> Double? {
+        guard current.rosterIndex == current.slot.programmes.count - 1 else { return nil }
+        return monthTurns(after: date, within: handoverLead)
     }
 
     // MARK: Schedule lookups

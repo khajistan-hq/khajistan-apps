@@ -1471,6 +1471,17 @@ func monthTurnsOnlyWithinTheLead() throws {
     try expectEqual(StationClock.monthTurns(after: pkt(2026, 11, 30, 23, 59, 57), within: 2), nil)
     try expectEqual(StationClock.monthTurns(after: pkt(2026, 11, 29, 23, 59, 59), within: 2), nil)
     try expectEqual(StationClock.monthTurns(after: pkt(2026, 12, 1, 0, 0, 0), within: 2), nil)
+    // The stores' decision: only after the roster's last entry. The midnight schedule moved to the
+    // month's end: P1 then P2, ending at 24:00 on 30 November.
+    let raw = #"{"_meta":{"channels":[{"id":"g","number":21,"name":"G"}]},"shows":{"a":{"slug":"a","name":"Show A"}},"programme_order":["P1","P2"],"programmes":{"P1":{"id":"P1","title":"p1","seconds":399},"P2":{"id":"P2","title":"p2","seconds":1}},"days":[{"date":"2026-11-30","channels":{"g":[{"start":"23:53","start_minute":1433,"minutes":7,"start_second":86000,"seconds":400,"show":"a","programmes":[0,1]}]}}]}"#
+    let p = try decode(Programming.self, raw)
+    let p1 = try require(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 30, 23, 59, 0)))
+    let p2 = try require(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 30, 23, 59, 59)))
+    try expectEqual([p1.programmeId, p2.programmeId], ["P1", "P2"])
+    let late = pkt(2026, 11, 30, 23, 59, 58).addingTimeInterval(0.5)
+    try expectClose(try require(StationClock.monthHandoverWait(after: p2, at: late)), 1.5, tolerance: 1e-6)
+    try expectEqual(StationClock.monthHandoverWait(after: p1, at: late), nil)      // mid-roster: no pause
+    try expectEqual(StationClock.monthHandoverWait(after: p2, at: pkt(2026, 11, 30, 23, 59, 57)), nil)
 }
 
 /// A strip ending at midnight hands over to the next day's first strip, whose end watch counts

@@ -304,7 +304,7 @@ final class TransmissionStore {
         // The last file of the month ending on time: what follows is in next month's schedule.
         // Wait for the turn (under handoverLead), then tune, which loads it. Asking this month's
         // file played the strip's own opener out on iPhone.
-        if let wait = StationClock.monthTurns(after: now, within: StationClock.handoverLead) {
+        if let wait = StationClock.monthHandoverWait(after: current, at: now) {
             let gen = generation
             try? await Task.sleep(for: .seconds(wait + 0.05))   // a hair past the turn
             guard gen == generation, case .onAir = phase else { return }

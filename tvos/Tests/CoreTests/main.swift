@@ -4763,7 +4763,42 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 }
 
 
+/// Screen & Signal (owner, 2026-11-17): tv_subtitles() answers, read as subtitles() in kj-transmission-auth.js reads them.
+func storedSubtitlesAnswer() throws {
+    func need<T>(_ value: T?, line: Int = #line) throws -> T {
+        guard let value else { throw Failure(description: "line \(line): unexpected nil") }
+        return value
+    }
+    let vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nx\n"
+    func answer(_ json: String) -> StoredSubtitles { StoredSubtitles.parse(Data(json.utf8)) }
+    let open = answer(#"{"access":"sample","week":"2026-W47","tracks":[{"lang":"en","vtt":"\#(vtt.replacingOccurrences(of: "\n", with: "\\n"))"},{"lang":"fa","vtt":"\#(vtt.replacingOccurrences(of: "\n", with: "\\n"))"}]}"#)
+    try expect(open.open && open.access == .sample)
+    try expectEqual(open.tracks.map(\.lang), ["en", "fa"])
+    try expectEqual(open.file(for: "/assets/tv-subtitles/x.fa.vtt")?.lang, "fa")
+    try expectEqual(open.file(for: "/assets/tv-subtitles/x.vtt")?.lang, "en")
+    try expect(answer(#"{"access":"subscriber","tracks":[]}"#).open)
+    // Closed: none (even carrying text), an unknown access, an error body, garbage.
+    for body in [#"{"access":"none","tracks":[{"lang":"en","vtt":"WEBVTT"}]}"#, #"{"access":"all","tracks":[]}"#,
+                 #"{"code":"42501","message":"permission denied"}"#, "not json", "[]"] {
+        try expect(answer(body) == .closed, body)
+    }
+    // Tracks that are not a two-letter language or not WebVTT are dropped.
+    let mixed = answer(#"{"access":"subscriber","tracks":[{"lang":"english","vtt":"WEBVTT"},{"lang":"en","vtt":"<html>"},{"lang":"AR","vtt":"WEBVTT"},{"lang":"ar","vtt":"WEBVTT"}]}"#)
+    try expectEqual(mixed.tracks.map(\.lang), ["ar"])
+    // The request: POST, the viewer's token, the programme in the body, never cached.
+    let r = try need(StoredSubtitles.request(programme: "tv-jj-x", accessToken: "tok"))
+    try expectEqual(r.httpMethod, "POST")
+    try expect(r.url!.path.hasSuffix("/rest/v1/rpc/tv_subtitles"))
+    try expectEqual(r.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+    try expectEqual(r.cachePolicy, .reloadIgnoringLocalAndRemoteCacheData)
+    let sent = try JSONSerialization.jsonObject(with: try need(r.httpBody)) as? [String: String]
+    try expectEqual(sent, ["p_programme": "tv-jj-x"])
+    try expect(StoredSubtitles.request(programme: "", accessToken: "tok") == nil)
+    try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),

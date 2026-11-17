@@ -316,3 +316,60 @@ actor HouseSongs {
         return decode(data)
     }
 }
+
+/// Stored Transmission subtitles are a Screen & Signal benefit (owner, 2026-11-17). Mirrors
+/// subtitles() in archive/scripts/kj-transmission-auth.js: tv_subtitles(programme) answers
+/// `subscriber` (a live film or All Access grant), `sample` (one of this week's five free
+/// programmes) or `none`, with the WebVTT text only when it is not `none`. The site no longer
+/// serves /assets/tv-subtitles/, so this answer is the only source of a prepared file, and a Stream
+/// programme's own manifest languages are followed only when it opens them.
+struct StoredSubtitles: Equatable, Sendable {
+    enum Access: String, Sendable { case subscriber, sample, none }
+    struct Track: Equatable, Sendable { let lang: String; let vtt: String }
+    let access: Access
+    let tracks: [Track]
+    static let closed = StoredSubtitles(access: .none, tracks: [])
+    var open: Bool { access != .none }
+
+    static var rpcURL: URL { KJConfig.supabase.appendingPathComponent("rest/v1/rpc/tv_subtitles") }
+
+    /// A POST with the viewer's token, never cached: a refunded grant loses them on the next programme.
+    static func request(programme: String, accessToken: String) -> URLRequest? {
+        guard !programme.isEmpty, programme.count <= 200,
+              let body = try? JSONSerialization.data(withJSONObject: ["p_programme": programme]) else { return nil }
+        var request = URLRequest(url: rpcURL)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(KJConfig.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    private struct Body: Decodable {
+        struct Row: Decodable { let lang: String?; let vtt: String? }
+        let access: String?
+        let tracks: [Row]?
+    }
+
+    /// Anything but a well-formed open answer is `closed`. Tracks keep only two-letter languages
+    /// whose text is WebVTT.
+    static func parse(_ data: Data) -> StoredSubtitles {
+        guard let body = try? JSONDecoder().decode(Body.self, from: data),
+              let access = body.access.flatMap(Access.init(rawValue:)), access != .none else { return .closed }
+        let tracks = (body.tracks ?? []).compactMap { row -> Track? in
+            guard let lang = row.lang, lang.count == 2, lang.allSatisfy({ ("a"..."z").contains($0) }),
+                  let vtt = row.vtt, vtt.hasPrefix("WEBVTT") else { return nil }
+            return Track(lang: lang, vtt: vtt)
+        }
+        return StoredSubtitles(access: access, tracks: tracks)
+    }
+
+    /// The prepared file to show: the language the programme's file name says, else the first.
+    func file(for subtitleURL: String) -> Track? {
+        let code = SubtitleChoice.fileLanguage(subtitleURL)
+        return tracks.first { $0.lang == code } ?? tracks.first
+    }
+}

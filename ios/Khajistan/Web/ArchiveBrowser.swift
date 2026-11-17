@@ -22,6 +22,8 @@ final class ArchiveBrowser: NSObject {
     var dialog: WebDialog?
     private var observations: [NSKeyValueObservation] = []
     private var downloads: [ObjectIdentifier: URL] = [:]
+    /// Downloads refused at their destination: their failure keeps the refusal's message.
+    private var refusedDownloads = Set<ObjectIdentifier>()
     private var requestedURL: URL?
     private let previewPassword: () -> String?
     private let previewQueue = PreviewNavigationQueue()
@@ -299,6 +301,7 @@ extension ArchiveBrowser: WKDownloadDelegate {
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
         // The final response, after any redirect, must still come from the archive.
         guard ArchiveURL.allowsDownload(response.url) else {
+            refusedDownloads.insert(ObjectIdentifier(download))
             downloadMessage = Self.foreignDownload
             completionHandler(nil); return
         }
@@ -333,8 +336,9 @@ extension ArchiveBrowser: WKDownloadDelegate {
         let temporary = downloads.removeValue(forKey: ObjectIdentifier(download))
         if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
         activeDownloads = downloads.count
-        // A download refused before it had a file fails however WebKit words it; keep the refusal.
-        if temporary == nil, downloadMessage == Self.foreignDownload { return }
+        // This download was refused before it had a file: it fails however WebKit words it, and
+        // the refusal's message stays. Any other failure says so, whatever banner is up.
+        if refusedDownloads.remove(ObjectIdentifier(download)) != nil { return }
         downloadMessage = "Download failed: \(error.localizedDescription). Return to the page to try again."
     }
 }

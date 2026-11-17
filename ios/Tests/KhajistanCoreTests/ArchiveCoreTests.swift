@@ -94,7 +94,9 @@ func downloadsComeOnlyFromTheArchivesHosts() throws {
     try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/public/covers/a.jpg")))
     for value in ["https://\(SupabaseRoute.host)/rest/v1/orders", "https://\(SupabaseRoute.host)/functions/v1/my-downloads",
                   "https://evil.supabase.co/storage/v1/object/sign/a.pdf", "http://\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
-                  "https://x@\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf"] {
+                  "https://x@\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/../../functions/v1/x",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/%2E%2E/%2E%2E/functions/v1/x"] {
         try expect(!ArchiveURL.allowsDownload(URL(string: value)))
     }
     // The browser's response decision, as ArchiveBrowser calls it.

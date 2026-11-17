@@ -185,6 +185,7 @@ enum ArchiveURL {
     static func isArchiveStorage(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "https" && url.host?.lowercased() == SupabaseRoute.host
             && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
+            && !url.path.contains("/..") && !url.path.contains("/./")
             && (url.path.hasPrefix("/storage/v1/object/sign/") || url.path.hasPrefix("/storage/v1/object/public/"))
     }
 

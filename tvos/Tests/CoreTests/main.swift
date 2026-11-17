@@ -2985,8 +2985,10 @@ func dancerMovesFollowTheSite() throws {
 }
 
 // Owner, 2026-11-16: the video steps repeat longer — 16 beats each, every other move 8.
-func dancerVideoStepsHoldTwoRuns() throws {
-    var rng = SplitMix(state: 7)
+// Walked for BOTH figures: the long-haired one draws from a different list (Kawliya), so the
+// held index points at a different name there.
+func holdRuns(seed: UInt64) throws -> String {
+    var rng = SplitMix(state: seed)
     var stage = DancerStage(random: { rng.next() })
     var now = 0.0, count = 0
     func frame() -> DancerStage.Frame {
@@ -3004,9 +3006,46 @@ func dancerVideoStepsHoldTwoRuns() throws {
     var runs: [(String, Int)] = []
     for m in moves { if let last = runs.last, last.0 == m { runs[runs.count - 1].1 += 1 } else { runs.append((m, 1)) } }
     let whole = runs.dropFirst().dropLast()
-    try expect(whole.contains { DancerMoves.hold.contains($0.0) }, "no video step came up in 1600 beats")
+    try expect(whole.contains { DancerMoves.hold.contains($0.0) }, "no video step came up in 1600 beats (seed \(seed))")
     for (m, n) in whole {
-        try expectEqual(n, DancerMoves.hold.contains(m) ? 16 : 8, m)
+        try expectEqual(n, DancerMoves.hold.contains(m) ? 16 : 8, "\(m), cast \(stage.cast), seed \(seed)")
+    }
+    return stage.cast
+}
+
+func dancerVideoStepsHoldTwoRuns() throws {
+    var casts = Set<String>()
+    for seed in UInt64(1)...12 { casts.insert(try holdRuns(seed: seed)) }
+    try expectEqual(casts, Set(DancerCast.keys), "the hold walked on every figure")
+}
+
+// The Swift lists are the site's lists: MOVES and HOLD read out of kj-scope.js, in order.
+func dancerMovesMatchKjScope() throws {
+    let js = String(decoding: try realFile("scripts/kj-scope.js"), as: UTF8.self)
+    func names(after marker: String, until close: Character) throws -> [String] {
+        let start = try require(js.range(of: marker)).upperBound
+        let end = try require(js[start...].firstIndex(of: close))
+        let body = js[start..<end]
+        var out: [String] = [], cur = "", inside = false
+        for ch in body {
+            if ch == "\"" { if inside { out.append(cur); cur = "" }; inside.toggle() } else if inside { cur.append(ch) }
+        }
+        return out
+    }
+    try expectEqual(try names(after: "var MOVES = [", until: "]"), DancerMoves.all)
+    try expectEqual(Set(try names(after: "var HOLD = {", until: "}")), DancerMoves.hold)
+}
+
+// Hands on hips by number: the elbow goes OUT and the forearm comes back DOWN and IN to the hip.
+// The first version bent the forearm up; this is the check that would have caught it.
+func dancerHandsOnHipsPose() throws {
+    for side in [-1.0, 1.0] {
+        for p in stride(from: 0.0, to: 2 * Double.pi, by: 0.5) {
+            let o = pose("Hands on hips", p, side, 0, 0, 0, 0)
+            let fore = o.arm + o.fore
+            try expect(cos(o.arm) * side > 0, "elbow out, side \(side)")
+            try expect(cos(fore) * side < 0 && sin(fore) > 0, "forearm down and in, side \(side), got \(fore)")
+        }
     }
 }
 
@@ -4890,6 +4929,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
     ("Dancer moves follow the site", dancerMovesFollowTheSite),
     ("Dancer video steps hold two runs", dancerVideoStepsHoldTwoRuns),
+    ("Dancer moves match kj-scope.js", dancerMovesMatchKjScope),
+    ("Dancer Hands on hips: elbow out, hand to the hip", dancerHandsOnHipsPose),
     ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
     ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),
     ("Screening Room: the offer line (marqueeOffer)", vodOfferLine),

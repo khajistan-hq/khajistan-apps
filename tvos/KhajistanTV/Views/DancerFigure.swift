@@ -112,9 +112,10 @@ private func stripe(_ g: inout Pen, _ x: Double, _ y: Double, _ len: Double, _ t
 /// The left arm's angle as the mirror image of the right's, so a pair reads as one gesture.
 private func mir(_ side: Double, _ r: Double) -> Double { side > 0 ? r : .pi - r }
 
-private struct LimbPose { var thigh = 0.0, shin = 0.0, arm = 0.0, fore = 0.0, shDy = 0.0 }
+/// Internal, not private, so CoreTests can check a pose by number.
+struct LimbPose { var thigh = 0.0, shin = 0.0, arm = 0.0, fore = 0.0, shDy = 0.0 }
 
-private func pose(_ name: String, _ p: Double, _ side: Double, _ bass: Double, _ mid: Double, _ spin: Double, _ sub: Double) -> LimbPose {
+func pose(_ name: String, _ p: Double, _ side: Double, _ bass: Double, _ mid: Double, _ spin: Double, _ sub: Double) -> LimbPose {
     let alt = sin(p + (side > 0 ? .pi : 0))
     let lift = max(0, alt)
     let fast = sin(p * 4 + (side > 0 ? .pi : 0))

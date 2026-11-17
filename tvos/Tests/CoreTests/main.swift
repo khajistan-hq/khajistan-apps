@@ -1338,6 +1338,24 @@ func upNextNamesOnlyAStripUnderADayAway() throws {
     try expectEqual(try require(StationClock.onAir(atEdge, channel: 21, at: pkt(2026, 11, 12, 20, 5, 1))).nextStart, "20:05")
 }
 
+func upNextCrossesTheMonthEndFromNextDay() throws {
+    // The 30th's last strip runs 20:00-23:00; the 1st's 00:30 is in next_day only (owner,
+    // 2026-11-16: "Builder carries next_day"). The same case as station_clock_next_test.mjs.
+    let head = #"{"_meta":{"channels":[{"id":"c","number":1,"name":"C"}]},"shows":{"s1":{"slug":"s1","name":"Show One"},"s3":{"slug":"s3","name":"Show Three"}},"programme_order":["A","D"],"programmes":{"A":{"id":"A","title":"a","seconds":10800},"D":{"id":"D","title":"d","display_title":"Title D","seconds":600}},"days":[{"date":"2026-11-30","channels":{"c":[{"start":"20:00","start_minute":1200,"minutes":180,"start_second":72000,"seconds":10800,"show":"s1","programmes":[0]}]}}]"#
+    let next = #","next_day":{"date":"2026-12-01","channels":{"c":[{"start":"00:30","start_minute":30,"minutes":10,"start_second":1800,"seconds":600,"show":"s3","programmes":[1]}]}}"#
+    let p = try decode(Programming.self, head + next + "}")
+    let air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 30, 22, 0, 0)))
+    try expectEqual(air.programmeId, "A")
+    try expectEqual([air.nextStart, air.nextShow?.name, air.nextProgrammeId], ["00:30", "Show Three", "D"])
+    try expectEqual(StationClock.returnLabel(p, channelId: "c", at: pkt(2026, 11, 30, 23, 30, 0)), "00:30 PKT")
+    // Negative: without next_day, nothing, as before; and a next_day not ahead of today is never read.
+    let bare = try decode(Programming.self, head + "}")
+    try expectEqual(try require(StationClock.onAir(bare, channel: 1, at: pkt(2026, 11, 30, 22, 0, 0))).nextStart, nil)
+    try expectEqual(StationClock.returnLabel(bare, channelId: "c", at: pkt(2026, 11, 30, 23, 30, 0)), nil)
+    let stale = try decode(Programming.self, head + next.replacingOccurrences(of: "2026-12-01", with: "2026-11-30") + "}")
+    try expectEqual(try require(StationClock.onAir(stale, channel: 1, at: pkt(2026, 11, 30, 22, 0, 0))).nextStart, nil)
+}
+
 func followingReadsUpNextFromTheClock() throws {
     // A 20:00–22:00 strip of two one-hour programmes; the next strip, 20:59 the day after, is 24 h
     // 54 min from 20:05 (no Up next) and 23 h 59 min from 21:00 (Up next). The programme that
@@ -5043,6 +5061,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Return time weighs each strip by its own day", returnTimeWeighsEachStripByItsOwnDay),
     ("Up next names only a strip under a day away", upNextNamesOnlyAStripUnderADayAway),
     ("following() reads Up next from the clock", followingReadsUpNextFromTheClock),
+    ("Up next crosses the month end from next_day", upNextCrossesTheMonthEndFromNextDay),
     ("The last programme of a full roster hands over, whatever the float sum", lastProgrammeHandsOverWhateverTheFloatSum),
     ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),

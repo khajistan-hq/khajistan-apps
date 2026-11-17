@@ -15,8 +15,10 @@ struct OnAir: Equatable, Sendable {
     let seekTo: Double
     let startLabel: String
     let endLabel: String
-    let nextShow: Programming.Show?
-    let nextStart: String?
+    /// The next strip's show and start, under 24 hours away. `withNextProgramme` sets them again
+    /// from the clock, so `following()` cannot carry an empty pair beside a filled Up next.
+    var nextShow: Programming.Show?
+    var nextStart: String?
     /// The programme after this one and when it starts (owner, 2026-11-08: "now playing and up
     /// next"), as `KJStation.onAir` gives them on the site. Nil past the month's grid.
     var nextProgrammeId: String? = nil
@@ -261,7 +263,6 @@ enum StationClock {
         // An index outside programme_order names no programme; the station cannot air it.
         guard let id = programmeId(p, index: slot.programmes[position.index]) else { return nil }
         let programme = p.programmes[id]
-        let next = nextSlotSoon(p, channel: channelId, iso: now.iso, second: second)
         return withNextProgramme(OnAir(
             channelId: channelId,
             // The day the strip is filed under: yesterday's, for a show still running past
@@ -277,8 +278,8 @@ enum StationClock {
             seekTo: (programme?.clean_start ?? 0) + position.into,
             startLabel: slot.start,
             endLabel: endLabel(slot),
-            nextShow: next.flatMap { p.shows[$0.slot.show] },
-            nextStart: next?.slot.start
+            nextShow: nil,                  // set from the clock by withNextProgramme
+            nextStart: nil
         ), in: p, slotSecond: slotSecond(hit.date, now: now), iso: now.iso, second: second)
     }
 
@@ -344,8 +345,8 @@ enum StationClock {
             seekTo: programme?.clean_start ?? 0,
             startLabel: current.startLabel,
             endLabel: current.endLabel,
-            nextShow: current.nextShow,
-            nextStart: current.nextStart
+            nextShow: nil,                  // read again from the clock by withNextProgramme
+            nextStart: nil
         ), in: p, slotSecond: at, iso: now.iso, second: Double(now.seconds))
     }
 
@@ -358,13 +359,15 @@ enum StationClock {
         var out = air
         let endsAt = (slotSecond ?? second) + runSeconds(air.programme) - air.into
         let slot = air.slot
+        let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second)
+        out.nextShow = next.flatMap { p.shows[$0.slot.show] }
+        out.nextStart = next?.slot.start
         if endsAt < slot.endSecond, slot.programmes.count > 1 {
             let index = slot.programmes[(air.rosterIndex + 1) % slot.programmes.count]
             out.nextProgrammeId = programmeId(p, index: index)
             out.nextProgrammeStart = clockLabel(Int(endsAt / 60))
             out.nextInSlot = true
-        } else if let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second),
-                  let first = next.slot.programmes.first {
+        } else if let next, let first = next.slot.programmes.first {
             out.nextProgrammeId = programmeId(p, index: first)
             out.nextProgrammeStart = next.slot.start
         }
@@ -372,7 +375,6 @@ enum StationClock {
         // The names, the site's rule (kj-station-clock.js onAir): Up next is the first programme
         // after this one, in this slot, whose name differs from Now, at the minute it starts;
         // failing that, the next slot's first programme by its title, else by its show.
-        let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second)
         let nextSlotShow = next.flatMap { p.shows[$0.slot.show] }
         func title(_ id: String?) -> String? { nonEmpty(id.flatMap { p.programmes[$0]?.display_title }) }
         out.nowName = title(air.programmeId) ?? nonEmpty(air.show?.name)

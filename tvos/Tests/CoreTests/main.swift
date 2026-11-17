@@ -1331,6 +1331,28 @@ func upNextNamesOnlyAStripUnderADayAway() throws {
     let nearAir = try require(StationClock.onAir(near, channel: 21, at: pkt(2026, 11, 12, 20, 5, 0)))
     try expectEqual(nearAir.nextStart, "09:00")
     try expectEqual(nearAir.nextProgrammeId, "G3")
+    // The boundary, as the label's and upcoming()'s: 24 h exactly is out, a second under is in.
+    let edge = #"{"start":"20:05","start_minute":1205,"minutes":10,"start_second":72300,"seconds":600,"show":"open","programmes":[2]}"#
+    let atEdge = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: #"{"date":"2026-11-13","channels":{"g":[]}}"#, with: #"{"date":"2026-11-13","channels":{"g":["# + edge + "]}}"))
+    try expectEqual(try require(StationClock.onAir(atEdge, channel: 21, at: pkt(2026, 11, 12, 20, 5, 0))).nextStart, nil)
+    try expectEqual(try require(StationClock.onAir(atEdge, channel: 21, at: pkt(2026, 11, 12, 20, 5, 1))).nextStart, "20:05")
+}
+
+func followingReadsUpNextFromTheClock() throws {
+    // A 20:00–22:00 strip of two one-hour programmes; the next strip, 20:59 the day after, is 24 h
+    // 54 min from 20:05 (no Up next) and 23 h 59 min from 21:00 (Up next). The programme that
+    // starts at 21:00 must say so, as a fresh clock reading does (Fable, 2026-11-16).
+    let raw = #"{"_meta":{"channels":[{"id":"g","number":21,"name":"G"}]},"shows":{"a":{"slug":"a","name":"Show A"},"b":{"slug":"b","name":"Show B"}},"programme_order":["P1","P2","P3"],"programmes":{"P1":{"id":"P1","title":"p1","seconds":3600},"P2":{"id":"P2","title":"p2","seconds":3600},"P3":{"id":"P3","title":"p3","display_title":"Three","seconds":600}},"days":[{"date":"2026-11-12","channels":{"g":[{"start":"20:00","start_minute":1200,"minutes":120,"start_second":72000,"seconds":7200,"show":"a","programmes":[0,1]}]}},{"date":"2026-11-13","channels":{"g":[{"start":"20:59","start_minute":1259,"minutes":10,"start_second":75540,"seconds":600,"show":"b","programmes":[2]}]}}]}"#
+    let p = try decode(Programming.self, raw)
+    let first = try require(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 12, 20, 5, 0)))
+    try expectEqual(first.nextStart, nil)
+    let at = pkt(2026, 11, 12, 21, 0, 0)
+    let handed = try require(StationClock.following(first, in: p, at: at))
+    let fresh = try require(StationClock.onAir(p, channel: 21, at: at))
+    try expectEqual(handed.programmeId, "P2")
+    try expectEqual([handed.nextStart, handed.nextShow?.name, handed.nextProgrammeStart, handed.nextAt],
+                    ["20:59", "Show B", "20:59", "20:59"])
+    try expectEqual([handed.nextStart, handed.nextShow?.name], [fresh.nextStart, fresh.nextShow?.name])
 }
 
 func returnTimeWeighsEachStripByItsOwnDay() throws {
@@ -4911,6 +4933,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Return time looks past tomorrow, and says the day a day or more off", returnTimeLooksPastTomorrow),
     ("Return time weighs each strip by its own day", returnTimeWeighsEachStripByItsOwnDay),
     ("Up next names only a strip under a day away", upNextNamesOnlyAStripUnderADayAway),
+    ("following() reads Up next from the clock", followingReadsUpNextFromTheClock),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),

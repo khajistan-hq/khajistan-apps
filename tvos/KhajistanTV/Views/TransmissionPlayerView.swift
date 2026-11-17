@@ -569,16 +569,23 @@ struct TransmissionPlayerView: View {
         let onStream: Bool
         if case .stream = air.programme?.play_url.flatMap(Transmission.route(for:)) { onStream = true } else { onStream = false }
         guard air.programme?.subtitle_url != nil || onStream else { return }
-        let stored = await storedSubtitles(air)
-        guard !Task.isCancelled else { return }
-        guard stored.open else {
-            if onStream { await silenceStreamTracks() }
+        guard onStream else {
+            let stored = await storedSubtitles(air)
+            if stored.open, !Task.isCancelled { await loadFile(air, stored) }
             return
         }
-        if onStream {
-            await followStreamTracks(air, stored)
-        } else {
-            await loadFile(air, stored)
+        // A Stream programme's own tracks are silenced from the moment it attaches, not after the
+        // answer: with tvOS's Closed Captions setting on, AVPlayer would otherwise draw one itself
+        // while tv_subtitles() is asked. Open, the silencing stops and the tracks are followed;
+        // closed, it runs until the programme changes (this task is cancelled).
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await silenceStreamTracks() }
+            let stored = await storedSubtitles(air)
+            guard !Task.isCancelled else { group.cancelAll(); return }
+            if stored.open {
+                group.cancelAll()
+                await followStreamTracks(air, stored)
+            }
         }
     }
 

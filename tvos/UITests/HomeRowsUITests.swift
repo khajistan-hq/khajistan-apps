@@ -71,6 +71,10 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "up returns to the front, got \(back)")
     }
 
+    /// The recorded list's first four News cards, all Indus channels.
+    static let recordedNewsFirst = ["genre-news-swept-pk-24-news-hd", "genre-news-swept-pk-365-news",
+                                    "genre-news-swept-pk-abn-news", "genre-news-swept-pk-capital-tv"]
+
     /// News is a shelf on the front (owner, 2026-11-04), and its first four cards get live stills,
     /// which VoiceOver reads as "live picture". Stills are taken one at a time, region cards first.
     ///
@@ -84,8 +88,9 @@ final class HomeRowsUITests: XCTestCase {
     /// can each be a region's own pick, so it cannot prove the shelf asks; it checks that News
     /// gets a picture. A still needs the carrier to reach the runner: on 2026-11-15 the first four
     /// News channels were all off air (run 43681581060). With no News picture, the run is skipped
-    /// when a card on another shelf got one (stills work; News's carriers are dead), and fails when
-    /// no card did. Radio cards never get stills.
+    /// when a card on another shelf got one, and fails when no card did. That picture can be a
+    /// region card's still, so the skip shows the stills store works, not that the shelf asks.
+    /// Radio cards never get stills.
     func testNewsShelfCarriesLivePictures() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
@@ -96,10 +101,17 @@ final class HomeRowsUITests: XCTestCase {
         func firstFour() -> [XCUIElement] { Array(news.allElementsBoundByIndex.prefix(4)) }
         func pictured(_ cards: [XCUIElement]) -> Int { cards.filter { $0.label.contains("live picture") }.count }
         let wanted = kjLiveMedia ? 1 : 4
+        if !kjLiveMedia {
+            // The proof above holds only while these four are all Indus channels.
+            let four = NSPredicate { _, _ in firstFour().count == 4 }
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: four, object: nil)], timeout: 10)
+            XCTAssertEqual(firstFour().map(\.identifier), Self.recordedNewsFirst, "the recorded News shelf starts with four Indus channels")
+        }
+        let asked = Date()
         let enough = NSPredicate { _, _ in pictured(firstFour()) >= wanted }
         let got = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: enough, object: nil)], timeout: 120) == .completed
         let newsFirst = firstFour()
-        print("KJNEWS first \(newsFirst.map(\.identifier)), pictured \(pictured(newsFirst)), wanted \(wanted)")
+        print("KJNEWS first \(newsFirst.map(\.identifier)), pictured \(pictured(newsFirst)), wanted \(wanted), in \(Int(Date().timeIntervalSince(asked))) s of 120")
         XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
         if !got {
             let names = newsFirst.map(\.label).joined(separator: "; ")

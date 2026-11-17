@@ -72,15 +72,17 @@ final class ChannelChangeUITests: XCTestCase {
                                           "swept-us-abn-urdu", "swept-in-balle-balle", "swept-pk-capital-tv"]
 
     /// `-kjnomoveon` holds a dead channel on screen, which the test above relies on.
-    func testNoMoveOnHoldsADeadChannel() { deadChannel(held: true) }
+    func testNoMoveOnHoldsADeadChannel() throws { try deadChannel(held: true) }
 
     /// Without `-kjnomoveon` the player moves past dead channels, so the test above it is not
     /// passing on a flag that does nothing.
-    func testADeadChannelMovesOnWithoutTheFlag() { deadChannel(held: false) }
+    func testADeadChannelMovesOnWithoutTheFlag() throws { try deadChannel(held: false) }
 
     /// `-kjdeadchannels` makes Indus's first six channels fail as a dead signal does. The player
     /// waits 3 s on a dead signal before it moves on, and `openChannel` waits 9 s after Select.
-    private func deadChannel(held: Bool) {
+    private func deadChannel(held: Bool) throws {
+        // The ids are the recorded list's; a live run reads the live lists, where they may be absent.
+        try XCTSkipIf(kjLiveMedia, "needs the recorded Indus list")
         app.launchArguments += ["-kjdeadchannels", Self.indusTelevision.joined(separator: ",")]
         if held { app.launchArguments += ["-kjnomoveon", "YES"] }
         openChannel()

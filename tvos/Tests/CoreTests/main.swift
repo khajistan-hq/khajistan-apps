@@ -1587,7 +1587,7 @@ func realUpcomingAgreesWithOnAir() throws {
 /// The last programme of a full roster named the strip's own opener from onAir and the next
 /// strip's from following(), on about 2% of readings (Fable, 2026-11-16). The minute labels are
 /// not compared: following() starts the file from its head at the whole second it is asked, so
-/// its "ends at" can be up to a second later than the schedule's, and on 658 of these handovers
+/// its "ends at" can be up to a second later than the schedule's, and on 615 of these handovers
 /// that second crosses a minute.
 func realFollowingAgreesWithOnAirAtEveryHandover() throws {
     let p = try realProgramming("2026-11")

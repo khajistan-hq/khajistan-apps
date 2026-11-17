@@ -267,7 +267,19 @@ final class PiPWindowUITests: XCTestCase {
         }
         let app = XCUIApplication()
         try openFullFilm(app, onAppleTV: true)
-        openWindow(app)
+        let pip = app.descendants(matching: .any)["pipControl"]
+        XCTAssertTrue(pip.waitForExistence(timeout: 30), "the full film offers PiP")
+        XCUIRemote.shared.press(.down)
+        kjPause(0.6)
+        for _ in 0..<4 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCUIRemote.shared.press(.select)
+        kjPause(1.5)
+        let opened = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        opened.name = "film-after-pip-press"
+        opened.lifetime = .keepAlways
+        add(opened)
+        let said = app.staticTexts.allElementsBoundByIndex.map(\.label).filter { $0.localizedCaseInsensitiveContains("picture") }
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "the window opens: \(said)")
         for index in 1...10 {
             kjPause(1.5)
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

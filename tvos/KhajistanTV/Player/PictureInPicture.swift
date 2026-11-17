@@ -276,7 +276,13 @@ final class PictureInPicture: NSObject {
         if isPlaying != playFollower.shown { isPlaying = playFollower.shown }
         switch event {
         case .windowPlay:
-            if rejoinsOnPlay { onSetPlaying?(true) } else { controller?.follow(playing: true) }
+            if rejoinsOnPlay {
+                // The bar holds Playing while the channel rejoins live.
+                playFollower.ask(true, at: seconds)
+                onSetPlaying?(true)
+            } else {
+                controller?.follow(playing: true)
+            }
         case .windowPause:
             // The end of the file stops the picture too, and that is not a Pause.
             if let item, item.duration.isNumeric, item.currentTime().seconds >= item.duration.seconds - 1 { return }
@@ -360,6 +366,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         onEnd = nil
         onSetPlaying = nil
         controller = nil
+        rejoinsOnPlay = false
         onHandOff = nil
         onCaptionToggle = nil
         hasFileCaptions = nil

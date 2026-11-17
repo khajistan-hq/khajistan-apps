@@ -223,9 +223,17 @@ final class PlayerController {
         // A failed or stopped signal stays as it is: an end of file or a stall is not a Pause.
         if case .failed = state { return }
         guard state != .idle else { return }
-        fadeTask?.cancel()
-        fadeInPending = false
-        state = playing ? .playing : .paused
+        if !playing {
+            fadeTask?.cancel()
+            fadeInPending = false
+            state = .paused
+            return
+        }
+        guard state == .paused else { return }
+        // The player's own reading decides: playing, or waiting with the stall watch running. A
+        // sound left low by a fade the Pause cut short comes back up once it plays.
+        if volume < 1, !holdsSound { fadeInPending = true }
+        syncWithPlayer()
     }
 
     func resume() {

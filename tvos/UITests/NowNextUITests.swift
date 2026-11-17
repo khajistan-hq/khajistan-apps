@@ -156,6 +156,9 @@ final class NowNextUITests: XCTestCase {
         // Back to 5 by a channel change, the path that just showed 6: no sign-on cover or first
         // flight is left to hold the number, so its absence here is the sound-only rule.
         XCUIRemote.shared.press(.down)
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        let backOnFive = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in tuned.exists && tuned.label == "5" }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [backOnFive], timeout: 30), .completed, "channel 5 is tuned again")
         XCTAssertTrue(state.waitForExistence(timeout: 30), "channel 5 is back on")
         XCTAssertFalse(osd.waitForExistence(timeout: 12), "no number over a sound-only programme after a change")
     }

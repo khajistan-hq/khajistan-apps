@@ -347,6 +347,7 @@ Task {
     // it waits for the new picture, then pauses it (Fable round 9).
     let early = Probe()
     early.startPictureInPicture()
+    early.pip.onStart?()
     early.store.player.state = .idle
     early.store.phase = .tuning
     early.pip.onSetPlaying?(false)
@@ -358,9 +359,26 @@ Task {
     let earlyPaused = waitedForPicture && early.store.player.state == .paused
     print("\(earlyPaused ? "PASS" : "FAIL") a Pause pressed while the rejoin is still loading pauses the new picture")
     if !earlyPaused { failures += 1 }
+    // A Pause pressed while the rejoin loads, then the window goes (a card opens the channel full
+    // screen): the screen that opens is not paused by it (Fable round 10).
+    let gone = Probe()
+    gone.startPictureInPicture()
+    gone.pip.onStart?()
+    gone.store.player.state = .idle
+    gone.store.phase = .tuning
+    gone.pip.onSetPlaying?(false)
+    gone.model.transmissionPiP = nil
+    gone.store.phase = .onAir
+    gone.store.player.state = .playing
+    for _ in 0..<20 { await Task.yield() }
+    try? await Task.sleep(for: .milliseconds(300))
+    let screenPlays = gone.store.player.state == .playing
+    print("\(screenPlays ? "PASS" : "FAIL") a Pause from a window that has gone does not pause the screen that replaced it")
+    if !screenPlays { failures += 1 }
     // A Pause alone while it retunes pauses it once the picture has come.
     let alone = Probe()
     alone.startPictureInPicture()
+    alone.pip.onStart?()
     alone.store.player.state = .tuning
     alone.store.player.holdsSettle = true
     alone.pip.onSetPlaying?(false)

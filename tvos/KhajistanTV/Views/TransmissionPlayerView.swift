@@ -599,8 +599,10 @@ struct TransmissionPlayerView: View {
                         try? await Task.sleep(for: .milliseconds(100))
                     }
                     await store.player.settled()
-                    // The channel's own player still: a cut to another channel is not paused by it.
-                    if !Task.isCancelled, store.player === player, store.player.state == .playing { store.player.pause() }
+                    // Only while this window still carries the channel: a screen opened since (a
+                    // card, another channel) is not paused by a Pause pressed in a window now gone.
+                    if !Task.isCancelled, model.transmissionPiP === pip, store.player === player,
+                       store.player.state == .playing { store.player.pause() }
                 }
             }
         }

@@ -192,8 +192,9 @@ enum StationClock {
         guard today != nil, let from = dayNumber(iso) else { return nil }
         // Nothing more today: the earliest strip on any later day of the loaded month, not only
         // tomorrow (Fable, 2026-11-16). antenna-indus opens on 12 November, and reading one day
-        // ahead left it with no return time from the 1st to the 10th. Each strip is placed by its
-        // own day, so one filed tomorrow past 86400 is weighed against the day after's.
+        // ahead left it with no return time from the 1st to the 10th. A later day's strip is placed
+        // by its own day, so one filed tomorrow past 86400 is weighed against the day after's. (Today's
+        // strips past 86400 were answered above, before tomorrow's are read, as they always were.)
         // ponytail: stops at the month's last day; the next month's file is not read here.
         var later: (slot: Programming.Slot, date: String)? = nil
         var laterAt = Double.infinity
@@ -207,6 +208,20 @@ enum StationClock {
         return later
     }
 
+    /// Seconds from `second` on `iso` to the start of a nextSlot answer, across the days between.
+    static func secondsAhead(_ next: (slot: Programming.Slot, date: String), iso: String, second: Double) -> Double? {
+        guard let from = dayNumber(iso), let filed = dayNumber(next.date) else { return nil }
+        return Double(filed - from) * daySeconds + next.slot.startSecond - second
+    }
+
+    /// nextSlot, for Up next: printed as an hour with no day, it names only a strip under 24 hours
+    /// away. A strip further off is the off-air plate's, where returnLabel gives its day.
+    static func nextSlotSoon(_ p: Programming, channel: String, iso: String, second: Double) -> (slot: Programming.Slot, date: String)? {
+        guard let next = nextSlot(p, channel: channel, iso: iso, minute: Int((second / 60).rounded(.down)), second: second),
+              let ahead = secondsAhead(next, iso: iso, second: second), ahead < daySeconds else { return nil }
+        return next
+    }
+
     private static let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     private static let monthNames = ["January", "February", "March", "April", "May", "June", "July", "August",
                                      "September", "October", "November", "December"]
@@ -217,10 +232,14 @@ enum StationClock {
     /// when the loaded month holds nothing more on the channel. kj-station-clock.js returnLabel.
     static func returnLabel(_ p: Programming, channel: String, iso: String, second: Double) -> String? {
         guard let next = nextSlot(p, channel: channel, iso: iso, minute: Int((second / 60).rounded(.down)), second: second),
-              let from = dayNumber(iso), let filed = dayNumber(next.date) else { return nil }
+              let ahead = secondsAhead(next, iso: iso, second: second), let filed = dayNumber(next.date) else { return nil }
         let at = "\(next.slot.start) \(tzLabel)"
-        if Double(filed - from) * daySeconds + next.slot.startSecond - second < daySeconds { return at }
-        let airs = filed + Int((next.slot.startSecond / daySeconds).rounded(.down))
+        if ahead < daySeconds { return at }
+        // The day it airs on: the day it is filed under, plus one for a strip filed past 86400. A
+        // start the builder cannot have written (beyond a week, NaN) keeps the hour alone.
+        let shift = (next.slot.startSecond / daySeconds).rounded(.down)
+        guard shift >= 0, shift <= 6 else { return at }
+        let airs = filed + Int(shift)
         let civil = civil(fromDayNumber: airs)
         let weekday = weekdays[((airs + 4) % 7 + 7) % 7]   // day 0, 1970-01-01, was a Thursday
         return "\(at) on \(weekday) \(civil.day) \(monthNames[civil.month - 1])"
@@ -242,7 +261,7 @@ enum StationClock {
         // An index outside programme_order names no programme; the station cannot air it.
         guard let id = programmeId(p, index: slot.programmes[position.index]) else { return nil }
         let programme = p.programmes[id]
-        let next = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: second)
+        let next = nextSlotSoon(p, channel: channelId, iso: now.iso, second: second)
         return withNextProgramme(OnAir(
             channelId: channelId,
             // The day the strip is filed under: yesterday's, for a show still running past
@@ -273,6 +292,14 @@ enum StationClock {
     static func returnTime(_ p: Programming, channelId: String, at date: Date) -> String? {
         let now = stationNow(date)
         return nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds))?.slot.start
+    }
+
+    /// The strip a dark channel comes back with, however far off in the loaded month (the one
+    /// returnLabel times). `upcoming` stops at 24 hours; this does not.
+    static func returnStrip(_ p: Programming, channelId: String, at date: Date) -> ScheduleStrip? {
+        let now = stationNow(date)
+        return nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds))
+            .map { ScheduleStrip(date: $0.date, slot: $0.slot, show: p.shows[$0.slot.show]) }
     }
 
     /// `returnLabel` for a moment: what the off-air plate and the guide print after "returns at".
@@ -336,7 +363,7 @@ enum StationClock {
             out.nextProgrammeId = programmeId(p, index: index)
             out.nextProgrammeStart = clockLabel(Int(endsAt / 60))
             out.nextInSlot = true
-        } else if let next = nextSlot(p, channel: air.channelId, iso: iso, minute: 0, second: second),
+        } else if let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second),
                   let first = next.slot.programmes.first {
             out.nextProgrammeId = programmeId(p, index: first)
             out.nextProgrammeStart = next.slot.start
@@ -345,7 +372,7 @@ enum StationClock {
         // The names, the site's rule (kj-station-clock.js onAir): Up next is the first programme
         // after this one, in this slot, whose name differs from Now, at the minute it starts;
         // failing that, the next slot's first programme by its title, else by its show.
-        let next = nextSlot(p, channel: air.channelId, iso: iso, minute: 0, second: second)
+        let next = nextSlotSoon(p, channel: air.channelId, iso: iso, second: second)
         let nextSlotShow = next.flatMap { p.shows[$0.slot.show] }
         func title(_ id: String?) -> String? { nonEmpty(id.flatMap { p.programmes[$0]?.display_title }) }
         out.nowName = title(air.programmeId) ?? nonEmpty(air.show?.name)
@@ -400,13 +427,15 @@ enum StationClock {
 
     /// The strips that start after `date` on a channel, soonest first, at most `count` of them:
     /// what the station page and the player list under "Up next". The walk is nextSlot's, so it
-    /// crosses midnight into the next day the schedule holds and stops where the month's grid
-    /// ends; a channel on air and a channel off air both start from the first strip after now.
+    /// crosses midnight and stops where the month's grid ends; a channel on air and a channel off
+    /// air both start from the first strip after now. Only strips under 24 hours away: the list
+    /// prints hours with no day, as onAir's Up next does.
     static func upcoming(_ p: Programming, channelId: String, at date: Date, count: Int) -> [ScheduleStrip] {
         let now = stationNow(date)
         var found: [ScheduleStrip] = []
         var cursor = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds))
-        while let hit = cursor, found.count < count {
+        while let hit = cursor, found.count < count,
+              let ahead = secondsAhead(hit, iso: now.iso, second: Double(now.seconds)), ahead < daySeconds {
             found.append(ScheduleStrip(date: hit.date, slot: hit.slot, show: p.shows[hit.slot.show]))
             cursor = nextSlot(p, channel: channelId, iso: hit.date, minute: 0, second: hit.slot.startSecond)
         }
@@ -447,7 +476,8 @@ enum StationClock {
     /// The day number of an ISO day, nil for a string that is not a real yyyy-MM-dd date.
     private static func dayNumber(_ iso: String) -> Int? {
         let parts = iso.split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
+        // Digits only: Int() takes a sign, so "2026-11-+5" was a day here and not in the JS.
+        guard parts.count == 3, parts.allSatisfy({ $0.utf8.allSatisfy { (48...57).contains($0) } }), parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               (1...12).contains(month), day >= 1, day <= daysIn(month: month, year: year) else { return nil }
         return dayNumber(year: year, month: month, day: day)

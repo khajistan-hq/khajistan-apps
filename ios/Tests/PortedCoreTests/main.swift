@@ -957,8 +957,11 @@ func nextSlotRollsOverEveryKindOfDayEnd() throws {
         let next = try require(StationClock.nextSlot(p, channel: "transfers", iso: r.from, minute: 1439), r.from)
         try expectEqual(next.date, r.to, r.from)
     }
+    // Past a gap of more than a day: the next day the schedule holds (2026-11-16, Fable).
+    let overGap = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439))
+    try expectEqual(overGap.date, "2028-02-28")
     // Nothing after the last day, an unknown day, an unknown channel, and a date that is not a date.
-    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2028-03-01", minute: 1439) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2031-01-01", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "nope", iso: "2026-10-10", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2026-02-30", minute: 1439) == nil, true)

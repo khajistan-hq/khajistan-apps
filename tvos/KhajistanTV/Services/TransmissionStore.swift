@@ -165,6 +165,12 @@ final class TransmissionStore {
         return StationClock.returnLabel(p, channelId: id, at: date)
     }
 
+    /// The strip a dark channel comes back with, for its show's name beside returnLabel.
+    func returnStrip(channel: Int, at date: Date) -> ScheduleStrip? {
+        guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
+        return StationClock.returnStrip(p, channelId: id, at: date)
+    }
+
     // MARK: - Loading the month
 
     /// Brings in the schedule for the current station month. One already held for this month is

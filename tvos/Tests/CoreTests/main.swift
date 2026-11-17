@@ -1229,11 +1229,11 @@ func slotAtAndOnAirOnTheSyntheticSchedule() throws {
     let unknownShow = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 12, 0, 0)))
     try expectEqual(unknownShow.show, nil)
     try expectEqual(unknownShow.programmeId, "p0")
-    // The next strip is on the next day the schedule holds with one, however far (2026-11-16):
-    // after 2026-10-11 that is 2026-12-31.
+    // Up next names only a strip under 24 hours away: the next strip after 2026-10-11 is on
+    // 2026-12-31, so none (2026-11-16), though the off-air return reaches it.
     let late = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 23, 59, 59)))
-    try expectEqual(late.nextStart, "00:00")
-    try expectEqual(late.nextShow?.slug, "a")
+    try expectEqual(late.nextStart, nil)
+    try expectEqual(late.nextProgrammeId, nil)
     try expectEqual(late.endLabel, "00:00")
     // End of the grid: the last strip of the last day has no next strip.
     try expectEqual(try require(StationClock.onAir(p, channel: 1, at: pkt(2028, 3, 1, 23, 59, 59))).nextStart, nil)
@@ -1294,7 +1294,10 @@ func returnTimeLooksPastTomorrow() throws {
     try expectEqual([next.slot.start, next.date], ["13:03", "2026-11-12"])
     try expectEqual(StationClock.returnLabel(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0)), "13:03 PKT on Thursday 12 November")
     try expectEqual(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 1, 12, 0, 0)), nil)
-    try expectEqual(StationClock.upcoming(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0), count: 3).map(\.startLabel), ["13:03", "20:00"])
+    // The list stops at 24 hours; the return strip does not.
+    try expectEqual(StationClock.upcoming(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0), count: 3).count, 0)
+    try expectEqual(StationClock.upcoming(p, channelId: "g", at: pkt(2026, 11, 11, 23, 0, 0), count: 3).map(\.startLabel), ["13:03", "20:00"])
+    try expectEqual(StationClock.returnStrip(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0))?.startLabel, "13:03")
     // The day appears at a day or more away, the hour alone under it.
     try expectEqual(StationClock.returnLabel(p, channel: "g", iso: "2026-11-11", second: 47_024.7), "13:03 PKT on Thursday 12 November")
     try expectEqual(StationClock.returnLabel(p, channel: "g", iso: "2026-11-11", second: 47_025.7), "13:03 PKT")
@@ -1306,6 +1309,28 @@ func returnTimeLooksPastTomorrow() throws {
     // A day string that is not a real date is never a later day (Date reads 2026-11-31 as 1 December).
     let bad = try decode(Programming.self, gapScheduleJSON(extraDays: #"{"date":"2026-11-31","channels":{"g":[{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[0]}]}}"#))
     try expectEqual(StationClock.nextSlot(bad, channel: "g", iso: "2026-11-12", minute: 1260, second: 75_600) == nil, true)
+    // Nor is one with a sign in it: Int() takes "+5", the JS does not (Fable, 2026-11-16).
+    let signed = try decode(Programming.self, gapScheduleJSON(extraDays: #"{"date":"2026-11-+5","channels":{"g":[{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[0]}]}}"#))
+    try expectEqual(StationClock.returnLabel(signed, channelId: "g", at: pkt(2026, 11, 12, 21, 0, 0)), nil)
+    // A start the builder cannot write keeps the hour alone, and does not trap converting to Int.
+    let huge = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: "47024.7", with: "1e24").replacingOccurrences(of: #""start_second":72000"#, with: #""start_second":1e24"#))
+    try expectEqual(StationClock.returnLabel(huge, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0)), "13:03 PKT")
+}
+
+func upNextNamesOnlyAStripUnderADayAway() throws {
+    let strip = #"{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[2]}"#
+    // On the 12th at 20:05, inside the 20:00 strip, with the next strip on the 14th at 09:00 (37 h off).
+    let far = try decode(Programming.self, gapScheduleJSON(extraDays: #"{"date":"2026-11-14","channels":{"g":["# + strip + "]}}"))
+    let farAir = try require(StationClock.onAir(far, channel: 21, at: pkt(2026, 11, 12, 20, 5, 0)))
+    try expectEqual(farAir.programmeId, "G2")
+    try expectEqual(farAir.nextStart, nil)
+    try expectEqual(farAir.nextProgrammeId, nil)
+    try expectEqual(farAir.nextName, nil)
+    // Negative: the 13th at 09:00 instead (12 h 55 m off) is named.
+    let near = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: #"{"date":"2026-11-13","channels":{"g":[]}}"#, with: #"{"date":"2026-11-13","channels":{"g":["# + strip + "]}}"))
+    let nearAir = try require(StationClock.onAir(near, channel: 21, at: pkt(2026, 11, 12, 20, 5, 0)))
+    try expectEqual(nearAir.nextStart, "09:00")
+    try expectEqual(nearAir.nextProgrammeId, "G3")
 }
 
 func returnTimeWeighsEachStripByItsOwnDay() throws {
@@ -1381,20 +1406,27 @@ func upcomingListsTheNextStripsInOrder() throws {
     // Off air between strips: up next is the strip it returns with.
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 8, 0, 0), count: 1)),
                     ["2026-10-10 23:00-00:00 a"])
-    // The last strip of the day hands over to the first of the next day, and on over the gaps to
-    // each later day the schedule holds...
+    // The last strip of the day hands over to the first of the next day, and the list stops at
+    // 24 hours, though the schedule holds later days (it prints hours with no day)...
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 23, 30, 0), count: 5)),
-                    ["2026-10-11 00:00-00:00 -", "2026-12-31 00:00-00:00 a", "2027-01-01 00:00-00:00 b",
-                     "2028-02-28 00:00-00:00 a", "2028-02-29 00:00-00:00 b"])
-    // ...and the last strip of the grid has nothing after it, however many are asked for.
+                    ["2026-10-11 00:00-00:00 -"])
+    // ...where the return still reaches the next of them, with its day.
+    try expectEqual(StationClock.returnStrip(p, channelId: "transfers", at: pkt(2026, 10, 11, 12, 0, 0))?.date, "2026-12-31")
+    try expectEqual(StationClock.returnLabel(p, channelId: "transfers", at: pkt(2026, 10, 11, 12, 0, 0)), "00:00 PKT on Thursday 31 December")
+    // The last strip of the grid has nothing after it, however many are asked for.
     try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 3, 1, 12, 0, 0), count: 5).count, 0)
+    try expectEqual(StationClock.returnStrip(p, channelId: "transfers", at: pkt(2028, 3, 1, 12, 0, 0)), nil)
     // Month and year boundaries the grid holds are crossed; the day after them is not invented.
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 4, 30, 12, 0, 0), count: 3)),
-                    ["2026-05-01 00:00-00:00 b", "2026-09-01 00:00-01:00 a", "2026-10-10 06:00-07:00 a"])
+                    ["2026-05-01 00:00-00:00 b"])
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 12, 31, 12, 0, 0), count: 3)),
-                    ["2027-01-01 00:00-00:00 b", "2028-02-28 00:00-00:00 a", "2028-02-29 00:00-00:00 b"])
+                    ["2027-01-01 00:00-00:00 b"])
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 2, 28, 12, 0, 0), count: 2)),
-                    ["2028-02-29 00:00-00:00 b", "2028-03-01 00:00-00:00 a"])
+                    ["2028-02-29 00:00-00:00 b"])
+    // The boundary: 24 h exactly is out, a second under is in.
+    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 2, 29, 0, 0, 0), count: 2).count, 0)
+    try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 2, 29, 0, 0, 1), count: 2)),
+                    ["2028-03-01 00:00-00:00 a"])
     // Nothing for a count of zero, an unknown channel, or a day the schedule does not hold.
     try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 6, 0, 0), count: 0).count, 0)
     try expectEqual(StationClock.upcoming(p, channelId: "nope", at: pkt(2026, 10, 10, 6, 0, 0), count: 3).count, 0)
@@ -1449,11 +1481,17 @@ func realUpcomingAgreesWithOnAir() throws {
         while t <= last {
             defer { t = t.addingTimeInterval(3517) }
             let strips = StationClock.upcoming(p, channelId: id, at: t, count: 4)
-            let expectedFirst = StationClock.onAir(p, channelId: id, at: t)?.nextStart ?? StationClock.returnTime(p, channelId: id, at: t)
+            let now = StationClock.stationNow(t)
+            // Off air, the list opens on the return strip when it is under 24 hours away, and is
+            // empty when it is further (the dark channels of early November): the plate gives its day.
+            let back = StationClock.returnStrip(p, channelId: id, at: t)
+            try expectEqual(back?.startLabel, StationClock.returnTime(p, channelId: id, at: t))
+            let soon = back.flatMap { StationClock.secondsAhead(($0.slot, $0.date), iso: now.iso, second: Double(now.seconds)) }.map { $0 < 86_400 } ?? false
+            let air = StationClock.onAir(p, channelId: id, at: t)
+            let expectedFirst = air != nil ? air?.nextStart : (soon ? back?.startLabel : nil)
             try expectEqual(strips.first?.startLabel, expectedFirst)
             // Soonest first, and every strip starts after now (read in seconds: a strip filed on a
             // day can start past its midnight).
-            let now = StationClock.stationNow(t)
             let keys = strips.map { ($0.date, $0.slot.startSecond) }
             try expect(zip(keys, keys.dropFirst()).allSatisfy { $0 < $1 }, "\(key) ch \(number): not soonest first")
             try expect(strips.allSatisfy { $0.date > now.iso || $0.slot.startSecond > Double(now.seconds) })
@@ -4872,6 +4910,7 @@ let tests: [(String, () throws -> Void)] = [
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("Return time looks past tomorrow, and says the day a day or more off", returnTimeLooksPastTomorrow),
     ("Return time weighs each strip by its own day", returnTimeWeighsEachStripByItsOwnDay),
+    ("Up next names only a strip under a day away", upNextNamesOnlyAStripUnderADayAway),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),

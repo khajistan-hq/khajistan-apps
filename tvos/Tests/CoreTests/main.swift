@@ -1444,6 +1444,25 @@ func lastFileEndingOnTimeTunesTheNextStrip() throws {
     try expectEqual(StationClock.following(p6g, in: gap, at: base), nil)
 }
 
+/// A strip tuned early that is shorter than the lead (night-bazaar, 9 November 2026; Fable,
+/// 2026-11-16): a film ends at 2208.3 and "clear cut", 2.4 s, follows. Tuned 1.9 s early, clear cut
+/// ends at 2208.8, before the clock reaches 2208.3 by whole seconds, and the clock handed the film
+/// back 4010 s in. It hands over to the strip after instead.
+func shortStripTunedEarlyHandsOnward() throws {
+    let raw = #"{"_meta":{"channels":[{"id":"g","number":21,"name":"G"}]},"shows":{"a":{"slug":"a","name":"Film"},"b":{"slug":"b","name":"Clear"},"c":{"slug":"c","name":"After"}},"programme_order":["F","C","N"],"programmes":{"F":{"id":"F","title":"f","display_title":"Film","seconds":4012.2},"C":{"id":"C","title":"c","display_title":"clear cut","seconds":2.4},"N":{"id":"N","title":"n","display_title":"Next","seconds":600}},"days":[{"date":"2026-11-09","channels":{"g":[{"start":"23:29","start_minute":1409,"minutes":67,"start_second":84596.1,"seconds":4012.2,"show":"a","programmes":[0]},{"start":"00:36","start_minute":2196,"minutes":1,"start_second":88608.3,"seconds":2.4,"show":"b","programmes":[1]},{"start":"00:36","start_minute":2196,"minutes":10,"start_second":88610.7,"seconds":600,"show":"c","programmes":[2]}]}}]}"#
+    let p = try decode(Programming.self, raw)
+    let film = try require(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 10, 0, 36, 0)))
+    try expectEqual(film.programmeId, "F")
+    let fileEnds = pkt(2026, 11, 10, 0, 36, 46).addingTimeInterval(0.4)   // 2206.4, 1.9 s early
+    let clear = try require(StationClock.following(film, in: p, at: fileEnds))
+    try expectEqual([clear.programmeId, clear.show?.name], ["C", "Clear"])
+    try expectEqual(clear.into, 0)
+    // Its 2.4 s run out at 2208.8: the strip after, never the film again.
+    let after = try require(StationClock.following(clear, in: p, at: fileEnds.addingTimeInterval(2.4)))
+    try expectEqual([after.programmeId, after.show?.name], ["N", "After"])
+    try expectEqual(after.into, 0)
+}
+
 /// A strip ending at midnight hands over to the next day's first strip, whose end watch counts
 /// from the day before.
 func lastFileAtMidnightTunesTomorrowsStrip() throws {
@@ -1705,7 +1724,7 @@ func realFollowingAgreesWithOnAirAtEveryHandover() throws {
     // or 1.5 s early, it hands over to what a fresh onAir says a second past the end, the next
     // strip or off air, never the strip's own opener; and the next strip's end watch is armed
     // (Fable measured 4,774 of 5,264 November last programmes tuning the opener, 2026-11-16).
-    var ends = 0, dark = 0, roundAgain = 0, monthEnd = 0, endMismatches: [String] = []
+    var ends = 0, dark = 0, roundAgain = 0, monthEnd = 0, chained = 0, chainedBack = 0, endMismatches: [String] = []
     for day in p.days {
         let parts = day.date.split(separator: "-").compactMap { Int($0) }
         let midnight = pkt(parts[0], parts[1], parts[2])
@@ -1729,6 +1748,11 @@ func realFollowingAgreesWithOnAirAtEveryHandover() throws {
                     var bad = a != b || handed?.slot != fresh?.slot
                     if let handed {
                         bad = bad || handed.into < 0 || handed.into > fresh!.into || StationClock.secondsLeft(in: handed, at: at) == nil
+                        // The handed programme's own file ending on time: never the strip it left.
+                        let ends = at.addingTimeInterval(StationClock.runSeconds(handed.programme) - handed.into)
+                        let onward = StationClock.following(handed, in: p, at: ends)
+                        if onward?.slot == last.slot, onward?.date == last.date { bad = true; chainedBack += 1 }
+                        chained += 1
                     }
                     if bad, endMismatches.count < 5 { endMismatches.append("\(label) -\(early) s: \(a) vs \(b)") }
                     if bad { endMismatches.append("") }
@@ -1737,7 +1761,7 @@ func realFollowingAgreesWithOnAirAtEveryHandover() throws {
             }
         }
     }
-    print("      \(ends) strip ends (\(dark) into a dark gap), \(endMismatches.filter(\.isEmpty).count) disagree; \(roundAgain) mid-round and \(monthEnd) at the month's end passed over")
+    print("      \(ends) strip ends (\(dark) into a dark gap), \(endMismatches.filter(\.isEmpty).count) disagree, \(chainedBack) of \(chained) handed back to the strip they left; \(roundAgain) mid-round and \(monthEnd) at the month's end passed over")
     try expect(endMismatches.isEmpty, endMismatches.filter { !$0.isEmpty }.joined(separator: "\n"))
     try expect(ends >= 4_000, "only \(ends) strip ends checked")
 }
@@ -5172,6 +5196,7 @@ let tests: [(String, () throws -> Void)] = [
     ("The last programme of a full roster hands over, whatever the float sum", lastProgrammeHandsOverWhateverTheFloatSum),
     ("The last file ending on time tunes the next strip, with its end watch", lastFileEndingOnTimeTunesTheNextStrip),
     ("The last file at midnight tunes the next day's strip", lastFileAtMidnightTunesTomorrowsStrip),
+    ("A short strip tuned early hands onward, not back", shortStripTunedEarlyHandsOnward),
     ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),

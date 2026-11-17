@@ -75,7 +75,8 @@ enum StationClock {
     /// rather than run the roster round to its opener. The clock reads whole seconds and a strip
     /// ends on a fraction: radio 01:39 on 1 November ends at 8943.9, so a last file ending on time
     /// was asked about at 8943, inside the strip, and tuned "Khawree Mi Zargai Sha" until the slot
-    /// watch moved on (Fable, 2026-11-16). Small, because the next strip then plays this far ahead.
+    /// watch moved on (Fable, 2026-11-16). Small, because the next strip then plays up to this far
+    /// ahead of the clock, and under a second more where it starts a fraction after this one ends.
     static let handoverLead = 2.0
     static let tzLabel = "PKT"
 
@@ -347,15 +348,19 @@ enum StationClock {
         let now = stationNow(date)
         let slot = current.slot
         let at = slotSecond(current.date, now: now)
-        let insideSlot = at.map { $0 >= slot.startSecond && $0 < slot.endSecond } ?? false
+        // A strip this method tuned early is inside from then on, as secondsLeft counts it: a 2.4 s
+        // strip tuned 1.9 s early ends before the clock reaches its start, and asking the clock then
+        // handed back the strip before it (night-bazaar, 9 November; Fable, 2026-11-16).
+        let insideSlot = at.map { $0 >= slot.startSecond - handoverLead - 1 && $0 < slot.endSecond } ?? false
         guard insideSlot, let at, !slot.programmes.isEmpty else {
             return onAir(p, channelId: current.channelId, at: date)
         }
         let whole = date.timeIntervalSince1970.rounded(.down)
         let exact = at + (date.timeIntervalSince1970 - whole)
         // The clock at the first whole second past the end, as a whole epoch second (no float
-        // drift). In another month this file holds nothing there: the roster walks on, and the
-        // store's slot watch tunes the next month's file.
+        // drift). In another month this file holds nothing there, and the roster walks on as it
+        // always did: on Apple TV the slot watch then tunes the next month's file; the iPhone has
+        // no slot watch and plays the opener out.
         let end = slot.endSecond.rounded(.up)
         let then = Date(timeIntervalSince1970: whole + (end - at))
         // Only after the roster's last entry: an ident under two seconds that closes the roster

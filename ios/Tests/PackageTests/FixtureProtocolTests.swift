@@ -7,13 +7,13 @@ final class FixtureProtocolTests: XCTestCase {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kj-fixture-test")
         try? FileManager.default.createDirectory(at: dir.appendingPathComponent("data"), withIntermediateDirectories: true)
         try? Data(#"{"recorded":true}"#.utf8).write(to: dir.appendingPathComponent("data/answer.json"))
-        // Read once, when the protocol first looks: set before any request is made.
-        UserDefaults.standard.set(dir.path, forKey: "kjfixtures")
         return dir
     }()
 
     private func session() -> URLSession {
-        _ = Self.directory
+        // Read per request, and other tests in this process point it elsewhere: set it every time.
+        UserDefaults.standard.set(Self.directory.path, forKey: "kjfixtures")
+        UserDefaults.standard.set(false, forKey: "kjfixturesonly")
         return URLSession(configuration: URLSessionConfiguration.ephemeral.answeringFromFixtures())
     }
 

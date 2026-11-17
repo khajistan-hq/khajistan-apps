@@ -4738,6 +4738,17 @@ func aPlayerIsRetunedOnlyForTheNetwork() throws {
     try expect(!retunes(nil, [("CoreMediaErrorDomain", 404)], stalled: true), "a stall after a 404 is not the network")
     try expect(!retunes(URLError(.networkConnectionLost), [("CoreMediaErrorDomain", 403)]), "a gate refused once stays shut")
     try expect(!retunes(nil, [("CoreMediaErrorDomain", -12937)], stalled: true), "an authentication error stays shut")
+    // The newest entry's age: a network blip long ago earns a later item failure nothing, while
+    // an old answer that came back still says the stall is not the network.
+    let timedOut = [(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)]
+    let old = SupabaseRoute.logRecency + 1
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: 20, stalled: false), "a recent timeout")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: false), "an old timeout, a failure now")
+    try expect(!SupabaseRoute.retunesPlayback(error: URLError(.badServerResponse), logged: timedOut, lastAge: old, stalled: false))
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: true), "a stall is the network by itself")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: [("CoreMediaErrorDomain", 404)], lastAge: old, stalled: true),
+               "an old 404 still says a stall is not the network")
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: nil, stalled: false), "an undated entry counts")
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {

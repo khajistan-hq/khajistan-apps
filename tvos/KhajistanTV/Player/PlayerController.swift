@@ -58,8 +58,6 @@ final class PlayerController {
     /// Two failures this close together are "in a row": a carrier that keeps dying is not
     /// retuned for ever.
     private static let retuneSpacing: Duration = .seconds(60)
-    /// How old an error-log entry may be and still say why the signal failed now.
-    private static let logRecency: TimeInterval = 60
 
     private struct Tuned {
         let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, listen: Bool, live: Bool
@@ -483,14 +481,12 @@ final class PlayerController {
     private func fail(error: Error?, stalled: Bool = false) {
         // A late error from the item a retune is about to replace must not call the retune off.
         guard !retunePending else { return }
-        // A refusal counts whenever it was logged; any other entry only if it is recent, so a
-        // network blip the signal recovered from long ago cannot earn a later failure a retune.
-        let logged = (player.currentItem?.errorLog()?.events ?? [])
-            .filter { SupabaseRoute.refusalCodes.contains($0.errorStatusCode) || ($0.date ?? .distantPast) > Date(timeIntervalSinceNow: -Self.logRecency) }
-            .map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        let events = player.currentItem?.errorLog()?.events ?? []
+        let logged = events.map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        let lastAge = events.last?.date.map { -$0.timeIntervalSinceNow }
         let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
         // A signal the viewer paused is never brought back by a retune: it fails as it is.
-        guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
+        guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, lastAge: lastAge, stalled: stalled) else {
             player.pause()
             state = .failed(Self.unreachable)
             return

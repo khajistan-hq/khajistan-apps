@@ -143,6 +143,8 @@ final class ReceiverGuideUITests: XCTestCase {
             let match = NSPredicate { _, _ in readouts.allElementsBoundByIndex.contains { $0.label == value } }
             return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: match, object: nil)], timeout: 5) == .completed
         }
+        // Radio is live third-party carriers too: one not playing gives way to the next on the shelf.
+        try kjTuneUntilPlaying(app)
         if nowPlaying.waitForExistence(timeout: 40) {
             XCTAssertTrue(awakeIs("on"), "a playing station holds the Apple TV awake")
             kjPause(2)

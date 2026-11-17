@@ -106,7 +106,9 @@ final class RecordedSubtitles {
             current = tracks.contains { $0.code == first } ? first : tracks.first?.code
         } else {
             let stored = UserDefaults.standard.string(forKey: SubtitleChoice.storeKey)
-            apply(SubtitleChoice.desired(available: tracks.map(\.code), stored: stored, preferred: Locale.preferredLanguages))
+            let want = SubtitleChoice.desired(available: tracks.map(\.code), stored: stored, preferred: Locale.preferredLanguages)
+            // Only when the union changes the opener: re-applying the same option blanks a line.
+            if want != current { apply(want) }
         }
         guard ticker == nil else { return }
         let gen = generation

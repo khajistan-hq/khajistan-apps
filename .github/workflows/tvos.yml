@@ -35,13 +35,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
-          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" -q '.[].filename')
+          # A PR to another branch can be retargeted to main without a new run, so it runs too.
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] || [ "$GITHUB_BASE_REF" != main ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # The files API lists at most 3,000 files: a bigger PR runs the simulator.
+          n=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" -q .changed_files)
+          if [ "$n" -ge 3000 ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # A move lists only its new path, so the old one is read too.
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" -q '.[] | .filename, (.previous_filename // empty)')
           if printf '%s\n' "$files" | grep -Eq '^(tvos/|ios/Khajistan/Services/LiveCaptionSession\.swift$|\.github/workflows/tvos\.yml$)'; then echo app=true; else echo app=false; fi >> "$GITHUB_OUTPUT"
   simulator:
     name: tvOS simulator
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    # Fails open: the check skips only on a clear "no app files". A failed `changes` job would
+    # skip it too, and GitHub counts a skipped required check as passed (Fable on PR 77).
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: macos-26
     # The UI suite outgrew 75 minutes: every tvOS run was cut at the limit from 2026-11-08 on,
     # with tests still passing (PR 48: 58 passed, 0 failed when cut). The one run allowed

@@ -168,7 +168,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   CC and Like, reached with Right. Select raises it from the bottom over the picture, which plays on above it (owner, 2026-11-14: "make the guide come from bottom up rather than from the left"):
   every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
   and the place, hairlines between, ● LIVE on the one playing. Up and down light a row (the focus
-  plate, 1.03), Select tunes it behind the pigeon, Left or Menu closes it. Like CC and Like it is
+  plate, 1.03), Select tunes it behind the pigeon, Left and Right turn to the region beside, Menu closes it. Like CC and Like it is
   lit by the remote and never takes focus, so presses keep reaching the player.
 - **Small player** (2026-10-28, after Sonos): Menu on a radio station that is playing leaves it
   playing. Under every section of the top bar (the gap was "while browsing other tabs"), below the
@@ -401,6 +401,19 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 
 Only the content moves: the pigeon mark, and the pigeon at a changeover (owner ruling
 2026-10-04 on the Higgsfield pigeon: loading states and transitions only).
+
+**Guide and focus move the way Apple's TV app does** (owner, 2026-11-15: the transitions "need
+to be just like how it is on apple tv app"). The numbers are in `CardMotion` (`Theme.swift`).
+
+| what | motion | Reduce Motion |
+|---|---|---|
+| Focus on a card, plate, tab, strip chip or band control | one spring, response 0.34, damping 0.74 | 0.12 s ease, no overshoot |
+| Guide, Up and Down | the rows, keyed by channel, scroll one place over 0.3 s with no bounce; the plate fades off one row as the next takes it, lifted to 1.03 | the rows and the plate cut, with no lift; at the list's ends, where the rows stay put, the plate changes over 0.12 s |
+| Guide, Left and Right (a region turn) | a cut; while the next region loads, and on a region with none, the rows keep the height they last had and say Loading or "No …" in it | the same |
+| Guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
+
+Picture transitions (tuning, the pigeon, a channel change) are the paragraphs below; nothing here
+touches them.
 
 **A channel change in the Receiver is the pigeon over the live picture, and a hard cut**
 (owner, 2026-10-06: "hard cut is ok from one channel to next ... and the pigeon transition on it",

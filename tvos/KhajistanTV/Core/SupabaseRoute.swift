@@ -230,8 +230,9 @@ enum SupabaseRoute {
 /// recording still listed off the dial, and a test that played them found them dead.
 /// `-kjfixturesonly YES` skips the network, so a test can prove the recording is what it reads.
 final class KJFixtureProtocol: URLProtocol, @unchecked Sendable {
-    static let directory = UserDefaults.standard.string(forKey: "kjfixtures").map { URL(fileURLWithPath: $0) }
-    static let only = UserDefaults.standard.bool(forKey: "kjfixturesonly")
+    /// Read on each request, not once: package tests in one process point it at different directories.
+    static var directory: URL? { UserDefaults.standard.string(forKey: "kjfixtures").map { URL(fileURLWithPath: $0) } }
+    static var only: Bool { UserDefaults.standard.bool(forKey: "kjfixturesonly") }
     /// The network, without this protocol, and short enough that a dead connection still leaves
     /// the caller's own timeout time to read the recording.
     private static let live: URLSession = {
@@ -242,6 +243,16 @@ final class KJFixtureProtocol: URLProtocol, @unchecked Sendable {
         return URLSession(configuration: config)
     }()
     private var liveTask: URLSessionDataTask?
+
+    /// Explicit UI-test media: real AVPlayer decoding without an upstream carrier dependency.
+    /// Release builds have neither this switch nor the local-file route.
+    static func mediaURL(for medium: String) throws -> URL? {
+        guard UserDefaults.standard.bool(forKey: "kjfixturemedia") else { return nil }
+        guard let directory else { throw URLError(.fileDoesNotExist) }
+        let file = directory.appendingPathComponent("media/" + (medium == "radio" ? "sound.m4a" : "picture.mp4"))
+        guard FileManager.default.fileExists(atPath: file.path) else { throw URLError(.fileDoesNotExist) }
+        return file
+    }
 
     /// The recorded answer for a URL: its path (off the `/sb/` proxy) under the fixture directory.
     static func file(for request: URLRequest) -> URL? {

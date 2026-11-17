@@ -123,7 +123,9 @@ final class ReceiverTuner {
         // Only a definite failure advances. Slow buffering does not switch a working station.
         for _ in 0..<2 {
             let revision = intentRevision
-            await controller.settled(within: .seconds(32))
+            // Long enough for the player's one network retune: a 30 s start-up, the 1 s grace,
+            // then the fresh item's own 30 s start-up. Settling returns at once on a result.
+            await controller.settled(within: .seconds(65))
             guard !Task.isCancelled, isActive(), opening == openingRevision, revision == intentRevision else { return }
             guard case .failed = controller.state,
                   let next = list.first(where: { !attempted.contains($0.id) }) else { return }

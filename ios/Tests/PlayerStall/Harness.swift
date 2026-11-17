@@ -70,7 +70,7 @@ struct StallHarness {
                 if isFailed(healing.state) { sawFailure = true }
                 // 80 000 bytes at 64 kb/s is 10 s of tone: past 13 s, it is playing past the cut.
                 return sawFailure || (healing.state == .playing && healing.player.currentTime().seconds > 13)
-            }) && !sawFailure
+            }) && !sawFailure && healing.retunedAt != nil // played on because of a retune, not by luck
             print((recovered ? "PASS" : "FAIL") + " a carrier that comes back is retuned once and plays on after \(Int(Date().timeIntervalSince(since))) s (state: \(healing.state))")
             if !recovered { failures += 1 }
         } else {

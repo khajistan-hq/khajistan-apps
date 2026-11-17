@@ -51,13 +51,15 @@ final class PlayerController {
     /// What `attach` was last asked to play, and when: a network failure retunes it once.
     @ObservationIgnored private var tuned: Tuned?
     /// When the last retune was: a failure within `retuneSpacing` of it is shown, not retuned.
-    @ObservationIgnored private var retunedAt: ContinuousClock.Instant?
+    @ObservationIgnored private(set) var retunedAt: ContinuousClock.Instant?
     /// Set during a retune's grace, so the item it replaces cannot fail the signal meanwhile.
     @ObservationIgnored private var retunePending = false
     @ObservationIgnored private var retuneToken = 0
     /// Two failures this close together are "in a row": a carrier that keeps dying is not
     /// retuned for ever.
     private static let retuneSpacing: Duration = .seconds(60)
+    /// How old an error-log entry may be and still say why the signal failed now.
+    private static let logRecency: TimeInterval = 60
 
     private struct Tuned {
         let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, listen: Bool, live: Bool
@@ -474,13 +476,18 @@ final class PlayerController {
         }
     }
 
-    /// Every way an AVPlayer signal fails ends here. One the network caused
+    /// Every AVPlayer failure after the start-up timeout ends here (that timeout fails at once).
+    /// One the network caused
     /// (SupabaseRoute.retunesPlayback) is retuned once with a fresh item, at the same live
     /// position; a refusal, or a second failure within a minute of the retune, is shown.
     private func fail(error: Error?, stalled: Bool = false) {
         // A late error from the item a retune is about to replace must not call the retune off.
         guard !retunePending else { return }
-        let logged = (player.currentItem?.errorLog()?.events ?? []).map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        // A refusal counts whenever it was logged; any other entry only if it is recent, so a
+        // network blip the signal recovered from long ago cannot earn a later failure a retune.
+        let logged = (player.currentItem?.errorLog()?.events ?? [])
+            .filter { SupabaseRoute.refusalCodes.contains($0.errorStatusCode) || ($0.date ?? .distantPast) > Date(timeIntervalSinceNow: -Self.logRecency) }
+            .map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
         let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
         // A signal the viewer paused is never brought back by a retune: it fails as it is.
         guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled) else {
@@ -512,7 +519,7 @@ final class PlayerController {
             if token == self.retuneToken { self.retunePending = false }
             guard !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
             let elapsed = (ContinuousClock.now - tuned.at) / .seconds(1)
-            let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite ? position : tuned.seekTo)
+            let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite && position > 0 ? position : tuned.seekTo)
             self.attach(url: tuned.url, seekTo: seekTo, title: tuned.title, subtitle: tuned.subtitle,
                         isLive: tuned.isLive, listen: tuned.listen, live: tuned.live)
             self.retunedAt = .now

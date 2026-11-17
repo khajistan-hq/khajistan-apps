@@ -99,7 +99,7 @@ The script compiles the Foundation-only core and runs its checks:
 - What is up next walks the schedule across midnight and stops where the month's grid ends, and the countdown to a slot's end is nil once the slot is over.
 - The WebVTT reader takes the site's seven prepared files cue for cue and skips malformed timing; the caption plate matches `kj-captions.css`; live-caption eligibility, the server's refusals in the site's words, the request shapes, the English gate, the 42-character blocks, the clock and the realtime frames each have negative cases.
 
-UI tests that need the schedule run without the preview password: a DEBUG build takes `-kjschedulefile <path>` and reads the month from the checkout's `data/khajistan-tv/`, and opens the Transmission player with no account and no picture. `-kjskin` sets the skin, `-kjhandoverlead` stretches the up-next notice's lead and `-kjsubtitlefile <path>` gives whatever is on air that WebVTT file. None of these exist in a Release build.
+UI tests that need the schedule run without the preview password: a DEBUG build takes `-kjschedulefile <path>` and reads the month from the checkout's `data/khajistan-tv/`, and opens the Transmission player with no account and no picture. `-kjskin` sets the skin, `-kjhandoverlead` stretches the up-next notice's lead and `-kjsubtitlefile <path>` gives whatever is on air that WebVTT file, Stream programme or not. None of these exist in a Release build.
 
 ### Typecheck without Xcode
 

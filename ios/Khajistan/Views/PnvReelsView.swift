@@ -36,8 +36,10 @@ struct PnvReelsView: View {
     /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
     /// so the reader scrolls to it, as it does on arrival.
     @State private var jump = 0
-    /// Set by the first Shuffle or region change: from then the tapped object is no fallback.
-    @State private var restarted = false
+    /// The page a missing position stands for: nil means the tapped object; "" means none, while a
+    /// Shuffle or region change waits for its feed; then that feed's first page. The scroll view
+    /// can set position to nil while the reel is empty, so this, not the tapped object, decides.
+    @State private var home: String?
 
     let start: PnvRow
     let source: Source
@@ -67,9 +69,9 @@ struct PnvReelsView: View {
     }
 
     private var isStream: Bool { if case .feed = source { return true } else { return false } }
-    /// The page on screen. Before any restart a missing position means the tapped object; after
-    /// one it means none, so a re-deal holding that same object still reopens on its first page.
-    private var currentId: String { position ?? (restarted ? "" : ReelItem.id(lap: 0, start.id)) }
+    /// The page on screen. A missing position means `home`, so a re-deal holding the tapped
+    /// object still reopens on its own first page.
+    private var currentId: String { position ?? home ?? ReelItem.id(lap: 0, start.id) }
     private var current: PnvRow? { reel.first { $0.id == currentId }?.row }
 
     var body: some View {
@@ -233,7 +235,7 @@ struct PnvReelsView: View {
         owner = nil
         activatedId = nil
         laps = []
-        restarted = true
+        home = ""
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.
@@ -243,8 +245,9 @@ struct PnvReelsView: View {
 
     /// The page on screen left the reel (a new region, a new deal): open on the first page.
     private func reopenIfLost() {
-        guard isStream, let first = items.first, current == nil else { return }
+        guard isStream, let first = items.first, home == "" || current == nil else { return }
         position = ReelItem.id(lap: 0, first.id)
+        home = position
         jump += 1
         activate()
     }

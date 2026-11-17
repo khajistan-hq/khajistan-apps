@@ -140,7 +140,8 @@ final class NowNextUITests: XCTestCase {
 
     /// No number over a sound-only programme, whose title sits in that corner; off air it shows.
     /// The fixture's channel 5 plays folk-tv, a sound-only tape, at 13:30; channel 6 has no
-    /// strips, so it is off air. The off-air number is the check that the number works here at all.
+    /// strips, so it is off air. The off-air number is the check that the number works here at all,
+    /// and the change back to 5 checks the sound-only rule on that same path.
     func testNoChannelNumberOverSoundOnlyButOffAir() {
         let app = open(channel: 5, skin: "day", now: "2026-11-08T13:40:00+05:00")
         let osd = app.descendants(matching: .any)["channelNumberOSD"]
@@ -152,5 +153,10 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
         XCTAssertEqual(osd.label, "Channel 6")
         kjScreenshot("channel-number-off-air", app: app)
+        // Back to 5 by a channel change, the path that just showed 6: no sign-on cover or first
+        // flight is left to hold the number, so its absence here is the sound-only rule.
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "channel 5 is back on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 12), "no number over a sound-only programme after a change")
     }
 }

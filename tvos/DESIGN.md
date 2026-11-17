@@ -474,7 +474,9 @@ centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E0
 outline, no shadow, each line laid out on its own direction. The plate sits 24pt above the strip
 (or the film's panel) while it is up and moves down with it. Its control is the strip's last item,
 a kicker in onBand underlined while on; reached with right, it takes the inverted plate (band text
-on onBand), which reads on the band in every skin.
+on onBand), which reads on the band in every skin. One exception: a film in the picture-in-picture
+window keeps its chosen track, which AVPlayer draws there in the system's style, since the house
+plate stays with the closed screen. Transmission's corner window carries no subtitles.
 
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.

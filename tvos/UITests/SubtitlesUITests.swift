@@ -268,7 +268,7 @@ final class SubtitlesUITests: XCTestCase {
         let caption = app.descendants(matching: .any)["caption"]
         XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text reaches the house view")
         // The caption reports the look it is drawn in: over a film's picture, the viewer's choice.
-        XCTAssertEqual(caption.value as? String, "bare", "Text only is drawn over the picture")
+        XCTAssertEqual(caption.value as? String, "bare", "Yellow text is drawn over the picture")
         kjPause(4)   // the panel hides, so the text sits on the picture
         kjScreenshot("film-subtitles-text-only", app: app)
     }

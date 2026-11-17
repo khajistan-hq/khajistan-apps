@@ -123,12 +123,12 @@ extension Skin {
 
 /// How captions and subtitles are drawn, chosen by the viewer on Account (owner, 2026-11-17: "a
 /// caption option without the background (only yellow text) that one can choose"). The plate is
-/// the house default; "Text only" is yellow text with a thin black edge on the picture.
+/// the house default; "Yellow text" (the website's name) is #F3FB04 with a thin black edge on the picture.
 enum CaptionStyle: String, CaseIterable {
     case plate, bare
     static let key = "kj-caption-style"
 
-    var label: String { self == .plate ? "Plate" : "Text only" }
+    var label: String { self == .plate ? "Plate" : "Yellow text" }
     var next: CaptionStyle { self == .plate ? .bare : .plate }
 
     /// The viewer's choice; the plate until one is made.

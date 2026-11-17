@@ -204,7 +204,7 @@ final class SkinWalkUITests: XCTestCase {
         XCTAssertEqual(skinState(app), "smut", "the choice is kept across a launch")
     }
 
-    /// The subtitle look (owner, 2026-11-17): the plate until chosen, "Text only" one press away,
+    /// The subtitle look (owner, 2026-11-17): the plate until chosen, "Yellow text" one press away,
     /// and the choice kept across a launch.
     func testChoosingTextOnlySubtitlesPersists() {
         // No launch argument for the setting: it would outrank what the button saves.
@@ -231,7 +231,7 @@ final class SkinWalkUITests: XCTestCase {
         wait(upTo: 3) { style() == after }
         XCTAssertEqual(style(), after, "one press moves to the other look")
         // The kicker style sets the label in capitals, so case is not compared.
-        XCTAssertEqual(toggle.label.lowercased(), after == "bare" ? "subtitles: text only. switch to plate." : "subtitles: plate. switch to text only.")
+        XCTAssertEqual(toggle.label.lowercased(), after == "bare" ? "subtitles: yellow text. switch to plate." : "subtitles: plate. switch to yellow text.")
         app.terminate()
 
         app = launch(["-kjskin", "day", "-kjtab", "account"])

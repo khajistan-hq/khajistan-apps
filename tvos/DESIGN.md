@@ -479,9 +479,10 @@ over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal 
 says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
 "i dont want info like 'regional broadcast by...' the apple tv").
 
-**Subtitles: Plate or Text only** (owner, 2026-11-17: "a caption option without the background
+**Subtitles: Plate or Yellow text** (owner, 2026-11-17: "a caption option without the background
 (only yellow text) that one can choose"). Account carries one button, as the colours do. The
-plate below is the default. Text only is the house yellow `#F3FB04` in every skin, with a 2pt black
+plate below is the default. Yellow text (the website's name for it) is the house yellow `#F3FB04`
+in every skin, with a 2pt black
 edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
 The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
 sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,

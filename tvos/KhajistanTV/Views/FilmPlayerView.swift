@@ -359,15 +359,16 @@ struct FilmPlayerView: View {
         }
     }
 
-    /// Back puts a scrubbed film back where it was, as Apple's player does; then it lets go of a
-    /// lit control; otherwise one Back stops the film and closes the screen. It used to hide the
-    /// panel first, which read as Back doing nothing.
+    /// Back, in order: puts a scrubbed film back where it was; closes the full film's bottom bar
+    /// over its picture; lets go of a lit control (under VoiceOver, where the bar stays); otherwise
+    /// stops the film and closes the screen. With no picture under the bar (connecting, ended,
+    /// failed, refused) it stops at once, since the bar is then all there is to read.
     private func back() {
         if scrub != nil { return endScrub(play: false) }
         // In the full film Back closes the bottom bar first, as Apple's player does (owner,
         // 2026-11-17: "a back button shoud exit the bottom bar"); with the bar closed, Back stops
         // the film. Not under VoiceOver, where the bar never hides: there Back stops at once.
-        if full != nil, overlayVisible, OverlayTiming.hidesItself {
+        if full != nil, overlayVisible, showsPicture, refusal == nil, OverlayTiming.hidesItself {
             armed = nil
             hideTask?.cancel()
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }

@@ -367,8 +367,10 @@ struct FilmPlayerView: View {
         if scrub != nil { return endScrub(play: false) }
         // In the full film Back closes the bottom bar first, as Apple's player does (owner,
         // 2026-11-17: "a back button shoud exit the bottom bar"); with the bar closed, Back stops
-        // the film. Not under VoiceOver, where the bar never hides: there Back stops at once.
-        if full != nil, overlayVisible, showsPicture, refusal == nil, OverlayTiming.hidesItself {
+        // the film. Not under VoiceOver, where the bar never hides: there Back lets go of a lit control,
+        // then stops the film.
+        // `movable`: a picture is on, playing, paused or catching up after a skip.
+        if movable, overlayVisible, refusal == nil, OverlayTiming.hidesItself {
             armed = nil
             hideTask?.cancel()
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }

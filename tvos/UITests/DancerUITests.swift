@@ -82,10 +82,11 @@ final class DancerUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    private func openRadio(_ ids: [String], region: String = "indus", skin: String, recorded: Bool = false, _ app: XCUIApplication) -> String? {
+    private func openRadio(_ ids: [String], region: String = "indus", skin: String, recorded: Bool = false,
+                           extra: [String] = [], _ app: XCUIApplication) -> String? {
         // `recorded` reads the recorded list, not the live one: the live Indus radio shelf fell to
         // two Indian stations on 2026-11-16, and none of the three Pakistani FM stations was on it.
-        app.launchArguments = ["-kjskin", skin] + (recorded ? ["-kjfixturesonly", "YES"] : [])
+        app.launchArguments = ["-kjskin", skin] + (recorded ? ["-kjfixturesonly", "YES"] : []) + extra
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
@@ -130,35 +131,74 @@ final class DancerUITests: XCTestCase {
         return id
     }
 
-    /// A Pakistani or Punjabi FM station on a live MP3 mount, played through LiveRadio: the signal
-    /// must be readable, and the dancer comes on when what is playing carries a beat. Live radio may
-    /// be talking at that minute, so the beat is recorded rather than required; the signal is required.
-    /// A mount is read only while the station plays, and the stations are live third-party carriers:
-    /// with live media (KJ_LIVE_RECEIVER=1) one not playing in 45 s gives way to the next, three at
-    /// most, then the test skips (CI 2026-11-01, 11-12). With the local test media, a station that
-    /// does not play fails, as does a station that plays and is not readable.
+    /// Pakistani and Punjabi FM stations in the recorded Indus list, in the order the walk reaches
+    /// them. The live Indus radio shelf fell to two Indian stations on 2026-11-16, so the recorded
+    /// list is read in every run.
+    static let radioStations = ["radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4", "radio-in-punjab-rocks-radio"]
+
+    /// An FM station plays: the signal must be readable, and the dancer comes on when what is
+    /// playing carries a beat. A station may be talking at that minute, so the beat is recorded
+    /// rather than required; the signal is required. By default the station plays the local test
+    /// sound through AVPlayer; with `TEST_RUNNER_KJ_LIVE_RECEIVER=1` it plays its live mount
+    /// through LiveRadio, and a station whose live carrier is down gives way to the next, three at
+    /// most, then the test is skipped (CI 2026-11-01, 11-12).
     func testRadioDancer() throws {
-        // The recorded list: the live Indus radio shelf fell to two Indian stations on 2026-11-16.
-        var left = ["radio-in-punjab-rocks-radio", "radio-pk-cityfm89", "radio-pk-hum-fm-106-2", "radio-pk-mera-fm-107-4"]
-        var tried: [String] = []
-        for _ in 0..<3 {
+        let run = radioDancer(dead: [], tries: 3)
+        guard run.played == nil, kjLiveMedia, !run.tried.isEmpty else { return }
+        throw XCTSkip("No radio station's live carrier played, three tried: \(run.tried.map { "\($0.id): \($0.why)" }.joined(separator: "; ")). LiveRadio was not proved on this run.")
+    }
+
+    /// The path a dead live carrier takes, run on every build: `-kjdeadchannels` makes the first
+    /// two stations the walk reaches fail as a dead signal does. The test must move past both, in
+    /// order, and check the third.
+    func testRadioDancerMovesPastDeadStations() {
+        let dead = Array(Self.radioStations.prefix(2))
+        let run = radioDancer(dead: dead, tries: 3)
+        XCTAssertEqual(run.tried.map(\.id), dead, "both dead stations are tried and passed over: \(run.tried)")
+        XCTAssertEqual(run.played, Self.radioStations[2], "the third station plays and is checked")
+    }
+
+    /// Opens up to `tries` stations, one launch each, and checks the first that plays. A station
+    /// counts as playing only while it is the channel on screen: the player moves on from a dead
+    /// signal by itself 3 s after it fails, and the next channel playing is not this station
+    /// playing. A station in `dead`, or a dead live carrier, is passed over; anything else fails
+    /// the test (the local test sound not playing, a player stuck connecting, paused or never
+    /// opened). Returns the station checked, or nil, with what each passed-over station did.
+    private func radioDancer(dead: [String], tries: Int) -> (played: String?, tried: [(id: String, why: String)]) {
+        var left = Self.radioStations
+        var tried: [(id: String, why: String)] = []
+        let extra = dead.isEmpty ? [] : ["-kjdeadchannels", dead.joined(separator: ",")]
+        for _ in 0..<tries {
             let app = XCUIApplication()
-            let id = try XCTUnwrap(openRadio(left, skin: "day", recorded: true, app), "a progressive radio channel must open")
+            guard let id = openRadio(left, skin: "day", recorded: true, extra: extra, app) else {
+                XCTFail("a progressive radio channel must open; left: \(left)")
+                return (nil, tried)
+            }
             left.removeAll { $0 == id }
             let state = app.staticTexts["playerState"]
+            let current = app.staticTexts["currentChannel"]
             XCTAssertTrue(state.waitForExistence(timeout: 30))
+            var moved = false
             let tuned = Date().addingTimeInterval(45)
-            while Date() < tuned, state.label != "Playing" { Thread.sleep(forTimeInterval: 0.5) }
-            // Read once, before the app is closed: a terminated app's label reads empty.
+            while Date() < tuned {
+                if current.exists, current.label != id { moved = true; break }
+                if state.label == "Playing" { break }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            // Read once, before the app is closed: a terminated app's labels read empty.
             let label = state.label
-            if label != "Playing" {
+            let on = current.exists ? current.label : ""
+            if moved || label != "Playing" || on != id {
+                let why = on != id ? "the player moved on to '\(on)'" : "'\(label)'"
                 shot("\(id)-not-playing", app)
                 app.terminate()
-                // As playsOrSkips: a player stuck connecting, paused or never opened is a failure,
-                // and so is the local test media not playing. Only a dead live carrier moves on.
                 let stuck = label == "Connecting…" || label == "Paused" || label.isEmpty
-                guard kjLiveMedia, !stuck else { XCTFail("\(id) did not play: '\(label)'"); return }
-                tried.append("\(id): \(label)")
+                let deadCarrier = kjLiveMedia && (moved || !stuck)
+                guard dead.contains(id) || deadCarrier else {
+                    XCTFail("\(id) did not play: \(why)")
+                    return (nil, tried)
+                }
+                tried.append((id, why))
                 continue
             }
             XCTAssertTrue(dancer(app).waitForExistence(timeout: 30))
@@ -166,12 +206,12 @@ final class DancerUITests: XCTestCase {
             while Date() < deadline, status(app).hasPrefix("stage=absent") { Thread.sleep(forTimeInterval: 0.5) }
             XCTAssertFalse(status(app).hasPrefix("stage=absent"), "a playing radio mount must be readable (\(status(app)))")
             let first = waitForDancing(app, timeout: 40)
-            print("DANCER radio \(id) first: \(first)")
+            print("DANCER radio \(id) first: \(first) passed over: \(tried)")
             _ = photograph("radio-\(id)", app)
             app.terminate()
-            return
+            return (id, tried)
         }
-        throw XCTSkip("no radio station played within 45 s, three tried: \(tried)")
+        return (nil, tried)
     }
 
     /// Waits up to 45 s for the station opened to play. When its live carrier is off air the test

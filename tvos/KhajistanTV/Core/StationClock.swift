@@ -197,10 +197,11 @@ enum StationClock {
         // ahead left it with no return time from the 1st to the 10th. A later day's strip is placed
         // by its own day, so one filed tomorrow past 86400 is weighed against the day after's. (Today's
         // strips past 86400 were answered above, before tomorrow's are read, as they always were.)
-        // ponytail: stops at the month's last day; the next month's file is not read here.
+        // Past the month's last day, `next_day`: the next month's first strip per channel, which
+        // the builder copies into each month file (owner, 2026-11-16), as kj-station-clock.js.
         var later: (slot: Programming.Slot, date: String)? = nil
         var laterAt = Double.infinity
-        for d in p.days {
+        for d in p.days + (p.next_day.map { [$0] } ?? []) {
             guard let n = dayNumber(d.date), n > from else { continue }
             for slot in d.channels[channel] ?? [] {
                 let s = Double(n - from) * daySeconds + slot.startSecond

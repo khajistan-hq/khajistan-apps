@@ -152,7 +152,9 @@ final class DancerUITests: XCTestCase {
     /// The path a dead live carrier takes, run on every build: `-kjdeadchannels` makes the first
     /// two stations the walk reaches fail as a dead signal does. The test must move past both, in
     /// order, and check the third.
-    func testRadioDancerMovesPastDeadStations() {
+    func testRadioDancerMovesPastDeadStations() throws {
+        // A live run would need the third station's real carrier up; testRadioDancer covers live.
+        try XCTSkipIf(kjLiveMedia, "the move past dead stations is proved on the local test sound")
         let dead = Array(Self.radioStations.prefix(2))
         let run = radioDancer(dead: dead, tries: 3)
         XCTAssertEqual(run.tried.map(\.id), dead, "both dead stations are tried and passed over: \(run.tried)")

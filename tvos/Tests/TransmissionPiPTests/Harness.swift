@@ -130,7 +130,8 @@ final class ProgrammeSubtitleFollower {
         Probe.lastFollower = self
     }
     func text() -> String? { subtitles.text }
-    func end() { ended = true }
+    var cleared = false
+    func end(clearing: Bool = true) { ended = true; cleared = clearing }
 }
 final class AppModel {
     var skin = 0
@@ -294,8 +295,9 @@ print("\(opensOnTop ? "PASS" : "FAIL") full screen opens the channel over whatev
 if !opensOnTop { failures += 1 }
 carried.pip.onStart?()
 carried.pip.onRestore?()
-print("\(follower.ended ? "PASS" : "FAIL") full screen ends the window's subtitles for the screen to load")
-if !follower.ended { failures += 1 }
+let restoreKeeps = follower.ended && !follower.cleared
+print("\(restoreKeeps ? "PASS" : "FAIL") full screen stops the window's follower and leaves its subtitle up until it closes")
+if !restoreKeeps { failures += 1 }
 let unloaded = Probe()
 unloaded.subtitles.tracks = []
 unloaded.startPictureInPicture()
@@ -306,7 +308,7 @@ let closed = Probe()
 closed.startPictureInPicture()
 closed.pip.onStart?()
 closed.pip.onEnd?()
-let closedEnds = Probe.lastFollower!.ended && closed.model.transmissionPiP == nil
+let closedEnds = Probe.lastFollower!.ended && Probe.lastFollower!.cleared && closed.model.transmissionPiP == nil
 print("\(closedEnds ? "PASS" : "FAIL") closing the window ends its subtitles and the channel")
 if !closedEnds { failures += 1 }
 func waitForBoundary(_ ready: () -> Bool) async -> Bool {

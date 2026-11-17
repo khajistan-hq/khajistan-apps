@@ -74,3 +74,54 @@ struct ChangeFollower<Key: Equatable> {
         return true
     }
 }
+
+/// What the PiP window does with each reading of its player, ten times a second: what the bar shows
+/// (playing or paused), and whether the window's own Play has to be passed on.
+///
+/// The bar's and the remote's Play/Pause are asked here (`asked`): the bar shows the asked state
+/// while the player catches up (a Transmission Play retunes, which stops the picture for a moment),
+/// for ten seconds at most. The window's own Play works AVPlayer directly and resumes the same item
+/// where it stopped; a broadcast passes that on to rejoin live. A new item (a retune, a handover)
+/// is not the window's Play, so it is never passed on, and a rejoin cannot set off another.
+struct PiPPlayFollower {
+    static let hold: Double = 10
+
+    private(set) var shown: Bool
+    private var asked: (playing: Bool, at: Double)?
+    private var pausedItem: ObjectIdentifier?
+
+    init(playing: Bool) { shown = playing }
+
+    /// The bar or the remote asked for `playing` at `now` (seconds).
+    mutating func ask(_ playing: Bool, at now: Double) {
+        asked = (playing, now)
+        shown = playing
+    }
+
+    /// The player reads `playing` on `item` at `now`. True when the window's own Play has to be
+    /// passed on.
+    mutating func read(playing: Bool, item: ObjectIdentifier?, at now: Double) -> Bool {
+        if let asked {
+            if asked.playing == playing || now - asked.at >= Self.hold { self.asked = nil } else { return false }
+        }
+        defer { shown = playing }
+        if !playing {
+            if shown || pausedItem == nil { pausedItem = item }
+            return false
+        }
+        let windowPlay = !shown && pausedItem != nil && pausedItem == item
+        pausedItem = nil
+        return windowPlay
+    }
+}
+
+/// The caption the PiP window draws into a file's picture, read on every tick whether it is drawn
+/// or not: the reading is what follows a Transmission handover (ProgrammeSubtitleFollower loads the
+/// next programme and hands its track to tvOS), so a window showing a stream must still read.
+enum PiPCaptionFeed {
+    static func drawn(read: () -> String?, intoPicture: Bool) -> String? {
+        let text = read()
+        guard intoPicture, let text, !text.isEmpty else { return nil }
+        return text
+    }
+}

@@ -77,10 +77,9 @@ final class PictureInPicture: NSObject {
     @ObservationIgnored private var compositing: Task<Void, Never>?
     /// `stop()` came while the window was opening: if AVKit opens it anyway, it is closed at once.
     @ObservationIgnored private var abandoned = false
-    /// What the bar or the remote last asked for, so a change made by the window's own control is
-    /// told apart and passed on.
-    @ObservationIgnored private var asked: Bool?
-    @ObservationIgnored private var pausedSince: ContinuousClock.Instant?
+    /// The bar's shown state and the window's own Play (PiPPlayFollower).
+    @ObservationIgnored private var playFollower = PiPPlayFollower(playing: true)
+    @ObservationIgnored private let started = ContinuousClock.now
     /// How long `start` waits for AVKit to open the window.
     static let startWait: Duration = .seconds(6)
     /// How long the window waits, on full screen, for the player screen to come up before it
@@ -173,7 +172,7 @@ final class PictureInPicture: NSObject {
     /// Play or pause the picture in the window.
     func setPlaying(_ playing: Bool) {
         guard player != nil else { return }
-        asked = playing
+        playFollower.ask(playing, at: seconds)
         if let onSetPlaying { onSetPlaying(playing) } else if playing { player?.play() } else { player?.pause() }
         isPlaying = playing
     }
@@ -201,6 +200,7 @@ final class PictureInPicture: NSObject {
         }
         lifecycle.started()
         isPlaying = player?.timeControlStatus != .paused
+        playFollower = PiPPlayFollower(playing: isPlaying)
         onStart?()
         // The screen may have refused the window (`onStart` stops it): only a window still up
         // takes the subtitle track from the screen.
@@ -251,35 +251,29 @@ final class PictureInPicture: NSObject {
                 self.drawsIntoPicture = player.currentItem.map {
                     $0.videoComposition?.customVideoCompositorClass == HouseCaptionCompositor.self
                 } ?? false
-                HouseCaptionCompositor.show(self.drawsIntoPicture
-                    ? self.captions?().flatMap { $0.isEmpty ? nil : HouseCaptionCompositor.Caption(text: $0, skin: skin) } : nil)
+                let text = PiPCaptionFeed.drawn(read: { self.captions?() }, intoPicture: self.drawsIntoPicture)
+                HouseCaptionCompositor.show(text.map { HouseCaptionCompositor.Caption(text: $0, skin: skin) })
                 self.followPlaying(player)
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
 
-    /// The window's own Play works AVPlayer directly, from where the picture stopped. A
-    /// Transmission channel is a broadcast, so a Play after a real pause (two seconds or more: a
-    /// programme handover stops the picture for less) is passed on to rejoin it live.
+    /// The window's own Play works AVPlayer directly, from where the picture stopped: a broadcast
+    /// passes it on to rejoin live (PiPPlayFollower, which also holds the bar's state while a
+    /// Play of its own retunes).
     private func followPlaying(_ player: AVPlayer) {
-        let playing = player.timeControlStatus != .paused
-        if !playing, pausedSince == nil { pausedSince = .now }
-        defer { if playing { pausedSince = nil } }
-        guard playing != isPlaying else {
-            if asked == playing { asked = nil }
-            return
-        }
-        isPlaying = playing
-        if asked == playing {
-            asked = nil
-        } else if playing, let since = pausedSince, ContinuousClock.now - since >= .seconds(2) {
-            onWindowPlay?()
-        }
+        let windowPlay = playFollower.read(playing: player.timeControlStatus != .paused,
+                                           item: player.currentItem.map(ObjectIdentifier.init), at: seconds)
+        if isPlaying != playFollower.shown { isPlaying = playFollower.shown }
+        if windowPlay { onWindowPlay?() }
     }
 
-    /// Gives a file the caption compositor. A stream has no video tracks to compose (HLS), and is
-    /// left to tvOS's own drawing of its track.
+    private var seconds: Double {
+        let elapsed = ContinuousClock.now - started
+        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+    }
+
     /// The compositor draws frames as they come off the track, so a picture tvOS would turn or
     /// scale (a phone video's rotation, a non-square pixel) is left alone rather than drawn wrong.
     private func composite(_ item: AVPlayerItem) {
@@ -312,8 +306,6 @@ final class PictureInPicture: NSObject {
         }
         composited.removeAllObjects()
         drawsIntoPicture = false
-        asked = nil
-        pausedSince = nil
         player = nil
         letGo()
     }

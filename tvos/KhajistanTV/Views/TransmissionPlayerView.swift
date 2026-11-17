@@ -595,8 +595,9 @@ struct TransmissionPlayerView: View {
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.transmissionPiP === pip else { return }
-            // The screen that opens loads the programme's subtitles afresh.
-            follower.end()
+            // The screen that opens loads the programme's subtitles afresh; the window's stay until
+            // it has closed.
+            follower.end(clearing: false)
             // transmissionPiP stays set: the player that opens over whatever is on top takes the
             // channel over as it plays (start(), RootView). If it cannot open, the next signal to
             // start still stops this one rather than playing over it.

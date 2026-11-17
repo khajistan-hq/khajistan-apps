@@ -374,8 +374,8 @@ struct FilmPlayerView: View {
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.filmPiP?.controller === player else { return }
-            // The screen that opens attaches the film's tracks afresh.
-            subtitles.clear()
+            // The track stays selected, so the window keeps its subtitle until it has closed; the
+            // screen that takes the film over attaches the tracks afresh, which hides tvOS's own.
             model.restoringFilm = film
         }
         pip.onEnd = {
@@ -434,7 +434,10 @@ struct FilmPlayerView: View {
             model.silenceRadio()
             full = resuming.grant ?? (kind: nil, expiresAt: nil)
             surfaceFocused = true
-            followTracks()
+            // Paused in the window or playing, its tracks come back to the house view now.
+            if let item = controller.player.currentItem {
+                await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin)
+            }
             wake()
             return
         }

@@ -157,16 +157,27 @@ enum TopScreen {
             return
         }
         weak var host: UIViewController?
-        // The root's environment does not reach a UIKit-presented screen: the model and the skin go with it.
-        let palette = Palette(model.skin)
-        let screen = make({ host?.dismiss(animated: true) })
-            .environment(model)
-            .environment(\.palette, palette)
-            .foregroundStyle(palette.ink)
-            .tint(palette.accent)
+        // The root's environment does not reach a UIKit-presented screen: the model and the skin
+        // go with it, the skin read as it turns (dawn, dusk), not once.
+        let screen = Skinned(model: model, content: make({ host?.dismiss(animated: true) }))
         let controller = UIHostingController(rootView: screen)
         controller.modalPresentationStyle = .fullScreen
         host = controller
         top.present(controller, animated: true)
+    }
+}
+
+/// A UIKit-presented screen with the root's model and the skin, read in `body` so it follows the sky.
+private struct Skinned<Content: View>: View {
+    let model: AppModel
+    let content: Content
+
+    var body: some View {
+        let palette = Palette(model.skin)
+        content
+            .environment(model)
+            .environment(\.palette, palette)
+            .foregroundStyle(palette.ink)
+            .tint(palette.accent)
     }
 }

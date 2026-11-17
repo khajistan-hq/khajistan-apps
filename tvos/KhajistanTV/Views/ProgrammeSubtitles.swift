@@ -133,11 +133,12 @@ final class ProgrammeSubtitleFollower {
         return subtitles.text
     }
 
-    /// The window is done: stop loading and clear what was shown.
-    func end() {
+    /// The window is done: stop loading, and clear what was shown unless a screen is taking the
+    /// channel over (Full screen), whose own load replaces it.
+    func end(clearing: Bool = true) {
         ended = true
         loading?.cancel()
         loading = nil
-        subtitles.clear()
+        if clearing { subtitles.clear() }
     }
 }

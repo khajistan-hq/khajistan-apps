@@ -1302,6 +1302,27 @@ func followingWalksTheRosterAndHandsBackToTheClock() throws {
     try expectEqual(StationClock.following(current, in: p, at: pkt(2026, 10, 10, 8, 30, 0)), nil)
 }
 
+/// `year` and `part` reach the strip only if the decoder reads them (Fable refute, 2026-11-16:
+/// both were declared and never decoded, so every strip showed neither). Lenient like `title`.
+func programmeDecodesYearAndPart() throws {
+    let both = try decode(Programming.Programme.self, #"{"id":"x","year":1988,"part":"Part 4 of 5"}"#)
+    try expectEqual(both.year, 1988)
+    try expectEqual(both.part, "Part 4 of 5")
+    let wrong = try decode(Programming.Programme.self, #"{"id":"x","year":"1988","part":4}"#)
+    try expectEqual(wrong.year, nil)
+    try expectEqual(wrong.part, nil)
+}
+
+/// Just after midnight on the 1st, Up next starts on last month's late strip (prev_day) and goes
+/// on into the 1st (Fable refute, 2026-11-16: it stopped after one strip).
+func upcomingWalksOnFromPrevDay() throws {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("station-clock-fixture-2026-12.json")
+    let p = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url)).programming
+    let got = StationClock.upcoming(p, channelId: "radio", at: pkt(2026, 12, 1, 0, 5, 0), count: 5)
+    try expectEqual(got.map { "\($0.date) \($0.startLabel)" },
+                    ["2026-11-30 00:12", "2026-12-01 01:11", "2026-12-01 02:50", "2026-12-01 02:59", "2026-12-01 03:52"])
+}
+
 func upcomingListsTheNextStripsInOrder() throws {
     let p = try syntheticSchedule()
     func labels(_ strips: [ScheduleStrip]) -> [String] { strips.map { "\($0.date) \($0.startLabel)-\($0.endLabel) \($0.show?.slug ?? "-")" } }
@@ -4812,6 +4833,8 @@ let tests: [(String, () throws -> Void)] = [
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
+    ("A programme decodes year and part", programmeDecodesYearAndPart),
+    ("upcoming() walks on from prev_day on the 1st", upcomingWalksOnFromPrevDay),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
     ("Real schedule: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),

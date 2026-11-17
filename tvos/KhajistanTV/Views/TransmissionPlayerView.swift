@@ -621,9 +621,7 @@ struct TransmissionPlayerView: View {
         guard !sources.isEmpty else { return }
         let opened = Date()
         let store = store
-        let files = sources.map { source, code in
-            (RecordedSubtitles.Track(code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil)), source)
-        }
+        let files = fileTracks(sources)
         let first = SubtitleChoice.fileOpener(
             available: files.map(\.0.code), stored: UserDefaults.standard.string(forKey: SubtitleChoice.storeKey),
             preferred: Locale.preferredLanguages, named: SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? ""))
@@ -654,6 +652,15 @@ struct TransmissionPlayerView: View {
                asset.url == store.player.attachedURL {
                 tried = item
                 await subtitles.attach(item, listed: SubtitleChoice.house)
+                // Stored files in languages the manifest does not carry (a staged Urdu beside the
+                // manifest's English and Persian), as video.html offers them.
+                if !subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
+                    let store = store
+                    subtitles.addFiles(fileTracks(subtitleSources(air, stored)), first: nil) {
+                        let time = store.player.player.currentTime().seconds
+                        return time.isFinite ? time : nil
+                    }
+                }
                 // Fall back only when this item is still the one playing. A read that fails on the
                 // playing item does fall back, to the same English text.
                 if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
@@ -662,6 +669,12 @@ struct TransmissionPlayerView: View {
                 }
             }
             try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    private func fileTracks(_ sources: [(String, String)]) -> [(RecordedSubtitles.Track, String)] {
+        sources.map { source, code in
+            (RecordedSubtitles.Track(code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil)), source)
         }
     }
 

@@ -127,7 +127,8 @@ struct PnvReelsView: View {
         .task { await model.saves.load() }
         .onChange(of: position) {
             // The last page known, so a nil from the scroll view later still names a real page.
-            if let position { home = position }
+            // Not while a restart waits: only reopenIfLost() ends that, on the new first page.
+            if let position, home != "" { home = position }
             activate()
         }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.

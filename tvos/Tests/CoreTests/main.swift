@@ -4860,6 +4860,12 @@ func pipPlayFollowerPassesOnTheWindowsOwnPlayOnce() throws {
     try expect(bar.shown, "held while the retune runs")
     try expectEqual(bar.read(playing: false, item: b, at: 2), .none)
     try expectEqual(bar.read(playing: true, item: b, at: 3), .none, "the bar's own Play is not passed on again")
+    // The bar's Pause, then the window's own Play of the same item: the window's (Fable round 5).
+    var mixed = PiPPlayFollower(playing: true)
+    _ = mixed.read(playing: true, item: a, at: 0)
+    mixed.ask(false, at: 1)
+    try expectEqual(mixed.read(playing: false, item: a, at: 1.2), .none)
+    try expectEqual(mixed.read(playing: true, item: a, at: 4), .windowPlay, "the window's Play after the bar's Pause")
     // A Play the player never follows lets go after the hold.
     var stuck = PiPPlayFollower(playing: false)
     stuck.ask(true, at: 0)

@@ -213,6 +213,21 @@ final class PlayerController {
         state = .paused
     }
 
+    /// Set while the picture-in-picture window carries this player (PictureInPicture).
+    var followsWindow = false
+
+    /// The window's own Play or Pause worked AVPlayer directly: the state follows it, and nothing
+    /// is played, paused or faded again (`resume()` would fade the sound in from 0 and wait for a
+    /// change that never comes, as AVPlayer is already playing).
+    func follow(playing: Bool) {
+        // A failed or stopped signal stays as it is: an end of file or a stall is not a Pause.
+        if case .failed = state { return }
+        guard state != .idle else { return }
+        fadeTask?.cancel()
+        fadeInPending = false
+        state = playing ? .playing : .paused
+    }
+
     func resume() {
         volume = 0
         fadeInPending = true
@@ -411,8 +426,10 @@ final class PlayerController {
         guard liveRadio == nil else { return }
         switch player.timeControlStatus {
         case .playing:
-            // A queued ready/seek callback cannot override a newer explicit Pause.
-            guard state != .paused else { player.pause(); return }
+            // A queued ready/seek callback cannot override a newer explicit Pause. In the
+            // picture-in-picture window a Play read here is the window's own control, not a late
+            // callback: followed, not undone.
+            guard state != .paused || followsWindow else { player.pause(); return }
             timeoutTask?.cancel()
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }

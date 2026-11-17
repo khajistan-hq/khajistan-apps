@@ -54,10 +54,13 @@ final class PictureInPicture: NSObject {
     @ObservationIgnored var captionLabel: (@MainActor () -> String?)?
     /// Works the bar's caption control: the next language, then off.
     @ObservationIgnored var onCaptionToggle: (() -> Void)?
-    /// Play or pause from the bar or the remote, and the window's own Play or Pause, which work
-    /// AVPlayer directly and are passed on here so the player's state follows (a broadcast rejoins
-    /// live on Play). Nil plays or pauses AVPlayer.
+    /// Play or pause from the bar or the remote. Nil plays or pauses AVPlayer.
     @ObservationIgnored var onSetPlaying: ((Bool) -> Void)?
+    /// The player whose state follows the window's own Play and Pause, which work AVPlayer directly.
+    @ObservationIgnored weak var controller: PlayerController?
+    /// A broadcast: the window's own Play, after a pause, rejoins it live (`onSetPlaying(true)`)
+    /// rather than playing on from where it stopped.
+    @ObservationIgnored var rejoinsOnPlay = false
     /// Called when the window is up, so the player screen can close behind it.
     @ObservationIgnored var onStart: (() -> Void)?
     /// Called when the window could not open, with the reason to show.
@@ -80,6 +83,8 @@ final class PictureInPicture: NSObject {
     /// The bar's shown state and the window's own Play (PiPPlayFollower).
     @ObservationIgnored private var playFollower = PiPPlayFollower(playing: true)
     @ObservationIgnored private let started = ContinuousClock.now
+    /// The item last read, held so its identity cannot pass to a new item between two readings.
+    @ObservationIgnored private var lastItem: AVPlayerItem?
     /// How long `start` waits for AVKit to open the window.
     static let startWait: Duration = .seconds(6)
     /// How long the window waits, on full screen, for the player screen to come up before it
@@ -201,6 +206,7 @@ final class PictureInPicture: NSObject {
         lifecycle.started()
         isPlaying = player?.timeControlStatus != .paused
         playFollower = PiPPlayFollower(playing: isPlaying)
+        self.controller?.followsWindow = true
         onStart?()
         // The screen may have refused the window (`onStart` stops it): only a window still up
         // takes the subtitle track from the screen.
@@ -263,13 +269,20 @@ final class PictureInPicture: NSObject {
     /// player's state follows and a broadcast rejoins live (PiPPlayFollower, which also holds the
     /// bar's state while a Play of its own retunes).
     private func followPlaying(_ player: AVPlayer) {
+        let item = player.currentItem
+        lastItem = item
         let event = playFollower.read(playing: player.timeControlStatus != .paused,
-                                      item: player.currentItem.map(ObjectIdentifier.init), at: seconds)
+                                      item: item.map(ObjectIdentifier.init), at: seconds)
         if isPlaying != playFollower.shown { isPlaying = playFollower.shown }
         switch event {
-        case .windowPlay: onSetPlaying?(true)
-        case .windowPause: onSetPlaying?(false)
-        case .none: break
+        case .windowPlay:
+            if rejoinsOnPlay { onSetPlaying?(true) } else { controller?.follow(playing: true) }
+        case .windowPause:
+            // The end of the file stops the picture too, and that is not a Pause.
+            if let item, item.duration.isNumeric, item.currentTime().seconds >= item.duration.seconds - 1 { return }
+            controller?.follow(playing: false)
+        case .none:
+            break
         }
     }
 
@@ -310,6 +323,8 @@ final class PictureInPicture: NSObject {
         }
         composited.removeAllObjects()
         drawsIntoPicture = false
+        controller?.followsWindow = false
+        lastItem = nil
         player = nil
         letGo()
     }
@@ -344,6 +359,7 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         onRestore = nil
         onEnd = nil
         onSetPlaying = nil
+        controller = nil
         onHandOff = nil
         onCaptionToggle = nil
         hasFileCaptions = nil

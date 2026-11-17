@@ -433,6 +433,7 @@ struct ReceiverPlayerView: View {
         // they are paid by the hour, so they stop with the screen (stopEverything).
         // The bar's and the remote's Play/Pause work the player as the screen's does.
         pip.onSetPlaying = { playing in playing ? player.resume() : player.pause() }
+        pip.controller = player
         pip.onStart = { [pip] in
             // A channel step between Select and the window opening stopped this player.
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }

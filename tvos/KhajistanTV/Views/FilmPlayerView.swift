@@ -365,6 +365,7 @@ struct FilmPlayerView: View {
         pip.captions = { subtitles.text }
         pip.skin = { model.skin }
         pip.onSetPlaying = { $0 ? player.resume() : player.pause() }
+        pip.controller = player
         pip.onStart = {
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             away.recordPlace()

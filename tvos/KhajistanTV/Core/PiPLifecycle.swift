@@ -119,7 +119,13 @@ struct PiPPlayFollower {
             playingItem = item
             return windowPlay ? .windowPlay : .none
         }
-        if pausedItem == nil, shown, !askedNow, item != nil, item == playingItem {
+        // The bar's own Pause, confirmed: the item it paused is remembered, so the window's Play of
+        // it afterwards is still the window's.
+        if askedNow {
+            pausedItem = item
+            return .none
+        }
+        if pausedItem == nil, shown, item != nil, item == playingItem {
             pausedItem = item
             return .windowPause
         }

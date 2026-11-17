@@ -94,6 +94,8 @@ final class PictureInPicture {
     var onCaptionToggle: (() -> Void)?
     var skin: (() -> Int)?
     var onSetPlaying: ((Bool) -> Void)?
+    var controller: PlayerController?
+    var rejoinsOnPlay = false
     var onHandOff: (() -> Void)?
     var hasFileCaptions: (() -> Bool)?
     var drawsIntoPicture = false
@@ -262,6 +264,9 @@ carried.startPictureInPicture()
 let follower = Probe.lastFollower!
 let windowReads = carried.pip.captions?() == "a line" && carried.pip.title == "Channel 5"
     && follower.loaded == "programme-1"
+let windowFollows = carried.pip.controller === carried.store.player && carried.pip.rejoinsOnPlay
+print("\(windowFollows ? "PASS" : "FAIL") the window's own Play rejoins the broadcast; its Pause is followed by the channel's player")
+if !windowFollows { failures += 1 }
 print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, named for the channel")
 if !windowReads { failures += 1 }
 carried.pip.onCaptionToggle?()

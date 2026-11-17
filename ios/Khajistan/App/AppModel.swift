@@ -195,7 +195,10 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
-        auth.onPreviewPasswordChange = { [weak self] in self?.browser.clearPreviewSession() }
+        auth.onPreviewPasswordChange = { [weak self] in
+            self?.browser.clearPreviewSession()
+            self?.reading.previewCredentialDidChange()
+        }
         refreshSkin()
         // WebKit's page process starts once the first screen is up, so the first page opened still
         // does not wait for it. A browser already opened has its process and a page not to replace.

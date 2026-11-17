@@ -594,19 +594,20 @@ struct TransmissionPlayerView: View {
     }
 
     /// Lists the tracks of the Stream item the player holds. A handover can leave the last
-    /// programme's item playing for a moment, so only stream-host items are read and a later one is
-    /// followed when it arrives. A manifest with no tracks falls back to the prepared file. The task
-    /// is cancelled when the programme changes.
+    /// programme's item playing for a moment, so only the item of the signal this programme started
+    /// (PlayerController.attachedURL) is read, and a later one (a re-tune mints a new address) is
+    /// followed when it arrives. That is why the loop keeps polling after an attach. A manifest with
+    /// no tracks falls back to the prepared file. The task is cancelled when the programme changes.
     private func followStreamTracks(_ air: OnAir) async {
         var tried: AVPlayerItem?
         while !Task.isCancelled {
             if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
-               (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
+               let asset = item.asset as? AVURLAsset, asset.url.host == KJConfig.streamHost,
+               asset.url == store.player.attachedURL {
                 tried = item
                 await subtitles.attach(item, listed: SubtitleChoice.house)
-                // Fall back only when this item is still the one playing: a previous Stream
-                // programme's item without tracks is no reason to give up on this one. A read that
-                // fails on the playing item does fall back, to the same English text.
+                // Fall back only when this item is still the one playing. A read that fails on the
+                // playing item does fall back, to the same English text.
                 if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
                     await loadFile(air)
                     return

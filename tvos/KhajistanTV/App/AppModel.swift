@@ -55,6 +55,9 @@ final class AppModel {
     var activePiP: PictureInPicture? {
         [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }
     }
+    /// A Transmission channel the picture-in-picture window asked to see full screen again.
+    /// RootView opens it over whatever is on top; the player takes the playing channel over.
+    var restoringTransmission: Int?
     /// A film the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoringFilm: Film?
     /// The Screening Room's films, read from vod.json with the preview password.

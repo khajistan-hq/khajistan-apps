@@ -94,7 +94,10 @@ final class PictureInPicture {
     var onCaptionToggle: (() -> Void)?
     var skin: (() -> Int)?
     var onSetPlaying: ((Bool) -> Void)?
+    var onWindowPlay: (() -> Void)?
     var onHandOff: (() -> Void)?
+    var hasFileCaptions: (() -> Bool)?
+    var drawsIntoPicture = false
     var onStart: (() -> Void)?
     var onFail: ((String) -> Void)?
     var onRestore: (() -> Void)?
@@ -108,10 +111,12 @@ final class RecordedSubtitles {
     var tracks: [Int] = [1]
     var text: String? = "a line"
     var label = "Subtitles · English"
+    var isHandedOff = false
+    var hasFile = false
     var cycled = 0
     var handedOff = 0
     func cycle() { cycled += 1 }
-    func handOff() { handedOff += 1 }
+    func handOff() { handedOff += 1; isHandedOff = true }
 }
 
 /// The window's subtitles: read by `captions`, ended when the window restores or closes.
@@ -129,6 +134,7 @@ final class ProgrammeSubtitleFollower {
 }
 final class AppModel {
     var skin = 0
+    var restoringTransmission: Int?
     enum Section { case transmission }
     enum Link { case channel(Int) }
     var transmissionPiP: PictureInPicture?
@@ -148,6 +154,7 @@ final class Probe {
     var subtitles = RecordedSubtitles()
     var subtitleKey: String? = "programme-1"
     var channel = 5
+    var close: (() -> Void)? = nil
     var model = AppModel()
     var store: TransmissionStore { model.transmission }
     var pip = PictureInPicture()
@@ -258,11 +265,33 @@ let windowReads = carried.pip.captions?() == "a line" && carried.pip.title == "C
 print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, named for the channel")
 if !windowReads { failures += 1 }
 carried.pip.onCaptionToggle?()
+let noLabelBeforeHandOff = carried.pip.captionLabel?() == nil
 carried.pip.onHandOff?()
-let barWorksSubtitles = carried.pip.captionLabel?() == "Subtitles · English" && follower.subtitles.cycled == 1
+let barWorksSubtitles = noLabelBeforeHandOff && carried.pip.captionLabel?() == "Subtitles · English" && follower.subtitles.cycled == 1
     && follower.subtitles.handedOff == 1
-print("\(barWorksSubtitles ? "PASS" : "FAIL") the window hands the stream's track to tvOS; the bar names and cycles it")
+print("\(barWorksSubtitles ? "PASS" : "FAIL") the window hands the stream's track to tvOS; the bar names and cycles it, and not before")
 if !barWorksSubtitles { failures += 1 }
+// A file is offered only once it is drawn into the picture; a stream fallen back to a file never.
+let file = Probe()
+file.subtitles.hasFile = true
+file.startPictureInPicture()
+let fileHidden = file.pip.captionLabel?() == nil && file.pip.hasFileCaptions?() == true
+file.pip.drawsIntoPicture = true
+let fileShown = file.pip.captionLabel?() == "Subtitles · English"
+print("\(fileHidden && fileShown ? "PASS" : "FAIL") a file's subtitles are offered on the bar only while drawn into the picture")
+if !(fileHidden && fileShown) { failures += 1 }
+// The window's own Play rejoins the broadcast live.
+let rejoin = Probe()
+rejoin.startPictureInPicture()
+rejoin.pip.onWindowPlay?()
+// Full screen asks for the channel to open over whatever is on top.
+let restoreTop = Probe()
+restoreTop.startPictureInPicture()
+restoreTop.pip.onStart?()
+restoreTop.pip.onRestore?()
+let opensOnTop = restoreTop.model.restoringTransmission == 5
+print("\(opensOnTop ? "PASS" : "FAIL") full screen opens the channel over whatever is on top")
+if !opensOnTop { failures += 1 }
 carried.pip.onStart?()
 carried.pip.onRestore?()
 print("\(follower.ended ? "PASS" : "FAIL") full screen ends the window's subtitles for the screen to load")
@@ -289,6 +318,10 @@ func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     return true
 }
 Task {
+    _ = await waitForBoundary { rejoin.store.rejoined == 1 }
+    let rejoined = rejoin.store.rejoined == 1
+    print("\(rejoined ? "PASS" : "FAIL") the window's own Play rejoins the channel live")
+    if !rejoined { failures += 1 }
     for stage in ["token", "reply", "valid"] {
         let store = TransmissionStore()
         store.signed.removeAll()

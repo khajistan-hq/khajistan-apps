@@ -144,6 +144,60 @@ final class PiPWindowUITests: XCTestCase {
         XCUIRemote.shared.press(.playPause)
         kjPause(0.8)
         XCTAssertEqual(app.buttons["pipBarToggle"].label, "Pause")
+        // Full screen from the bar over the page: the film opens over it (TopScreen), not under it.
+        XCTAssertTrue(kjFocus(fullScreen, app: app), "Left walks back to Full screen")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["playerState"].waitForExistence(timeout: 30), "the film opens over the page")
+        XCTAssertTrue(app.otherElements["pipBar"].waitForNonExistence(timeout: 10), "the bar goes with the window")
+        kjScreenshot("pip-restored-over-film-page", app: app)
+    }
+
+    /// A Receiver channel in the window, the viewer in the Screening Room (a cover): Full screen
+    /// opens the channel over the cover (Fable round 2: it opened under it, and only the sound was left).
+    func testReceiverComesBackOverACover() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "smut", "-kjpipproof", "YES"]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
+            XCUIRemote.shared.press(.right)
+        }
+        XCUIRemote.shared.press(.select)
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND NOT (identifier BEGINSWITH 'channel-radio-') AND label CONTAINS 'live picture'")).firstMatch
+        XCTAssertTrue(tv.waitForExistence(timeout: 60), "a television channel is listed")
+        XCTAssertTrue(kjFocus(tv, app: app), "the remote reaches it")
+        XCUIRemote.shared.press(.select)
+        try kjTuneUntilPlaying(app)
+        let pip = app.buttons["pipControl"]
+        XCUIRemote.shared.press(.select)
+        kjPause(0.6)
+        for _ in 0..<6 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "the window opens with its bar")
+        // Into the Screening Room, a cover over the root.
+        let rooms = app.buttons["nav-rooms"]
+        XCTAssertTrue(kjFocus(rooms, app: app), "the top bar reaches Rooms")
+        XCUIRemote.shared.press(.select)
+        let door = app.buttons["tvroom-screening"].firstMatch
+        XCTAssertTrue(door.waitForExistence(timeout: 30))
+        XCTAssertTrue(kjFocus(door, app: app))
+        XCUIRemote.shared.press(.select)
+        kjPause(2)
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        XCTAssertTrue(fullScreen.waitForExistence(timeout: 10), "the bar is on the cover")
+        XCTAssertTrue(kjFocus(fullScreen, app: app), "Down reaches the bar's Full screen")
+        kjScreenshot("pip-bar-on-screening-room", app: app)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens over the cover")
+        kjScreenshot("pip-receiver-over-cover", app: app)
+        XCUIRemote.shared.press(.menu)
+        kjPause(2)
+        XCTAssertTrue(door.exists || app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'upnext-' OR identifier BEGINSWITH 'film-'")).firstMatch.exists,
+                      "Back returns to the Screening Room underneath")
     }
 
     /// The real window, on a real Apple TV signed in to an account that can watch Transmission:

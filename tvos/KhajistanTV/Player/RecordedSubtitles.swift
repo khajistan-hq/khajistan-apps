@@ -61,6 +61,22 @@ final class RecordedSubtitles {
     /// True once the track is drawn by AVPlayer rather than this object (`handOff()`).
     var isHandedOff: Bool { group != nil && output == nil }
 
+    /// True while a programme's prepared file is loaded: text the PiP window must draw into the
+    /// picture itself (HouseCaptionCompositor), as tvOS has no track of it.
+    var hasFile: Bool { !cues.isEmpty }
+
+    /// The skin's caption colours for the text tvOS draws itself: bold and half again as large,
+    /// since the window shows it at a third of the size (Apple TV HD, 2026-11-17: yellow on the
+    /// Grove plate in the window). Set again by the window when the skin turns.
+    static func styleRules(_ skin: Skin) -> [AVTextStyleRule] {
+        [AVTextStyleRule(textMarkupAttributes: [
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_BoldStyle as String: true,
+            kCMTextMarkupAttribute_RelativeFontSize as String: 150,
+        ])].compactMap { $0 }
+    }
+
     func clear() {
         generation += 1
         ticker?.cancel()
@@ -125,15 +141,8 @@ final class RecordedSubtitles {
         clear()
         let gen = generation
         // The house view draws the text full screen. In the picture-in-picture window AVPlayer
-        // draws it (handOff()), and these rules give it the skin's caption plate there, bold and
-        // half again as large, since the window shows it at a third of the size (Apple TV HD,
-        // 2026-11-17: yellow on the Grove plate in the window).
-        item.textStyleRules = [AVTextStyleRule(textMarkupAttributes: [
-            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
-            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
-            kCMTextMarkupAttribute_BoldStyle as String: true,
-            kCMTextMarkupAttribute_RelativeFontSize as String: 150,
-        ])].compactMap { $0 }
+        // draws it (handOff()), and these rules give it the skin's caption plate there.
+        item.textStyleRules = Self.styleRules(skin)
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []

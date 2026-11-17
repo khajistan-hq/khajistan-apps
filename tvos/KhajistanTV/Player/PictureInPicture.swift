@@ -40,6 +40,11 @@ final class PictureInPicture: NSObject {
     /// The caption the window draws into a file's picture, nil for none. Read ten times a second
     /// while the window is up.
     @ObservationIgnored var captions: (@MainActor () -> String?)?
+    /// True while the programme's subtitles are a prepared file (not a track tvOS can draw), so a
+    /// file's picture gets the compositor. Nil for never.
+    @ObservationIgnored var hasFileCaptions: (@MainActor () -> Bool)?
+    /// The compositor is drawing into the playing item's picture.
+    private(set) var drawsIntoPicture = false
     /// The skin the caption plate takes.
     @ObservationIgnored var skin: (@MainActor () -> Skin)?
     /// Hands a stream's subtitle track to tvOS as the window opens, which then draws it.
@@ -51,6 +56,8 @@ final class PictureInPicture: NSObject {
     @ObservationIgnored var onCaptionToggle: (() -> Void)?
     /// Play or pause from the bar or the remote. Nil plays or pauses AVPlayer.
     @ObservationIgnored var onSetPlaying: ((Bool) -> Void)?
+    /// The window's own Play, after a pause: a broadcast rejoins live here (`followPlaying`).
+    @ObservationIgnored var onWindowPlay: (() -> Void)?
     /// Called when the window is up, so the player screen can close behind it.
     @ObservationIgnored var onStart: (() -> Void)?
     /// Called when the window could not open, with the reason to show.
@@ -68,7 +75,12 @@ final class PictureInPicture: NSObject {
     /// Items given the caption compositor, so it comes off them when the window has gone.
     @ObservationIgnored private var composited = NSHashTable<AVPlayerItem>.weakObjects()
     @ObservationIgnored private var compositing: Task<Void, Never>?
-
+    /// `stop()` came while the window was opening: if AVKit opens it anyway, it is closed at once.
+    @ObservationIgnored private var abandoned = false
+    /// What the bar or the remote last asked for, so a change made by the window's own control is
+    /// told apart and passed on.
+    @ObservationIgnored private var asked: Bool?
+    @ObservationIgnored private var pausedSince: ContinuousClock.Instant?
     /// How long `start` waits for AVKit to open the window.
     static let startWait: Duration = .seconds(6)
     /// How long the window waits, on full screen, for the player screen to come up before it
@@ -104,6 +116,7 @@ final class PictureInPicture: NSObject {
     @discardableResult
     func start(_ player: AVPlayer) -> Bool {
         guard !isActive, pending == nil else { return false }
+        abandoned = false
         #if DEBUG
         if Self.proof {
             self.player = player
@@ -137,7 +150,7 @@ final class PictureInPicture: NSObject {
         if let pending {
             pending.cancel()
             self.pending = nil
-            controllers.values.first { $0.isPictureInPictureActive }?.stopPictureInPicture()
+            abandoned = true
             finish()
             return
         }
@@ -160,6 +173,7 @@ final class PictureInPicture: NSObject {
     /// Play or pause the picture in the window.
     func setPlaying(_ playing: Bool) {
         guard player != nil else { return }
+        asked = playing
         if let onSetPlaying { onSetPlaying(playing) } else if playing { player?.play() } else { player?.pause() }
         isPlaying = playing
     }
@@ -168,19 +182,45 @@ final class PictureInPicture: NSObject {
 
     private func closeWindow() {
         #if DEBUG
-        if Self.proof { windowClosed(); return }
+        if Self.proof {
+            // As AVKit does: it asks to restore the interface, whoever closed the window, then stops.
+            restoreRequested { _ in self.windowClosed() }
+            return
+        }
         #endif
         controllers.values.first { $0.isPictureInPictureActive }?.stopPictureInPicture()
     }
 
-    private func windowOpened() {
+    private func windowOpened(_ controller: AVPictureInPictureController? = nil) {
         pending?.cancel()
         pending = nil
+        // Stopped while it was opening: no screen is waiting on it, so it closes again at once.
+        guard !abandoned else {
+            controller?.stopPictureInPicture()
+            return
+        }
         lifecycle.started()
         isPlaying = player?.timeControlStatus != .paused
+        onStart?()
+        // The screen may have refused the window (`onStart` stops it): only a window still up
+        // takes the subtitle track from the screen.
+        guard lifecycle.isActive, lifecycle.reason == .none else { return }
         onHandOff?()
         feedWindow()
-        onStart?()
+    }
+
+    /// AVKit asks to restore the interface. The window's own full-screen control opens the screen
+    /// now; the bar's Full screen opened it already; Close and Stop get a plain close. The window
+    /// closes into the screen once it has had a moment to come up.
+    private func restoreRequested(_ completion: @escaping (Bool) -> Void) {
+        if lifecycle.reason != .restore {
+            guard lifecycle.systemRestoreAsked() else { completion(false); return }
+            onRestore?()
+        }
+        Task {
+            try? await Task.sleep(for: Self.restoreSettle)
+            completion(true)
+        }
     }
 
     /// The window has gone, however it was closed.
@@ -195,26 +235,62 @@ final class PictureInPicture: NSObject {
     private func feedWindow() {
         feed?.cancel()
         feed = Task { [weak self] in
+            var styled: (item: AVPlayerItem, skin: Skin)?
             while !Task.isCancelled {
                 guard let self, let player = self.player else { return }
-                if let item = player.currentItem, !self.composited.contains(item) { self.composite(item) }
                 let skin = self.skin?() ?? .day
-                HouseCaptionCompositor.show(self.captions?().flatMap { $0.isEmpty ? nil : HouseCaptionCompositor.Caption(text: $0, skin: skin) })
-                let playing = player.timeControlStatus != .paused
-                if playing != self.isPlaying { self.isPlaying = playing }
+                if let item = player.currentItem {
+                    if !self.composited.contains(item), self.hasFileCaptions?() == true { self.composite(item) }
+                    // tvOS draws a stream's track in the colours set at attach: a skin that turns
+                    // while the window is up (dawn, dusk) turns the window's subtitles with it.
+                    if styled?.item !== item || styled?.skin != skin {
+                        if styled != nil { item.textStyleRules = RecordedSubtitles.styleRules(skin) }
+                        styled = (item, skin)
+                    }
+                }
+                self.drawsIntoPicture = player.currentItem.map {
+                    $0.videoComposition?.customVideoCompositorClass == HouseCaptionCompositor.self
+                } ?? false
+                HouseCaptionCompositor.show(self.drawsIntoPicture
+                    ? self.captions?().flatMap { $0.isEmpty ? nil : HouseCaptionCompositor.Caption(text: $0, skin: skin) } : nil)
+                self.followPlaying(player)
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
 
+    /// The window's own Play works AVPlayer directly, from where the picture stopped. A
+    /// Transmission channel is a broadcast, so a Play after a real pause (two seconds or more: a
+    /// programme handover stops the picture for less) is passed on to rejoin it live.
+    private func followPlaying(_ player: AVPlayer) {
+        let playing = player.timeControlStatus != .paused
+        if !playing, pausedSince == nil { pausedSince = .now }
+        defer { if playing { pausedSince = nil } }
+        guard playing != isPlaying else {
+            if asked == playing { asked = nil }
+            return
+        }
+        isPlaying = playing
+        if asked == playing {
+            asked = nil
+        } else if playing, let since = pausedSince, ContinuousClock.now - since >= .seconds(2) {
+            onWindowPlay?()
+        }
+    }
+
     /// Gives a file the caption compositor. A stream has no video tracks to compose (HLS), and is
     /// left to tvOS's own drawing of its track.
+    /// The compositor draws frames as they come off the track, so a picture tvOS would turn or
+    /// scale (a phone video's rotation, a non-square pixel) is left alone rather than drawn wrong.
     private func composite(_ item: AVPlayerItem) {
         composited.add(item)
         compositing?.cancel()
         compositing = Task { [weak self] in
-            guard let tracks = try? await item.asset.loadTracks(withMediaType: .video), !tracks.isEmpty,
+            guard let track = try? await item.asset.loadTracks(withMediaType: .video).first,
+                  let (transform, size) = try? await track.load(.preferredTransform, .naturalSize),
+                  transform.isIdentity,
                   let made = try? await AVMutableVideoComposition.videoComposition(withPropertiesOf: item.asset),
+                  made.renderSize == size, made.renderScale == 1,
                   !Task.isCancelled, self?.isActive == true else { return }
             made.customVideoCompositorClass = HouseCaptionCompositor.self
             item.videoComposition = made
@@ -235,6 +311,9 @@ final class PictureInPicture: NSObject {
             item.videoComposition = nil
         }
         composited.removeAllObjects()
+        drawsIntoPicture = false
+        asked = nil
+        pausedSince = nil
         player = nil
         letGo()
     }
@@ -242,7 +321,7 @@ final class PictureInPicture: NSObject {
 
 extension PictureInPicture: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
-        MainActor.assumeIsolated { windowOpened() }
+        MainActor.assumeIsolated { windowOpened(controller) }
     }
 
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
@@ -252,20 +331,9 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         }
     }
 
-    /// The window's own full-screen control: the screen opens, and the window closes into it once
-    /// it has had a moment to come up. Close and Stop also ask this; they get a plain close.
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
                                                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        MainActor.assumeIsolated {
-            if lifecycle.reason != .restore {
-                guard lifecycle.systemRestoreAsked() else { completionHandler(false); return }
-                onRestore?()
-            }
-            Task {
-                try? await Task.sleep(for: Self.restoreSettle)
-                completionHandler(true)
-            }
-        }
+        MainActor.assumeIsolated { restoreRequested(completionHandler) }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
@@ -280,8 +348,10 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         onRestore = nil
         onEnd = nil
         onSetPlaying = nil
+        onWindowPlay = nil
         onHandOff = nil
         onCaptionToggle = nil
+        hasFileCaptions = nil
         captions = nil
         captionLabel = nil
         skin = nil

@@ -79,9 +79,10 @@ struct PiPBarHost: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .overlay(alignment: .bottom) {
-                // Only the screen on top carries the bar: a screen under a cover is still drawn,
-                // and a second bar there would be a second Full screen for VoiceOver to find.
+            // An inset, not an overlay: the page moves up for it, so nothing at the foot is
+            // hidden under the bar. Only the screen on top carries it: a screen under a cover is
+            // still drawn, and a second bar there would be a second Full screen for VoiceOver.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if let pip = model.activePiP, PiPBarStack.shared.top == id { PiPBar(pip: pip, focus: $focus) }
             }
             .onAppear { PiPBarStack.shared.push(id) }
@@ -129,5 +130,43 @@ extension View {
     func kjFullScreenCover<Cover: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
                                         @ViewBuilder content: @escaping () -> Cover) -> some View {
         fullScreenCover(isPresented: isPresented, onDismiss: onDismiss) { content().pipBarHost() }
+    }
+}
+
+/// Opens a screen over whatever is on top, as Full screen from the picture-in-picture window must:
+/// SwiftUI cannot present from the root while a page or a room is a cover over it, and the window
+/// has already closed by then, so the picture would play on as sound with nothing on screen
+/// (Fable round 2: a Receiver channel restored over the Screening Room did exactly that).
+/// `otherwise` runs when there is no window to present on, or a closing screen refuses it.
+@MainActor
+enum TopScreen {
+    static func present<Screen: View>(model: AppModel, otherwise: @escaping () -> Void,
+                                      _ make: @escaping (_ close: @escaping () -> Void) -> Screen) {
+        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
+        // The key window, else the app's one window: on a restore from another app the window may
+        // not be key yet when AVKit asks.
+        guard var top = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else { return otherwise() }
+        while let next = top.presentedViewController, !next.isBeingDismissed { top = next }
+        // A screen still closing above `top` refuses a present: wait for it to finish.
+        if let closing = top.presentedViewController {
+            if let coordinator = closing.transitionCoordinator {
+                coordinator.animate(alongsideTransition: nil) { _ in present(model: model, otherwise: otherwise, make) }
+            } else {
+                otherwise()
+            }
+            return
+        }
+        weak var host: UIViewController?
+        // The root's environment does not reach a UIKit-presented screen: the model and the skin go with it.
+        let palette = Palette(model.skin)
+        let screen = make({ host?.dismiss(animated: true) })
+            .environment(model)
+            .environment(\.palette, palette)
+            .foregroundStyle(palette.ink)
+            .tint(palette.accent)
+        let controller = UIHostingController(rootView: screen)
+        controller.modalPresentationStyle = .fullScreen
+        host = controller
+        top.present(controller, animated: true)
     }
 }

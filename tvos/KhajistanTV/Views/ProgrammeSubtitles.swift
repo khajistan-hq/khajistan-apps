@@ -106,6 +106,7 @@ final class ProgrammeSubtitleFollower {
     private let model: AppModel
     private var follower: ChangeFollower<String>
     private var loading: Task<Void, Never>?
+    private var ended = false
 
     /// `loaded` is the programme the screen already loaded for, nil if it had not finished.
     init(_ subtitles: RecordedSubtitles, store: TransmissionStore, model: AppModel, loaded: String?) {
@@ -121,6 +122,8 @@ final class ProgrammeSubtitleFollower {
     /// A stream's tracks, once loaded, go straight to tvOS to draw (the window's); a file's text
     /// is returned for the window to draw into the picture.
     func text() -> String? {
+        // A handover in the moment between Full screen and the window closing loads nothing more.
+        guard !ended else { return nil }
         if follower.changed(to: ProgrammeSubtitles.key(store.phase)) {
             loading?.cancel()
             let subtitles = subtitles, store = store, model = model
@@ -132,6 +135,7 @@ final class ProgrammeSubtitleFollower {
 
     /// The window is done: stop loading and clear what was shown.
     func end() {
+        ended = true
         loading?.cancel()
         loading = nil
         subtitles.clear()

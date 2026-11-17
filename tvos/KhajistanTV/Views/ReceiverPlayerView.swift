@@ -85,7 +85,13 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil) {
+    /// Closes the screen when UIKit presented it (TopScreen, a restore from the PiP window);
+    /// SwiftUI's dismiss otherwise.
+    private let close: (() -> Void)?
+
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil,
+         close: (() -> Void)? = nil) {
+        self.close = close
         _list = State(initialValue: list)
         self.surfChoice = surfChoice
         _listRegion = State(initialValue: regionId)
@@ -217,7 +223,7 @@ struct ReceiverPlayerView: View {
                                            listRegion: listRegion, listTitle: listTitle)
             }
             stopEverything()
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         .onChange(of: controller.state) { _, state in
             wake()
@@ -426,7 +432,7 @@ struct ReceiverPlayerView: View {
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             model.radioAway = away
             stopEverything()
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         pip.onFail = { say($0) }
         pip.onRestore = { [model] in model.restoring = away }

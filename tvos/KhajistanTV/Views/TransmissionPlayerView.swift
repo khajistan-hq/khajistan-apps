@@ -16,6 +16,9 @@ import UIKit
 struct TransmissionPlayerView: View {
     /// The channel the viewer chose. The store holds the channel now on air, which Up and Down change.
     let channel: Int
+    /// Closes the screen when UIKit presented it (TopScreen, a restore from the PiP window);
+    /// SwiftUI's dismiss otherwise.
+    var close: (() -> Void)? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -99,7 +102,7 @@ struct TransmissionPlayerView: View {
                 return
             }
             leave()
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         .onChange(of: store.phase) { wake() }
         // A control cannot stay lit once it is gone from the strip.
@@ -126,7 +129,7 @@ struct TransmissionPlayerView: View {
             switch schedule {
             case .needsPreviewPassword, .noSchedule:
                 leave()
-                dismiss()
+                if let close { close() } else { dismiss() }
             default:
                 break
             }
@@ -566,32 +569,38 @@ struct TransmissionPlayerView: View {
         pip.title = store.channelName(store.channelNumber)
         pip.onHandOff = { follower.subtitles.handOff() }
         pip.captions = { follower.text() }
-        pip.captionLabel = { follower.subtitles.tracks.isEmpty ? nil : follower.subtitles.label }
+        pip.hasFileCaptions = { follower.subtitles.hasFile }
+        // Offered only where the window can draw it: a track tvOS draws, or a file drawn into the
+        // picture. A stream that fell back to a file cannot be drawn there, and says nothing.
+        pip.captionLabel = { [weak pip] in
+            let subtitles = follower.subtitles
+            let drawn = subtitles.isHandedOff || (subtitles.hasFile && pip?.drawsIntoPicture == true)
+            return drawn && !subtitles.tracks.isEmpty ? subtitles.label : nil
+        }
         pip.onCaptionToggle = { follower.subtitles.cycle() }
         pip.skin = { model.skin }
         // A paused transmission is not the transmission any more: Play joins it again, live.
         pip.onSetPlaying = { playing in
             if playing { Task { await store.rejoinLive() } } else { store.player.pause() }
         }
+        pip.onWindowPlay = { Task { await store.rejoinLive() } }
         pip.onStart = {
             // AVKit can finish starting after a retune or after this screen has left.
             guard !left, !switching, store.player === player, store.accessRevision == access,
                   player.state == .playing || player.state == .tuning else { pip.stop(); return }
             model.transmissionPiP = pip
             handedToPiP = true
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.transmissionPiP === pip else { return }
             // The screen that opens loads the programme's subtitles afresh.
             follower.end()
-            // transmissionPiP stays set: the player that opens takes the channel over as it plays
-            // (start()). If it cannot open (signed out, a cover in the way), the next
-            // signal to start still stops this one rather than playing over it.
-            // The station page opens the channel again, as a Top Shelf link does.
-            model.section = .transmission
-            model.link = .channel(store.channelNumber)
+            // transmissionPiP stays set: the player that opens over whatever is on top takes the
+            // channel over as it plays (start(), RootView). If it cannot open, the next signal to
+            // start still stops this one rather than playing over it.
+            model.restoringTransmission = store.channelNumber
         }
         pip.onEnd = {
             follower.end()

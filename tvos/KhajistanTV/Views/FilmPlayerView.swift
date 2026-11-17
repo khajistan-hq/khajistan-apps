@@ -347,7 +347,7 @@ struct FilmPlayerView: View {
         // The film's track goes to tvOS as the window opens, which draws it in the skin's colours;
         // the bar's control moves it to the next language.
         pip.onHandOff = { subtitles.handOff() }
-        pip.captionLabel = { subtitles.tracks.isEmpty ? nil : subtitles.label }
+        pip.captionLabel = { subtitles.isHandedOff ? subtitles.label : nil }
         pip.onCaptionToggle = { subtitles.cycle() }
         pip.captions = { subtitles.text }
         pip.skin = { model.skin }
@@ -600,32 +600,10 @@ enum FilmRestore {
     #endif
 
     static func present(_ film: Film, model: AppModel) {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        // The key window, else the app's one window: on a restore from another app the window
-        // may not be key yet when the delegate is called.
-        let windows = scenes.flatMap(\.windows)
-        guard var top = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
-            // No window to present on: stop the film with its place kept rather than play it unseen.
-            model.silenceRadio()
-            return
+        // No window, or a closing screen in the way: stop the film with its place kept rather
+        // than play it unseen.
+        TopScreen.present(model: model, otherwise: { model.silenceRadio() }) { close in
+            FilmPlayerView(film: film, startsFull: true, close: close)
         }
-        while let next = top.presentedViewController, !next.isBeingDismissed { top = next }
-        // A screen still closing above `top` refuses a present: wait for it to finish, and if
-        // it does not, stop the film with its place kept rather than play it unseen.
-        if let closing = top.presentedViewController {
-            if let coordinator = closing.transitionCoordinator {
-                coordinator.animate(alongsideTransition: nil) { _ in present(film, model: model) }
-            } else {
-                model.silenceRadio()
-            }
-            return
-        }
-        weak var host: UIViewController?
-        let screen = FilmPlayerView(film: film, startsFull: true, close: { host?.dismiss(animated: true) })
-            .environment(model)
-        let controller = UIHostingController(rootView: screen)
-        controller.modalPresentationStyle = .fullScreen
-        host = controller
-        top.present(controller, animated: true)
     }
 }

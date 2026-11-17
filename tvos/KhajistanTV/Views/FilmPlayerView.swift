@@ -126,6 +126,8 @@ struct FilmPlayerView: View {
         .onChange(of: subtitles.tracks.isEmpty) { _, empty in if empty, armed == .subtitles { armed = nil } }
         .onChange(of: controller.state) { _, state in
             if full != nil, state == .playing { fullPlayed = true }
+            // A stopped player has no seek left to land; the poll must not wait on one for good.
+            if state == .idle { seeksInFlight = 0 }
             wake()
             followTracks()
         }

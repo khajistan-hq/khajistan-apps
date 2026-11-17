@@ -434,8 +434,10 @@ struct FilmPlayerView: View {
             model.silenceRadio()
             full = resuming.grant ?? (kind: nil, expiresAt: nil)
             surfaceFocused = true
-            // Paused in the window or playing, its tracks come back to the house view now.
-            if let item = controller.player.currentItem {
+            // Paused in the window or playing, its tracks come back to the house view once the
+            // window has closed into the screen (tvOS draws them in the window until then).
+            try? await Task.sleep(for: PictureInPicture.restoreSettle)
+            if !gone, let item = controller.player.currentItem {
                 await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin)
             }
             wake()

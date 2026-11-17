@@ -54,10 +54,10 @@ final class PictureInPicture: NSObject {
     @ObservationIgnored var captionLabel: (@MainActor () -> String?)?
     /// Works the bar's caption control: the next language, then off.
     @ObservationIgnored var onCaptionToggle: (() -> Void)?
-    /// Play or pause from the bar or the remote. Nil plays or pauses AVPlayer.
+    /// Play or pause from the bar or the remote, and the window's own Play or Pause, which work
+    /// AVPlayer directly and are passed on here so the player's state follows (a broadcast rejoins
+    /// live on Play). Nil plays or pauses AVPlayer.
     @ObservationIgnored var onSetPlaying: ((Bool) -> Void)?
-    /// The window's own Play, after a pause: a broadcast rejoins live here (`followPlaying`).
-    @ObservationIgnored var onWindowPlay: (() -> Void)?
     /// Called when the window is up, so the player screen can close behind it.
     @ObservationIgnored var onStart: (() -> Void)?
     /// Called when the window could not open, with the reason to show.
@@ -259,14 +259,18 @@ final class PictureInPicture: NSObject {
         }
     }
 
-    /// The window's own Play works AVPlayer directly, from where the picture stopped: a broadcast
-    /// passes it on to rejoin live (PiPPlayFollower, which also holds the bar's state while a
-    /// Play of its own retunes).
+    /// The window's own Play and Pause work AVPlayer directly: each is passed on once, so the
+    /// player's state follows and a broadcast rejoins live (PiPPlayFollower, which also holds the
+    /// bar's state while a Play of its own retunes).
     private func followPlaying(_ player: AVPlayer) {
-        let windowPlay = playFollower.read(playing: player.timeControlStatus != .paused,
-                                           item: player.currentItem.map(ObjectIdentifier.init), at: seconds)
+        let event = playFollower.read(playing: player.timeControlStatus != .paused,
+                                      item: player.currentItem.map(ObjectIdentifier.init), at: seconds)
         if isPlaying != playFollower.shown { isPlaying = playFollower.shown }
-        if windowPlay { onWindowPlay?() }
+        switch event {
+        case .windowPlay: onSetPlaying?(true)
+        case .windowPause: onSetPlaying?(false)
+        case .none: break
+        }
     }
 
     private var seconds: Double {
@@ -340,7 +344,6 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         onRestore = nil
         onEnd = nil
         onSetPlaying = nil
-        onWindowPlay = nil
         onHandOff = nil
         onCaptionToggle = nil
         hasFileCaptions = nil

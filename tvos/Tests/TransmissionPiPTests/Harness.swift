@@ -94,7 +94,6 @@ final class PictureInPicture {
     var onCaptionToggle: (() -> Void)?
     var skin: (() -> Int)?
     var onSetPlaying: ((Bool) -> Void)?
-    var onWindowPlay: (() -> Void)?
     var onHandOff: (() -> Void)?
     var hasFileCaptions: (() -> Bool)?
     var drawsIntoPicture = false
@@ -284,7 +283,7 @@ if !(fileHidden && fileShown) { failures += 1 }
 // The window's own Play rejoins the broadcast live.
 let rejoin = Probe()
 rejoin.startPictureInPicture()
-rejoin.pip.onWindowPlay?()
+rejoin.pip.onSetPlaying?(true)
 // Full screen asks for the channel to open over whatever is on top.
 let restoreTop = Probe()
 restoreTop.startPictureInPicture()
@@ -322,7 +321,7 @@ func waitForBoundary(_ ready: () -> Bool) async -> Bool {
 Task {
     _ = await waitForBoundary { rejoin.store.rejoined == 1 }
     let rejoined = rejoin.store.rejoined == 1
-    print("\(rejoined ? "PASS" : "FAIL") the window's own Play rejoins the channel live")
+    print("\(rejoined ? "PASS" : "FAIL") Play (the bar's, the remote's or the window's own) rejoins the channel live")
     if !rejoined { failures += 1 }
     for stage in ["token", "reply", "valid"] {
         let store = TransmissionStore()

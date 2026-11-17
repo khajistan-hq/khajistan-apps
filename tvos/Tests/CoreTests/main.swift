@@ -4827,36 +4827,45 @@ func pipFollowerLoadsEachProgrammeOnce() throws {
     try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
 }
 
-/// The window's own Play is passed on once, for the item it paused; a retune or a handover (a new
-/// item) never is, so a rejoin cannot set off another; the bar holds what was asked meanwhile.
+/// The window's own Play is passed on once, for the item it paused; a new item that loads paused (a
+/// rejoin, a handover) never is, so a rejoin cannot set off another; the bar holds what was asked.
 func pipPlayFollowerPassesOnTheWindowsOwnPlayOnce() throws {
-    let itemA = NSObject(), itemB = NSObject()   // held, so the two identifiers differ
-    let a = ObjectIdentifier(itemA), b = ObjectIdentifier(itemB)
+    let itemA = NSObject(), itemB = NSObject(), itemC = NSObject()   // held, so the identifiers differ
+    let a = ObjectIdentifier(itemA), b = ObjectIdentifier(itemB), c = ObjectIdentifier(itemC)
     var follow = PiPPlayFollower(playing: true)
-    // The window's own Pause, then Play on the same item: passed on once.
-    try expect(!follow.read(playing: false, item: a, at: 0))
+    try expectEqual(follow.read(playing: true, item: a, at: 0), .none)
+    // The window's own Pause, then Play on the same item: each passed on once.
+    try expectEqual(follow.read(playing: false, item: a, at: 1), .windowPause)
     try expect(!follow.shown, "the bar shows Paused")
-    try expect(follow.read(playing: true, item: a, at: 5), "the window's Play is passed on")
-    try expect(!follow.read(playing: true, item: a, at: 5.1), "once")
-    // The rejoin stops the picture and plays a new item: not the window's Play, no loop.
-    try expect(!follow.read(playing: false, item: a, at: 6))
-    try expect(!follow.read(playing: false, item: nil, at: 7))
-    try expect(!follow.read(playing: true, item: b, at: 9), "a new item is not the window's Play")
-    // A handover: playing on a new item with no pause seen is nothing.
-    try expect(!follow.read(playing: true, item: a, at: 10))
+    try expectEqual(follow.read(playing: false, item: a, at: 1.1), .none, "once")
+    try expectEqual(follow.read(playing: true, item: a, at: 5), .windowPlay)
+    try expectEqual(follow.read(playing: true, item: a, at: 5.1), .none, "once")
+    // The rejoin it sets off: stop, the new item loads paused (a seek before play), then plays.
+    // None of it is the window's: no loop (Fable round 4 ran exactly this order).
+    try expectEqual(follow.read(playing: false, item: nil, at: 6), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 7), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 8), .none)
+    try expectEqual(follow.read(playing: true, item: b, at: 9), .none, "a rejoin's new item is not the window's Play")
+    // A handover: the next item loads paused, then plays. Nothing.
+    try expectEqual(follow.read(playing: false, item: c, at: 10), .none)
+    try expectEqual(follow.read(playing: true, item: c, at: 11), .none, "a handover is not the window's Play")
     // The bar's Play: shown at once, held while the player catches up, never passed on.
-    var bar = PiPPlayFollower(playing: false)
-    _ = bar.read(playing: false, item: a, at: 0)
+    var bar = PiPPlayFollower(playing: true)
+    _ = bar.read(playing: true, item: a, at: 0)
+    bar.ask(false, at: 0.5)
+    try expectEqual(bar.read(playing: false, item: a, at: 0.6), .none, "the bar's own Pause is not passed on again")
     bar.ask(true, at: 1)
     try expect(bar.shown, "the bar shows Playing at once")
-    try expect(!bar.read(playing: false, item: nil, at: 1.5) && bar.shown, "held while the retune runs")
-    try expect(!bar.read(playing: true, item: b, at: 3), "the bar's own Play is not passed on again")
+    try expectEqual(bar.read(playing: false, item: nil, at: 1.5), .none)
+    try expect(bar.shown, "held while the retune runs")
+    try expectEqual(bar.read(playing: false, item: b, at: 2), .none)
+    try expectEqual(bar.read(playing: true, item: b, at: 3), .none, "the bar's own Play is not passed on again")
     // A Play the player never follows lets go after the hold.
     var stuck = PiPPlayFollower(playing: false)
     stuck.ask(true, at: 0)
     _ = stuck.read(playing: false, item: a, at: PiPPlayFollower.hold + 1)
     try expect(!stuck.shown, "after the hold the bar shows what the player does")
-    withExtendedLifetime((itemA, itemB)) {}
+    withExtendedLifetime((itemA, itemB, itemC)) {}
 }
 
 /// The window reads its caption source on every tick, drawn or not: reading follows a handover.

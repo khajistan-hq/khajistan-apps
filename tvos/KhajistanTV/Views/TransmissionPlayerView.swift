@@ -583,7 +583,6 @@ struct TransmissionPlayerView: View {
         pip.onSetPlaying = { playing in
             if playing { Task { await store.rejoinLive() } } else { store.player.pause() }
         }
-        pip.onWindowPlay = { Task { await store.rejoinLive() } }
         pip.onStart = {
             // AVKit can finish starting after a retune or after this screen has left.
             guard !left, !switching, store.player === player, store.accessRevision == access,

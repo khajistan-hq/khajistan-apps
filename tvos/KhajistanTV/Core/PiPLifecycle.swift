@@ -76,18 +76,21 @@ struct ChangeFollower<Key: Equatable> {
 }
 
 /// What the PiP window does with each reading of its player, ten times a second: what the bar shows
-/// (playing or paused), and whether the window's own Play has to be passed on.
+/// (playing or paused), and whether the window's own Play or Pause has to be passed on.
 ///
-/// The bar's and the remote's Play/Pause are asked here (`asked`): the bar shows the asked state
-/// while the player catches up (a Transmission Play retunes, which stops the picture for a moment),
-/// for ten seconds at most. The window's own Play works AVPlayer directly and resumes the same item
-/// where it stopped; a broadcast passes that on to rejoin live. A new item (a retune, a handover)
-/// is not the window's Play, so it is never passed on, and a rejoin cannot set off another.
+/// The bar's and the remote's Play/Pause are asked here (`ask`): the bar shows the asked state while
+/// the player catches up (a Transmission Play retunes, which stops the picture for a moment), for ten
+/// seconds at most. The window's own controls work AVPlayer directly. Only a pause of the item that
+/// was playing, and a Play of that same item afterwards, are the window's: a new item loading paused
+/// (a rejoin, a handover, a seek before play) is never, so a rejoin cannot set off another.
 struct PiPPlayFollower {
+    enum Event: Equatable { case none, windowPlay, windowPause }
+
     static let hold: Double = 10
 
     private(set) var shown: Bool
     private var asked: (playing: Bool, at: Double)?
+    private var playingItem: ObjectIdentifier?
     private var pausedItem: ObjectIdentifier?
 
     init(playing: Bool) { shown = playing }
@@ -98,20 +101,30 @@ struct PiPPlayFollower {
         shown = playing
     }
 
-    /// The player reads `playing` on `item` at `now`. True when the window's own Play has to be
-    /// passed on.
-    mutating func read(playing: Bool, item: ObjectIdentifier?, at now: Double) -> Bool {
+    /// The player reads `playing` on `item` at `now`.
+    mutating func read(playing: Bool, item: ObjectIdentifier?, at now: Double) -> Event {
+        var askedNow = false
         if let asked {
-            if asked.playing == playing || now - asked.at >= Self.hold { self.asked = nil } else { return false }
+            if asked.playing == playing || now - asked.at >= Self.hold {
+                self.asked = nil
+                askedNow = asked.playing == playing
+            } else {
+                return .none
+            }
         }
         defer { shown = playing }
-        if !playing {
-            if shown || pausedItem == nil { pausedItem = item }
-            return false
+        if playing {
+            let windowPlay = !shown && !askedNow && pausedItem != nil && pausedItem == item
+            pausedItem = nil
+            playingItem = item
+            return windowPlay ? .windowPlay : .none
         }
-        let windowPlay = !shown && pausedItem != nil && pausedItem == item
-        pausedItem = nil
-        return windowPlay
+        if pausedItem == nil, shown, !askedNow, item != nil, item == playingItem {
+            pausedItem = item
+            return .windowPause
+        }
+        if item != pausedItem { pausedItem = nil }
+        return .none
     }
 }
 

@@ -122,8 +122,9 @@ final class ProgrammeSubtitleFollower {
     /// A stream's tracks, once loaded, go straight to tvOS to draw (the window's); a file's text
     /// is returned for the window to draw into the picture.
     func text() -> String? {
-        // A handover in the moment between Full screen and the window closing loads nothing more.
-        guard !ended else { return nil }
+        // A handover in the moment between Full screen and the window closing loads nothing more;
+        // the line on screen stays until the window has gone.
+        guard !ended else { return subtitles.text }
         if follower.changed(to: ProgrammeSubtitles.key(store.phase)) {
             loading?.cancel()
             let subtitles = subtitles, store = store, model = model

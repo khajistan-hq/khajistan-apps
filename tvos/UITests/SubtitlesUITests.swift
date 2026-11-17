@@ -320,6 +320,10 @@ final class SubtitlesUITests: XCTestCase {
         let note = app.staticTexts["filmNote"]
         XCTAssertTrue(note.waitForExistence(timeout: 30), "the film reopens over the cover")
         kjScreenshot("film-restored-over-cover", app: app)
+        // Signed out, the note is up while the screen is still sliding in, before focus has moved
+        // into it: a Back pressed then was lost, or reached the cover underneath (failed 2 of 3 on
+        // the base commit too). Back once the screen has settled, as a viewer would.
+        kjPause(1.5)
         XCUIRemote.shared.press(.menu)
         kjPause(1.5)
         XCTAssertFalse(note.exists, "Back closes the reopened screen")

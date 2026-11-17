@@ -22,6 +22,18 @@ struct FilmPlayerView: View {
     var startsFull = false
     /// Closes the screen when UIKit presented it (FilmRestore); SwiftUI's dismiss otherwise.
     var close: (() -> Void)? = nil
+    /// The film in the picture-in-picture window, when this screen opens as its Full screen: the
+    /// screen takes that player over as it plays, as Apple TV hands a film back, with no new token
+    /// and no reload.
+    private let resuming: FilmAway?
+
+    init(film: Film, startsFull: Bool = false, close: (() -> Void)? = nil, resuming: FilmAway? = nil) {
+        self.film = film
+        self.startsFull = startsFull
+        self.close = close
+        self.resuming = resuming
+        _controller = State(initialValue: resuming?.controller ?? PlayerController())
+    }
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -183,6 +195,7 @@ struct FilmPlayerView: View {
                 Text(duration.map { "\(Mixes.clock(position)) / \(Mixes.clock($0))" } ?? Mixes.clock(position))
                     .kjSmall()
                     .monospacedDigit()
+                    .accessibilityIdentifier("filmTime")
             }
             Text(Films.attribution)
                 .kjSmall(faint: true)
@@ -342,7 +355,7 @@ struct FilmPlayerView: View {
         let player = controller, film = film, model = model, pip = pip
         // The object, not the screen's state: the window reads it after the screen has closed.
         let subtitles = subtitles
-        let away = FilmAway(film: film, controller: player, pip: pip)
+        let away = FilmAway(film: film, controller: player, pip: pip, grant: full)
         pip.title = Films.displayTitle(film)
         // The film's track goes to tvOS as the window opens, which draws it in the skin's colours;
         // the bar's control moves it to the next language.
@@ -415,6 +428,16 @@ struct FilmPlayerView: View {
 
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
+        if let resuming, model.filmPiP?.controller === resuming.controller {
+            // Taken over before anything else is silenced, so silenceRadio leaves the film playing.
+            model.filmPiP = nil
+            model.silenceRadio()
+            full = resuming.grant ?? (kind: nil, expiresAt: nil)
+            surfaceFocused = true
+            followTracks()
+            wake()
+            return
+        }
         model.silenceRadio()
         // The film's own subtitle language is turned on by RecordedSubtitles. Left automatic, the
         // player can put the device's subtitle setting over it once the item is ready.
@@ -579,6 +602,8 @@ struct FilmAway {
     let film: Film
     let controller: PlayerController
     let pip: PictureInPicture
+    /// What vod-token granted, carried back to the screen that takes the film over.
+    var grant: (kind: String?, expiresAt: String?)? = nil
 
     /// Where the film has got to, kept as the screen keeps it on Back.
     @MainActor func recordPlace() {
@@ -602,8 +627,10 @@ enum FilmRestore {
     static func present(_ film: Film, model: AppModel) {
         // No window, or a closing screen in the way: stop the film with its place kept rather
         // than play it unseen.
+        // The film in the window is handed back, not fetched again.
+        let playing = model.filmPiP.flatMap { $0.film.handle == film.handle ? $0 : nil }
         TopScreen.present(model: model, otherwise: { model.silenceRadio() }) { close in
-            FilmPlayerView(film: film, startsFull: true, close: close)
+            FilmPlayerView(film: film, startsFull: true, close: close, resuming: playing)
         }
     }
 }

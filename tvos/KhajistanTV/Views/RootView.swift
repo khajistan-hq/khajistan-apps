@@ -43,11 +43,11 @@ struct RootView: View {
         }
         // The corner window's bar, over the foot of whichever section is up (PiPBar).
         .pipBarHost(handlesPlayPause: false)
-        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
-        // as a radio from the small player does, over whatever screen is on top (TopScreen): a
-        // cover on the root would open under a page's cover and never be seen. Not silenced here:
-        // the player that opens silences it as it starts. With no screen to open on, the channel
-        // plays on in the small bar rather than stopping with nothing on screen.
+        // Full screen from the picture-in-picture window: the channel's screen opens over whatever
+        // screen is on top (TopScreen): a cover on the root would open under a page's cover and
+        // never be seen. The screen takes the playing channel over, as Apple TV hands it back.
+        // With no screen to open on, the channel plays on in the small bar rather than stopping
+        // with nothing on screen.
         .onChange(of: model.restoring?.id) {
             guard let away = model.restoring else { return }
             model.restoring = nil
@@ -56,7 +56,8 @@ struct RootView: View {
             model.radioAway = bar
             TopScreen.present(model: model, otherwise: {}) { close in
                 ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
-                                   regionId: away.listRegion, listTitle: away.listTitle, close: close)
+                                   regionId: away.listRegion, listTitle: away.listTitle, close: close,
+                                   resuming: away.controller)
             }
         }
         // Full screen from a Transmission channel's window: its player opens over whatever is on

@@ -89,9 +89,15 @@ struct ReceiverPlayerView: View {
     /// SwiftUI's dismiss otherwise.
     private let close: (() -> Void)?
 
+    /// The channel playing in the picture-in-picture window, when this screen opens as its Full
+    /// screen: the screen takes that player over as it plays, as Apple TV hands a channel back.
+    private let resuming: PlayerController?
+
     init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil,
-         close: (() -> Void)? = nil) {
+         close: (() -> Void)? = nil, resuming: PlayerController? = nil) {
         self.close = close
+        self.resuming = resuming
+        _playerA = State(initialValue: resuming ?? PlayerController())
         _list = State(initialValue: list)
         self.surfChoice = surfChoice
         _listRegion = State(initialValue: regionId)
@@ -752,6 +758,15 @@ struct ReceiverPlayerView: View {
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
     /// arrives.
     private func open() async {
+        if let resuming, model.radioAway?.controller === resuming, resuming.state == .playing || resuming.state == .tuning {
+            // Taken over before anything else is silenced, so silenceRadio leaves it playing; its
+            // live captions, stopped while it was in the window, start again on the screen.
+            model.radioAway = nil
+            model.silenceRadio()
+            model.captions.attach(current, player: resuming)
+            wake()
+            return
+        }
         model.silenceRadio()
         model.clips.cover(caption: current.name, animated: false)
         tune(current)

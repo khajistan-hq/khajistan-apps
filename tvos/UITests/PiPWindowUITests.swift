@@ -65,9 +65,17 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["playerState"].exists, "the player screen has closed behind the window")
         kjScreenshot("pip-bar-lit", app: app)
 
-        // One Select: the film comes back full screen, with its captions.
+        // One Select: the film comes back full screen, with its captions, where it had got to:
+        // handed back as Apple TV does, not fetched and started again.
+        kjPause(6)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["playerState"].waitForExistence(timeout: 30), "the film opens full screen again")
+        let time = app.staticTexts["filmTime"]
+        XCTAssertTrue(time.waitForExistence(timeout: 10), "the film's time shows")
+        let seconds = time.label.split(separator: "/").first.map { part -> Int in
+            part.trimmingCharacters(in: .whitespaces).split(separator: ":").reduce(0) { $0 * 60 + (Int($1) ?? 0) }
+        } ?? 0
+        XCTAssertGreaterThanOrEqual(seconds, 6, "the film carries on from where the window had it (\(time.label)), not from the start")
         XCTAssertTrue(app.otherElements["pipBar"].waitForNonExistence(timeout: 10), "the bar goes with the window")
         XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "captions come back full screen")
         kjScreenshot("pip-restored-full-screen", app: app)
@@ -193,6 +201,8 @@ final class PiPWindowUITests: XCTestCase {
         kjScreenshot("pip-bar-on-screening-room", app: app)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens over the cover")
+        // Handed back as it plays, as Apple TV does: no tuning first.
+        XCTAssertEqual(app.staticTexts["playerState"].label, "Playing", "the playing channel is taken over, not tuned again")
         kjScreenshot("pip-receiver-over-cover", app: app)
         XCUIRemote.shared.press(.menu)
         kjPause(2)

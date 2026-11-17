@@ -147,7 +147,7 @@ struct TransmissionPlayerView: View {
         .task(id: subtitleKey) { await loadSubtitles() }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { await store.tune(channel: store.channelNumber) })
         }
     }
@@ -558,13 +558,16 @@ struct TransmissionPlayerView: View {
         let store = store, model = model, pip = pip
         let player = store.player
         let access = store.accessRevision
-        // The window draws the house plate itself (PiPFramePump), following the channel's
-        // handovers once this screen has closed: the object, not the screen's state.
+        // The window carries the programme's subtitles, following the channel's handovers once
+        // this screen has closed: a stream's track drawn by tvOS, a file's drawn into the picture
+        // (PictureInPicture). The object, not the screen's state.
         let follower = ProgrammeSubtitleFollower(subtitles, store: store, model: model,
                                                  loaded: subtitles.tracks.isEmpty ? nil : subtitleKey)
         pip.title = store.channelName(store.channelNumber)
-        pip.isLive = true
+        pip.onHandOff = { follower.subtitles.handOff() }
         pip.captions = { follower.text() }
+        pip.captionLabel = { follower.subtitles.tracks.isEmpty ? nil : follower.subtitles.label }
+        pip.onCaptionToggle = { follower.subtitles.cycle() }
         pip.skin = { model.skin }
         // A paused transmission is not the transmission any more: Play joins it again, live.
         pip.onSetPlaying = { playing in
@@ -751,9 +754,15 @@ struct TransmissionPlayerView: View {
     private func start() async {
         // Full screen from the corner window, as Apple TV does it: the channel playing in the
         // window is this one, so the screen takes it over as it plays, with no retune.
-        let adopted = model.transmissionPiP != nil && store.channelNumber == channel
+        let window = model.transmissionPiP
+        let adopted = window != nil && store.channelNumber == channel
             && (store.player.state == .playing || store.player.state == .tuning)
-        if adopted { model.transmissionPiP = nil }
+        if adopted {
+            // Reached by full screen the window is already closing; opened from the channel's card
+            // it is not, and is closed here without ending the channel.
+            model.transmissionPiP = nil
+            window?.stop()
+        }
         model.silenceRadio()
         if adopted { return }
         // The sign-on, once per launch: the skin's colour with the channel's name, a pigeon

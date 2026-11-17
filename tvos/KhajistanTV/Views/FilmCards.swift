@@ -35,10 +35,10 @@ struct FilmShelf: View {
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }
         }
-        .fullScreenCover(item: $playing) { film in
+        .kjFullScreenCover(item: $playing) { film in
             if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
-        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
+        .kjFullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
     }
 }
 

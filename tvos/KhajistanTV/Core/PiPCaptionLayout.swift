@@ -1,29 +1,19 @@
 import CoreGraphics
 
-/// Where the house caption plate sits on a frame drawn for the picture-in-picture window.
+/// Where the house caption plate sits on a frame drawn for the picture-in-picture window
+/// (HouseCaptionCompositor).
 ///
 /// Full screen, CaptionView sets the type at 2.7% of 1920. The corner window shows the frame at
 /// about a third of that width, where 2.7% is a 13-pixel line nobody reads from a sofa, so the
-/// type is sized for the window: 30 window pixels, kept between 4% and 9% of the frame. The plate
-/// is the site's one opaque plate: 0.4 em at the sides, 0.12 em above and below, centred, its foot
-/// 5% of the frame above the bottom edge. Lines wrap inside 88% of the frame (6% each side, as
-/// the site's plate keeps).
+/// window's type is 6% of the frame's width, read at that size in an Apple TV HD's window
+/// (2026-11-17). The plate is the site's one opaque plate: 0.4 em at the sides, 0.12 em above and
+/// below, centred, its foot 5% of the frame above the bottom edge. Lines wrap inside 88% of the
+/// frame (6% each side, as the site's plate keeps).
 enum PiPCaptionLayout {
-    /// Type height the window should show, in window pixels.
-    static let windowTypePixels: CGFloat = 30
-    static let minShare: CGFloat = 0.04
-    static let maxShare: CGFloat = 0.09
-    /// Used until tvOS reports the window's size.
-    static let defaultShare: CGFloat = 0.055
+    static let share: CGFloat = 0.06
 
-    /// The font size, in frame pixels, for a frame `frameWidth` wide shown in a window
-    /// `windowWidth` pixels wide (0 while unknown).
-    static func fontSize(frameWidth: CGFloat, windowWidth: CGFloat) -> CGFloat {
-        guard frameWidth > 0 else { return 0 }
-        guard windowWidth > 0 else { return (frameWidth * defaultShare).rounded() }
-        let wanted = windowTypePixels * frameWidth / windowWidth
-        return min(max(wanted, frameWidth * minShare), frameWidth * maxShare).rounded()
-    }
+    /// The font size, in frame pixels, for a frame `frameWidth` wide.
+    static func fontSize(frameWidth: CGFloat) -> CGFloat { max(0, (frameWidth * share).rounded()) }
 
     /// The widest a line may run before it wraps.
     static func textWidth(frameWidth: CGFloat) -> CGFloat { frameWidth * 0.88 }

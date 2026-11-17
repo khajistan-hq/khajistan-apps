@@ -63,13 +63,13 @@ struct ReadingView: View {
         .task(id: store.phase == .ready && model.readingLink != nil) { follow() }
         // A shelf that did not load drops the request, so it never opens a title later unasked.
         .onChange(of: store.phase) { if case .failed = store.phase { model.readingLink = nil } }
-        .fullScreenCover(item: $opened) { title in
+        .kjFullScreenCover(item: $opened) { title in
             ReadingTitleView(title: title)
         }
-        .fullScreenCover(item: $continuing) { place in
+        .kjFullScreenCover(item: $continuing) { place in
             ReadingReaderView(title: place.title, issue: place.issue, startPage: place.page)
         }
-        .fullScreenCover(item: $wholeRow) { row in
+        .kjFullScreenCover(item: $wholeRow) { row in
             ReadingRowGrid(row: row)
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
@@ -415,7 +415,7 @@ struct ReadingRowGrid: View {
             }
         }
         .foregroundStyle(palette.ink)
-        .fullScreenCover(item: $opened) { title in ReadingTitleView(title: title) }
+        .kjFullScreenCover(item: $opened) { title in ReadingTitleView(title: title) }
     }
 }
 

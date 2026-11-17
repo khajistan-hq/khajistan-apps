@@ -3307,6 +3307,10 @@ func filmSubtitleChoice() throws {
     let iranian = SubtitleChoice.filmKey("gav-1969"), razia = SubtitleChoice.filmKey("razia-phas-gayi-ghundon-main-2015-khajistan")
     try expect(iranian != razia, "each film keeps its own choice")
     try expect(iranian != SubtitleChoice.storeKey && razia != SubtitleChoice.storeKey, "the old shared choice is not read")
+    // A film's subtitles in the picture-in-picture window take the skin's caption colours, as ARGB 0 to 1.
+    try expectEqual(Skin.argb(Skin.day.captionTextHex), [1, 0, 0, 0])
+    try expectEqual(Skin.argb(Skin.grove.captionPlateHex), [1, 0, 40.0 / 255, 0])
+    try expectEqual(Skin.argb(0xF3FB04), [1, 243.0 / 255, 251.0 / 255, 4.0 / 255])
     let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
     try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
     try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")
@@ -4756,15 +4760,11 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 
 /// The caption plate in the picture-in-picture window is sized for the window, not the screen.
 func pipCaptionIsSizedForTheWindow() throws {
-    // 1920-wide frame in a 640-pixel window: 30 window pixels = 90 frame pixels, at the 4.7% share.
-    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920, windowWidth: 640), 90)
-    // Unknown window: the default share, never the full-screen 2.7% (52 px).
-    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920, windowWidth: 0), 106)
-    try expect(PiPCaptionLayout.fontSize(frameWidth: 1920, windowWidth: 0) > 52, "bigger than full screen's type")
-    // A full-size window clamps to the 4% floor; a tiny one to the 9% ceiling.
-    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920, windowWidth: 1920), 77)
-    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1280, windowWidth: 200), 115)
-    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 0, windowWidth: 640), 0)
+    // 6% of the frame: 115 px on a 1920 frame, over twice full screen's 2.7% (52 px), so it reads in the corner.
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920), 115)
+    try expect(PiPCaptionLayout.fontSize(frameWidth: 1920) > 52, "bigger than full screen's type")
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 640), 38)
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 0), 0)
     // The plate: centred, its foot 5% above the bottom, padded 0.4 em by 0.12 em.
     let frame = CGSize(width: 1920, height: 1080)
     let (plate, text) = PiPCaptionLayout.plate(text: CGSize(width: 800, height: 100), fontSize: 100, frame: frame)
@@ -4777,7 +4777,59 @@ func pipCaptionIsSizedForTheWindow() throws {
     try expect(wide.minX >= 0 && wide.maxX <= frame.width, "plate stays in the frame")
 }
 
+/// Who closed the PiP window decides what follows: full screen reopens, Close ends, Stop does
+/// neither, and AVKit's restore request after Close or Stop is not the viewer asking.
+func pipLifecycleReadsWhoClosedTheWindow() throws {
+    // The window's own full-screen control: AVKit asks to restore, then stops.
+    var life = PiPLifecycle()
+    life.started()
+    try expect(life.systemRestoreAsked(), "the window's control opens the screen")
+    try expect(!life.stopped(), "a restore does not end the signal")
+    try expect(!life.isActive)
+    // The bar's Full screen: the screen opens once; AVKit's own restore request after it does not open it again.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.systemRestoreAsked(), "the bar already opened the screen")
+    try expect(!life.restoreAsked(), "a second press does nothing")
+    try expect(!life.stopped())
+    // The bar's Close: AVKit still asks to restore, which must not open the screen; the signal ends.
+    life.started()
+    try expect(life.closeAsked())
+    try expect(!life.systemRestoreAsked(), "Close is not a restore")
+    try expect(life.stopped(), "Close ends the signal")
+    // The window's own close: no restore request at all; the signal ends.
+    life.started()
+    try expect(life.stopped(), "the window's close ends the signal")
+    // Stop (another signal started): no restore, no end.
+    life.started()
+    try expect(life.stopAsked())
+    try expect(!life.stopAsked(), "stop is asked once")
+    try expect(!life.systemRestoreAsked(), "Stop is not a restore")
+    try expect(!life.stopped(), "Stop does not end what the next signal replaced")
+    // Stop during a restore leaves the restore alone.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.stopAsked(), "the screen opening is not stopped")
+    try expect(!life.stopped())
+    // Nothing is asked of a window that is not up.
+    try expect(!life.restoreAsked() && !life.closeAsked() && !life.stopAsked(), "a closed window takes no asks")
+}
+
+/// The PiP window loads each programme's subtitles once, as the channel moves on.
+func pipFollowerLoadsEachProgrammeOnce() throws {
+    var follower = ChangeFollower<String>(loaded: "a")
+    try expect(!follower.changed(to: "a"), "what the screen loaded is not loaded again")
+    try expect(follower.changed(to: "b"), "a handover loads the next programme")
+    try expect(!follower.changed(to: "b"), "once")
+    try expect(follower.changed(to: nil), "off air clears")
+    try expect(follower.changed(to: "c"))
+    var unloaded = ChangeFollower<String>(loaded: nil)
+    try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("pipLifecycleReadsWhoClosedTheWindow", pipLifecycleReadsWhoClosedTheWindow),
+    ("pipFollowerLoadsEachProgrammeOnce", pipFollowerLoadsEachProgrammeOnce),
     ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),

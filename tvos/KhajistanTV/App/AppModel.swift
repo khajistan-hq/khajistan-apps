@@ -182,8 +182,6 @@ final class AppModel {
     func silenceRadio() {
         let away = radioAway
         radioAway = nil
-        // A picture in the corner window carried its live captions with it.
-        if away?.pip != nil { captions.detach() }
         away?.pip?.stop()
         away?.controller.stop()
         if let pip = transmissionPiP {

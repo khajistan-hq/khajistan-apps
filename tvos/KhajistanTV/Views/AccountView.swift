@@ -33,7 +33,7 @@ struct AccountView: View {
         }
         // Full screen on the ground, not a sheet: tvOS draws a sheet as a rounded, shadowed
         // card over a dimmed page, and the house has no boxes and no shadows.
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {})
         }
     }

@@ -62,7 +62,7 @@ enum ProgrammeSubtitles {
             if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
                (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
                 tried = item
-                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house)
+                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house, skin: model.skin)
                 // Fall back only when this item is still the one playing: a previous Stream
                 // programme's item without tracks is no reason to give up on this one. A read that
                 // fails on the playing item does fall back, to the same English text.
@@ -104,7 +104,7 @@ final class ProgrammeSubtitleFollower {
     let subtitles: RecordedSubtitles
     private let store: TransmissionStore
     private let model: AppModel
-    private var key: String?
+    private var follower: ChangeFollower<String>
     private var loading: Task<Void, Never>?
 
     /// `loaded` is the programme the screen already loaded for, nil if it had not finished.
@@ -112,20 +112,21 @@ final class ProgrammeSubtitleFollower {
         self.subtitles = subtitles
         self.store = store
         self.model = model
-        key = loaded
+        follower = ChangeFollower(loaded: loaded)
     }
 
     deinit { loading?.cancel() }
 
     /// The caption on screen now, loading the next programme's first when the channel has moved on.
+    /// A stream's tracks, once loaded, go straight to tvOS to draw (the window's); a file's text
+    /// is returned for the window to draw into the picture.
     func text() -> String? {
-        let now = ProgrammeSubtitles.key(store.phase)
-        if now != key {
-            key = now
+        if follower.changed(to: ProgrammeSubtitles.key(store.phase)) {
             loading?.cancel()
             let subtitles = subtitles, store = store, model = model
             loading = Task { await ProgrammeSubtitles.load(into: subtitles, store: store, model: model) }
         }
+        if !subtitles.tracks.isEmpty, !subtitles.isHandedOff { subtitles.handOff() }
         return subtitles.text
     }
 

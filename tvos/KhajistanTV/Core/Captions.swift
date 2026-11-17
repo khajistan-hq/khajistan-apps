@@ -110,6 +110,11 @@ extension Skin {
     }
 
     var captionTextHex: UInt32 { self == .day ? 0x000000 : 0xF3FB04 }
+
+    /// A hex colour as CoreMedia's text markup takes it: alpha, red, green, blue, each 0 to 1.
+    static func argb(_ hex: UInt32) -> [Double] {
+        [1, Double((hex >> 16) & 0xFF) / 255, Double((hex >> 8) & 0xFF) / 255, Double(hex & 0xFF) / 255]
+    }
 }
 
 enum CaptionText {

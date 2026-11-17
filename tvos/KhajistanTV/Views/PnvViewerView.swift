@@ -147,10 +147,10 @@ struct PnvViewerView: View {
         .onChange(of: controller.state) { wake() }
         .task { show(current) }
         .onDisappear { stopEverything() }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
         }
-        .fullScreenCover(isPresented: $showCollections) {
+        .kjFullScreenCover(isPresented: $showCollections) {
             PnvCollectionsPanel(key: current.media_key).environment(\.palette, palette)
         }
         .task(id: model.auth.email) { await model.saves.load() }

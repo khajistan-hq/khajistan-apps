@@ -125,7 +125,7 @@ struct FilmPlayerView: View {
             wake()
             followTracks()
         }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { refusal = nil })
                 .environment(\.palette, palette)
         }
@@ -343,10 +343,12 @@ struct FilmPlayerView: View {
         // The object, not the screen's state: the window reads it after the screen has closed.
         let subtitles = subtitles
         let away = FilmAway(film: film, controller: player, pip: pip)
-        pip.title = film.title ?? ""
-        pip.isLive = false
-        // The house plate goes into the window with the picture (PiPFramePump): the track keeps
-        // playing into RecordedSubtitles, which the screen leaves running while the film is away.
+        pip.title = Films.displayTitle(film)
+        // The film's track goes to tvOS as the window opens, which draws it in the skin's colours;
+        // the bar's control moves it to the next language.
+        pip.onHandOff = { subtitles.handOff() }
+        pip.captionLabel = { subtitles.tracks.isEmpty ? nil : subtitles.label }
+        pip.onCaptionToggle = { subtitles.cycle() }
         pip.captions = { subtitles.text }
         pip.skin = { model.skin }
         pip.onSetPlaying = { $0 ? player.resume() : player.pause() }
@@ -523,7 +525,7 @@ struct FilmPlayerView: View {
         switch controller.state {
         case .playing:
             guard let item = controller.player.currentItem, !subtitles.follows(item) else { return }
-            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? []) }
+            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin) }
         case .idle:
             subtitles.clear()
         default:

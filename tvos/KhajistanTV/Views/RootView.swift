@@ -10,8 +10,6 @@ struct RootView: View {
     @State private var visited: [Section] = []
     /// Set while Back changes the section, so the change is not recorded as a visit.
     @State private var goingBack = false
-    /// Full screen on the PiP bar, lit as the corner window opens.
-    @FocusState private var pipFocus: Bool
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -42,24 +40,9 @@ struct RootView: View {
                     reopened = away
                 }
             }
-            if let pip = model.activePiP {
-                PiPBar(pip: pip, focus: $pipFocus)
-            }
         }
-        // As the corner window opens the player screen closes behind it; Full screen is lit once
-        // the page underneath has settled, so one Select brings the picture back. tvOS hands focus
-        // back to the card that opened the player when its cover finishes closing, which can land
-        // after a first try, so it is asked for again until it holds (about a second at most).
-        .onChange(of: model.activePiP != nil) { _, up in
-            guard up else { return }
-            Task {
-                for _ in 0..<6 {
-                    try? await Task.sleep(for: .milliseconds(250))
-                    guard model.activePiP != nil else { return }
-                    if !pipFocus { pipFocus = true }
-                }
-            }
-        }
+        // The corner window's bar, over the foot of whichever section is up (PiPBar).
+        .pipBarHost(handlesPlayPause: false)
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.
         .onChange(of: model.restoring?.id) {
@@ -81,7 +64,7 @@ struct RootView: View {
             model.restoringFilm = nil
             FilmRestore.present(film, model: model)
         }
-        .fullScreenCover(item: $reopened) { away in
+        .kjFullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)
         }

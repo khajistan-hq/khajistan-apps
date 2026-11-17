@@ -55,13 +55,13 @@ struct TVMadrassa: View {
             await model.madrassaPosts.load()
             await model.lughat.load()
         }
-        .fullScreenCover(item: $entry) { item in
+        .kjFullScreenCover(item: $entry) { item in
             TVReading(kicker: item.cat, title: item.title, picture: picture(item.img),
                       blocks: [item.sub, item.desc].compactMap { $0 }.map { .paragraph(AttributedString($0)) },
                       website: item.href.map { "khajistan-archive.pages.dev/\($0)" })
         }
-        .fullScreenCover(item: $post) { item in Self.reading(item, model: model) }
-        .fullScreenCover(isPresented: $dictionary) { TVDictionary() }
+        .kjFullScreenCover(item: $post) { item in Self.reading(item, model: model) }
+        .kjFullScreenCover(isPresented: $dictionary) { TVDictionary() }
     }
 
     private func picture(_ raw: String?) -> URL? { Self.picture(raw, model: model) }
@@ -214,7 +214,7 @@ struct TVReading: View {
         .foregroundStyle(palette.ink)
         .onAppear { if let opened { OpenedLately.record(.writing, ref: opened, title: title) } }
         .task { if saving != nil { await model.saves.load() } }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {}).environment(\.palette, palette)
         }
     }

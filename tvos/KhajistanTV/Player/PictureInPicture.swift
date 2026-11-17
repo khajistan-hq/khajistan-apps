@@ -4,13 +4,17 @@ import Observation
 import UIKit
 
 /// Picture in picture for a player screen: the picture leaves its screen and plays in a corner
-/// while the viewer browses the app or another one, as the TV app's channels and films do.
+/// while the viewer browses the app or another one, as the TV app's channels and films do. One
+/// AVPictureInPictureController for each of the player screen's layers (the one on screen and the
+/// one a channel change tunes behind it), made as each layer is drawn, so the one on screen is
+/// ready by the time the viewer asks.
 ///
-/// The window shows frames this app draws (PiPFramePump), not AVPlayer's own layer, so the house
-/// caption plate goes into the window with the picture: a film's track, a programme's prepared
-/// file, a receiver channel's live captions (owner, 2026-11-17: "pip still not showing subtitles
-/// in skin"). Back to full screen is one action, from the window's own controls (the TV button)
-/// or from the app's PiP bar (PiPBar), which the viewer lands on as the window opens.
+/// The window carries the house caption plate (owner, 2026-11-17: "pip still not showing subtitles
+/// in skin"): a stream's subtitle track is handed to tvOS, which draws it in the skin's colours
+/// (`onHandOff`, RecordedSubtitles.handOff), and a file's prepared subtitles are drawn into the
+/// picture (HouseCaptionCompositor). Back to full screen is one action, from tvOS's own window
+/// menu (the TV button) or from the app's PiP bar (PiPBar), which the viewer lands on as the
+/// window opens.
 @MainActor @Observable
 final class PictureInPicture: NSObject {
     static var isSupported: Bool {
@@ -21,25 +25,31 @@ final class PictureInPicture: NSObject {
     }
 
     #if DEBUG
-    /// `-kjpipproof YES`: the simulator has no picture in picture, so the frames' layer is shown
-    /// as a corner window in the app itself, fed exactly as the real window is. UI tests photograph
-    /// the caption plate in it and work the bar; the real window is checked on an Apple TV.
+    /// `-kjpipproof YES`: the simulator has no picture in picture, so the window is taken as open
+    /// the moment it is asked for. UI tests work the bar against it; the window itself is
+    /// checked on an Apple TV.
     static var proof: Bool { UserDefaults.standard.bool(forKey: "kjpipproof") }
     #endif
 
     /// The corner window is up.
-    private(set) var isActive = false
+    var isActive: Bool { lifecycle.isActive }
     /// The picture in the window is playing, for the bar's Play/Pause.
     private(set) var isPlaying = false
     /// What the bar names: the channel, the programme or the film.
     var title = ""
-    /// A broadcast: the window shows it as live, with no skip and no timeline.
-    @ObservationIgnored var isLive = true
-    /// The caption on screen now, nil for none. Read ten times a second while the window is up.
+    /// The caption the window draws into a file's picture, nil for none. Read ten times a second
+    /// while the window is up.
     @ObservationIgnored var captions: (@MainActor () -> String?)?
     /// The skin the caption plate takes.
     @ObservationIgnored var skin: (@MainActor () -> Skin)?
-    /// Play or pause from the window's own button or the bar. Nil plays or pauses AVPlayer.
+    /// Hands a stream's subtitle track to tvOS as the window opens, which then draws it.
+    @ObservationIgnored var onHandOff: (() -> Void)?
+    /// The bar's caption control: its label ("Subtitles · English"), nil for none. Read by the
+    /// bar, so a label built on observed state redraws it.
+    @ObservationIgnored var captionLabel: (@MainActor () -> String?)?
+    /// Works the bar's caption control: the next language, then off.
+    @ObservationIgnored var onCaptionToggle: (() -> Void)?
+    /// Play or pause from the bar or the remote. Nil plays or pauses AVPlayer.
     @ObservationIgnored var onSetPlaying: ((Bool) -> Void)?
     /// Called when the window is up, so the player screen can close behind it.
     @ObservationIgnored var onStart: (() -> Void)?
@@ -50,100 +60,101 @@ final class PictureInPicture: NSObject {
     /// The window closed without a restore: the signal is no longer wanted.
     @ObservationIgnored var onEnd: (() -> Void)?
 
-    @ObservationIgnored private let pump = PiPFramePump()
-    @ObservationIgnored private var controller: AVPictureInPictureController?
+    private var lifecycle = PiPLifecycle()
+    @ObservationIgnored private var controllers: [ObjectIdentifier: AVPictureInPictureController] = [:]
     @ObservationIgnored private weak var player: AVPlayer?
-    @ObservationIgnored private weak var window: UIWindow?
     @ObservationIgnored private var feed: Task<Void, Never>?
     @ObservationIgnored private var pending: Task<Void, Never>?
-    @ObservationIgnored private var restoring = false
-    /// `stop()` closed the window: AVKit still asks to restore, and that is not the viewer asking.
-    @ObservationIgnored private var stopping = false
-    /// `close()` closed the window: the signal ends with it, as the window's own close does.
-    @ObservationIgnored private var closing = false
+    /// Items given the caption compositor, so it comes off them when the window has gone.
+    @ObservationIgnored private var composited = NSHashTable<AVPlayerItem>.weakObjects()
+    @ObservationIgnored private var compositing: Task<Void, Never>?
 
-    /// How long `start` waits for the first frame and for AVKit to allow the window.
-    static let startWait: Duration = .seconds(4)
+    /// How long `start` waits for AVKit to open the window.
+    static let startWait: Duration = .seconds(6)
+    /// How long the window waits, on full screen, for the player screen to come up before it
+    /// closes into it (AVKit's restore completion).
+    static let restoreSettle: Duration = .milliseconds(500)
 
-    /// A player layer as it is drawn: only its window is wanted, where the frames' layer goes.
-    /// Called on every redraw.
+    /// A layer as it is drawn. Called on every redraw; a layer already held is left alone.
+    /// Layers no longer on screen are let go: Transmission draws new layers after a channel
+    /// change, and the old ones, still holding the same player, were picked by `start` and
+    /// refused (owner's Apple TV, 2026-11-15: "pip not working ... in transmission"). A layer
+    /// not yet in the window counts as off screen too, so it may be let go once and bound again
+    /// on its next redraw.
     func bind(_ layer: AVPlayerLayer) {
-        if let view = layer.delegate as? UIView, let window = view.window { self.window = window }
-    }
-
-    /// Opens the corner window on `player`'s picture. False when it cannot open now; true when it
-    /// is opening, in which case `onStart` or `onFail` follows.
-    @discardableResult
-    func start(_ player: AVPlayer) -> Bool {
-        guard Self.isSupported, !isActive, pending == nil, player.currentItem != nil,
-              let window = window ?? Self.keyWindow else { return false }
-        // AVKit answers isPictureInPicturePossible with false on any session but playback, so the
-        // session is set before the controller is made (Apple TV HD, 2026-11-16). Only when not
-        // already playback: changing the mode under a live session can drop its sound for a moment.
+        guard Self.isSupported else { return }
+        if !isActive {
+            controllers = controllers.filter { $0.value.playerLayer.superlayer != nil || $0.value.playerLayer === layer }
+        }
+        guard controllers[ObjectIdentifier(layer)] == nil else { return }
+        // AVKit answers isPictureInPicturePossible with false on any session but playback, so
+        // the session is set before the controller is made, not when the viewer asks: set in
+        // start(), it came after the check and the window never opened (Apple TV HD, 2026-11-16).
+        // Only when not already playback: a radio playing under the screens set it, and changing
+        // the mode under a live session can drop its sound for a moment.
         let session = AVAudioSession.sharedInstance()
         if session.category != .playback { try? session.setCategory(.playback, mode: .moviePlayback) }
-        install(in: window)
+        guard let pip = AVPictureInPictureController(playerLayer: layer) else { return }
+        pip.delegate = self
+        controllers[ObjectIdentifier(layer)] = pip
+    }
+
+    /// Opens the corner window on the layer that draws `player`. False when it cannot open now;
+    /// true when it is opening, in which case `onStart` or `onFail` follows.
+    @discardableResult
+    func start(_ player: AVPlayer) -> Bool {
+        guard !isActive, pending == nil else { return false }
         #if DEBUG
-        if Self.proof { return startProof(player, in: window) }
-        #endif
-        guard let controller else { return false }
-        restoring = false
-        stopping = false
-        closing = false
-        self.player = player
-        // With the screen gone there is no layer on the player: without this tvOS pauses it when
-        // the app goes to the background, and the window would freeze over the other app.
-        player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
-        pump.follow(player)
-        feedWindow()
-        controller.invalidatePlaybackState()
-        pending = Task { [weak self] in
-            let deadline = ContinuousClock.now + Self.startWait
-            while ContinuousClock.now < deadline {
-                guard let self, !Task.isCancelled else { return }
-                if self.pump.frames > 0, controller.isPictureInPicturePossible {
-                    self.pending = nil
-                    controller.startPictureInPicture()
-                    return
-                }
-                try? await Task.sleep(for: .milliseconds(100))
+        if Self.proof {
+            self.player = player
+            pending = Task { [weak self] in
+                self?.pending = nil
+                self?.windowOpened()
             }
-            guard let self, !Task.isCancelled else { return }
+            return true
+        }
+        #endif
+        // The layer on screen that draws `player`: an off-screen layer can hold the same player.
+        let drawing = controllers.values.filter { $0.playerLayer.player === player && $0.playerLayer.superlayer != nil }
+        guard let pip = drawing.first(where: \.isPictureInPicturePossible) else { return false }
+        self.player = player
+        pip.startPictureInPicture()
+        // Neither delegate call can come: give up rather than hold the screen's closures for good.
+        pending = Task { [weak self] in
+            try? await Task.sleep(for: Self.startWait)
+            guard let self, !Task.isCancelled, !self.isActive else { return }
             self.pending = nil
-            self.onFail?("Picture in picture is not ready yet. Try again in a moment.")
+            pip.stopPictureInPicture()
+            self.onFail?("Picture in picture did not open. Try again.")
             self.finish()
         }
         return true
     }
 
-    /// Closes the window, if it is up or opening, and stops nothing else. A restore already
-    /// closing it is left to finish.
+    /// Closes the window, if it is up or opening, and stops nothing else: another signal is
+    /// starting, or the screen has taken the picture over.
     func stop() {
         if let pending {
             pending.cancel()
             self.pending = nil
+            controllers.values.first { $0.isPictureInPictureActive }?.stopPictureInPicture()
             finish()
             return
         }
-        guard isActive, !restoring else { return }
-        stopping = true
-        closeWindow()
+        if lifecycle.stopAsked() { closeWindow() }
     }
 
     /// Back to full screen, as the window's own full-screen control does: the player screen opens
     /// again and the window closes into it.
     func restore() {
-        guard isActive, !restoring, !stopping else { return }
-        restoring = true
+        guard lifecycle.restoreAsked() else { return }
         onRestore?()
         closeWindow()
     }
 
     /// Closes the window and ends what it plays, as the window's own close control does.
     func close() {
-        guard isActive, !restoring, !stopping, !closing else { return }
-        closing = true
-        closeWindow()
+        if lifecycle.closeAsked() { closeWindow() }
     }
 
     /// Play or pause the picture in the window.
@@ -151,7 +162,6 @@ final class PictureInPicture: NSObject {
         guard player != nil else { return }
         if let onSetPlaying { onSetPlaying(playing) } else if playing { player?.play() } else { player?.pause() }
         isPlaying = playing
-        controller?.invalidatePlaybackState()
     }
 
     // MARK: - Inside
@@ -160,96 +170,71 @@ final class PictureInPicture: NSObject {
         #if DEBUG
         if Self.proof { windowClosed(); return }
         #endif
-        controller?.stopPictureInPicture()
+        controllers.values.first { $0.isPictureInPictureActive }?.stopPictureInPicture()
+    }
+
+    private func windowOpened() {
+        pending?.cancel()
+        pending = nil
+        lifecycle.started()
+        isPlaying = player?.timeControlStatus != .paused
+        onHandOff?()
+        feedWindow()
+        onStart?()
     }
 
     /// The window has gone, however it was closed.
     private func windowClosed() {
-        if closing || (!restoring && !stopping) { onEnd?() }
-        restoring = false
-        stopping = false
-        closing = false
+        if lifecycle.stopped() { onEnd?() }
         finish()
     }
 
-    #if DEBUG
-    private func startProof(_ player: AVPlayer, in window: UIWindow) -> Bool {
-        restoring = false
-        stopping = false
-        closing = false
-        self.player = player
-        // Where tvOS puts its window: the bottom right, a third of the screen wide.
-        let width = window.bounds.width / 3, height = width * 9 / 16
-        pump.layer.removeFromSuperlayer()
-        window.layer.addSublayer(pump.layer)
-        pump.layer.frame = CGRect(x: window.bounds.width - width - 90, y: window.bounds.height - height - 60, width: width, height: height)
-        pump.windowDidResize(width: width)
-        pump.follow(player)
-        feedWindow()
-        pending = Task { [weak self] in
-            while let self, !Task.isCancelled, self.pump.frames == 0 { try? await Task.sleep(for: .milliseconds(100)) }
-            guard let self, !Task.isCancelled else { return }
-            self.pending = nil
-            self.isActive = true
-            self.isPlaying = player.timeControlStatus != .paused
-            self.onStart?()
-        }
-        return true
-    }
-    #endif
-
-    private static var keyWindow: UIWindow? {
-        let windows = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows)
-        return windows.first(where: \.isKeyWindow) ?? windows.first
-    }
-
-    /// The frames' layer sits at the back of the window, under every screen, sized as the screen:
-    /// tvOS takes the window's picture from it and animates the window out of its frame.
-    private func install(in window: UIWindow) {
-        if pump.layer.superlayer !== window.layer {
-            pump.layer.removeFromSuperlayer()
-            window.layer.insertSublayer(pump.layer, at: 0)
-        }
-        pump.layer.frame = window.bounds
-        guard controller == nil else { return }
-        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: pump.layer, playbackDelegate: self)
-        let made = AVPictureInPictureController(contentSource: source)
-        made.delegate = self
-        controller = made
-    }
-
-    /// Ten times a second while the window is opening or up: the caption, the item (a handover
-    /// brings a new one), and whether the picture plays, which the window's button shows.
+    /// Ten times a second while the window is up: the caption for a file's picture, the item (a
+    /// handover brings a new one, which gets the compositor in its turn), and whether the picture
+    /// plays, which the bar shows.
     private func feedWindow() {
         feed?.cancel()
         feed = Task { [weak self] in
-            var lastPlaying: Bool?
-            var lastDuration: Double?
             while !Task.isCancelled {
                 guard let self, let player = self.player else { return }
-                self.pump.follow(player)
+                if let item = player.currentItem, !self.composited.contains(item) { self.composite(item) }
                 let skin = self.skin?() ?? .day
-                self.pump.show(self.captions?().flatMap { $0.isEmpty ? nil : PiPFramePump.Caption(text: $0, skin: skin) })
+                HouseCaptionCompositor.show(self.captions?().flatMap { $0.isEmpty ? nil : HouseCaptionCompositor.Caption(text: $0, skin: skin) })
                 let playing = player.timeControlStatus != .paused
-                let duration = player.currentItem?.duration.seconds
-                if playing != lastPlaying || duration != lastDuration {
-                    lastPlaying = playing
-                    lastDuration = duration
-                    self.isPlaying = playing
-                    self.controller?.invalidatePlaybackState()
-                }
+                if playing != self.isPlaying { self.isPlaying = playing }
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
     }
 
-    /// The window is done: stop feeding it and let go of the player screen's closures.
+    /// Gives a file the caption compositor. A stream has no video tracks to compose (HLS), and is
+    /// left to tvOS's own drawing of its track.
+    private func composite(_ item: AVPlayerItem) {
+        composited.add(item)
+        compositing?.cancel()
+        compositing = Task { [weak self] in
+            guard let tracks = try? await item.asset.loadTracks(withMediaType: .video), !tracks.isEmpty,
+                  let made = try? await AVMutableVideoComposition.videoComposition(withPropertiesOf: item.asset),
+                  !Task.isCancelled, self?.isActive == true else { return }
+            made.customVideoCompositorClass = HouseCaptionCompositor.self
+            item.videoComposition = made
+        }
+    }
+
+    /// The window is done: the compositor comes off the picture (the screen draws its own caption
+    /// again) and the player screen's closures are let go.
     private func finish() {
-        isActive = false
+        pending?.cancel()
+        pending = nil
         feed?.cancel()
         feed = nil
-        pump.stop()
-        pump.layer.removeFromSuperlayer()
+        compositing?.cancel()
+        compositing = nil
+        HouseCaptionCompositor.show(nil)
+        for item in composited.allObjects where item.videoComposition?.customVideoCompositorClass == HouseCaptionCompositor.self {
+            item.videoComposition = nil
+        }
+        composited.removeAllObjects()
         player = nil
         letGo()
     }
@@ -257,11 +242,7 @@ final class PictureInPicture: NSObject {
 
 extension PictureInPicture: AVPictureInPictureControllerDelegate {
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ controller: AVPictureInPictureController) {
-        MainActor.assumeIsolated {
-            isActive = true
-            isPlaying = player?.timeControlStatus != .paused
-            onStart?()
-        }
+        MainActor.assumeIsolated { windowOpened() }
     }
 
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
@@ -271,15 +252,20 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         }
     }
 
+    /// The window's own full-screen control: the screen opens, and the window closes into it once
+    /// it has had a moment to come up. Close and Stop also ask this; they get a plain close.
     nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController,
                                                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
         MainActor.assumeIsolated {
-            // The bar's Full screen already asked (restore()); `stop()` and `close()` are not a restore.
-            guard !stopping, !restoring, !closing else { return }
-            restoring = true
-            onRestore?()
+            if lifecycle.reason != .restore {
+                guard lifecycle.systemRestoreAsked() else { completionHandler(false); return }
+                onRestore?()
+            }
+            Task {
+                try? await Task.sleep(for: Self.restoreSettle)
+                completionHandler(true)
+            }
         }
-        completionHandler(true)
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
@@ -294,41 +280,10 @@ extension PictureInPicture: AVPictureInPictureControllerDelegate {
         onRestore = nil
         onEnd = nil
         onSetPlaying = nil
+        onHandOff = nil
+        onCaptionToggle = nil
         captions = nil
+        captionLabel = nil
         skin = nil
-    }
-}
-
-extension PictureInPicture: AVPictureInPictureSampleBufferPlaybackDelegate {
-    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, setPlaying playing: Bool) {
-        MainActor.assumeIsolated { setPlaying(playing) }
-    }
-
-    /// A broadcast is live: no timeline and no skip. A film runs from its start to its length.
-    nonisolated func pictureInPictureControllerTimeRangeForPlayback(_ controller: AVPictureInPictureController) -> CMTimeRange {
-        MainActor.assumeIsolated {
-            let live = CMTimeRange(start: .negativeInfinity, duration: .positiveInfinity)
-            guard !isLive, let duration = player?.currentItem?.duration, duration.isNumeric, duration.seconds > 0 else { return live }
-            return CMTimeRange(start: .zero, duration: duration)
-        }
-    }
-
-    nonisolated func pictureInPictureControllerIsPlaybackPaused(_ controller: AVPictureInPictureController) -> Bool {
-        MainActor.assumeIsolated { player.map { $0.timeControlStatus == .paused } ?? true }
-    }
-
-    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {
-        pump.windowDidResize(width: CGFloat(newRenderSize.width))
-    }
-
-    nonisolated func pictureInPictureController(_ controller: AVPictureInPictureController, skipByInterval skipInterval: CMTime,
-                                                completion completionHandler: @escaping () -> Void) {
-        MainActor.assumeIsolated {
-            guard !isLive, let player else { completionHandler(); return }
-            let target = CMTimeMaximum(.zero, CMTimeAdd(player.currentTime(), skipInterval))
-            player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
-                DispatchQueue.main.async { completionHandler() }
-            }
-        }
     }
 }

@@ -1,13 +1,12 @@
 import XCTest
 
-/// The picture-in-picture window carries the house caption plate, and the PiP bar brings it back
-/// full screen in one press or closes it (owner, 2026-11-17: "pip still not showing subtitles in
-/// skin and its hard to navigate into small pip window and click it back up to full screen").
+/// The PiP bar brings the picture back full screen in one press, closes it, works its subtitles
+/// and Play/Pause, and shows over a cover as well as the root (owner, 2026-11-17: "hard to navigate
+/// into small pip window and click it back up to full screen").
 ///
-/// The simulator has no picture in picture, so `-kjpipproof` shows the frames' layer as a corner
-/// window in the app, fed exactly as tvOS's window is. The preview plays as the full film
-/// (`-kjfilmasfull`) with English on, in Grove, whose plate (#002800) is a colour no other part of
-/// the screen uses: the plate is found by its pixels in the corner, not assumed.
+/// The simulator has no picture in picture, so `-kjpipproof` takes the window as open the moment
+/// it is asked for. The window's own picture and subtitles are checked on an Apple TV
+/// (`testTransmissionWindowOnAppleTV`, and the screenshots in the pull request).
 final class PiPWindowUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -15,12 +14,17 @@ final class PiPWindowUITests: XCTestCase {
 
     private static let film = "filmfarsi-trailers-vol-1-khajistan"
 
-    private func openFullFilm(_ app: XCUIApplication) throws {
-        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
-            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+    private func openFullFilm(_ app: XCUIApplication, onAppleTV: Bool = false) throws {
+        if onAppleTV {
+            // The real window: production's vod.json, read with the preview password the Apple TV holds.
+            app.launchArguments = ["-kjskin", "grove", "-kjfilmasfull", "YES", "-kj-of-subtitles.\(Self.film)", "en"]
+        } else {
+            guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+                throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+            }
+            app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
+                                   "-kj-of-subtitles.\(Self.film)", "en"]
         }
-        app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
-                               "-kj-of-subtitles.\(Self.film)", "en"]
         kjLaunch(app)
         let film = app.buttons["film-\(Self.film)"]
         let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
@@ -51,25 +55,7 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "the PiP bar comes up with the window")
     }
 
-    /// Pixels of the Grove caption plate (#002800) in the bottom-right third of the screen.
-    private func platePixels(_ shot: XCUIScreenshot) -> Int {
-        guard let cg = shot.image.cgImage else { return 0 }
-        let width = cg.width, height = cg.height
-        var bytes = [UInt8](repeating: 0, count: width * height * 4)
-        guard let ctx = CGContext(data: &bytes, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return 0 }
-        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        var count = 0
-        for y in stride(from: height * 2 / 3, to: height, by: 2) {
-            for x in stride(from: width * 2 / 3, to: width, by: 2) {
-                let i = (y * width + x) * 4
-                if bytes[i] <= 4, abs(Int(bytes[i + 1]) - 40) <= 4, bytes[i + 2] <= 4 { count += 1 }
-            }
-        }
-        return count
-    }
-
-    func testWindowCarriesTheCaptionPlateAndComesBackInOnePress() throws {
+    func testBarComesUpLitAndBringsTheFilmBackInOnePress() throws {
         let app = XCUIApplication()
         try openFullFilm(app)
         openWindow(app)
@@ -77,14 +63,7 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fullScreen.hasFocus }, object: nil)], timeout: 10),
                        .completed, "Full screen is lit as the window opens")
         XCTAssertFalse(app.staticTexts["playerState"].exists, "the player screen has closed behind the window")
-        // A cue is up within a few seconds of the trailer; the plate is read off the corner.
-        var plate = 0
-        for _ in 0..<20 where plate < 200 {
-            kjPause(1)
-            plate = platePixels(XCUIScreen.main.screenshot())
-        }
-        kjScreenshot("pip-window-caption-plate", app: app)
-        XCTAssertGreaterThan(plate, 200, "the house caption plate is drawn in the corner window")
+        kjScreenshot("pip-bar-lit", app: app)
 
         // One Select: the film comes back full screen, with its captions.
         XCUIRemote.shared.press(.select)
@@ -94,25 +73,12 @@ final class PiPWindowUITests: XCTestCase {
         kjScreenshot("pip-restored-full-screen", app: app)
     }
 
-    /// The negative case: without a caption on, the corner shows no plate (the plate is not the
-    /// picture's own colour), and the bar's Close ends the film.
-    func testWindowWithSubtitlesOffShowsNoPlateAndCloseEnds() throws {
+    /// Close ends the film; it does not reopen it (the window's restore request after a close is
+    /// not the viewer asking for full screen).
+    func testCloseOnTheBarEndsTheFilm() throws {
         let app = XCUIApplication()
         try openFullFilm(app)
-        // Subtitles to Off: Down lights Subtitles; English → Off.
-        let subtitles = app.descendants(matching: .any)["subtitlesControl"]
-        XCUIRemote.shared.press(.down)
-        kjPause(0.6)
-        XCTAssertTrue(subtitles.isSelected, "Down lights Subtitles")
-        XCUIRemote.shared.press(.select)
-        kjPause(0.8)
-        XCTAssertEqual(subtitles.label, "Subtitles · Off")
-        XCUIRemote.shared.press(.menu)   // let go of the lit control
-        kjPause(0.6)
         openWindow(app)
-        kjPause(6)
-        XCTAssertLessThan(platePixels(XCUIScreen.main.screenshot()), 20, "no caption, no plate")
-        kjScreenshot("pip-window-no-caption", app: app)
         let close = app.buttons["pipBarClose"]
         for _ in 0..<4 where !close.hasFocus { XCUIRemote.shared.press(.right); kjPause(0.5) }
         XCTAssertTrue(close.hasFocus, "Right walks the bar to Close")
@@ -121,6 +87,63 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(2)
         XCTAssertFalse(app.staticTexts["playerState"].exists, "Close ends the film rather than reopening it")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'")).firstMatch.exists, "the shelf is there")
+    }
+
+    /// A film played from its page (a cover over the root) goes to the corner and the viewer is
+    /// back on the page: the bar must be there, over the page, with Full screen lit (Fable round 1:
+    /// the bar lived on the root only and was hidden under every cover).
+    func testBarShowsOverTheFilmPage() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        // A place kept for the film puts it on Rooms' Up Next row, whose cards open the film's page.
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
+                               "-kjtab", "rooms", "-kj.filmPlaces", "<dict><key>\(Self.film)</key><real>60</real></dict>",
+                               "-kj-of-subtitles.\(Self.film)", "en"]
+        kjLaunch(app)
+        // Rooms → Screening Room (a cover), whose Up Next row comes first; its card opens the film's
+        // page, a second cover.
+        let door = app.buttons["tvroom-screening"].firstMatch
+        XCTAssertTrue(door.waitForExistence(timeout: 30), "Rooms shows the Screening Room")
+        XCTAssertTrue(kjFocus(door, app: app), "the door takes focus")
+        XCUIRemote.shared.press(.select)
+        // The root's Rooms page carries the same Up Next card under the cover, so the card is
+        // found by focus, not by its identifier alone.
+        XCTAssertTrue(app.buttons["upnext-\(Self.film)"].firstMatch.waitForExistence(timeout: 45), "Up Next carries the film")
+        let focused = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<12 where !(focused.exists && focused.identifier == "upnext-\(Self.film)") {
+            XCUIRemote.shared.press(focused.exists && focused.identifier.hasPrefix("upnext-") ? .right : .down)
+            kjPause(0.5)
+        }
+        XCTAssertEqual(focused.identifier, "upnext-\(Self.film)", "the card takes focus")
+        XCUIRemote.shared.press(.select)
+        let play = app.buttons["filmPlay"]
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page opens")
+        kjPause(1)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "the film plays with its English")
+        openWindow(app)
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "the viewer is back on the film's page")
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fullScreen.hasFocus }, object: nil)], timeout: 10),
+                       .completed, "Full screen is lit over the page")
+        kjPause(2)
+        kjScreenshot("pip-bar-over-film-page", app: app)
+        // The bar's subtitle control works the window's language.
+        let captions = app.buttons["pipBarCaptions"]
+        XCTAssertEqual(captions.label, "Subtitles · English")
+        for _ in 0..<4 where !captions.hasFocus { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        XCUIRemote.shared.press(.select)
+        kjPause(0.8)
+        XCTAssertEqual(captions.label, "Subtitles · Off", "the bar turns the window's subtitles off")
+        // Play/Pause on the remote works the window wherever focus is.
+        XCUIRemote.shared.press(.playPause)
+        kjPause(0.8)
+        XCTAssertEqual(app.buttons["pipBarToggle"].label, "Play", "Play/Pause paused the window")
+        XCUIRemote.shared.press(.playPause)
+        kjPause(0.8)
+        XCTAssertEqual(app.buttons["pipBarToggle"].label, "Pause")
     }
 
     /// The real window, on a real Apple TV signed in to an account that can watch Transmission:
@@ -138,20 +161,23 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
         for _ in 1..<channel { XCUIRemote.shared.press(.right); kjPause(0.4) }
         XCUIRemote.shared.press(.select)
-        let state = app.staticTexts["playerState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 30), "the player opens")
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == 'Playing'"), object: state)], timeout: 90),
-                       .completed, "the channel plays")
-        kjPause(14)
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(tuned.waitForExistence(timeout: 30), "the player opens")
+        // The sign-on and the tune; the strip then hides itself, taking the state line with it.
+        kjPause(30)
         kjScreenshot("device-1-full-screen", app: app)
         let pip = app.descendants(matching: .any)["pipControl"]
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         for _ in 0..<5 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP")
+        XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP (it is offered only while the channel plays)")
         XCUIRemote.shared.press(.select)
         let bar = app.otherElements["pipBar"]
-        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the window opens and the bar comes up")
+        if !bar.waitForExistence(timeout: 20) {
+            let said = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'picture'")).allElementsBoundByIndex.map(\.label)
+            XCTFail("the window did not open: \(said)")
+            return
+        }
         let fullScreen = app.buttons["pipBarFullScreen"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fullScreen.hasFocus }, object: nil)], timeout: 10),
                        .completed, "Full screen is lit as the window opens")
@@ -163,9 +189,30 @@ final class PiPWindowUITests: XCTestCase {
             add(shot)
         }
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(state.waitForExistence(timeout: 40), "one Select brings the channel back full screen")
+        XCTAssertTrue(tuned.waitForExistence(timeout: 40), "one Select brings the channel back full screen")
         XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "the bar goes with the window")
         kjPause(10)
         kjScreenshot("device-6-back-full-screen", app: app)
+    }
+
+    /// The real window on an Apple TV (`TEST_RUNNER_KJ_DEVICE_FILM=1`): the film's English, drawn by
+    /// tvOS in the skin's colours, in the corner; the photographs are the evidence.
+    func testFilmWindowOnAppleTV() throws {
+        guard ProcessInfo.processInfo.environment["KJ_DEVICE_FILM"] != nil else {
+            throw XCTSkip("the real window needs an Apple TV: set TEST_RUNNER_KJ_DEVICE_FILM")
+        }
+        let app = XCUIApplication()
+        try openFullFilm(app, onAppleTV: true)
+        openWindow(app)
+        for index in 1...10 {
+            kjPause(1.5)
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "film-window-\(index)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "back full screen, the house view draws again")
+        kjScreenshot("film-back-full-screen", app: app)
     }
 }

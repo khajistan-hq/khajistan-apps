@@ -89,10 +89,12 @@ final class ReadingStore {
 }
 final class PictureInPicture {
     var title = ""
-    var isLive = false
     var captions: (() -> String?)?
+    var captionLabel: (() -> String?)?
+    var onCaptionToggle: (() -> Void)?
     var skin: (() -> Int)?
     var onSetPlaying: ((Bool) -> Void)?
+    var onHandOff: (() -> Void)?
     var onStart: (() -> Void)?
     var onFail: ((String) -> Void)?
     var onRestore: (() -> Void)?
@@ -105,7 +107,13 @@ final class PictureInPicture {
 final class RecordedSubtitles {
     var tracks: [Int] = [1]
     var text: String? = "a line"
+    var label = "Subtitles · English"
+    var cycled = 0
+    var handedOff = 0
+    func cycle() { cycled += 1 }
+    func handOff() { handedOff += 1 }
 }
+
 /// The window's subtitles: read by `captions`, ended when the window restores or closes.
 final class ProgrammeSubtitleFollower {
     let subtitles: RecordedSubtitles
@@ -245,10 +253,16 @@ if !receiverMetadataPreserved { failures += 1 }
 let carried = Probe()
 carried.startPictureInPicture()
 let follower = Probe.lastFollower!
-let windowReads = carried.pip.captions?() == "a line" && carried.pip.isLive && carried.pip.title == "Channel 5"
+let windowReads = carried.pip.captions?() == "a line" && carried.pip.title == "Channel 5"
     && follower.loaded == "programme-1"
-print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, live, named for the channel")
+print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, named for the channel")
 if !windowReads { failures += 1 }
+carried.pip.onCaptionToggle?()
+carried.pip.onHandOff?()
+let barWorksSubtitles = carried.pip.captionLabel?() == "Subtitles · English" && follower.subtitles.cycled == 1
+    && follower.subtitles.handedOff == 1
+print("\(barWorksSubtitles ? "PASS" : "FAIL") the window hands the stream's track to tvOS; the bar names and cycles it")
+if !barWorksSubtitles { failures += 1 }
 carried.pip.onStart?()
 carried.pip.onRestore?()
 print("\(follower.ended ? "PASS" : "FAIL") full screen ends the window's subtitles for the screen to load")

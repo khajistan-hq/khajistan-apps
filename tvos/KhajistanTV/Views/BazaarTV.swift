@@ -41,8 +41,8 @@ struct TVBazaar: View {
             await model.bazaar.load()
             await model.bazaarSwap.load()
         }
-        .fullScreenCover(item: $showing) { item in TVProductScreen(item: item) }
-        .fullScreenCover(isPresented: $showBag) { TVBagScreen() }
+        .kjFullScreenCover(item: $showing) { item in TVProductScreen(item: item) }
+        .kjFullScreenCover(isPresented: $showBag) { TVBagScreen() }
     }
 }
 

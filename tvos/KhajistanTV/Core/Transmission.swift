@@ -367,9 +367,4 @@ struct StoredSubtitles: Equatable, Sendable {
         return StoredSubtitles(access: access, tracks: tracks)
     }
 
-    /// The prepared file to show: the language the programme's file name says, else the first.
-    func file(for subtitleURL: String) -> Track? {
-        let code = SubtitleChoice.fileLanguage(subtitleURL)
-        return tracks.first { $0.lang == code } ?? tracks.first
-    }
 }

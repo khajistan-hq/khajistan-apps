@@ -4774,8 +4774,13 @@ func storedSubtitlesAnswer() throws {
     let open = answer(#"{"access":"sample","week":"2026-W47","tracks":[{"lang":"en","vtt":"\#(vtt.replacingOccurrences(of: "\n", with: "\\n"))"},{"lang":"fa","vtt":"\#(vtt.replacingOccurrences(of: "\n", with: "\\n"))"}]}"#)
     try expect(open.open && open.access == .sample)
     try expectEqual(open.tracks.map(\.lang), ["en", "fa"])
-    try expectEqual(open.file(for: "/assets/tv-subtitles/x.fa.vtt")?.lang, "fa")
-    try expectEqual(open.file(for: "/assets/tv-subtitles/x.vtt")?.lang, "en")
+    // Which prepared file opens: remembered, then device, then the named file, then the first; never off.
+    let have = ["ar", "en", "fa", "ur"]
+    try expectEqual(SubtitleChoice.fileOpener(available: have, stored: "ur", preferred: ["fa-IR"], named: "en"), "ur")
+    try expectEqual(SubtitleChoice.fileOpener(available: have, stored: "off", preferred: ["fa-IR"], named: "en"), "fa")
+    try expectEqual(SubtitleChoice.fileOpener(available: have, stored: nil, preferred: ["de-DE"], named: "en"), "en")
+    try expectEqual(SubtitleChoice.fileOpener(available: ["ar", "ur"], stored: "he", preferred: [], named: "en"), "ar")
+    try expect(SubtitleChoice.fileOpener(available: [], stored: "en", preferred: ["en"], named: "en") == nil)
     try expect(answer(#"{"access":"subscriber","tracks":[]}"#).open)
     // Closed: none (even carrying text), an unknown access, an error body, garbage.
     for body in [#"{"access":"none","tracks":[{"lang":"en","vtt":"WEBVTT"}]}"#, #"{"access":"all","tracks":[]}"#,

@@ -25,7 +25,7 @@ final class RecordedSubtitles {
     /// The language on, nil for off.
     private(set) var current: String?
 
-    @ObservationIgnored private var cues: [SubtitleCue] = []
+    @ObservationIgnored private var fileCues: [String: [SubtitleCue]] = [:]
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var group: AVMediaSelectionGroup?
     @ObservationIgnored private var options: [String: AVMediaSelectionOption] = [:]
@@ -51,7 +51,7 @@ final class RecordedSubtitles {
         output = nil
         group = nil
         options = [:]
-        cues = []
+        fileCues = [:]
         tracks = []
         current = nil
         text = nil
@@ -78,16 +78,28 @@ final class RecordedSubtitles {
     /// Reads the file and follows `clock` (seconds into the programme's file). A file that does not
     /// parse offers nothing: there is no control for subtitles that cannot be shown.
     func load(vtt source: String, language: Track, clock: @escaping @MainActor () -> Double?) {
+        load(files: [(language, source)], first: language.code, clock: clock)
+    }
+
+    /// Several files for one programme (English, and Urdu, Persian or Arabic where made), one per
+    /// language, on in `first` when it is among them, else the first that parses. The control steps
+    /// through them and off, as with a film's tracks; a file's choice is not remembered (video.html).
+    func load(files: [(Track, String)], first: String?, clock: @escaping @MainActor () -> Double?) {
         clear()
-        guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { return }
-        cues = parsed
-        tracks = [language]
-        current = language.code
+        var parsedTracks: [Track] = []
+        for (track, source) in files where fileCues[track.code] == nil {
+            guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { continue }
+            fileCues[track.code] = parsed
+            parsedTracks.append(track)
+        }
+        guard let opener = parsedTracks.first else { return }
+        tracks = parsedTracks
+        current = parsedTracks.contains { $0.code == first } ? first : opener.code
         let gen = generation
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, gen == self.generation else { return }
-                let showing = self.current == nil ? nil : clock().flatMap { WebVTT.text(at: $0, in: self.cues) }
+                let showing = self.current == nil ? nil : clock().flatMap { WebVTT.text(at: $0, in: self.fileCues[self.current ?? ""] ?? []) }
                 if self.text != showing { self.text = showing }
                 try? await Task.sleep(for: .milliseconds(100))
             }

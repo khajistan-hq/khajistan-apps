@@ -582,13 +582,18 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// tv_subtitles() for the programme on air, asked with the viewer's session. Any failure is closed.
+    /// tv_subtitles() for the programme on air, asked with the viewer's session; one retry, as the
+    /// site's subtitles() does. Any failure is closed.
     private func storedSubtitles(_ air: OnAir) async -> StoredSubtitles {
         guard let token = try? await model.auth.validAccessToken(),
-              let request = StoredSubtitles.request(programme: air.programmeId, accessToken: token),
-              let (data, response) = try? await SupabaseRoute.data(for: request, session: .shared),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return .closed }
-        return StoredSubtitles.parse(data)
+              let request = StoredSubtitles.request(programme: air.programmeId, accessToken: token) else { return .closed }
+        for _ in 0..<2 where !Task.isCancelled {
+            if let (data, response) = try? await SupabaseRoute.data(for: request, session: .shared),
+               (response as? HTTPURLResponse)?.statusCode == 200 {
+                return StoredSubtitles.parse(data)
+            }
+        }
+        return .closed
     }
 
     /// Closed on a Stream programme: AVPlayer could still render a manifest track itself when the
@@ -609,14 +614,20 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// The programme's prepared file, the text tv_subtitles() returned with the answer.
+    /// The programme's prepared files, the text tv_subtitles() returned with the answer: English,
+    /// and Urdu, Persian or Arabic where made. Opens as video.html does (SubtitleChoice.fileOpener).
     private func loadFile(_ air: OnAir, _ stored: StoredSubtitles) async {
-        guard let (source, code) = subtitleSource(air, stored) else { return }
+        let sources = subtitleSources(air, stored)
+        guard !sources.isEmpty else { return }
         let opened = Date()
         let store = store
-        let language = RecordedSubtitles.Track(
-            code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil))
-        subtitles.load(vtt: source, language: language) {
+        let files = sources.map { source, code in
+            (RecordedSubtitles.Track(code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil)), source)
+        }
+        let first = SubtitleChoice.fileOpener(
+            available: files.map(\.0.code), stored: UserDefaults.standard.string(forKey: SubtitleChoice.storeKey),
+            preferred: Locale.preferredLanguages, named: SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? ""))
+        subtitles.load(files: files, first: first) {
             let player = store.player.player
             if player.currentItem != nil {
                 let time = player.currentTime().seconds
@@ -654,16 +665,15 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    private func subtitleSource(_ air: OnAir, _ stored: StoredSubtitles) -> (String, String)? {
-        let path = air.programme?.subtitle_url ?? ""
+    private func subtitleSources(_ air: OnAir, _ stored: StoredSubtitles) -> [(String, String)] {
         #if DEBUG
         // `-kjsubtitlefile <path>`: a UI test's WebVTT file for whatever is on air.
         if let file = UserDefaults.standard.string(forKey: "kjsubtitlefile") {
-            return (try? String(contentsOfFile: file, encoding: .utf8)).map { ($0, SubtitleChoice.fileLanguage(path)) }
+            let named = SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? "")
+            return (try? String(contentsOfFile: file, encoding: .utf8)).map { [($0, named)] } ?? []
         }
         #endif
-        guard !path.isEmpty, let track = stored.file(for: path) else { return nil }
-        return (track.vtt, track.lang)
+        return stored.tracks.map { ($0.vtt, $0.lang) }
     }
 
     private var isOnAir: Bool {

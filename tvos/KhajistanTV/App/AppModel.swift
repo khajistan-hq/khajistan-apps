@@ -51,6 +51,10 @@ final class AppModel {
     var transmissionPiP: PictureInPicture?
     /// A Screening Room film playing in the picture-in-picture window, its player screen closed.
     var filmPiP: FilmAway?
+    /// The corner window that is up, whichever player put it there, for the PiP bar.
+    var activePiP: PictureInPicture? {
+        [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }
+    }
     /// A film the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoringFilm: Film?
     /// The Screening Room's films, read from vod.json with the preview password.
@@ -178,6 +182,8 @@ final class AppModel {
     func silenceRadio() {
         let away = radioAway
         radioAway = nil
+        // A picture in the corner window carried its live captions with it.
+        if away?.pip != nil { captions.detach() }
         away?.pip?.stop()
         away?.controller.stop()
         if let pip = transmissionPiP {

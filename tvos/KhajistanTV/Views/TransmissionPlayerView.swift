@@ -558,6 +558,18 @@ struct TransmissionPlayerView: View {
         let store = store, model = model, pip = pip
         let player = store.player
         let access = store.accessRevision
+        // The window draws the house plate itself (PiPFramePump), following the channel's
+        // handovers once this screen has closed: the object, not the screen's state.
+        let follower = ProgrammeSubtitleFollower(subtitles, store: store, model: model,
+                                                 loaded: subtitles.tracks.isEmpty ? nil : subtitleKey)
+        pip.title = store.channelName(store.channelNumber)
+        pip.isLive = true
+        pip.captions = { follower.text() }
+        pip.skin = { model.skin }
+        // A paused transmission is not the transmission any more: Play joins it again, live.
+        pip.onSetPlaying = { playing in
+            if playing { Task { await store.rejoinLive() } } else { store.player.pause() }
+        }
         pip.onStart = {
             // AVKit can finish starting after a retune or after this screen has left.
             guard !left, !switching, store.player === player, store.accessRevision == access,
@@ -569,14 +581,17 @@ struct TransmissionPlayerView: View {
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.transmissionPiP === pip else { return }
-            // transmissionPiP stays set: the player that opens clears it as it starts
-            // (silenceRadio). If it cannot open (signed out, a cover in the way), the next
+            // The screen that opens loads the programme's subtitles afresh.
+            follower.end()
+            // transmissionPiP stays set: the player that opens takes the channel over as it plays
+            // (start()). If it cannot open (signed out, a cover in the way), the next
             // signal to start still stops this one rather than playing over it.
             // The station page opens the channel again, as a Top Shelf link does.
             model.section = .transmission
             model.link = .channel(store.channelNumber)
         }
         pip.onEnd = {
+            follower.end()
             guard model.transmissionPiP === pip else { return }
             model.transmissionPiP = nil
             store.stop()
@@ -601,93 +616,10 @@ struct TransmissionPlayerView: View {
     // MARK: - Subtitles
 
     /// The programme on air, so a handover loads the next programme's file.
-    private var subtitleKey: String? {
-        guard case .onAir(let air) = store.phase else { return nil }
-        return "\(air.date) \(air.slot.start) \(air.programmeId)"
-    }
+    private var subtitleKey: String? { ProgrammeSubtitles.key(store.phase) }
 
-    /// A Cloudflare Stream programme offers the tracks its own manifest carries (Persian, Urdu,
-    /// Arabic…), as the Screening Room does. Its prepared English file is the same text with the
-    /// same timings as the manifest's English track (measured 2026-11-15 on all 11 on air), so
-    /// the manifest wins; a manifest with no tracks falls back to the file. Any other programme
-    /// shows its prepared file, in the language its name gives; without one, no control.
     private func loadSubtitles() async {
-        subtitles.clear()
-        guard case .onAir(let air) = store.phase else { return }
-        #if DEBUG
-        // `-kjsubtitlefile` gives whatever is on air that file, Stream or not (README).
-        if UserDefaults.standard.string(forKey: "kjsubtitlefile") != nil { await loadFile(air); return }
-        #endif
-        if case .stream = air.programme?.play_url.flatMap(Transmission.route(for:)) {
-            await followStreamTracks(air)
-        } else {
-            await loadFile(air)
-        }
-    }
-
-    /// The programme's prepared file, read through the site's gate like the schedule.
-    private func loadFile(_ air: OnAir) async {
-        guard let source = await subtitleSource(air) else { return }
-        let opened = Date()
-        let store = store
-        let code = SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? "")
-        let language = RecordedSubtitles.Track(
-            code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil))
-        subtitles.load(vtt: source, language: language) {
-            let player = store.player.player
-            if player.currentItem != nil {
-                let time = player.currentTime().seconds
-                return time.isFinite ? time : nil
-            }
-            #if DEBUG
-            // A schedule file plays no picture; the slot's own position stands in for the file's.
-            if store.isScheduleFile { return air.seekTo + Date().timeIntervalSince(opened) }
-            #endif
-            return nil
-        }
-    }
-
-    /// Lists the tracks of the Stream item the player holds. A handover can leave the last
-    /// programme's item playing for a moment, so only stream-host items are read and a later one is
-    /// followed when it arrives. A manifest with no tracks falls back to the prepared file. The task
-    /// is cancelled when the programme changes.
-    private func followStreamTracks(_ air: OnAir) async {
-        var tried: AVPlayerItem?
-        while !Task.isCancelled {
-            if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
-               (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
-                tried = item
-                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house, skin: model.skin)
-                // Fall back only when this item is still the one playing: a previous Stream
-                // programme's item without tracks is no reason to give up on this one. A read that
-                // fails on the playing item does fall back, to the same English text.
-                if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
-                    await loadFile(air)
-                    return
-                }
-            }
-            try? await Task.sleep(for: .milliseconds(500))
-        }
-    }
-
-    private func subtitleSource(_ air: OnAir) async -> String? {
-        #if DEBUG
-        // `-kjsubtitlefile <path>`: a UI test's WebVTT file for whatever is on air.
-        if let path = UserDefaults.standard.string(forKey: "kjsubtitlefile") {
-            return try? String(contentsOfFile: path, encoding: .utf8)
-        }
-        #endif
-        guard let path = air.programme?.subtitle_url, let url = KJURL.sitePath(path) else { return nil }
-        var request = URLRequest(url: url)
-        request.setValue(KJConfig.userAgent, forHTTPHeaderField: "User-Agent")
-        guard var (data, response) = try? await URLSession.shared.data(for: request) else { return nil }
-        if (response as? HTTPURLResponse)?.statusCode == 401, let password = model.auth.previewPassword {
-            request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: password), forHTTPHeaderField: "Authorization")
-            guard let again = try? await URLSession.shared.data(for: request) else { return nil }
-            (data, response) = again
-        }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        await ProgrammeSubtitles.load(into: subtitles, store: store, model: model)
     }
 
     private var isOnAir: Bool {
@@ -817,7 +749,13 @@ struct TransmissionPlayerView: View {
     /// The sign-on once per launch, then the channel. Every step checks that the viewer is still
     /// here: a clip must not start after the screen has gone.
     private func start() async {
+        // Full screen from the corner window, as Apple TV does it: the channel playing in the
+        // window is this one, so the screen takes it over as it plays, with no retune.
+        let adopted = model.transmissionPiP != nil && store.channelNumber == channel
+            && (store.player.state == .playing || store.player.state == .tuning)
+        if adopted { model.transmissionPiP = nil }
         model.silenceRadio()
+        if adopted { return }
         // The sign-on, once per launch: the skin's colour with the channel's name, a pigeon
         // flying over it while the programme tunes behind, and the cut to the picture.
         if !model.clips.signOnPlayed {
@@ -852,9 +790,12 @@ struct TransmissionPlayerView: View {
         // The bird is on the window, over every screen: it goes with the player.
         model.pigeon.clear()
         hideTask?.cancel()
-        subtitles.clear()
-        // A picture in the corner window plays on: the store keeps it until the window closes.
-        if !handedToPiP { store.stop() }
+        // A picture in the corner window plays on, its subtitles with it: the store keeps it until
+        // the window closes, and the window clears the subtitles then.
+        if !handedToPiP {
+            subtitles.clear()
+            store.stop()
+        }
         model.clips.clear()
     }
 

@@ -416,6 +416,14 @@ struct ReceiverPlayerView: View {
         let player = controller
         let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
                              listRegion: listRegion, listTitle: listTitle, pip: pip)
+        let captions = model.captions, model = model
+        pip.title = current.name
+        pip.isLive = true
+        // Live captions stay on in the window, drawn on the picture in the house plate.
+        pip.captions = { captions.text }
+        pip.skin = { model.skin }
+        // The window's own Play/Pause works the player as the screen's does.
+        pip.onSetPlaying = { playing in playing ? player.resume() : player.pause() }
         pip.onStart = { [pip] in
             // A channel step between Select and the window opening stopped this player.
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
@@ -424,7 +432,11 @@ struct ReceiverPlayerView: View {
             dismiss()
         }
         pip.onFail = { say($0) }
-        pip.onRestore = { [model] in model.restoring = away }
+        pip.onRestore = {
+            // The screen that opens attaches the channel's captions afresh.
+            captions.detach()
+            model.restoring = away
+        }
         pip.onEnd = { [model] in
             if model.radioAway?.controller === player { model.silenceRadio() } else { player.stop() }
         }
@@ -923,7 +935,9 @@ struct ReceiverPlayerView: View {
         tuneTask?.cancel()
         changeTask?.cancel()
         hideTask?.cancel()
-        model.captions.detach()
+        // A picture handed to the corner window keeps its live captions: the window draws them.
+        let toWindow = model.radioAway?.pip != nil && (model.radioAway?.controller === playerA || model.radioAway?.controller === playerB)
+        if !toWindow { model.captions.detach() }
         // The radio handed to the small player keeps playing.
         if model.radioAway?.controller !== playerA { playerA.stop() }
         if model.radioAway?.controller !== playerB { playerB.stop() }
@@ -1055,7 +1069,7 @@ struct RadioBar: View {
 
 /// A control on the band: onBand at rest; under focus the colours swap, the onBand plate with the
 /// band's colour as its text, at 1.03. No outline.
-private struct OnBandStyle: ButtonStyle {
+struct OnBandStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         OnBandFace(label: configuration.label, isPressed: configuration.isPressed)
     }

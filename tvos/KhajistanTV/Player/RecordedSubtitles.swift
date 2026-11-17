@@ -43,22 +43,12 @@ final class RecordedSubtitles {
         return "Subtitles \u{00B7} \(on)"
     }
 
-    /// Hands a film's chosen track to AVPlayer for the corner window: the house view stops
-    /// drawing, and the track stays selected, so AVPlayer draws it in the window itself.
-    func handOff() {
-        if let output, let item { item.remove(output) }
-        output = nil
-        // clear() deselects through the group; with the group let go, the selection stays.
-        group = nil
-        clear()
-    }
-
     func clear() {
         generation += 1
         ticker?.cancel()
         ticker = nil
         // Deselect too: with its suppressing output gone, a selected track would be drawn by the
-        // system itself, in its own style, in the picture-in-picture window.
+        // system itself, in its own style.
         if let group, let item { item.select(nil, in: group) }
         if let output, let item { item.remove(output) }
         output = nil
@@ -113,16 +103,9 @@ final class RecordedSubtitles {
     /// Lists the legible options of `item`, one per language, labelled from `listed`, and
     /// switches on the language remembered for this film (or, with no film, the one Transmission
     /// choice), or the device's, else English, else none (desiredSubtitle()).
-    func attach(_ item: AVPlayerItem, film handle: String?, listed: [SubtitleLanguage], skin: Skin) async {
+    func attach(_ item: AVPlayerItem, film handle: String?, listed: [SubtitleLanguage]) async {
         clear()
         let gen = generation
-        // The house view draws the text full screen. In the picture-in-picture window AVPlayer
-        // draws it (handOff()), and these rules give it the skin's caption plate there too.
-        item.textStyleRules = [AVTextStyleRule(textMarkupAttributes: [
-            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
-            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
-            kCMTextMarkupAttribute_BoldStyle as String: true,
-        ])].compactMap { $0 }
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []

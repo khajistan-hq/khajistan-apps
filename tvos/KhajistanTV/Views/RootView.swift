@@ -10,6 +10,8 @@ struct RootView: View {
     @State private var visited: [Section] = []
     /// Set while Back changes the section, so the change is not recorded as a visit.
     @State private var goingBack = false
+    /// Full screen on the PiP bar, lit as the corner window opens.
+    @FocusState private var pipFocus: Bool
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -38,6 +40,23 @@ struct RootView: View {
                 RadioBar(away: away) {
                     model.silenceRadio()
                     reopened = away
+                }
+            }
+            if let pip = model.activePiP {
+                PiPBar(pip: pip, focus: $pipFocus)
+            }
+        }
+        // As the corner window opens the player screen closes behind it; Full screen is lit once
+        // the page underneath has settled, so one Select brings the picture back. tvOS hands focus
+        // back to the card that opened the player when its cover finishes closing, which can land
+        // after a first try, so it is asked for again until it holds (about a second at most).
+        .onChange(of: model.activePiP != nil) { _, up in
+            guard up else { return }
+            Task {
+                for _ in 0..<6 {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    guard model.activePiP != nil else { return }
+                    if !pipFocus { pipFocus = true }
                 }
             }
         }
@@ -107,7 +126,12 @@ struct RootView: View {
         }
         // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
         // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
-        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
+        // With the corner window up, Play/Pause works the window's picture, wherever focus is.
+        .onPlayPauseCommand(perform: model.activePiP == nil && (model.radioAway == nil || model.radioAway?.pip != nil) ? nil : {
+            if let pip = model.activePiP {
+                pip.setPlaying(!pip.isPlaying)
+                return
+            }
             guard let away = model.radioAway else { return }
             if away.controller.state == .playing || away.controller.state == .tuning {
                 away.controller.pause()

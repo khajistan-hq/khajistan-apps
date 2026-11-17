@@ -340,22 +340,31 @@ struct FilmPlayerView: View {
         guard pipOffered else { return }
         armed = nil
         let player = controller, film = film, model = model, pip = pip
+        // The object, not the screen's state: the window reads it after the screen has closed.
+        let subtitles = subtitles
         let away = FilmAway(film: film, controller: player, pip: pip)
+        pip.title = film.title ?? ""
+        pip.isLive = false
+        // The house plate goes into the window with the picture (PiPFramePump): the track keeps
+        // playing into RecordedSubtitles, which the screen leaves running while the film is away.
+        pip.captions = { subtitles.text }
+        pip.skin = { model.skin }
+        pip.onSetPlaying = { $0 ? player.resume() : player.pause() }
         pip.onStart = {
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             away.recordPlace()
-            // AVPlayer draws the chosen subtitles itself in the corner: the house caption view
-            // stays with the closed screen, and the track stays selected.
-            subtitles.handOff()
             model.filmPiP = away
             leave()
         }
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.filmPiP?.controller === player else { return }
+            // The screen that opens attaches the film's tracks afresh.
+            subtitles.clear()
             model.restoringFilm = film
         }
         pip.onEnd = {
+            subtitles.clear()
             if model.filmPiP?.controller === player { model.silenceRadio() } else { player.stop() }
         }
         if !pip.start(player.player) {
@@ -514,7 +523,7 @@ struct FilmPlayerView: View {
         switch controller.state {
         case .playing:
             guard let item = controller.player.currentItem, !subtitles.follows(item) else { return }
-            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin) }
+            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? []) }
         case .idle:
             subtitles.clear()
         default:

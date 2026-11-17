@@ -6,6 +6,7 @@ final class PlayerController {
     var state: PlaybackState = .playing
     let player = NSObject()
     func stop() { state = .idle; SharedNowPlaying.title = nil }
+    func pause() { state = .idle }
 }
 final class Watch {
     var cancelled = false
@@ -37,6 +38,9 @@ final class TransmissionStore {
     var slotWatch: Watch? = Watch()
     var refusalWatch: Watch? = Watch()
     var channelNumber = 5
+    func channelName(_ number: Int) -> String { "Channel \(number)" }
+    var rejoined = 0
+    func rejoinLive() async { rejoined += 1 }
     var signed = ["viewer": (url: URL(string: "https://example.invalid/old")!, until: Date.distantFuture)]
     var generation = 0
     private(set) var accessRevision = 0
@@ -84,6 +88,11 @@ final class ReadingStore {
     func previewCredentialDidChange() { invalidations += 1 }
 }
 final class PictureInPicture {
+    var title = ""
+    var isLive = false
+    var captions: (() -> String?)?
+    var skin: (() -> Int)?
+    var onSetPlaying: ((Bool) -> Void)?
     var onStart: (() -> Void)?
     var onFail: ((String) -> Void)?
     var onRestore: (() -> Void)?
@@ -93,7 +102,25 @@ final class PictureInPicture {
     func stop() { stopped = true }
     func letGo() {}
 }
+final class RecordedSubtitles {
+    var tracks: [Int] = [1]
+    var text: String? = "a line"
+}
+/// The window's subtitles: read by `captions`, ended when the window restores or closes.
+final class ProgrammeSubtitleFollower {
+    let subtitles: RecordedSubtitles
+    let loaded: String?
+    var ended = false
+    init(_ subtitles: RecordedSubtitles, store: TransmissionStore, model: AppModel, loaded: String?) {
+        self.subtitles = subtitles
+        self.loaded = loaded
+        Probe.lastFollower = self
+    }
+    func text() -> String? { subtitles.text }
+    func end() { ended = true }
+}
 final class AppModel {
+    var skin = 0
     enum Section { case transmission }
     enum Link { case channel(Int) }
     var transmissionPiP: PictureInPicture?
@@ -109,6 +136,10 @@ final class AppModel {
     }
 }
 final class Probe {
+    static var lastFollower: ProgrammeSubtitleFollower?
+    var subtitles = RecordedSubtitles()
+    var subtitleKey: String? = "programme-1"
+    var channel = 5
     var model = AppModel()
     var store: TransmissionStore { model.transmission }
     var pip = PictureInPicture()
@@ -210,6 +241,31 @@ let receiverMetadataPreserved = SharedNowPlaying.title == "Public Receiver"
     && idle.store.generation == 1 && idle.store.signed.isEmpty
 print("\(receiverMetadataPreserved ? "PASS" : "FAIL") idle Transmission invalidation preserves Receiver Now Playing")
 if !receiverMetadataPreserved { failures += 1 }
+// The window carries the programme's subtitles, and lets go of them when it restores or closes.
+let carried = Probe()
+carried.startPictureInPicture()
+let follower = Probe.lastFollower!
+let windowReads = carried.pip.captions?() == "a line" && carried.pip.isLive && carried.pip.title == "Channel 5"
+    && follower.loaded == "programme-1"
+print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, live, named for the channel")
+if !windowReads { failures += 1 }
+carried.pip.onStart?()
+carried.pip.onRestore?()
+print("\(follower.ended ? "PASS" : "FAIL") full screen ends the window's subtitles for the screen to load")
+if !follower.ended { failures += 1 }
+let unloaded = Probe()
+unloaded.subtitles.tracks = []
+unloaded.startPictureInPicture()
+let reloads = Probe.lastFollower!.loaded == nil
+print("\(reloads ? "PASS" : "FAIL") subtitles still loading are loaded again by the window")
+if !reloads { failures += 1 }
+let closed = Probe()
+closed.startPictureInPicture()
+closed.pip.onStart?()
+closed.pip.onEnd?()
+let closedEnds = Probe.lastFollower!.ended && closed.model.transmissionPiP == nil
+print("\(closedEnds ? "PASS" : "FAIL") closing the window ends its subtitles and the channel")
+if !closedEnds { failures += 1 }
 func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now.advanced(by: .seconds(2))
     while !ready() {

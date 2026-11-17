@@ -291,15 +291,20 @@ final class ReceiverTuner {
         }
         guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
         // Every channel of the pool once before any repeats, as on the Apple TV.
-        if let channel = surfHistory.press(catalogue, for: choice, onAir: destination ?? self.channel) {
+        let onAir = destination ?? self.channel
+        if let channel = surfHistory.press(catalogue, for: choice, onAir: onAir) {
+            // A pool of one: the channel on air is the only pick, so leave it playing.
+            guard channel.id != onAir?.id else {
+                surfNote = "This is the only channel to surf there right now."
+                return
+            }
             if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }
             play(channel, in: catalogue.channels.shuffled())
-            surfChoice = choice
+            surfChoice = choice // after play(), which clears it
             return
         }
-        surfNote = catalogue.channels.isEmpty && !catalogue.isComplete
-            ? "The atlas lists could not load. Press Surf again to retry."
-            : "Nothing to surf there right now."
+        surfNote = catalogue.isComplete ? "Nothing to surf there right now."
+            : "Some atlas lists could not load. Press Surf again to retry."
     }
 
     /// Turns the receiver off.

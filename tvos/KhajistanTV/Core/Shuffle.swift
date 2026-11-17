@@ -110,7 +110,8 @@ extension ShufflePick {
 
     /// Wait for every requested shard's bounded request. Returning after the first fast region
     /// silently shrank Surf to that region. Failed shards are explicit and cannot start a short
-    /// repeat cycle; a later Surf request retries them through ReceiverStore.
+    /// repeat cycle (the iPhone's SurfHistory.press repeats a loaded channel at random instead);
+    /// a later Surf request retries them through ReceiverStore.
     @MainActor
     static func catalogue(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
                           genre: SurfGenre = .any,

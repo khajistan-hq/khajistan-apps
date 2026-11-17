@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// One channel of Khajistan Transmission, full screen. The first time in a launch the station signs
@@ -551,14 +552,34 @@ struct TransmissionPlayerView: View {
         return "\(air.date) \(air.slot.start) \(air.programmeId)"
     }
 
-    /// The programme's prepared file, read through the site's gate like the schedule: without the
-    /// preview password first, then with it. A programme without one shows no control.
+    /// A Cloudflare Stream programme offers the tracks its own manifest carries (Persian, Urdu,
+    /// Arabic…), as the Screening Room does. Its prepared English file is the same text with the
+    /// same timings as the manifest's English track (measured 2026-11-15 on all 11 on air), so
+    /// the manifest wins; a manifest with no tracks falls back to the file. Any other programme
+    /// shows its prepared file, in the language its name gives; without one, no control.
     private func loadSubtitles() async {
         subtitles.clear()
-        guard case .onAir(let air) = store.phase, let source = await subtitleSource(air) else { return }
+        guard case .onAir(let air) = store.phase else { return }
+        #if DEBUG
+        // `-kjsubtitlefile` gives whatever is on air that file, Stream or not (README).
+        if UserDefaults.standard.string(forKey: "kjsubtitlefile") != nil { await loadFile(air); return }
+        #endif
+        if case .stream = air.programme?.play_url.flatMap(Transmission.route(for:)) {
+            await followStreamTracks(air)
+        } else {
+            await loadFile(air)
+        }
+    }
+
+    /// The programme's prepared file, read through the site's gate like the schedule.
+    private func loadFile(_ air: OnAir) async {
+        guard let source = await subtitleSource(air) else { return }
         let opened = Date()
         let store = store
-        subtitles.load(vtt: source, language: .init(code: "en", label: "English")) {
+        let code = SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? "")
+        let language = RecordedSubtitles.Track(
+            code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil))
+        subtitles.load(vtt: source, language: language) {
             let player = store.player.player
             if player.currentItem != nil {
                 let time = player.currentTime().seconds
@@ -569,6 +590,29 @@ struct TransmissionPlayerView: View {
             if store.isScheduleFile { return air.seekTo + Date().timeIntervalSince(opened) }
             #endif
             return nil
+        }
+    }
+
+    /// Lists the tracks of the Stream item the player holds. A handover can leave the last
+    /// programme's item playing for a moment, so only stream-host items are read and a later one is
+    /// followed when it arrives. A manifest with no tracks falls back to the prepared file. The task
+    /// is cancelled when the programme changes.
+    private func followStreamTracks(_ air: OnAir) async {
+        var tried: AVPlayerItem?
+        while !Task.isCancelled {
+            if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
+               (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
+                tried = item
+                await subtitles.attach(item, listed: SubtitleChoice.house)
+                // Fall back only when this item is still the one playing: a previous Stream
+                // programme's item without tracks is no reason to give up on this one. A read that
+                // fails on the playing item does fall back, to the same English text.
+                if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
+                    await loadFile(air)
+                    return
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(500))
         }
     }
 

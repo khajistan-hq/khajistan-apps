@@ -312,6 +312,8 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.down)
         kjPause(0.6)
         XCTAssertTrue(subtitles.isSelected, "Down lights Subtitles")
+        kjPause(3.5)
+        XCTAssertTrue(subtitles.isSelected, "a lit control stays past the panel's 2.6 s, so Select can still work it")
         XCUIRemote.shared.press(.select)
         kjPause(0.8)
         XCTAssertEqual(subtitles.label, "Subtitles · English", "Select on the lit control moves to the next choice")
@@ -395,6 +397,21 @@ final class SubtitlesUITests: XCTestCase {
 
         XCUIRemote.shared.press(.playPause)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays again")
+
+        #if !targetEnvironment(simulator)
+        // Playing, quick clicks add up as Apple's do: the next is not lost while the last buffers.
+        // Device only: on the simulator the stream does not buffer after a seek, so this passed
+        // with the old rule too (measured twice) and could not fail there.
+        let rolling = at()
+        for _ in 0..<3 { XCUIRemote.shared.press(.right) }
+        waitUntil("three quick clicks right go thirty seconds on") { $0 >= rolling + 28 }
+
+        // A hold while the film plays scans too, and the film plays on after it.
+        let playingFrom = at()
+        XCUIRemote.shared.press(.left, forDuration: 2.5)
+        waitUntil("holding left while playing rewinds") { $0 >= 0 && $0 <= playingFrom - 14 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays on")
+        #endif
     }
 
     /// Full screen from the corner window opens the film over whatever is on top: here, over the

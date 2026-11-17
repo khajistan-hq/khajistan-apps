@@ -50,6 +50,9 @@ final class PlayerController {
     @ObservationIgnored var holdsSound = false
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now
+    /// The address of the last signal started, as its item's asset holds it: tells this
+    /// programme's item from the previous one still playing during a handover.
+    @ObservationIgnored private(set) var attachedURL: URL?
     #endif
 
     init() {
@@ -70,6 +73,7 @@ final class PlayerController {
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
+        attachedURL = url
         generation += 1
         let gen = generation
         #if DEBUG

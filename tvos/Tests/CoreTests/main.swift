@@ -3307,6 +3307,10 @@ func filmSubtitleChoice() throws {
     let iranian = SubtitleChoice.filmKey("gav-1969"), razia = SubtitleChoice.filmKey("razia-phas-gayi-ghundon-main-2015-khajistan")
     try expect(iranian != razia, "each film keeps its own choice")
     try expect(iranian != SubtitleChoice.storeKey && razia != SubtitleChoice.storeKey, "the old shared choice is not read")
+    // A film's subtitles in the picture-in-picture window take the skin's caption colours, as ARGB 0 to 1.
+    try expectEqual(Skin.argb(Skin.day.captionTextHex), [1, 0, 0, 0])
+    try expectEqual(Skin.argb(Skin.grove.captionPlateHex), [1, 0, 40.0 / 255, 0])
+    try expectEqual(Skin.argb(0xF3FB04), [1, 243.0 / 255, 251.0 / 255, 4.0 / 255])
     let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
     try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
     try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")

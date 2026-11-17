@@ -442,6 +442,8 @@ struct FilmPlayerView: View {
         if UserDefaults.standard.bool(forKey: "kjfilmasfull"), let preview = Films.previewURL(film) {
             checking = false
             full = ("test", nil)
+            surfaceFocused = true
+            controller.player.appliesMediaSelectionCriteriaAutomatically = false
             controller.onEnded = { [weak controller, model] in
                 if let controller, model.filmPiP?.controller === controller { model.silenceRadio() }
                 controller?.stop()
@@ -462,6 +464,13 @@ struct FilmPlayerView: View {
                 return
             }
             full = (kind, expiresAt)
+            // The remote's focus goes to the picture: Watch the full film, which held it, is gone,
+            // and with focus nowhere Play/Pause, left, right and Down reached nothing (owner's
+            // Apple TV, 2026-11-16: no pause, no skipping, no other languages).
+            surfaceFocused = true
+            // The film's own language is turned on by RecordedSubtitles. Left automatic, the player
+            // can put the device's subtitle setting over it once the item is ready.
+            controller.player.appliesMediaSelectionCriteriaAutomatically = false
             model.clips.cover(caption: Films.displayTitle(film))
             // Watched to the end: it leaves Up Next. Ended in the corner window, the window closes.
             controller.onEnded = { [weak controller, handle = film.handle, model] in
@@ -503,7 +512,7 @@ struct FilmPlayerView: View {
         switch controller.state {
         case .playing:
             guard let item = controller.player.currentItem, !subtitles.follows(item) else { return }
-            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? []) }
+            Task { await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin) }
         case .idle:
             subtitles.clear()
         default:
@@ -533,8 +542,11 @@ struct FilmPlayerView: View {
     private func wake() {
         if !overlayVisible {
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = true }
-            if full == nil { watchFocused = true } else { surfaceFocused = true }
+            if full == nil { watchFocused = true }
         }
+        // In the full film the picture is the only thing to focus; a press that finds focus
+        // elsewhere puts it back there.
+        if full != nil, !surfaceFocused { surfaceFocused = true }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }
         guard OverlayTiming.hidesItself else { return }

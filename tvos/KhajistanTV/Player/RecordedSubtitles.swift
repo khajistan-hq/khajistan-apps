@@ -113,9 +113,16 @@ final class RecordedSubtitles {
     /// Lists the legible options of `item`, one per language, labelled from `listed`, and
     /// switches on the language remembered for this film (or, with no film, the one Transmission
     /// choice), or the device's, else English, else none (desiredSubtitle()).
-    func attach(_ item: AVPlayerItem, film handle: String?, listed: [SubtitleLanguage]) async {
+    func attach(_ item: AVPlayerItem, film handle: String?, listed: [SubtitleLanguage], skin: Skin) async {
         clear()
         let gen = generation
+        // The house view draws the text full screen. In the picture-in-picture window AVPlayer
+        // draws it (handOff()), and these rules give it the skin's caption plate there too.
+        item.textStyleRules = [AVTextStyleRule(textMarkupAttributes: [
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_BoldStyle as String: true,
+        ])].compactMap { $0 }
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []

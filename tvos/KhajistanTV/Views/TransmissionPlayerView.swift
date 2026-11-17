@@ -657,7 +657,7 @@ struct TransmissionPlayerView: View {
             if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
                (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
                 tried = item
-                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house)
+                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house, skin: model.skin)
                 // Fall back only when this item is still the one playing: a previous Stream
                 // programme's item without tracks is no reason to give up on this one. A read that
                 // fails on the playing item does fall back, to the same English text.

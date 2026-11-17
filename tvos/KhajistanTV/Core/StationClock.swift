@@ -30,6 +30,10 @@ struct OnAir: Equatable, Sendable {
     var nowName: String? = nil
     var nextName: String? = nil
     var nextAt: String? = nil
+    /// The programme `nextName` names; nil when Up next is a show. Whatever Up next prints about
+    /// the programme (its country) is read from this one, not from `nextProgrammeId`, which can
+    /// be an earlier programme walked past for repeating Now's name.
+    var nextNameId: String? = nil
 }
 
 /// One strip of a channel's schedule as the guide lists it: when it starts and ends, and whose
@@ -323,6 +327,7 @@ enum StationClock {
             let name = title(id)                 // an untitled programme is walked past, not named
             if !said(name) {
                 out.nextName = name
+                out.nextNameId = id
                 out.nextAt = clockLabel(Int(t / 60))
                 break
             }
@@ -336,6 +341,7 @@ enum StationClock {
             let first = roster.first.flatMap { programmeId(p, index: $0) }
             if let name = [title(first), nonEmpty(nextSlotShow?.name)].first(where: { !said($0) }) {
                 out.nextName = name
+                out.nextNameId = name == title(first) ? first : nil
                 out.nextAt = next.slot.start
             } else {
                 var u = next.slot.startSecond
@@ -344,6 +350,7 @@ enum StationClock {
                     let id = programmeId(p, index: index)
                     if let name = title(id), !said(name) {
                         out.nextName = name
+                        out.nextNameId = id
                         out.nextAt = clockLabel(Int(u / 60))
                         break
                     }
@@ -368,10 +375,16 @@ enum StationClock {
     static func upcoming(_ p: Programming, channelId: String, at date: Date, count: Int) -> [ScheduleStrip] {
         let now = stationNow(date)
         var found: [ScheduleStrip] = []
-        var cursor = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds))
+        var iso = now.iso
+        var cursor = nextSlot(p, channel: channelId, iso: iso, minute: now.minutes, second: Double(now.seconds))
         while let hit = cursor, found.count < count {
             found.append(ScheduleStrip(date: hit.date, slot: hit.slot, show: p.shows[hit.slot.show]))
-            cursor = nextSlot(p, channel: channelId, iso: hit.date, minute: 0, second: hit.slot.startSecond)
+            // A late strip filed under yesterday is read on today's clock: walking on from
+            // yesterday's date would ask for a day the month may not hold (prev_day on the 1st)
+            // and stop the list after one strip (Fable refute, 2026-11-16).
+            var second = hit.slot.startSecond
+            if hit.date < iso { second -= 86_400 } else { iso = hit.date }
+            cursor = nextSlot(p, channel: channelId, iso: iso, minute: 0, second: second)
         }
         return found
     }

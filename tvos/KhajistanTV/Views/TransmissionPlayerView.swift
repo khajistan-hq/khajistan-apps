@@ -299,7 +299,7 @@ struct TransmissionPlayerView: View {
 
     /// Up next carries the country too, as Now does.
     private func upNextName(_ name: String, _ air: OnAir) -> String {
-        guard let id = air.nextProgrammeId,
+        guard let id = air.nextNameId,
               let country = nonEmpty(store.programming?.programmes[id]?.country) else { return name }
         return name + " \u{00B7} " + country
     }

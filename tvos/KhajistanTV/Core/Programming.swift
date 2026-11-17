@@ -97,7 +97,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title
+        case display_title, year, part
     }
 
     init(from decoder: Decoder) throws {
@@ -119,5 +119,8 @@ extension Programming.Programme {
         description = try values.decodeIfPresent(String.self, forKey: .description)
         subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
         display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
+        // Lenient, like `title`: a wrong type on one record must not lose the whole month.
+        year = try? values.decodeIfPresent(Int.self, forKey: .year)
+        part = try? values.decodeIfPresent(String.self, forKey: .part)
     }
 }

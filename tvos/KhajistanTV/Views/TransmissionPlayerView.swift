@@ -581,7 +581,17 @@ struct TransmissionPlayerView: View {
         pip.skin = { model.skin }
         // A paused transmission is not the transmission any more: Play joins it again, live.
         pip.onSetPlaying = { playing in
-            if playing { Task { await store.rejoinLive() } } else { store.player.pause() }
+            if playing {
+                Task { await store.rejoinLive() }
+            } else if store.player.state == .playing || store.player.state == .paused {
+                store.player.pause()
+            } else {
+                // Pressed while the channel retunes: it pauses once the new picture has come.
+                Task {
+                    await store.player.settled()
+                    if store.player.state == .playing { store.player.pause() }
+                }
+            }
         }
         pip.controller = player
         pip.rejoinsOnPlay = true

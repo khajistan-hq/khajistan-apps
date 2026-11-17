@@ -230,9 +230,7 @@ final class PlayerController {
             return
         }
         guard state == .paused else { return }
-        // The player's own reading decides: playing, or waiting with the stall watch running. A
-        // sound left low by a fade the Pause cut short comes back up once it plays.
-        if volume < 1, !holdsSound { fadeInPending = true }
+        // The player's own reading decides: playing, or waiting with the stall watch running.
         syncWithPlayer()
     }
 
@@ -432,6 +430,12 @@ final class PlayerController {
     /// that arrives late cannot put back a state the viewer has already left.
     private func syncWithPlayer() {
         guard liveRadio == nil else { return }
+        // The picture-in-picture window's own Play, read here first (the observer runs before the
+        // window's 100 ms reading): a sound left low by a fade that a Pause cut short comes back up
+        // once it plays.
+        if state == .paused, followsWindow, player.timeControlStatus != .paused, volume < 1, !holdsSound {
+            fadeInPending = true
+        }
         switch player.timeControlStatus {
         case .playing:
             // A queued ready/seek callback cannot override a newer explicit Pause. In the

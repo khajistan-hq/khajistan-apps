@@ -287,6 +287,8 @@ final class PictureInPicture: NSObject {
             // The end of the file stops the picture too, and that is not a Pause.
             if let item, item.duration.isNumeric, item.currentTime().seconds >= item.duration.seconds - 1 { return }
             controller?.follow(playing: false)
+            // A broadcast rejoins live on Play: no sound from the old place in the moment before.
+            if rejoinsOnPlay { player.volume = 0 }
         case .none:
             break
         }

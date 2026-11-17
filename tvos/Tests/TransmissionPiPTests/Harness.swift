@@ -1,12 +1,13 @@
 import Foundation
 
-enum PlaybackState { case playing, tuning, idle }
+enum PlaybackState { case playing, tuning, idle, paused }
 enum SharedNowPlaying { static var title: String? }
 final class PlayerController {
     var state: PlaybackState = .playing
     let player = NSObject()
     func stop() { state = .idle; SharedNowPlaying.title = nil }
-    func pause() { state = .idle }
+    func pause() { state = .paused }
+    func settled() async {}
 }
 final class Watch {
     var cancelled = false

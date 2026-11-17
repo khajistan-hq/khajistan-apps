@@ -4866,6 +4866,19 @@ func pipPlayFollowerPassesOnTheWindowsOwnPlayOnce() throws {
     mixed.ask(false, at: 1)
     try expectEqual(mixed.read(playing: false, item: a, at: 1.2), .none)
     try expectEqual(mixed.read(playing: true, item: a, at: 4), .windowPlay, "the window's Play after the bar's Pause")
+    // The window's Play on a broadcast: the bar asks for Playing and holds it through the rejoin's
+    // stop and the new item loading paused; nothing more is passed on (Fable round 7).
+    var rejoin = PiPPlayFollower(playing: true)
+    _ = rejoin.read(playing: true, item: a, at: 0)
+    try expectEqual(rejoin.read(playing: false, item: a, at: 1), .windowPause)
+    try expectEqual(rejoin.read(playing: true, item: a, at: 3), .windowPlay)
+    rejoin.ask(true, at: 3)
+    try expectEqual(rejoin.read(playing: false, item: nil, at: 3.2), .none)
+    try expect(rejoin.shown, "Playing held through the rejoin's stop")
+    try expectEqual(rejoin.read(playing: false, item: b, at: 4), .none)
+    try expect(rejoin.shown, "and through the new item loading")
+    try expectEqual(rejoin.read(playing: true, item: b, at: 5), .none, "the rejoin's own Play is not passed on")
+    try expect(rejoin.shown)
     // A Play the player never follows lets go after the hold.
     var stuck = PiPPlayFollower(playing: false)
     stuck.ask(true, at: 0)

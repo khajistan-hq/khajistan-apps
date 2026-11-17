@@ -606,7 +606,6 @@ struct TransmissionPlayerView: View {
                asset.url == store.player.attachedURL {
                 done = item
                 if let group = try? await asset.loadMediaSelectionGroup(for: .legible), !Task.isCancelled {
-                    item.appliesMediaSelectionCriteriaAutomatically = false
                     item.select(nil, in: group)
                 }
             }

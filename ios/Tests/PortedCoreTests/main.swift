@@ -1165,14 +1165,29 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
 func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
     let f = try fixture()
     let p = f.programming
-    var checked = 0, wrapped = 0, afterEnd = 0
+    var checked = 0, wrapped = 0, afterEnd = 0, nearEnd = 0
     for c in f.cases {
         guard c.expect != nil else { continue }
         let date = Date(timeIntervalSince1970: c.nowMs / 1000)
         let air = try require(StationClock.onAir(p, channel: c.channel, at: date))
         let count = air.slot.programmes.count
-        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         let index = (air.rosterIndex + 1) % count
+        // The roster's last entry, under two seconds from the strip's end: the clock a second past
+        // the end answers instead (lastFileEndingOnTimeTunesTheNextStrip has the detail).
+        let whole = date.timeIntervalSince1970.rounded(.down)
+        let at = try require(StationClock.slotSecond(air.date, now: StationClock.stationNow(date)))
+        let then = Date(timeIntervalSince1970: whole + air.slot.endSecond.rounded(.up) - at)
+        if air.rosterIndex == count - 1, air.slot.endSecond - (at + date.timeIntervalSince1970 - whole) <= 2,
+           StationClock.stationMonth(then) == StationClock.stationMonth(date) {
+            let handed = StationClock.following(air, in: p, at: date)
+            let clock = StationClock.onAir(p, channelId: air.channelId, at: then)
+            try expectEqual(handed?.programmeId, clock?.programmeId, "case \(Int(c.nowMs))")
+            try expectEqual(handed?.slot, clock?.slot)
+            try expect(handed?.slot != air.slot || handed?.date != air.date, "case \(Int(c.nowMs)): same strip")
+            nearEnd += 1
+            continue
+        }
+        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         if index == 0 { wrapped += 1 }
         let id = p.programme_order[air.slot.programmes[index]]
         try expectEqual(next.rosterIndex, index)
@@ -1196,7 +1211,7 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
             afterEnd += 1
         }
     }
-    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock")
+    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock, \(nearEnd) at a strip's end")
     try expect(checked >= 400, "only \(checked) checked")
     try expect(wrapped >= 1, "no roster wrapped")
 }

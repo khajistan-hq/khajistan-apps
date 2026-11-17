@@ -11,8 +11,8 @@ struct OnAir: Equatable, Sendable {
     let show: Programming.Show?
     let programmeId: String
     let programme: Programming.Programme?
-    let into: Double
-    let seekTo: Double
+    var into: Double
+    var seekTo: Double
     let startLabel: String
     let endLabel: String
     /// The next strip's show and start, under 24 hours away. `withNextProgramme` sets them again
@@ -71,6 +71,12 @@ enum StationClock {
     /// clock still read the programme that had ended. A microsecond is far above the drift and far
     /// below a clock tick.
     static let sumEpsilon = 1e-6
+    /// How long before its strip's end a file may finish and still hand over to the next strip
+    /// rather than run the roster round to its opener. The clock reads whole seconds and a strip
+    /// ends on a fraction: radio 01:39 on 1 November ends at 8943.9, so a last file ending on time
+    /// was asked about at 8943, inside the strip, and tuned "Khawree Mi Zargai Sha" until the slot
+    /// watch moved on (Fable, 2026-11-16). Small, because the next strip then plays this far ahead.
+    static let handoverLead = 2.0
     static let tzLabel = "PKT"
 
     // MARK: Station time
@@ -324,23 +330,44 @@ enum StationClock {
 
     /// The clock read in the frame of the day a strip is filed under: past 86 400 the day after,
     /// nil on any other day. One reading, so a strip from yesterday keeps counting past midnight.
+    /// Before 00:00 of the day after, negative: a strip tuned early from the last before midnight.
     static func slotSecond(_ filed: String, now: (iso: String, minutes: Int, seconds: Int)) -> Double? {
         if now.iso == filed { return Double(now.seconds) }
         if isoDay(filed, offset: 1) == now.iso { return Double(now.seconds) + daySeconds }
+        if isoDay(filed, offset: -1) == now.iso { return Double(now.seconds) - daySeconds }
         return nil
     }
 
     /// The programme after `current`, for the moment a file ends. While the clock is still
     /// inside the slot it walks the SLOT's roster and never re-reads the clock: a file that ends
     /// a second early ends while the clock still says it is on, and asking the clock then hands
-    /// back the programme that just finished. Once the slot is over it is `onAir` again.
+    /// back the programme that just finished. Once the slot is over it is `onAir` again, and so it
+    /// is within `handoverLead` of the slot's end: the next strip, from its head.
     static func following(_ current: OnAir, in p: Programming, at date: Date) -> OnAir? {
         let now = stationNow(date)
         let slot = current.slot
         let at = slotSecond(current.date, now: now)
         let insideSlot = at.map { $0 >= slot.startSecond && $0 < slot.endSecond } ?? false
-        guard insideSlot, !slot.programmes.isEmpty else {
+        guard insideSlot, let at, !slot.programmes.isEmpty else {
             return onAir(p, channelId: current.channelId, at: date)
+        }
+        let whole = date.timeIntervalSince1970.rounded(.down)
+        let exact = at + (date.timeIntervalSince1970 - whole)
+        // The clock at the first whole second past the end, as a whole epoch second (no float
+        // drift). In another month this file holds nothing there: the roster walks on, and the
+        // store's slot watch tunes the next month's file.
+        let end = slot.endSecond.rounded(.up)
+        let then = Date(timeIntervalSince1970: whole + (end - at))
+        // Only after the roster's last entry: an ident under two seconds that closes the roster
+        // (state-tv 05:47 on 2 November) still airs.
+        if current.rosterIndex == slot.programmes.count - 1, slot.endSecond - exact <= handoverLead,
+           stationMonth(then) == stationMonth(date) {
+            guard var next = onAir(p, channelId: current.channelId, at: then) else { return nil }
+            // No further in than the strip has run by now, so it is never pushed further ahead.
+            let into = max(0, next.into - (end - exact))
+            next.seekTo -= next.into - into
+            next.into = into
+            return next
         }
         let count = slot.programmes.count
         let nextIndex = (((current.rosterIndex + 1) % count) + count) % count
@@ -460,10 +487,11 @@ enum StationClock {
 
     /// Whole seconds until the slot `air` belongs to ends, or nil once the clock has left it
     /// (another day, or past its end). The player uses it for the notice before a handover and
-    /// to tune the next strip the moment this one ends.
+    /// to tune the next strip the moment this one ends. It counts a strip that `following()`
+    /// tuned up to `handoverLead` early, so that strip has an end watch too.
     static func secondsLeft(in air: OnAir, at date: Date) -> Int? {
         guard let at = slotSecond(air.date, now: stationNow(date)),
-              at >= air.slot.startSecond, at < air.slot.endSecond else { return nil }
+              at >= air.slot.startSecond - handoverLead - 1, at < air.slot.endSecond else { return nil }
         return Int((air.slot.endSecond - at).rounded(.up))
     }
 

@@ -1412,6 +1412,56 @@ func lastProgrammeHandsOverWhateverTheFloatSum() throws {
     }
 }
 
+/// The radio 01:39 strip's last file ending on time (Fable, 2026-11-16): the strip ends at
+/// 8943.9 and the clock reads whole seconds, so following(P6) at 8943.0–8943.95 still read the
+/// strip as on and tuned its opener, "Khawree Mi Zargai Sha", until the slot watch moved it on.
+/// The next strip is tuned from its head instead, and its own end watch is armed.
+func lastFileEndingOnTimeTunesTheNextStrip() throws {
+    let p = try decode(Programming.self, radioStripJSON())
+    let p6 = try require(StationClock.onAir(p, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0)))
+    try expectEqual(p6.programmeId, "P6")
+    let base = pkt(2026, 11, 1, 2, 29, 3)                   // second 8943, 0.9 s before the end
+    for offset in [-1.0, 0.0, 0.5, 0.95] {
+        let at = base.addingTimeInterval(offset)
+        let handed = try require(StationClock.following(p6, in: p, at: at), "at +\(offset)")
+        try expectEqual([handed.programmeId, handed.startLabel], ["B1", "02:29"], "at +\(offset)")
+        try expectEqual(handed.rosterIndex, 0)
+        // From its head: no further in than the strip has run at this moment, which is 0.05 s at +0.95.
+        try expectClose(handed.into, max(0, 8943 + offset - 8943.9), tolerance: 1e-6)
+        try expectClose(handed.seekTo, handed.into, tolerance: 1e-6)
+        // The end watch: seconds to the next strip's end (14313.7), counted from now.
+        try expectEqual(StationClock.secondsLeft(in: handed, at: at), Int((14313.7 - (8943 + offset).rounded(.down)).rounded(.up)))
+    }
+    // Negative: 2.9 s before the end is outside the lead, written here rather than read from
+    // handoverLead, and the roster runs round as before.
+    try expectEqual(try require(StationClock.following(p6, in: p, at: base.addingTimeInterval(-2))).programmeId, "P1")
+    // A strip that does not start for another 2.9 s has no end watch yet.
+    let b1 = try require(StationClock.following(p6, in: p, at: base))
+    try expectEqual(StationClock.secondsLeft(in: b1, at: base.addingTimeInterval(-3)), nil)
+    // A gap after the strip: off air, not the opener.
+    let gap = try decode(Programming.self, radioStripJSON(nextStart: "8950.9"))
+    let p6g = try require(StationClock.onAir(gap, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0)))
+    try expectEqual(StationClock.following(p6g, in: gap, at: base), nil)
+}
+
+/// A strip ending at midnight hands over to the next day's first strip, whose end watch counts
+/// from the day before.
+func lastFileAtMidnightTunesTomorrowsStrip() throws {
+    let raw = #"{"_meta":{"channels":[{"id":"g","number":21,"name":"G"}]},"shows":{"a":{"slug":"a","name":"Show A"},"b":{"slug":"b","name":"Show B"}},"programme_order":["P1","P2","P3"],"programmes":{"P1":{"id":"P1","title":"p1","seconds":200},"P2":{"id":"P2","title":"p2","seconds":200},"P3":{"id":"P3","title":"p3","seconds":600}},"days":[{"date":"2026-11-12","channels":{"g":[{"start":"23:53","start_minute":1433,"minutes":7,"start_second":86000,"seconds":400,"show":"a","programmes":[0,1]}]}},{"date":"2026-11-13","channels":{"g":[{"start":"00:00","start_minute":0,"minutes":10,"start_second":0,"seconds":600,"show":"b","programmes":[2]}]}}]}"#
+    let p = try decode(Programming.self, raw)
+    let last = try require(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 12, 23, 59, 0)))
+    try expectEqual(last.programmeId, "P2")
+    let at = pkt(2026, 11, 12, 23, 59, 59)
+    let handed = try require(StationClock.following(last, in: p, at: at))
+    try expectEqual([handed.programmeId, handed.date], ["P3", "2026-11-13"])
+    try expectEqual(handed.into, 0)
+    try expectEqual(StationClock.secondsLeft(in: handed, at: at), 601)
+    // The last strip of the loaded month: the old walk, and the slot watch loads the next month.
+    let month = try decode(Programming.self, raw.replacingOccurrences(of: "2026-11-13", with: "2026-12-01").replacingOccurrences(of: "2026-11-12", with: "2026-11-30"))
+    let monthLast = try require(StationClock.onAir(month, channel: 21, at: pkt(2026, 11, 30, 23, 59, 0)))
+    try expectEqual(try require(StationClock.following(monthLast, in: month, at: pkt(2026, 11, 30, 23, 59, 59))).programmeId, "P1")
+}
+
 /// The 03:05 strip on channel `mujra`, 1 November 2026 (Fable, 2026-11-16): its 23rd programme
 /// starts at second 17780, and taking 6624.8 seconds down the roster leaves 313.0999999999988 of
 /// the 22nd's 313.1, so the clock still read the 22nd as on. As in station_clock_next_test.mjs.
@@ -1539,9 +1589,11 @@ func secondsLeftCountsDownToTheSlotEnd() throws {
     let air = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 6, 12, 30)))
     try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 6, 12, 30)), 47 * 60 + 30)
     try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 6, 59, 59)), 1)
-    // The moment the slot ends the clock has left it, and so before it began, and on another day.
+    // The moment the slot ends the clock has left it, and so more than three seconds before it
+    // began (a strip following() tuned early is counted from then), and on another day.
     try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 7, 0, 0)), nil)
-    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 5, 59, 59)), nil)
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 5, 59, 57)), 3603)
+    try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 10, 5, 59, 56)), nil)
     try expectEqual(StationClock.secondsLeft(in: air, at: pkt(2026, 10, 11, 6, 12, 30)), nil)
     // And at that moment the clock has the next strip on air: now is never the slot just gone.
     try expectEqual(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 7, 0, 0))?.startLabel, "07:00")
@@ -1648,6 +1700,46 @@ func realFollowingAgreesWithOnAirAtEveryHandover() throws {
     print("      \(checked) handovers (\(lastOfRoster) onto a roster's last), \(mismatches.filter(\.isEmpty).count) disagree, \(short) after a programme under 2 s passed over")
     try expect(mismatches.isEmpty, mismatches.filter { !$0.isEmpty }.joined(separator: "\n"))
     try expect(checked >= 10_000, "only \(checked) handovers checked")
+
+    // The last programme's handover, at the strip's end: its file ending on time (0.05 s before)
+    // or 1.5 s early, it hands over to what a fresh onAir says a second past the end, the next
+    // strip or off air, never the strip's own opener; and the next strip's end watch is armed
+    // (Fable measured 4,774 of 5,264 November last programmes tuning the opener, 2026-11-16).
+    var ends = 0, dark = 0, roundAgain = 0, monthEnd = 0, endMismatches: [String] = []
+    for day in p.days {
+        let parts = day.date.split(separator: "-").compactMap { Int($0) }
+        let midnight = pkt(parts[0], parts[1], parts[2])
+        for (channel, strips) in day.channels {
+            for slot in strips where !slot.programmes.isEmpty {
+                let label = "\(day.date) \(channel) \(slot.start)"
+                let end = slot.endSecond
+                guard let last = StationClock.onAir(p, channelId: channel, at: midnight.addingTimeInterval((end - 1).rounded(.down))),
+                      last.slot == slot, last.date == day.date else { continue }
+                // A roster shorter than its strip may be mid-round at the end; only the last entry hands over.
+                guard last.rosterIndex == slot.programmes.count - 1 else { roundAgain += 1; continue }
+                let then = midnight.addingTimeInterval(end.rounded(.up))
+                if StationClock.stationMonth(then) != StationClock.stationMonth(midnight) { monthEnd += 1; continue }
+                let fresh = StationClock.onAir(p, channelId: channel, at: then)
+                if fresh == nil { dark += 1 }
+                for early in [0.05, 1.5] {
+                    let at = midnight.addingTimeInterval(end - early)
+                    let handed = StationClock.following(last, in: p, at: at)
+                    let a = [handed?.programmeId, handed?.nextProgrammeId, handed?.nextName, handed?.nextStart, handed?.date, handed?.startLabel]
+                    let b = [fresh?.programmeId, fresh?.nextProgrammeId, fresh?.nextName, fresh?.nextStart, fresh?.date, fresh?.startLabel]
+                    var bad = a != b || handed?.slot != fresh?.slot
+                    if let handed {
+                        bad = bad || handed.into < 0 || handed.into > fresh!.into || StationClock.secondsLeft(in: handed, at: at) == nil
+                    }
+                    if bad, endMismatches.count < 5 { endMismatches.append("\(label) -\(early) s: \(a) vs \(b)") }
+                    if bad { endMismatches.append("") }
+                }
+                ends += 1
+            }
+        }
+    }
+    print("      \(ends) strip ends (\(dark) into a dark gap), \(endMismatches.filter(\.isEmpty).count) disagree; \(roundAgain) mid-round and \(monthEnd) at the month's end passed over")
+    try expect(endMismatches.isEmpty, endMismatches.filter { !$0.isEmpty }.joined(separator: "\n"))
+    try expect(ends >= 4_000, "only \(ends) strip ends checked")
 }
 
 // MARK: - Station clock: differential against the site's own JS
@@ -1861,14 +1953,29 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
 func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
     let f = try fixture()
     let p = f.programming
-    var checked = 0, wrapped = 0, afterEnd = 0
+    var checked = 0, wrapped = 0, afterEnd = 0, nearEnd = 0
     for c in f.cases {
         guard c.expect != nil else { continue }
         let date = Date(timeIntervalSince1970: c.nowMs / 1000)
         let air = try require(StationClock.onAir(p, channel: c.channel, at: date))
         let count = air.slot.programmes.count
-        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         let index = (air.rosterIndex + 1) % count
+        // The roster's last entry, under two seconds from the strip's end: the clock a second past
+        // the end answers instead (lastFileEndingOnTimeTunesTheNextStrip has the detail).
+        let whole = date.timeIntervalSince1970.rounded(.down)
+        let at = try require(StationClock.slotSecond(air.date, now: StationClock.stationNow(date)))
+        let then = Date(timeIntervalSince1970: whole + air.slot.endSecond.rounded(.up) - at)
+        if air.rosterIndex == count - 1, air.slot.endSecond - (at + date.timeIntervalSince1970 - whole) <= 2,
+           StationClock.stationMonth(then) == StationClock.stationMonth(date) {
+            let handed = StationClock.following(air, in: p, at: date)
+            let clock = StationClock.onAir(p, channelId: air.channelId, at: then)
+            try expectEqual(handed?.programmeId, clock?.programmeId, "case \(Int(c.nowMs))")
+            try expectEqual(handed?.slot, clock?.slot)
+            try expect(handed?.slot != air.slot || handed?.date != air.date, "case \(Int(c.nowMs)): same strip")
+            nearEnd += 1
+            continue
+        }
+        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         if index == 0 { wrapped += 1 }
         let id = p.programme_order[air.slot.programmes[index]]
         try expectEqual(next.rosterIndex, index)
@@ -1892,7 +1999,7 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
             afterEnd += 1
         }
     }
-    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock")
+    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock, \(nearEnd) at a strip's end")
     try expect(checked >= 400, "only \(checked) checked")
     try expect(wrapped >= 1, "no roster wrapped")
 }
@@ -5063,6 +5170,8 @@ let tests: [(String, () throws -> Void)] = [
     ("following() reads Up next from the clock", followingReadsUpNextFromTheClock),
     ("Up next crosses the month end from next_day", upNextCrossesTheMonthEndFromNextDay),
     ("The last programme of a full roster hands over, whatever the float sum", lastProgrammeHandsOverWhateverTheFloatSum),
+    ("The last file ending on time tunes the next strip, with its end watch", lastFileEndingOnTimeTunesTheNextStrip),
+    ("The last file at midnight tunes the next day's strip", lastFileAtMidnightTunesTomorrowsStrip),
     ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),

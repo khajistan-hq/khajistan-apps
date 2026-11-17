@@ -1,0 +1,36 @@
+name: gate proof (throwaway, PR to fix/ci-gate-fails-open only)
+on: pull_request
+permissions: { contents: read }
+jobs:
+  changes_fails:
+    runs-on: ubuntu-latest
+    outputs: { app: "${{ steps.d.outputs.app }}" }
+    steps: [{ id: d, run: "exit 1" }]
+  changes_false:
+    runs-on: ubuntu-latest
+    outputs: { app: "${{ steps.d.outputs.app }}" }
+    steps: [{ id: d, run: "echo app=false >> \"$GITHUB_OUTPUT\"" }]
+  changes_true:
+    runs-on: ubuntu-latest
+    outputs: { app: "${{ steps.d.outputs.app }}" }
+    steps: [{ id: d, run: "echo app=true >> \"$GITHUB_OUTPUT\"" }]
+  sim_after_failure_must_RUN:
+    needs: changes_fails
+    if: ${{ !cancelled() && needs.changes_fails.outputs.app != 'false' }}
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo ran" }]
+  sim_after_false_must_SKIP:
+    needs: changes_false
+    if: ${{ !cancelled() && needs.changes_false.outputs.app != 'false' }}
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo ran" }]
+  sim_after_true_must_RUN:
+    needs: changes_true
+    if: ${{ !cancelled() && needs.changes_true.outputs.app != 'false' }}
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo ran" }]
+  old_gate_after_failure_SKIPPED:
+    needs: changes_fails
+    if: needs.changes_fails.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    steps: [{ run: "echo ran" }]

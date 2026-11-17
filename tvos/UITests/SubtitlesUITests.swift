@@ -215,8 +215,10 @@ final class SubtitlesUITests: XCTestCase {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day",
-                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "en"]
+        // Off under the old shared key: a film must not read it (the Razia bug read Persian there).
+        // The film's own key is blanked, so a choice an earlier run left on this device is not read.
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kj-of-subtitles", "off",
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", ""]
         kjLaunch(app)
         // Filmfarsi Trailers vol. 1: its public preview announces an English track.
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
@@ -234,7 +236,8 @@ final class SubtitlesUITests: XCTestCase {
 
         let control = app.buttons["subtitlesControl"]
         XCTAssertTrue(control.waitForExistence(timeout: 45), "a preview whose manifest carries a track offers the control")
-        XCTAssertEqual(control.label, "Subtitles · English", "English starts on with nothing remembered")
+        XCTAssertEqual(control.label, "Subtitles · English",
+                       "with nothing remembered for this film, English starts on; the shared Off is not read")
         let caption = app.descendants(matching: .any)["caption"]
         XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text must reach the house view")
         kjScreenshot("film-1-subtitle-over-panel", app: app)
@@ -249,8 +252,9 @@ final class SubtitlesUITests: XCTestCase {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
         let app = XCUIApplication()
+        // Off for this film, English under the old shared key: the film's own choice must win.
         app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjfilmasfull", "YES",
-                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "en"]
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "off", "-kj-of-subtitles", "en"]
         kjLaunch(app)
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
         let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
@@ -275,13 +279,14 @@ final class SubtitlesUITests: XCTestCase {
         let stop = app.descendants(matching: .any)["stopControl"]
         XCTAssertTrue(subtitles.waitForExistence(timeout: 45), "the full film carries its subtitle control")
         XCTAssertFalse(subtitles.isSelected, "nothing is lit until the remote moves to it")
+        // Read while nothing is lit, when the face carries the ↓ hint: the spoken label must not.
+        XCTAssertEqual(subtitles.label, "Subtitles · Off", "the film's own Off wins over the shared English; no ↓ in the label")
         XCUIRemote.shared.press(.down)
         kjPause(0.6)
         XCTAssertTrue(subtitles.isSelected, "Down lights Subtitles")
-        XCTAssertEqual(subtitles.label, "Subtitles · English", "English starts on, and the lit control drops the Down hint")
         XCUIRemote.shared.press(.select)
         kjPause(0.8)
-        XCTAssertEqual(subtitles.label, "Subtitles · Off", "Select on the lit control moves to the next choice")
+        XCTAssertEqual(subtitles.label, "Subtitles · English", "Select on the lit control moves to the next choice")
         for _ in 0..<3 where !stop.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(stop.isSelected, "Right walks to Stop")
         kjScreenshot("film-full-controls-stop-lit", app: app)

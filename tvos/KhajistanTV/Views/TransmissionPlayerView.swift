@@ -108,7 +108,13 @@ struct TransmissionPlayerView: View {
         // Off air or re-tuning: the guide and the strip's controls go with the picture.
         .onChange(of: isOnAir) { _, onAir in if !onAir { guideRow = nil; armed = nil } }
         .onChange(of: store.player.state) { wake(); showNumberWhenTuned() }
-        .onChange(of: store.channelNumber) { plateOwed = true; showNumberWhenTuned() }
+        // The last channel's number goes at once: it must not sit over the next one.
+        .onChange(of: store.channelNumber) {
+            plateTask?.cancel()
+            plateChannel = nil
+            plateOwed = true
+            showNumberWhenTuned()
+        }
         .onChange(of: store.phase) { showNumberWhenTuned() }
         // The number waits for the channel change, the bird and the sign-on cover to be done.
         .onChange(of: switching) { showNumberWhenTuned() }
@@ -416,7 +422,7 @@ struct TransmissionPlayerView: View {
     /// Once the channel changed to is on screen (playing, or off air with its return), its number
     /// shows in the top corner for three seconds, as an old set's did: on and off at once.
     private func showNumberWhenTuned() {
-        guard plateOwed, !switching, !model.pigeon.isFlying, model.clips.coverage == 0 else { return }
+        guard plateOwed, !left, !switching, !model.pigeon.isFlying, model.clips.coverage == 0 else { return }
         let ready: Bool
         switch store.phase {
         case .offAir: ready = true
@@ -651,7 +657,7 @@ struct TransmissionPlayerView: View {
             if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
                (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
                 tried = item
-                await subtitles.attach(item, listed: SubtitleChoice.house)
+                await subtitles.attach(item, film: nil, listed: SubtitleChoice.house)
                 // Fall back only when this item is still the one playing: a previous Stream
                 // programme's item without tracks is no reason to give up on this one. A read that
                 // fails on the playing item does fall back, to the same English text.

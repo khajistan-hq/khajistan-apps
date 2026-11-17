@@ -15,10 +15,10 @@ final class NowNextUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
     }
 
-    private func open(channel: Int, skin: String) -> XCUIApplication {
+    private func open(channel: Int, skin: String, now: String = "2026-11-08T12:10:00+05:00") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", now]
         kjLaunch(app)
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
@@ -136,5 +136,21 @@ final class NowNextUITests: XCTestCase {
             kjScreenshot("channel-number-up-\(skin)", app: app)
             app.terminate()
         }
+    }
+
+    /// No number over a sound-only programme, whose title sits in that corner; off air it shows.
+    /// The fixture's channel 5 plays folk-tv, a sound-only tape, at 13:30; channel 6 has no
+    /// strips, so it is off air. The off-air number is the check that the number works here at all.
+    func testNoChannelNumberOverSoundOnlyButOffAir() {
+        let app = open(channel: 5, skin: "day", now: "2026-11-08T13:40:00+05:00")
+        let osd = app.descendants(matching: .any)["channelNumberOSD"]
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "the sound-only programme is on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 8), "no number over a sound-only programme")
+        XCUIRemote.shared.press(.up)
+        XCTAssertTrue(app.staticTexts["Off air"].waitForExistence(timeout: 30), "channel 6 is off air")
+        XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
+        XCTAssertEqual(osd.label, "Channel 6")
+        kjScreenshot("channel-number-off-air", app: app)
     }
 }

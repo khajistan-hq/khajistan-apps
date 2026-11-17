@@ -210,7 +210,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   generator's black edge; on the ground (off air) they take the ink and no edge. They snap on once
   the channel changed to is on screen (after the pigeon and the sign-on cover) and off 3 s later,
   with no fade, as the set had none. Not over a sound-only programme, whose title already sits in
-  that corner with the dancer. VoiceOver hears "Channel 5".
+  that corner with the dancer. A channel change takes the last number off at once.
+  VoiceOver hears "Channel 5".
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
   channel's name. Up and down switch channel as under Motion. The
@@ -244,8 +245,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   Back lets go, and a lit control lets go when the panel hides. One Back stops the film.
   Subtitles start in the language chosen for that film, else the device's, else English: a
   choice made on one film is not carried to another (Persian chosen for an Iranian film opened
-  Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses;
-  full screen opens it again over whatever is on top, where it had got to.
+  Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,
+  with its chosen subtitles drawn by AVPlayer in the window; full screen opens it again over
+  whatever is on top, where it had got to.
 
 ## Sign in
 

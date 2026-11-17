@@ -345,8 +345,8 @@ struct FilmPlayerView: View {
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             away.recordPlace()
             // AVPlayer draws the chosen subtitles itself in the corner: the house caption view
-            // stays with the closed screen.
-            subtitles.clear()
+            // stays with the closed screen, and the track stays selected.
+            subtitles.handOff()
             model.filmPiP = away
             leave()
         }
@@ -575,7 +575,10 @@ enum FilmRestore {
 
     static func present(_ film: Film, model: AppModel) {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard var top = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController else {
+        // The key window, else the app's one window: on a restore from another app the window
+        // may not be key yet when the delegate is called.
+        let windows = scenes.flatMap(\.windows)
+        guard var top = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
             // No window to present on: stop the film with its place kept rather than play it unseen.
             model.silenceRadio()
             return

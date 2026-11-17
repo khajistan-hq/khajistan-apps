@@ -37,7 +37,7 @@ struct PnvReelsView: View {
     /// so the reader scrolls to it, as it does on arrival.
     @State private var jump = 0
     /// The page a missing position stands for: nil means the tapped object; "" means none, while a
-    /// Shuffle or region change waits for its feed; then that feed's first page. The scroll view
+    /// Shuffle or region change waits for its feed; otherwise the last page known. The scroll view
     /// can set position to nil while the reel is empty, so this, not the tapped object, decides.
     @State private var home: String?
 
@@ -125,7 +125,11 @@ struct PnvReelsView: View {
         .statusBarHidden()
         .onAppear { activate() }
         .task { await model.saves.load() }
-        .onChange(of: position) { activate() }
+        .onChange(of: position) {
+            // The last page known, so a nil from the scroll view later still names a real page.
+            if let position { home = position }
+            activate()
+        }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
         .task(id: "\(model.pnvRegion)|\(store.deal)") {
             guard isStream else { return }
@@ -243,7 +247,8 @@ struct PnvReelsView: View {
         reopenIfLost()
     }
 
-    /// The page on screen left the reel (a new region, a new deal): open on the first page.
+    /// A Shuffle or region change is waiting for its feed, or the page on screen left the reel:
+    /// open on the first page.
     private func reopenIfLost() {
         guard isStream, let first = items.first, home == "" || current == nil else { return }
         position = ReelItem.id(lap: 0, first.id)

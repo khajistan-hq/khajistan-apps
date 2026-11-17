@@ -13,6 +13,51 @@ final class ReceiverGuideUITests: XCTestCase {
     func testGrove() throws { try walk("grove") }
     func testSmut() throws { try walk("smut") }
 
+    /// A region with no channel of the medium says so in the guide, inside the rows' space, which
+    /// keeps the height the last region's rows had. Dakhan has no television in the recorded list,
+    /// and only the extended atlas reaches it.
+    func testAnEmptyRegionSaysSoInTheGuide() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-kjskin", "day", "-kj.extendedAtlas", "YES"]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
+            XCUIRemote.shared.press(.right)
+        }
+        XCUIRemote.shared.press(.select)
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
+        XCTAssertTrue(tv.firstMatch.waitForExistence(timeout: 60))
+        kjPause(2)
+        let focusedChannel = tv.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<8 where !focusedChannel.exists { XCUIRemote.shared.press(.down); kjPause(0.4) }
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 15))
+        try kjTuneUntilPlaying(app)
+        // Right on the bare picture opens the guide, once the strip has gone.
+        XCTAssertTrue(app.descendants(matching: .any)["captionsControl"].waitForNonExistence(timeout: 15))
+        XCUIRemote.shared.press(.right)
+        let guide = app.descendants(matching: .any)["receiverGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        let region = app.staticTexts["guideRegion"]
+        XCTAssertTrue(region.waitForExistence(timeout: 5))
+        kjPause(1)
+        var before = guide.frame.minY
+        for _ in 0..<40 where !region.label.contains("Dakhan") {
+            before = guide.frame.minY
+            XCUIRemote.shared.press(.right)
+            kjPause(0.8)
+        }
+        XCTAssertTrue(region.label.contains("Dakhan"), "Right in the guide reaches Dakhan: \(region.label)")
+        let none = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No '")).firstMatch
+        XCTAssertTrue(none.waitForExistence(timeout: 10), "the guide says Dakhan has no television")
+        XCTAssertGreaterThan(none.frame.width, 100, "the line is drawn, not laid out in no width: \(none.frame)")
+        XCTAssertEqual(guide.frame.minY, before, accuracy: 2, "the panel keeps the height the region before had")
+        kjScreenshot("guide-empty-region", app: app)
+    }
+
     private func walk(_ skin: String) throws {
         let app = XCUIApplication()
         app.launchArguments += ["-kjskin", skin]

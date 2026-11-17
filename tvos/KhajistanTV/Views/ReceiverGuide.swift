@@ -52,8 +52,9 @@ struct ReceiverGuide: View {
                         }
                     }
                 }
-                // At least a line, for a guide that opens on an empty region with no height kept yet.
-                .frame(minHeight: loading || list.isEmpty ? max(rowsHeight, 44) : nil, alignment: .topLeading)
+                // Full width, or an empty slot is 0 wide and its line is laid out in no width (Fable,
+                // round 5 on PR 88). At least a line high, for a guide that opens on an empty region.
+                .frame(maxWidth: .infinity, minHeight: loading || list.isEmpty ? max(rowsHeight, 44) : nil, alignment: .topLeading)
                 .overlay(alignment: .topLeading) {
                     if loading {
                         Text("Loading").kjSmall(faint: true)

@@ -49,8 +49,7 @@ final class PlayerController {
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
     /// The address of the last signal started, as its item's asset holds it: tells this
-    /// programme's item from the previous one still playing during a handover. Outside DEBUG: the
-    /// Transmission player reads it in every build, and a Release build did not compile without it.
+    /// programme's item from the previous one still playing during a handover.
     @ObservationIgnored private(set) var attachedURL: URL?
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now

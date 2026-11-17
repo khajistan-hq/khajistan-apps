@@ -408,8 +408,8 @@ to be just like how it is on apple tv app"). The numbers are in `CardMotion` (`T
 | what | motion | Reduce Motion |
 |---|---|---|
 | Focus on a card, plate, tab, strip chip or band control | one spring, response 0.34, damping 0.74 | 0.12 s ease, no overshoot |
-| Guide, Up and Down | the rows, keyed by channel, scroll one place over 0.3 s with no bounce; the plate fades off one row as the next takes it, lifted to 1.03 | the rows cut; the plate changes over 0.12 s, with no lift |
-| Guide, Left and Right (a region turn) | a cut; while the next region loads, the rows keep their height and say Loading | the same |
+| Guide, Up and Down | the rows, keyed by channel, scroll one place over 0.3 s with no bounce; the plate fades off one row as the next takes it, lifted to 1.03 | the rows and the plate cut, with no lift; at the list's ends, where the rows stay put, the plate changes over 0.12 s |
+| Guide, Left and Right (a region turn) | a cut; while the next region loads, and on a region with none, the rows keep the height they last had and say Loading or "No …" in it | the same |
 | Guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
 
 Picture transitions (tuning, the pigeon, a channel change) are the paragraphs below; nothing here

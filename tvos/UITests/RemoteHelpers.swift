@@ -14,8 +14,9 @@ extension XCTestCase {
     }
 
     /// Waits for the channel just opened to play. When it does not, Down tunes the next channel,
-    /// as the player's own line says, up to `tries` channels; then the test is skipped, naming what
-    /// each said. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
+    /// as the player's own line says, up to `tries` channels; then a live run is skipped, naming what
+    /// each said. It fails instead on the local test video, and when every channel played and
+    /// `accept` turned each down. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
     /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
     /// `accept` narrows which channel counts, by id: a captions test needs a language the
     /// recogniser takes, and Down can bring up DD Kashir, which plays but is Kashmiri.

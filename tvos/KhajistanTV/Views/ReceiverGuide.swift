@@ -36,13 +36,12 @@ struct ReceiverGuide: View {
                         .accessibilityIdentifier("guideRegion")
                     if !loading { Text("\(list.count)").kjSmall(faint: true) }
                 }
-                if !loading, list.isEmpty {
-                    Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall(faint: true)
-                }
                 // Only the rows that fit, around the lit one: a region holds up to ~500 channels,
                 // and drawing them all on every press made the guide slow (owner, 2026-11-04).
-                // While a region turn loads, the rows' space keeps the height it last had and
-                // says Loading in it, so the panel does not drop to its header and jump back.
+                // The rows' space keeps the height it last had with rows in it while a region turn
+                // loads, and on a region with none, and says Loading or "No …" inside it. So a
+                // turn into, out of or across an empty region does not drop the panel to its
+                // header and jump back.
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(keys, id: \.self) { key in
                         VStack(alignment: .leading, spacing: 0) {
@@ -53,12 +52,17 @@ struct ReceiverGuide: View {
                         }
                     }
                 }
-                .frame(minHeight: loading ? rowsHeight : nil, alignment: .topLeading)
+                // At least a line, for a guide that opens on an empty region with no height kept yet.
+                .frame(minHeight: loading || list.isEmpty ? max(rowsHeight, 44) : nil, alignment: .topLeading)
                 .overlay(alignment: .topLeading) {
-                    if loading { Text("Loading").kjSmall(faint: true) }
+                    if loading {
+                        Text("Loading").kjSmall(faint: true)
+                    } else if list.isEmpty {
+                        Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall(faint: true)
+                    }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    if !loading { rowsHeight = height }
+                    if !loading, !list.isEmpty { rowsHeight = height }
                 }
                 .padding(.vertical, 8)
             }

@@ -592,8 +592,15 @@ struct TransmissionPlayerView: View {
                 store.player.pause()
             } else {
                 pending.task = Task {
+                    // The rejoin's own stop leaves the player idle while it signs and loads (up to
+                    // 20 s): the Pause waits for the new picture, then for it to settle.
+                    let deadline = ContinuousClock.now + .seconds(20)
+                    while !Task.isCancelled, store.player.state == .idle, store.phase == .tuning, ContinuousClock.now < deadline {
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
                     await store.player.settled()
-                    if !Task.isCancelled, store.player.state == .playing { store.player.pause() }
+                    // The channel's own player still: a cut to another channel is not paused by it.
+                    if !Task.isCancelled, store.player === player, store.player.state == .playing { store.player.pause() }
                 }
             }
         }

@@ -37,7 +37,7 @@ final class TransmissionStore {
         get { playerA }
         set { playerA = newValue }
     }
-    enum Phase { case idle, onAir, needsSignIn }
+    enum Phase { case idle, onAir, needsSignIn, tuning }
     var phase = Phase.onAir
     var offAirWatch: Watch? = Watch()
     var slotWatch: Watch? = Watch()
@@ -343,6 +343,21 @@ Task {
     let playWins = retune.store.player.state == .playing
     print("\(playWins ? "PASS" : "FAIL") Pause then Play while the channel retunes ends playing")
     if !playWins { failures += 1 }
+    // A Pause pressed in the first half of a rejoin, while the player is idle (signing, loading):
+    // it waits for the new picture, then pauses it (Fable round 9).
+    let early = Probe()
+    early.startPictureInPicture()
+    early.store.player.state = .idle
+    early.store.phase = .tuning
+    early.pip.onSetPlaying?(false)
+    for _ in 0..<5 { await Task.yield() }
+    let waitedForPicture = early.store.player.state == .idle
+    early.store.phase = .onAir
+    early.store.player.state = .playing
+    _ = await waitForBoundary { early.store.player.state == .paused }
+    let earlyPaused = waitedForPicture && early.store.player.state == .paused
+    print("\(earlyPaused ? "PASS" : "FAIL") a Pause pressed while the rejoin is still loading pauses the new picture")
+    if !earlyPaused { failures += 1 }
     // A Pause alone while it retunes pauses it once the picture has come.
     let alone = Probe()
     alone.startPictureInPicture()

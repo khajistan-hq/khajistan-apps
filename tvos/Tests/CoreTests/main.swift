@@ -1700,7 +1700,10 @@ func realReceiverIndexDecodes() throws {
 func realShardsAndWithdrawalFeedsDecode() throws {
     let indus = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/indus.json"))
     try expectEqual(indus.region, "indus")
-    try expect(indus.channels.count > 50, "only \(indus.channels.count) channels")
+    let index = try JSONDecoder().decode(ReceiverIndex.self, from: try realFile("data/open-frequencies/receiver-index.json"))
+    let expected = index.regionCounts["indus"]?.channels ?? 0
+    try expect(expected > 0, "the current registry must count Indus channels")
+    try expectEqual(indus.channels.count, expected, "Indus shard matches the current registry after withdrawals")
     try expect(indus.channels.allSatisfy { $0.mediaType == "tv" || $0.mediaType == "radio" })
     let cameras = try JSONDecoder().decode(RegionShard.self, from: try realFile("data/open-frequencies/regions/anatolia-camera.json"))
     try expectEqual(cameras.region, "anatolia")
@@ -3307,6 +3310,20 @@ func filmSubtitleChoice() throws {
     try expectEqual(SubtitleChoice.label("fa", listed: listed, fallback: nil), "FA")
 }
 
+func transmissionSubtitleFileLanguage() throws {
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/tv-prerev-mp4-3.en.vtt"), "en")
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/tv-prerev-mp4-3.fa.vtt"), "fa")
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/x.PA.VTT"), "pa")
+    // Negative cases: no language in the name, a word that is not a code, a path whose folder has dots.
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/tv-item-arman.vtt"), "en")
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/tv-item.final.vtt"), "en")
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/v1.fa/tv-item.vtt"), "en")
+    try expectEqual(SubtitleChoice.fileLanguage(""), "en")
+    try expectEqual(SubtitleChoice.label("pa", listed: SubtitleChoice.house, fallback: nil), "Punjabi \u{00B7} پنجابی")
+    try expectEqual(SubtitleChoice.label("en", listed: SubtitleChoice.house, fallback: nil), "English")
+    try expectEqual(SubtitleChoice.label("he", listed: SubtitleChoice.house, fallback: "Hebrew (device)"), "Hebrew \u{00B7} עברית")
+}
+
 func filmSubtitleLanguagesDecode() throws {
     let catalogue = try JSONDecoder().decode(FilmCatalogue.self, from: try realFile("data/khajistan-tv/vod.json"))
     let showgirls = try require(catalogue.films.first { $0.handle == "showgirls-of-pakistan-2021-khajistan" })
@@ -4862,6 +4879,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Subtitles: the plate matches kj-captions.css", captionPlateMatchesTheSite),
     ("Subtitles: right-to-left lines", captionDirection),
     ("Subtitles: a film's track choice", filmSubtitleChoice),
+    ("Subtitles: a Transmission file's language from its name", transmissionSubtitleFileLanguage),
     ("Subtitles: vod.json subtitle_languages decode", filmSubtitleLanguagesDecode),
     ("Live captions: eligibility both ways", liveCaptionEligibility),
     ("Live captions: language order", liveCaptionLanguageOrder),

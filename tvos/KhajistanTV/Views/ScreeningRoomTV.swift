@@ -165,33 +165,49 @@ struct TVFilmPage: View {
         }
     }
 
+    /// The buttons sit on one row; where the labels do not fit (a long "Resume from"), Play keeps
+    /// the first row and the rest go under it. A label never breaks across two lines.
     private func actions(place: Double?) -> some View {
-        HStack(spacing: 24) {
-            Button { playing = .full } label: {
-                Label(place.map { "Resume from \(Mixes.clock($0))" } ?? "Play", systemImage: "play.fill").kjKicker()
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 24) {
+                playButton(place: place)
+                otherButtons
             }
-            .buttonStyle(HouseButtonStyle(solid: true))
-            .focused($playFocused)
-            .accessibilityIdentifier("filmPlay")
-            if Films.previewURL(film) != nil {
-                Button { playing = .preview } label: { Label("Preview", systemImage: "play.rectangle").kjKicker() }
-                    .buttonStyle(HouseButtonStyle())
-                    .accessibilityIdentifier("filmPreview")
+            VStack(alignment: .leading, spacing: 24) {
+                playButton(place: place)
+                HStack(spacing: 24) { otherButtons }
             }
-            let listed = model.saves.isSaved(film: film.handle)
-            Button { toggleWatchlist() } label: {
-                Label(listed ? "On your watchlist" : "Watchlist", systemImage: listed ? "checkmark" : "plus").kjKicker()
-            }
-            .buttonStyle(HouseButtonStyle())
-            .disabled(PassportSaves.filmRef(film.handle) == nil)
-            .accessibilityIdentifier("filmWatchlist")
-            .accessibilityValue(listed ? "On" : "Off")
-            // The TV has no browser: the film's page opens on the phone, from a code.
-            Button { showWebsite = true } label: { Label("Website", systemImage: "safari").kjKicker() }
-                .buttonStyle(HouseButtonStyle())
-                .accessibilityIdentifier("filmOnWebsite")
         }
         .focusSection()
+    }
+
+    private func playButton(place: Double?) -> some View {
+        Button { playing = .full } label: {
+            Label(place.map { "Resume from \(Mixes.clock($0))" } ?? "Play", systemImage: "play.fill").oneLineKicker()
+        }
+        .buttonStyle(HouseButtonStyle(solid: true))
+        .focused($playFocused)
+        .accessibilityIdentifier("filmPlay")
+    }
+
+    @ViewBuilder private var otherButtons: some View {
+        if Films.previewURL(film) != nil {
+            Button { playing = .preview } label: { Label("Preview", systemImage: "play.rectangle").oneLineKicker() }
+                .buttonStyle(HouseButtonStyle())
+                .accessibilityIdentifier("filmPreview")
+        }
+        let listed = model.saves.isSaved(film: film.handle)
+        Button { toggleWatchlist() } label: {
+            Label(listed ? "On your watchlist" : "Watchlist", systemImage: listed ? "checkmark" : "plus").oneLineKicker()
+        }
+        .buttonStyle(HouseButtonStyle())
+        .disabled(PassportSaves.filmRef(film.handle) == nil)
+        .accessibilityIdentifier("filmWatchlist")
+        .accessibilityValue(listed ? "On" : "Off")
+        // The TV has no browser: the film's page opens on the phone, from a code.
+        Button { showWebsite = true } label: { Label("Website", systemImage: "safari").oneLineKicker() }
+            .buttonStyle(HouseButtonStyle())
+            .accessibilityIdentifier("filmOnWebsite")
     }
 
     /// What the record says, label beside value, as the Apple TV app's Information section.
@@ -300,5 +316,12 @@ struct TVProgressLine: View {
         .accessibilityElement()
         .accessibilityLabel("Watched")
         .accessibilityValue("\(Int((min(max(value, 0), 1) * 100).rounded())) percent")
+    }
+}
+
+private extension View {
+    /// A button label at its own width, on one line: the row makes room, the word never breaks.
+    func oneLineKicker() -> some View {
+        kjKicker().lineLimit(1).fixedSize()
     }
 }

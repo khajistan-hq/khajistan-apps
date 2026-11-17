@@ -76,6 +76,38 @@ func downloadNamesCannotTraverseDirectories() throws {
     try expect(longName.hasSuffix(".pdf"))
 }
 
+func downloadsComeOnlyFromTheArchivesHosts() throws {
+    for value in ["https://khajistan-archive.pages.dev/books/a.pdf", "https://ARCHIVE.khajistan.com/x.zip",
+                  "blob:https://khajistan-archive.pages.dev/5c1f-uuid"] {
+        try expect(ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    for value in ["https://evil.example/a.pdf", "http://khajistan-archive.pages.dev/a.pdf",
+                  "https://khajistan-archive.pages.dev.evil.example/a.pdf", "https://khajistan-archive.pages.dev:8443/a.pdf",
+                  "https://user@khajistan-archive.pages.dev/a.pdf", "blob:https://evil.example/5c1f-uuid",
+                  "blob:null/5c1f-uuid", "data:application/pdf;base64,JVBERi0=", "file:///etc/hosts"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    try expect(!ArchiveURL.allowsDownload(nil))
+    // A buyer's file is a signed URL into the archive's own Storage; nothing else on that host.
+    let storage = "https://\(SupabaseRoute.host)/storage/v1/object"
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/sign/digital/a.pdf?token=t")))
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/public/covers/a.jpg")))
+    for value in ["https://\(SupabaseRoute.host)/rest/v1/orders", "https://\(SupabaseRoute.host)/functions/v1/my-downloads",
+                  "https://evil.supabase.co/storage/v1/object/sign/a.pdf", "http://\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://x@\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/../../functions/v1/x",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/%2E%2E/%2E%2E/functions/v1/x"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    // The browser's response decision, as ArchiveBrowser calls it.
+    let site = URL(string: "https://khajistan-archive.pages.dev/a.pdf"), evil = URL(string: "https://evil.example/a.pdf")
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "") == .allow)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "Attachment; filename=a.pdf") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: false, contentDisposition: "") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: false, contentDisposition: "") == .download)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: true, contentDisposition: "attachment") == .download)
+}
+
 // MARK: - Sky (the website's KJSky, differential)
 
 private struct SkyFixture: Decodable {
@@ -421,6 +453,7 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Bounded history and bookmark toggle", historyDeduplicatesAndHasBoundedSize),
             ("Disk round trip and corruption preservation", libraryRoundTripAndCorruptFile),
             ("Download traversal and Unicode limits", downloadNamesCannotTraverseDirectories),
+            ("Downloads come only from the archive's hosts", downloadsComeOnlyFromTheArchivesHosts),
             ("Sky matches the site's KJSky (differential)", skyMatchesTheSitesJS),
             ("The sky comparator can fail", skyComparatorCanFail),
             ("A skin pick holds only in its band", skyPickHoldsOnlyInItsBand),

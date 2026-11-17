@@ -71,31 +71,52 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "up returns to the front, got \(back)")
     }
 
-    /// News is a shelf on the front (owner, 2026-11-04), and its first cards get live stills, which
-    /// VoiceOver reads as "live picture". Stills are taken one at a time, region cards first.
+    /// News is a shelf on the front (owner, 2026-11-04), and its first four cards get live stills,
+    /// which VoiceOver reads as "live picture". Stills are taken one at a time, region cards first.
     ///
-    /// A still is a frame of the channel's live stream, so a News carrier that does not reach the
-    /// runner gives none. On 2026-11-15 the first four News channels (24 News HD, 365 News, ABN
-    /// News, Capital TV) were all off air before the nightly probe took them off the dial, and the
-    /// shelf pictured 0 of 4 (run 43681581060). One still proves the shelf asks for them; when none
-    /// comes but Music's first cards, asked for in the same list, got theirs, the test is skipped
-    /// naming the News cards. With no still on either shelf, it fails.
+    /// Stills are kept by channel, and a region card's still shows on any card of that channel.
+    /// The first four News cards are all Indus channels, and the Indus card takes one still, so a
+    /// shelf that asked for none would still show one picture there. Two or more prove the shelf
+    /// asks. Only the first four cards are counted, on News and on Music.
+    ///
+    /// The local test video always gives a frame, so by default all four must be pictured. With
+    /// live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`) a still needs the carrier to reach the
+    /// runner: on 2026-11-15 the first four News channels were all off air (run 43681581060). So in
+    /// a live run fewer than two is skipped when Music's first four, asked for in the same list,
+    /// got two or more, and fails when they did not.
     func testNewsShelfCarriesLivePictures() throws {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
         kjLaunch(app)
         let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-'"))
         XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front carries a News shelf")
-        let pictured = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-' AND label CONTAINS 'live picture'"))
-        let one = NSPredicate { _, _ in pictured.count >= 1 }
-        if XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: one, object: nil)], timeout: 120) != .completed {
-            let music = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-music-' AND label CONTAINS 'live picture'"))
-            XCTAssertGreaterThan(music.count, 0, "neither News nor Music got a live still: the stills are broken, not one shelf's carriers")
-            let names = news.allElementsBoundByIndex.map(\.label).joined(separator: "; ")
-            throw XCTSkip("No News carrier gave a frame in 120 s while \(music.count) Music cards did: \(names)")
-        }
-        print("KJNEWS cards \(news.count), pictured \(pictured.count)")
+        let music = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-music-'"))
+        // Read again on each look: a shelf builds its cards as it comes on screen.
+        func firstFour(_ shelf: XCUIElementQuery) -> [XCUIElement] { Array(shelf.allElementsBoundByIndex.prefix(4)) }
+        func pictured(_ cards: [XCUIElement]) -> Int { cards.filter { $0.label.contains("live picture") }.count }
+        let wanted = kjLiveMedia ? 2 : 4
+        let enough = NSPredicate { _, _ in pictured(firstFour(news)) >= wanted }
+        let got = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: enough, object: nil)], timeout: 120) == .completed
+        let newsFirst = firstFour(news)
+        print("KJNEWS first \(newsFirst.map(\.identifier)), pictured \(pictured(newsFirst)), wanted \(wanted)")
         XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
+        if !got {
+            let names = newsFirst.map(\.label).joined(separator: "; ")
+            guard kjLiveMedia else {
+                XCTFail("the first News cards get live stills from the local test video: pictured \(pictured(newsFirst)) of 4: \(names)")
+                return
+            }
+            // Music is asked for after the region cards and the News cards: give it time.
+            let musicDone = NSPredicate { _, _ in pictured(firstFour(music)) >= 2 }
+            let musicGot = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: musicDone, object: nil)], timeout: 60) == .completed
+            let musicFirst = firstFour(music)
+            print("KJNEWS live, News short; Music first \(musicFirst.map(\.identifier)), pictured \(pictured(musicFirst))")
+            guard musicGot else {
+                XCTFail("neither News nor Music's first cards got two live stills: the stills are broken, not one shelf's carriers. News: \(names)")
+                return
+            }
+            throw XCTSkip("Fewer than two of the first News cards gave a frame in 120 s while \(pictured(musicFirst)) of Music's first four did: \(names)")
+        }
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
         kjScreenshot("home-news-pictures", app: app)

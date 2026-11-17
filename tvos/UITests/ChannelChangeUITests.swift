@@ -67,6 +67,37 @@ final class ChannelChangeUITests: XCTestCase {
         XCTAssertNotEqual(current.label, start)
     }
 
+    /// Indus's first television channels in the recorded list; the walk opens the first of them.
+    private static let indusTelevision = ["swept-pk-24-news-hd", "swept-pk-365-news", "swept-pk-abn-news",
+                                          "swept-us-abn-urdu", "swept-in-balle-balle", "swept-pk-capital-tv"]
+
+    /// `-kjnomoveon` holds a dead channel on screen, which the test above relies on.
+    func testNoMoveOnHoldsADeadChannel() { deadChannel(held: true) }
+
+    /// Without `-kjnomoveon` the player moves past dead channels, so the test above it is not
+    /// passing on a flag that does nothing.
+    func testADeadChannelMovesOnWithoutTheFlag() { deadChannel(held: false) }
+
+    /// `-kjdeadchannels` makes Indus's first six channels fail as a dead signal does. The player
+    /// waits 3 s on a dead signal before it moves on, and `openChannel` waits 9 s after Select.
+    private func deadChannel(held: Bool) {
+        app.launchArguments += ["-kjdeadchannels", Self.indusTelevision.joined(separator: ",")]
+        if held { app.launchArguments += ["-kjnomoveon", "YES"] }
+        openChannel()
+        let current = app.staticTexts["currentChannel"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        if held {
+            let opened = current.label
+            XCTAssertTrue(Self.indusTelevision.contains(opened), "a dead channel opened, got \(opened)")
+            Thread.sleep(forTimeInterval: 6)
+            XCTAssertEqual(current.label, opened, "-kjnomoveon holds the dead channel on screen")
+        } else {
+            let passed = NSPredicate { _, _ in current.exists && !Self.indusTelevision.contains(current.label) }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: passed, object: nil)], timeout: 60), .completed,
+                           "the player moves past every dead channel, last on \(current.label)")
+        }
+    }
+
     /// A press made while the sign-on's pigeon is still flying must not stop channel changes for
     /// the rest of the player's life (found 2026-11-04): Up at once, and Up again once the change
     /// has had time to land, must each move the channel.

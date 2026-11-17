@@ -243,7 +243,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   panel's Subtitles · PiP · Stop are lit by the remote as the strip's are: Down lights the first
   (it carries a ↓ while none is lit), left and right walk them, Select works the lit one, Up or
   Back lets go, and a lit control lets go 6 s after the panel would have hidden (8.6 s with no
-  press), long enough to read it and press Select. One Back stops the film.
+  press), long enough to read it and press Select. In the full film Back closes the bottom bar, and
+  with the bar closed stops the film (owner, 2026-11-17: "a back button shoud exit the bottom bar");
+  in the preview one Back stops it.
   Subtitles start in the language chosen for that film, else the device's, else English: a
   choice made on one film is not carried to another (Persian chosen for an Iranian film opened
   Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,

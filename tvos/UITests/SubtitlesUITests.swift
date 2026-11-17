@@ -245,9 +245,9 @@ final class SubtitlesUITests: XCTestCase {
         if caption.exists { kjScreenshot("film-2-subtitle-alone", app: app) }
     }
 
-    /// "Text only" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
+    /// "Yellow text" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
     /// film's preview. The look is checked on the screenshot.
-    func testTextOnlySubtitlesOnAFilm() throws {
+    func testYellowTextSubtitlesOnAFilm() throws {
         guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
@@ -321,13 +321,15 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(stop.isSelected, "Right walks to Stop")
         kjScreenshot("film-full-controls-stop-lit", app: app)
 
-        // Back lets go of the lit control; the next Back stops the film and closes the screen.
+        // Back closes the bottom bar, letting go of the lit control (owner, 2026-11-17); with the
+        // bar closed, the next Back stops the film and closes the screen.
         XCUIRemote.shared.press(.menu)
-        kjPause(0.6)
-        XCTAssertTrue(app.staticTexts["playerState"].exists, "the first Back only lets go of the control")
+        kjPause(0.8)
+        XCTAssertFalse(app.staticTexts["playerState"].exists, "the first Back closes the bottom bar")
+        XCTAssertTrue(app.descendants(matching: .any)["filmPicture"].exists, "and the film is still on")
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "one Back stops the film")
-        XCTAssertFalse(app.staticTexts["playerState"].exists, "the player is gone")
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "the next Back stops the film")
+        XCTAssertFalse(app.descendants(matching: .any)["filmPicture"].exists, "the player is gone")
     }
 
     /// The full film moves as Apple's player moves it (owner, 2026-11-17: "all controls should work

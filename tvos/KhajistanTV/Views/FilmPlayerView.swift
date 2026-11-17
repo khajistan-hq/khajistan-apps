@@ -15,7 +15,8 @@ import UIKit
 /// In the full film the picture (FilmRemote) keeps the remote's focus. The panel's controls
 /// (Subtitles, PiP, Stop) are lit as the Transmission strip's are: Down lights the first, left and
 /// right walk them, Select works the lit one. With none lit the remote moves the film as Apple's
-/// player does (FilmTransport). One Back stops the film (owner, 2026-11-15: "why cant you stop on
+/// player does (FilmTransport). Back closes the bottom bar, and with it closed stops the film
+/// (owner, 2026-11-17); the preview's one Back stops it (owner, 2026-11-15: "why cant you stop on
 /// demand movies").
 struct FilmPlayerView: View {
     let film: Film
@@ -363,6 +364,15 @@ struct FilmPlayerView: View {
     /// panel first, which read as Back doing nothing.
     private func back() {
         if scrub != nil { return endScrub(play: false) }
+        // In the full film Back closes the bottom bar first, as Apple's player does (owner,
+        // 2026-11-17: "a back button shoud exit the bottom bar"); with the bar closed, Back stops
+        // the film. Not under VoiceOver, where the bar never hides: there Back stops at once.
+        if full != nil, overlayVisible, OverlayTiming.hidesItself {
+            armed = nil
+            hideTask?.cancel()
+            withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
+            return
+        }
         if armed != nil {
             armed = nil
             wake()

@@ -206,7 +206,7 @@ final class SkinWalkUITests: XCTestCase {
 
     /// The subtitle look (owner, 2026-11-17): the plate until chosen, "Yellow text" one press away,
     /// and the choice kept across a launch.
-    func testChoosingTextOnlySubtitlesPersists() {
+    func testChoosingYellowTextSubtitlesPersists() {
         // No launch argument for the setting: it would outrank what the button saves.
         var app = launch(["-kjskin", "day", "-kjtab", "account"])
         let toggle = app.buttons["caption-style-toggle"]

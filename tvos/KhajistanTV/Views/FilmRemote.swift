@@ -24,6 +24,8 @@ struct FilmRemote: UIViewRepresentable {
             let swipe = UIPanGestureRecognizer(target: self, action: #selector(pan))
             swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
             addGestureRecognizer(swipe)
+            // For the UI tests: the full film is on screen while this view is.
+            accessibilityIdentifier = "filmPicture"
         }
 
         required init?(coder: NSCoder) { nil }

@@ -205,6 +205,15 @@ enum SubtitleChoice {
         for language in preferred.map(langOf) where available.contains(language) { return language }
         return available.contains("en") ? "en" : nil
     }
+
+    /// Which of a programme's prepared files opens (video.html offer()): files are on by default, so
+    /// "off" is not a choice here. The remembered language, then the device's, then the language the
+    /// schedule's file name gives, then the first.
+    static func fileOpener(available: [String], stored: String?, preferred: [String], named: String) -> String? {
+        if let stored, available.contains(stored) { return stored }
+        for language in preferred.map(langOf) where available.contains(language) { return language }
+        return available.contains(named) ? named : available.first
+    }
 }
 
 // MARK: - Live captions: kj-captions-live.js

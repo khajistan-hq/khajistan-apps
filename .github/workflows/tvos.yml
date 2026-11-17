@@ -77,6 +77,8 @@ jobs:
         run: sh tvos/scripts/test-reading-cache.sh
       - name: Transmission picture-in-picture session regressions
         run: sh tvos/scripts/test-transmission-pip.sh
+      - name: Transmission stored subtitles (several languages per programme)
+        run: sh tvos/scripts/test-recorded-subtitles.sh
       - name: Select an Apple TV simulator
         id: simulator
         run: |

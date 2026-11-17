@@ -58,7 +58,7 @@ struct ReadingView: View {
         }
         // Down from the top bar lands on the tab on show, not on the one under the bar item.
         .defaultFocus($focusedTab, tab?.id, priority: .userInitiated)
-        .task { await store.start() }
+        .task(id: store.loadRevision) { await store.start() }
         // A title the Rooms door asked for, opened once the shelf is in hand.
         .task(id: store.phase == .ready && model.readingLink != nil) { follow() }
         // A shelf that did not load drops the request, so it never opens a title later unasked.

@@ -4,12 +4,12 @@ import XCTest
 /// a walk toward an element by the Siri Remote's presses.
 extension XCTestCase {
     /// Existing navigation fixtures keep the map visible; autoplay has its own acceptance test.
-    /// The receiver's list, feeds and map and the chat room list fall back to recorded answers
-    /// (`Fixtures/recorded`, shared with the iPhone tests) when the live request fails: one TLS
+    /// The receiver's list, feeds and map and the chat room list are recorded answers
+    /// (`Fixtures/recorded`, shared with the iPhone tests; see `kjFixtureArguments`): one TLS
     /// error on receiver-index.json failed pull requests that never touched the Receiver (CI, 2026-11-14).
     func kjLaunch(_ app: XCUIApplication, autoplay: Bool = false) {
         if !autoplay { app.launchArguments += ["-kjnoautoplay", "YES"] }
-        app.launchArguments += ["-kjfixtures", kjRecordedFixtures]
+        app.launchArguments += kjFixtureArguments(kjRecordedFixtures)
         app.launch()
     }
 
@@ -17,7 +17,9 @@ extension XCTestCase {
     /// as the player's own line says, up to `tries` channels; then the test is skipped, naming what
     /// each said. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
     /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
-    func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4) throws {
+    /// `accept` narrows which channel counts, by id: a captions test needs a language the
+    /// recogniser takes, and Down can bring up DD Kashir, which plays but is Kashmiri.
+    func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4, accept: @escaping (String) -> Bool = { _ in true }) throws {
         let state = app.staticTexts["playerState"]
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
@@ -30,10 +32,15 @@ extension XCTestCase {
             let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
             }, object: nil)
-            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed { return }
+            // A channel that plays but fails `accept` moves on at once, not after the timeout.
+            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed,
+               accept(current.exists ? current.label : "") { return }
             tried.append("\(current.exists ? current.label : "?"): \(state.label)")
         }
-        throw XCTSkip("No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))")
+        let why = "No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
+        // The local test video always plays: if it did not, the test media is broken.
+        guard kjLiveMedia else { XCTFail(why); return }
+        throw XCTSkip(why)
     }
 
     var kjRecordedFixtures: String {
@@ -51,15 +58,20 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// From the top bar (or Surf, where focus rests at launch) to the Receiver's region strip:
-    /// Down through the sidebar until a region card has focus. Since the front became two bands
-    /// (2026-10-29) the strip runs under the sidebar, so the old Right off the sidebar found
-    /// nothing. Never presses Select, so nothing on the way is switched.
+    /// Reach the Receiver's region strip with remote presses, including when focus has moved
+    /// into a channel shelf below it. Never selects or changes the highlighted channel.
     @discardableResult
     func kjFocusStrip(_ app: XCUIApplication) -> Bool {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<10 where !focused.exists { XCUIRemote.shared.press(.down); kjPause(0.35) }
+        for _ in 0..<10 {
+            if focused.exists { return true }
+            let current = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            let belowStrip = current.exists && !current.identifier.hasPrefix("nav-") && regions.firstMatch.exists
+                && current.frame.midY > regions.firstMatch.frame.midY
+            XCUIRemote.shared.press(belowStrip ? .up : .down)
+            kjPause(0.35)
+        }
         return focused.exists
     }
 
@@ -87,4 +99,16 @@ extension XCTestCase {
         }
         return element.exists && element.hasFocus
     }
+}
+
+/// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
+/// default local media may not.
+var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
+
+/// The recorded lists and local media by default, so a navigation test reads no live list and
+/// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
+/// with the recording behind them, streams live.
+func kjFixtureArguments(_ directory: String) -> [String] {
+    if kjLiveMedia { return ["-kjfixtures", directory] }
+    return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]
 }

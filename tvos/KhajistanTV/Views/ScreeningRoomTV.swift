@@ -165,18 +165,13 @@ struct TVFilmPage: View {
         }
     }
 
-    /// The buttons sit on one row; where the labels do not fit (a long "Resume from"), Play keeps
-    /// the first row and the rest go under it. A label never breaks across two lines.
+    /// Play on its own row, the rest under it, each label on one line. Always two rows: all four
+    /// on one row barely fit "Play" and never "Resume from …", so a layout that chose would switch
+    /// rows under the remote when Watchlist becomes "On your watchlist".
     private func actions(place: Double?) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 24) {
-                playButton(place: place)
-                otherButtons
-            }
-            VStack(alignment: .leading, spacing: 24) {
-                playButton(place: place)
-                HStack(spacing: 24) { otherButtons }
-            }
+        VStack(alignment: .leading, spacing: 24) {
+            playButton(place: place)
+            HStack(spacing: 24) { otherButtons }
         }
         .focusSection()
     }

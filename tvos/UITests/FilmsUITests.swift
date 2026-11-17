@@ -101,6 +101,9 @@ final class FilmsUITests: XCTestCase {
         // label, 29 pt on one line, about 58 on two.
         let oneLine: [String: CGFloat] = ["filmPlay": 80, "filmPreview": 40, "filmWatchlist": 40, "filmOnWebsite": 40]
         let buttons = ["filmPlay", "filmPreview", "filmWatchlist", "filmOnWebsite"]
+        // The page's text column ends at 1760 (the 80 pt safe area and 80 pt inset). The three plain
+        // buttons report their label alone, and their plate runs 26 pt past it, so a label ends by 1734.
+        let columnEnd: CGFloat = 1734
         // Jism is the film in the owner's photograph; World ka Centre has the longest title in front.
         for handle in ["jism-2006-khajistan", "world-ka-centre-center-of-the-world-2002-directors-cut-khajistan"] {
             for skin in ["day", "grove", "smut"] {
@@ -118,15 +121,21 @@ final class FilmsUITests: XCTestCase {
                 XCTAssertTrue(play.waitForExistence(timeout: 20), "\(skin): the film page must open")
                 kjPause(2)
                 XCTAssertTrue(play.label.contains("Resume from 1:21:38"), "\(skin): Play must offer the saved place; reads \(play.label)")
-                let screen = app.windows.firstMatch.frame
                 var drawn: [String] = []
+                var row: [CGRect] = []   // Preview, Watchlist, Website: the row under Play
                 continueAfterFailure = true   // measure all four, so a failure names every broken label
                 defer { continueAfterFailure = false }
                 for id in buttons where app.buttons[id].exists {
                     let frame = app.buttons[id].frame
                     drawn.append("\(id) \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
                     XCTAssertLessThanOrEqual(frame.height, oneLine[id]!, "\(skin) \(handle): \(id) breaks onto a second line (\(frame))")
-                    XCTAssertLessThanOrEqual(frame.maxX, screen.maxX, "\(skin) \(handle): \(id) runs off the screen (\(frame))")
+                    XCTAssertLessThanOrEqual(frame.maxX, columnEnd, "\(skin) \(handle): \(id) runs past the page's column (\(frame))")
+                    if id != "filmPlay" { row.append(frame) }
+                }
+                // Play alone on the first row, the others under it, left to right without touching.
+                for (i, frame) in row.enumerated() {
+                    XCTAssertGreaterThan(frame.minY, play.frame.maxY, "\(skin) \(handle): button \(i + 1) must sit under Play")
+                    if i > 0 { XCTAssertGreaterThan(frame.minX, row[i - 1].maxX, "\(skin) \(handle): buttons \(i) and \(i + 1) overlap") }
                 }
                 print("FILMBUTTONS \(skin) \(handle) " + drawn.joined(separator: " | "))
                 XCTAssertGreaterThanOrEqual(drawn.count, 3, "\(skin): Play, Watchlist and Website must draw")

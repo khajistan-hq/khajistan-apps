@@ -356,6 +356,34 @@ func surfPressVisitsEveryChannelBeforeRepeating() throws {
     }
 }
 
+func surfCountsStepsAndOutlivesAFailingList() throws {
+    let channels = try (0..<5).map { try regionChannel("ch-\($0)", region: "indus") }
+    let main = SurfChoice(medium: .all, scope: .main)
+    for _ in 0..<40 {
+        // Next/previous inside the pool are visits (ReceiverTuner.step): Surf never lands on them.
+        var history = SurfHistory()
+        let full = SurfCatalogue(channels: channels, missingRegions: [])
+        let first = try require(history.press(full, for: main, onAir: nil))
+        let stepped = channels.filter { $0.id != first.id }.prefix(3)
+        for channel in stepped { history.visit(channel, for: main) }
+        let surfed = try require(history.press(full, for: main, onAir: stepped.last))
+        try expect(surfed.id != first.id && !stepped.contains { $0.id == surfed.id })
+        // A region list that never loads: once the loaded channels are spent, Surf still plays one
+        // (not the one on air) instead of going dead until relaunch.
+        var failing = SurfHistory()
+        let partial = SurfCatalogue(channels: Array(channels.prefix(2)), missingRegions: ["parsistan"])
+        var onAir: Channel?
+        for _ in 0..<6 {
+            let pick = try require(failing.press(partial, for: main, onAir: onAir))
+            try expect(pick.id != onAir?.id)
+            onAir = pick
+        }
+        // Nothing loaded at all: nothing to play.
+        var empty = SurfHistory()
+        try expect(empty.press(SurfCatalogue(channels: [], missingRegions: ["indus"]), for: main, onAir: nil) == nil)
+    }
+}
+
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
     guard try condition() else { throw AssertionFailure(description: "\(file):\(line) assertion failed") }
 }
@@ -405,6 +433,7 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Preview password only answers the exact HTTPS archive gate once", previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce),
             ("A region tap after global Surf steps and wraps only within that region", regionTapAfterGlobalSurfNeverEscapesItsRegion),
             ("Surf visits every channel in its pool before any repeats", surfPressVisitsEveryChannelBeforeRepeating),
+            ("Surf counts next/previous as visits and outlives a list that keeps failing", surfCountsStepsAndOutlivesAFailingList),
             ("Region taps preserve media choices and the eligible catalogue", regionTapPreservesMediumAndEligibleCatalogue),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes),
             ("The open chain preserves the store exclusion at every step", storeExclusionSurvivesTheOpenChain)

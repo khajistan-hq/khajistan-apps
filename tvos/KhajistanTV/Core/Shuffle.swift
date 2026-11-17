@@ -200,7 +200,12 @@ struct SurfHistory {
     mutating func press(_ catalogue: SurfCatalogue, for choice: SurfChoice, onAir: Channel?) -> Channel? {
         update(catalogue, for: choice)
         if let onAir { visit(onAir, for: choice) }
-        return next(for: choice)
+        if let channel = next(for: choice) { return channel }
+        // A list that keeps failing holds the cycle open, so a spent pool would leave Surf dead
+        // until relaunch. Play a loaded channel again instead; the caller notes the missing lists.
+        // ponytail: random repeat; the cycle resumes on its own once every list loads.
+        guard !catalogue.isComplete else { return nil }
+        return catalogue.channels.filter { $0.id != onAir?.id }.randomElement()
     }
 
     /// The next channel not in `skipping`, and the walk as it would stand once it is visited,

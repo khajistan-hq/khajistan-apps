@@ -159,7 +159,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   Receiver keeps no copy.
 - **Player**: the picture full screen. Over it, while waking: the status band (KHAJISTAN
   RECEIVER · BROADCASTING FROM PAKISTAN · ● LIVE TELEVISION) and a ground panel at the bottom
-  (state kicker, the name as headline, the place, the attribution line in small type). The
+  (state kicker, the name as headline, the place). The
   screen opens on the ground with TUNING and the channel's name, which fades off as the picture
   arrives. Radio shows its Now Playing on the ground: the radio mark large, ● NOW PLAYING · LIVE
   RADIO, the station's name in display type, and its place and broadcaster. A channel change is
@@ -461,9 +461,11 @@ and back to the centre when he stops (owner, 2026-10-06).
 along the bottom in the band colour, in two tiers since 2026-11-15 (one row squeezed the title to
 "Ra n…" beside the channel's name and the controls on the owner's TV). The top line: the medium or
 the channel as a kicker at left, the controls at right. Under it, the full width: the name (30pt
-black), the place or the slot beside it, the attribution or the show's line under them in small
-type, and on Transmission UP NEXT with its time and show at the right. It rises 40pt and fades in over 0.35 s, and goes
-the same way 2.6 s into playback. It waits while a signal tunes: the ground says so.
+black), the place or the slot beside it, on Transmission the credit under them in small
+type, and on Transmission UP NEXT with its time and show at the right. It rises 40pt and fades in
+over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal tunes: the ground
+says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
+"i dont want info like 'regional broadcast by...' the apple tv").
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no

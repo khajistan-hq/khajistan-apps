@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -215,7 +216,7 @@ struct TransmissionPlayerView: View {
             overlay(air)
             if let guideRow {
                 TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.move(edge: .bottom))
             }
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
@@ -272,7 +273,7 @@ struct TransmissionPlayerView: View {
                     // channel's (owner, 2026-11-08: "qawalli as chanel name doesnt make sense").
                     trailing: ["\u{25CF} " + store.channelName(store.channelNumber)],
                     // The station clock's answer (StationClock.withNextProgramme, the site's rule).
-                    upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, name) } },
+                    upNext: air.nextName.flatMap { name in air.nextAt.map { ($0, upNextName(name, air)) } },
                     accessory: chips.isEmpty ? nil : AnyView(stripControls)
                 )
             }
@@ -306,14 +307,22 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// One small line under the name: the show's own line, else the custodian and the transfer.
+    /// One small line under the name: the custodian and the transfer, a person's credit or
+    /// nothing. The show's own line is not shown here (owner, 2026-11-15: "i dont want any
+    /// subtitle it looks AI").
     private func credit(_ air: OnAir) -> String? {
-        if let line = nonEmpty(air.show?.line) { return line }
         let parts = [air.programme?.custodian, air.programme?.transfer].compactMap { nonEmpty($0) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - Words
+
+    /// Up next carries the country too, as Now does.
+    private func upNextName(_ name: String, _ air: OnAir) -> String {
+        guard let id = air.nextProgrammeId,
+              let country = nonEmpty(store.programming?.programmes[id]?.country) else { return name }
+        return name + " \u{00B7} " + country
+    }
 
     /// Now playing: the programme, by the standardized name the schedule carries (owner,
     /// 2026-11-08: "add now playing and up next ... names need to be standardized"). Where a
@@ -338,7 +347,8 @@ struct TransmissionPlayerView: View {
         if case .failed = store.player.state { return stateText(air) }
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
-        return [showUnderTitle(air), stateText(air), nonEmpty(air.programme?.country), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        // Country first, then year (owner, 2026-11-15: "country is imp").
+        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -399,6 +409,34 @@ struct TransmissionPlayerView: View {
             .accessibilityIdentifier("subtitlesControl")
             // Lit by the remote rather than focused: tests and VoiceOver read it as selected.
             .accessibilityAddTraits(armed == .subtitles ? .isSelected : [])
+    }
+
+    // MARK: - The channel number
+
+    /// Once the channel changed to is on screen (playing, or off air with its return), its number
+    /// shows in the top corner for three seconds, as an old set's did: on and off at once.
+    private func showNumberWhenTuned() {
+        guard plateOwed, !switching, !model.pigeon.isFlying, model.clips.coverage == 0 else { return }
+        let ready: Bool
+        switch store.phase {
+        case .offAir: ready = true
+        // A sound-only programme puts the channel in that corner already, with the dancer.
+        case .onAir(let air) where air.programme?.audio_only == true:
+            plateOwed = false
+            return
+        case .onAir: ready = store.player.state == .playing || store.isScheduleFile
+        default: ready = false
+        }
+        guard ready else { return }
+        plateOwed = false
+        plateTask?.cancel()
+        plateChannel = store.channelNumber
+        UIAccessibility.post(notification: .announcement, argument: "Channel \(store.channelNumber)")
+        plateTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            plateChannel = nil
+        }
     }
 
     // MARK: - Strip controls, the guide and picture in picture
@@ -474,13 +512,13 @@ struct TransmissionPlayerView: View {
             return .init(number: number, name: store.channelName(number), now: line,
                          soundOnly: air?.programme?.audio_only == true)
         }
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) {
             guideRow = guideRows.firstIndex { $0.number == store.channelNumber } ?? 0
         }
     }
 
     private func closeGuide() {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         wake()
     }
 
@@ -512,9 +550,12 @@ struct TransmissionPlayerView: View {
         guard pipOffered else { return }
         armed = nil
         let store = store, model = model, pip = pip
+        let player = store.player
+        let access = store.accessRevision
         pip.onStart = {
-            // A channel change between Select and the window opening stopped this picture.
-            guard store.player.state == .playing || store.player.state == .tuning else { pip.stop(); return }
+            // AVKit can finish starting after a retune or after this screen has left.
+            guard !left, !switching, store.player === player, store.accessRevision == access,
+                  player.state == .playing || player.state == .tuning else { pip.stop(); return }
             model.transmissionPiP = pip
             handedToPiP = true
             dismiss()
@@ -534,39 +575,11 @@ struct TransmissionPlayerView: View {
             model.transmissionPiP = nil
             store.stop()
         }
-        if !pip.start(store.player.player) {
+        if !pip.start(player.player) {
             pip.letGo()
             say("Picture in picture is not ready yet. Try again in a moment.")
         }
         wake()
-    }
-
-    // MARK: - The channel number
-
-    /// Once the channel changed to is on screen (playing, or off air with its return), its number
-    /// shows in the top corner for three seconds, as an old set's did: on and off at once.
-    private func showNumberWhenTuned() {
-        guard plateOwed, !switching, !model.pigeon.isFlying, model.clips.coverage == 0 else { return }
-        let ready: Bool
-        switch store.phase {
-        case .offAir: ready = true
-        // A sound-only programme puts the channel in that corner already, with the dancer.
-        case .onAir(let air) where air.programme?.audio_only == true:
-            plateOwed = false
-            return
-        case .onAir: ready = store.player.state == .playing || store.isScheduleFile
-        default: ready = false
-        }
-        guard ready else { return }
-        plateOwed = false
-        plateTask?.cancel()
-        plateChannel = store.channelNumber
-        UIAccessibility.post(notification: .announcement, argument: "Channel \(store.channelNumber)")
-        plateTask = Task {
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            plateChannel = nil
-        }
     }
 
     /// A line in the strip for a few seconds.
@@ -587,14 +600,34 @@ struct TransmissionPlayerView: View {
         return "\(air.date) \(air.slot.start) \(air.programmeId)"
     }
 
-    /// The programme's prepared file, read through the site's gate like the schedule: without the
-    /// preview password first, then with it. A programme without one shows no control.
+    /// A Cloudflare Stream programme offers the tracks its own manifest carries (Persian, Urdu,
+    /// Arabic…), as the Screening Room does. Its prepared English file is the same text with the
+    /// same timings as the manifest's English track (measured 2026-11-15 on all 11 on air), so
+    /// the manifest wins; a manifest with no tracks falls back to the file. Any other programme
+    /// shows its prepared file, in the language its name gives; without one, no control.
     private func loadSubtitles() async {
         subtitles.clear()
-        guard case .onAir(let air) = store.phase, let source = await subtitleSource(air) else { return }
+        guard case .onAir(let air) = store.phase else { return }
+        #if DEBUG
+        // `-kjsubtitlefile` gives whatever is on air that file, Stream or not (README).
+        if UserDefaults.standard.string(forKey: "kjsubtitlefile") != nil { await loadFile(air); return }
+        #endif
+        if case .stream = air.programme?.play_url.flatMap(Transmission.route(for:)) {
+            await followStreamTracks(air)
+        } else {
+            await loadFile(air)
+        }
+    }
+
+    /// The programme's prepared file, read through the site's gate like the schedule.
+    private func loadFile(_ air: OnAir) async {
+        guard let source = await subtitleSource(air) else { return }
         let opened = Date()
         let store = store
-        subtitles.load(vtt: source, language: .init(code: "en", label: "English")) {
+        let code = SubtitleChoice.fileLanguage(air.programme?.subtitle_url ?? "")
+        let language = RecordedSubtitles.Track(
+            code: code, label: SubtitleChoice.label(code, listed: SubtitleChoice.house, fallback: nil))
+        subtitles.load(vtt: source, language: language) {
             let player = store.player.player
             if player.currentItem != nil {
                 let time = player.currentTime().seconds
@@ -605,6 +638,29 @@ struct TransmissionPlayerView: View {
             if store.isScheduleFile { return air.seekTo + Date().timeIntervalSince(opened) }
             #endif
             return nil
+        }
+    }
+
+    /// Lists the tracks of the Stream item the player holds. A handover can leave the last
+    /// programme's item playing for a moment, so only stream-host items are read and a later one is
+    /// followed when it arrives. A manifest with no tracks falls back to the prepared file. The task
+    /// is cancelled when the programme changes.
+    private func followStreamTracks(_ air: OnAir) async {
+        var tried: AVPlayerItem?
+        while !Task.isCancelled {
+            if store.player.state == .playing, let item = store.player.player.currentItem, item !== tried,
+               (item.asset as? AVURLAsset)?.url.host == KJConfig.streamHost {
+                tried = item
+                await subtitles.attach(item, listed: SubtitleChoice.house)
+                // Fall back only when this item is still the one playing: a previous Stream
+                // programme's item without tracks is no reason to give up on this one. A read that
+                // fails on the playing item does fall back, to the same English text.
+                if subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
+                    await loadFile(air)
+                    return
+                }
+            }
+            try? await Task.sleep(for: .milliseconds(500))
         }
     }
 

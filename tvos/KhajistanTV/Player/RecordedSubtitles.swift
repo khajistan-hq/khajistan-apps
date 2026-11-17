@@ -46,6 +46,9 @@ final class RecordedSubtitles {
         generation += 1
         ticker?.cancel()
         ticker = nil
+        // Deselect too: with its suppressing output gone, a selected track would be drawn by the
+        // system itself, in its own style, in the picture-in-picture window.
+        if let group, let item { item.select(nil, in: group) }
         if let output, let item { item.remove(output) }
         output = nil
         group = nil

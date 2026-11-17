@@ -243,9 +243,20 @@ struct HouseCardStyle: ButtonStyle {
     }
 }
 
-private enum CardMotion {
+/// The motion a remote press drives. Cards, plates and tabs lift on one spring, so focus moves
+/// on one clock, as tvOS's focus engine does, rather than each control easing to its own.
+enum CardMotion {
     static let lift: CGFloat = 1.08
     static let spring = Animation.spring(response: 0.34, dampingFraction: 0.74)
+    /// A list that scrolls under the remote (the guides): no bounce, as a tvOS list does not
+    /// overshoot its rows. Under Reduce Motion it is a short linear step with no lift.
+    static func scroll(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .linear(duration: 0.12) : .smooth(duration: 0.3)
+    }
+    /// A panel that rises over the picture (the guides): opaque, sliding on a curve with no
+    /// bounce. The fade it had under the slide showed the picture and the rows doubled through a
+    /// half-drawn yellow panel. Under Reduce Motion it cuts.
+    static func panel(reduceMotion: Bool) -> Animation? { reduceMotion ? nil : .smooth(duration: 0.4) }
 }
 
 private struct CardControl<Face: View>: View {
@@ -311,7 +322,7 @@ struct CardPlate<Content: View>: View {
             .foregroundStyle(look.ink)
             .background(isFocused ? palette.focusPlate : palette.lift)
             .kjCardArt()
-            .animation(.easeOut(duration: 0.15), value: isFocused)
+            .animation(CardMotion.spring, value: isFocused)
     }
 }
 
@@ -436,7 +447,7 @@ private struct HousePlate<Face: View>: View {
             .foregroundStyle(look.ink)
             .background(plate)
             .scaleEffect(isFocused ? 1.03 : 1)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .animation(CardMotion.spring, value: isFocused)
     }
 }
 

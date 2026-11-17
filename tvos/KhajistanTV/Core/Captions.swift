@@ -150,6 +150,27 @@ enum SubtitleChoice {
 
     static func langOf(_ value: String?) -> String { String((value ?? "").prefix(2)).lowercased() }
 
+    /// The house's own names for the languages a Transmission programme can carry, as vod.json
+    /// labels a film's. Punjabi is written in Shahmukhi, so its own name is too.
+    static let house: [SubtitleLanguage] = [
+        .init(code: "en", name: "English", native: nil),
+        .init(code: "fa", name: "Persian", native: "فارسی"),
+        .init(code: "ur", name: "Urdu", native: "اردو"),
+        .init(code: "pa", name: "Punjabi", native: "پنجابی"),
+        .init(code: "ar", name: "Arabic", native: "العربية"),
+        .init(code: "ps", name: "Pashto", native: "پښتو"),
+        .init(code: "he", name: "Hebrew", native: "עברית"),
+    ]
+
+    /// The language of a prepared file, from its name: `<id>.fa.vtt` is Persian. A name without
+    /// a language is English, which is what every file was before the name said otherwise.
+    static func fileLanguage(_ path: String) -> String {
+        let parts = (path.split(separator: "/").last ?? "").split(separator: ".")
+        guard parts.count >= 3, parts.last?.lowercased() == "vtt" else { return "en" }
+        let code = parts[parts.count - 2].lowercased()
+        return code.count == 2 && code.allSatisfy(\.isLetter) ? code : "en"
+    }
+
     /// One entry per language, the first announcement winning (availableSubtitles()).
     static func distinct(_ codes: [String]) -> [String] {
         var seen = Set<String>()

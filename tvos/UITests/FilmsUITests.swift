@@ -67,10 +67,9 @@ final class FilmsUITests: XCTestCase {
 
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "The film's player must show its state")
-        // Stops at Playing. A `for … where` loop here skipped the Playing turns and kept going,
-        // then read the label after the panel had hidden itself (2.6 s) and failed on main.
-        let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in state.exists && state.label == "Playing" }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [playing], timeout: 45), .completed, "the preview must play")
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45),
+                       .completed, "the preview must play")
         kjScreenshot("vod-04-preview-with-panel", app: app)
         kjPause(5)
         kjScreenshot("vod-05-preview-picture", app: app)

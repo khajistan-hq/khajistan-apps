@@ -214,6 +214,17 @@ final class SkinWalkUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 20))
         let before = style()
         XCTAssertTrue(["plate", "bare"].contains(before), "the subtitle look reads \(before)")
+        // Put it back even if a check below fails, so the next run starts where this one did.
+        addTeardownBlock {
+            let again = XCUIApplication()
+            again.launchArguments = ["-kjskin", "day", "-kjtab", "account"]
+            self.kjLaunch(again)
+            let button = again.buttons["caption-style-toggle"]
+            guard button.waitForExistence(timeout: 20),
+                  (again.staticTexts["captionStyleState"].value as? String) != before else { return }
+            _ = self.focus(button, by: .down)
+            XCUIRemote.shared.press(.select)
+        }
         let after = before == "plate" ? "bare" : "plate"
         XCTAssertTrue(focus(toggle, by: .down), "the subtitle button must take focus")
         XCUIRemote.shared.press(.select)
@@ -226,9 +237,5 @@ final class SkinWalkUITests: XCTestCase {
         app = launch(["-kjskin", "day", "-kjtab", "account"])
         XCTAssertTrue(app.buttons["caption-style-toggle"].waitForExistence(timeout: 20))
         XCTAssertEqual(style(), after, "the choice is kept across a launch")
-        // Put it back, so the next run starts where this one did.
-        XCTAssertTrue(focus(app.buttons["caption-style-toggle"], by: .down))
-        XCUIRemote.shared.press(.select)
-        wait(upTo: 3) { style() == before }
     }
 }

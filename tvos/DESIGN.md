@@ -482,7 +482,9 @@ says so. The Receiver's strip carries no "broadcast by" line: that stays on the 
 (only yellow text) that one can choose"). Account carries one button, as the colours do. The
 plate below is the default. Text only is the house yellow `#F3FB04` in every skin, with a 2pt black
 edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
-The choice reaches every caption in the app and is kept across launches.
+The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
+sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,
+and yellow text on the day ground cannot be read. A scan is silent, as Apple's is.
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no

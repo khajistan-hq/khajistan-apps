@@ -66,7 +66,9 @@ struct FilmRemote: UIViewRepresentable {
 /// edge, held, is a scan.
 @MainActor
 final class RemoteHold {
-    var onHold: ((Int, Bool) -> Void)?
+    /// The direction, and true as a hold begins (answered with whether the screen took it), false
+    /// as it ends.
+    private var onHold: ((Int, Bool) -> Bool)?
     /// How long a press is held before it scans instead of skipping.
     private static let after: Duration = .milliseconds(450)
     private var timer: Task<Void, Never>?
@@ -74,8 +76,9 @@ final class RemoteHold {
     private var ended: (direction: Int, at: ContinuousClock.Instant)?
     private var observer: NSObjectProtocol?
 
-    func start() {
+    func start(_ onHold: @escaping (Int, Bool) -> Bool) {
         stop()
+        self.onHold = onHold
         GCController.controllers().forEach(attach)
         observer = NotificationCenter.default.addObserver(forName: .GCControllerDidConnect, object: nil, queue: .main) { [weak self] note in
             guard let controller = note.object as? GCController else { return }
@@ -86,18 +89,27 @@ final class RemoteHold {
     func stop() {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
-        for controller in GCController.controllers() { controller.microGamepad?.buttonA.pressedChangedHandler = nil }
+        for controller in GCController.controllers() {
+            controller.microGamepad?.buttonA.pressedChangedHandler = nil
+            controller.microGamepad?.reportsAbsoluteDpadValues = false
+        }
         timer?.cancel()
         timer = nil
         if let held = holding {
             holding = nil
-            onHold?(held, false)
+            _ = onHold?(held, false)
         }
+        ended = nil
+        // The closure holds the player screen; let go, or each film opened keeps its player alive.
+        onHold = nil
     }
 
-    /// True for the move tvOS sends when a held press is let go: it is not also a click.
+    /// True for a move that belongs to a hold: one a remote may send while the press is held, and
+    /// the one tvOS sends when it is let go (once). Neither is also a click.
     func swallows(_ direction: Int) -> Bool {
+        if holding == direction { return true }
         guard let ended, ended.direction == direction else { return false }
+        self.ended = nil
         return ContinuousClock.now - ended.at < .milliseconds(700)
     }
 
@@ -117,7 +129,7 @@ final class RemoteHold {
             if let held = holding {
                 holding = nil
                 ended = (held, .now)
-                onHold?(held, false)
+                _ = onHold?(held, false)
             }
             return
         }
@@ -126,8 +138,8 @@ final class RemoteHold {
         timer = Task { [weak self] in
             try? await Task.sleep(for: Self.after)
             guard let self, !Task.isCancelled else { return }
-            self.holding = direction
-            self.onHold?(direction, true)
+            // Only a hold the screen took is one: a refused one leaves its release a click.
+            if self.onHold?(direction, true) == true { self.holding = direction }
         }
     }
 }

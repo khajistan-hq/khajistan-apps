@@ -58,6 +58,10 @@ struct FilmPlayerView: View {
     @State private var scan: (direction: Int, speed: Int)?
     @State private var scanTask: Task<Void, Never>?
     @State private var remoteHold = RemoteHold()
+    /// Whether the player was muted before a scan, which is silent as Apple's is.
+    @State private var scanWasMuted = false
+    /// When a swipe last moved the scrub.
+    @State private var lastSwipe: ContinuousClock.Instant?
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -91,6 +95,8 @@ struct FilmPlayerView: View {
         // RemoteHold, and the move that ends it is not counted as a click as well.
         .onMoveCommand { direction in
             guard full != nil else { return wake() }
+            // A swipe can arrive as a move too: it scrubs, and is not also a skip or a Down.
+            if let lastSwipe, ContinuousClock.now - lastSwipe < .milliseconds(500) { return }
             switch direction {
             case .left: if !remoteHold.swallows(-1) { click(-1) }
             case .right: if !remoteHold.swallows(1) { click(1) }
@@ -103,8 +109,7 @@ struct FilmPlayerView: View {
         .onExitCommand { back() }
         .onChange(of: full != nil) { _, on in
             if on {
-                remoteHold.onHold = { hold($0, $1) }
-                remoteHold.start()
+                remoteHold.start { hold($0, $1) }
             } else {
                 remoteHold.stop()
             }
@@ -467,7 +472,7 @@ struct FilmPlayerView: View {
         controller.player.appliesMediaSelectionCriteriaAutomatically = false
         if startsFull {
             await watchFull()
-            if full == nil { watchFocused = true } else { surfaceFocused = true }
+            if full == nil { watchFocused = true }
             return
         }
         // The offer's button first, not the picture under it.
@@ -502,7 +507,6 @@ struct FilmPlayerView: View {
         if UserDefaults.standard.bool(forKey: "kjfilmasfull"), let preview = Films.previewURL(film) {
             checking = false
             full = ("test", nil)
-            surfaceFocused = true
             controller.onEnded = { [weak controller, model] in
                 if let controller, model.filmPiP?.controller === controller { model.silenceRadio() }
                 controller?.stop()
@@ -522,11 +526,10 @@ struct FilmPlayerView: View {
                 refusal = 409
                 return
             }
+            // The picture (FilmRemote) takes the remote's focus once it is on screen: Watch the
+            // full film, which held it, is gone, and with focus nowhere nothing answered on the
+            // owner's Apple TV (2026-11-16: no pause, no skipping, no other languages).
             full = (kind, expiresAt)
-            // The remote's focus goes to the picture: Watch the full film, which held it, is gone,
-            // and with focus nowhere Play/Pause, left, right and Down reached nothing (owner's
-            // Apple TV, 2026-11-16: no pause, no skipping, no other languages).
-            surfaceFocused = true
             model.clips.cover(caption: Films.displayTitle(film))
             // Watched to the end: it leaves Up Next. Ended in the corner window, the window closes.
             controller.onEnded = { [weak controller, handle = film.handle, model] in
@@ -539,9 +542,6 @@ struct FilmPlayerView: View {
                               title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
             await controller.settled()
             model.clips.uncover()
-            // Again once the picture is on: the first focus write can land before the picture's
-            // button exists.
-            if full != nil, refusal == nil { surfaceFocused = true }
         case .refused(let status):
             if status == 403 { await model.auth.rearmCode() }
             refusal = status
@@ -584,20 +584,29 @@ struct FilmPlayerView: View {
     }
 
     /// A held arrow scans the film, faster the longer it is held; letting go plays from there.
-    private func hold(_ direction: Int, _ began: Bool) {
-        guard full != nil, armed == nil, scrub == nil else { return }
-        scanTask?.cancel()
-        scanTask = nil
+    /// Answers whether the hold was taken: not while a control is lit, a scrub is up or the film
+    /// is not on screen.
+    private func hold(_ direction: Int, _ began: Bool) -> Bool {
         guard began else {
-            if scan != nil { place(position, exact: true) }
+            // Whatever else is on screen, a scan in progress ends when the press is let go.
+            let scanning = scanTask != nil
+            scanTask?.cancel()
+            scanTask = nil
+            if scanning {
+                place(position, exact: true)
+                controller.player.isMuted = scanWasMuted
+            }
             scan = nil
-            return
+            return scanning
         }
-        guard movable else { return }
+        guard full != nil, armed == nil, scrub == nil, movable else { return false }
+        scanTask?.cancel()
         let started = ContinuousClock.now
         var at = position
+        scanWasMuted = controller.player.isMuted
+        controller.player.isMuted = true
         scanTask = Task {
-            while !Task.isCancelled {
+            while !Task.isCancelled, movable {
                 let held = (ContinuousClock.now - started) / .seconds(1)
                 at = FilmTransport.clamp(at + Double(direction) * FilmTransport.scanStep(heldFor: held), duration: duration)
                 scan = (direction, FilmTransport.scanSpeed(heldFor: held))
@@ -606,6 +615,7 @@ struct FilmPlayerView: View {
                 try? await Task.sleep(for: .seconds(FilmTransport.scanTick))
             }
         }
+        return true
     }
 
     /// A swipe across the touch surface scrubs: the film pauses on the place the swipe reaches.
@@ -614,6 +624,7 @@ struct FilmPlayerView: View {
         guard full != nil, armed == nil, scan == nil, movable else { return }
         if state == .began { swipeBase = scrub?.to }
         guard state == .changed else { return }
+        lastSwipe = .now
         if scrub == nil {
             // A small touch is a rest of the thumb, not a swipe.
             guard abs(points) > 40 else { return }
@@ -672,6 +683,7 @@ struct FilmPlayerView: View {
         }
         hideTask?.cancel()
         armed = nil
+        if scanTask != nil { controller.player.isMuted = scanWasMuted }
         scanTask?.cancel()
         scanTask = nil
         remoteHold.stop()
@@ -690,10 +702,6 @@ struct FilmPlayerView: View {
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = true }
             if full == nil { watchFocused = true }
         }
-        // In the full film the picture is the only thing to focus; a press that finds focus
-        // elsewhere puts it back there.
-        // Not while a refusal or Sign in is on screen: their buttons need the focus.
-        if full != nil, refusal == nil, !showSignIn, !surfaceFocused { surfaceFocused = true }
         hideTask?.cancel()
         guard controller.state == .playing, !showSignIn, !checking, refusal == nil else { return }
         guard OverlayTiming.hidesItself else { return }

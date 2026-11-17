@@ -143,7 +143,8 @@ struct ReceiverPlayerView: View {
                               turns: guideRegions.count > 1, loading: guideLoading)
                     .transition(.move(edge: .bottom))
             }
-            CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus, lift: stripShown ? stripHeight : 0)
+            CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus,
+                         overPicture: showsPicture, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
                 .opacity(guideRow == nil ? 1 : 0)
             StationClipLayer(clips: model.clips)

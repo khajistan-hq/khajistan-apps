@@ -224,7 +224,8 @@ struct TransmissionPlayerView: View {
                 TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
                     .transition(.move(edge: .bottom))
             }
-            CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
+            CaptionLayer(text: subtitles.text, skin: model.skin,
+                         overPicture: air.programme?.audio_only != true, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
                 .opacity(guideRow == nil ? 1 : 0)
             HandoverNotice(

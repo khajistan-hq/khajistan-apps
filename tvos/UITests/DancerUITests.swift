@@ -144,8 +144,9 @@ final class DancerUITests: XCTestCase {
     /// most, then the test is skipped (CI 2026-11-01, 11-12).
     func testRadioDancer() throws {
         let run = radioDancer(dead: [], tries: 3)
-        guard run.played == nil, kjLiveMedia, !run.tried.isEmpty else { return }
-        throw XCTSkip("No radio station's live carrier played, three tried: \(run.tried.map { "\($0.id): \($0.why)" }.joined(separator: "; ")). LiveRadio was not proved on this run.")
+        // Fewer than three passed over means the run stopped on a failure, already recorded.
+        guard run.played == nil, kjLiveMedia, run.tried.count == 3 else { return }
+        throw XCTSkip("No radio station's live carrier played, \(run.tried.count) tried: \(run.tried.map { "\($0.id): \($0.why)" }.joined(separator: "; ")). LiveRadio was not proved on this run.")
     }
 
     /// The path a dead live carrier takes, run on every build: `-kjdeadchannels` makes the first
@@ -188,13 +189,17 @@ final class DancerUITests: XCTestCase {
             // Read once, before the app is closed: a terminated app's labels read empty.
             let label = state.label
             let on = current.exists ? current.label : ""
+            // A move that lands between the loop's last look and this read is a move too.
+            if !on.isEmpty, on != id { moved = true }
             if moved || label != "Playing" || on != id {
-                let why = on != id ? "the player moved on to '\(on)'" : "'\(label)'"
+                let why = moved ? "the player moved on to '\(on)'" : "'\(label)'\(on.isEmpty ? ", no channel on screen" : "")"
                 shot("\(id)-not-playing", app)
                 app.terminate()
-                let stuck = label == "Connecting…" || label == "Paused" || label.isEmpty
-                let deadCarrier = kjLiveMedia && (moved || !stuck)
-                guard dead.contains(id) || deadCarrier else {
+                // A dead signal is a failed player, or one that moved on. Connecting, paused or
+                // with no channel on screen is stuck, whatever the station. The declared-dead
+                // stations of the proof test go through the same test as a live run's.
+                let stuck = !moved && (label == "Connecting…" || label == "Paused" || label.isEmpty || on.isEmpty)
+                guard !stuck, kjLiveMedia || dead.contains(id) else {
                     XCTFail("\(id) did not play: \(why)")
                     return (nil, tried)
                 }

@@ -3326,6 +3326,7 @@ func transmissionSubtitleFileLanguage() throws {
     try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/x.vtt?lang=fa.vtt"), "en")
     try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/x.fa-ir-extra.vtt"), "en")
     try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/x.f4.vtt"), "en")
+    try expectEqual(SubtitleChoice.fileLanguage("/assets/tv-subtitles/x.raw.vtt"), "en")
     try expectEqual(SubtitleChoice.langOf("est"), "est")
     try expectEqual(SubtitleChoice.langOf("fa_IR"), "fa")
     try expectEqual(SubtitleChoice.langOf("en-GB"), "en")

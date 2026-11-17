@@ -177,7 +177,10 @@ enum SubtitleChoice {
         let letters = { (s: Substring) in s.allSatisfy { $0.isASCII && $0.isLetter } }
         guard (2...3).contains(tag[0].count), letters(tag[0]) else { return "en" }
         if tag.count == 2, !((2...8).contains(tag[1].count) && tag[1].allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }) { return "en" }
-        return tag.count <= 2 ? String(tag[0]) : "en"
+        guard tag.count <= 2 else { return "en" }
+        // A three-letter word counts only when it is a language the house names (x.raw.vtt is English).
+        let code = String(tag[0])
+        return code.count == 2 || house.contains(where: { $0.code == code }) ? code : "en"
     }
 
     /// One entry per language, the first announcement winning (availableSubtitles()).

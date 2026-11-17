@@ -189,10 +189,41 @@ enum StationClock {
             }
         }
         if let best { return best }
-        guard today != nil else { return nil }
-        guard let tomorrowIso = isoDay(iso, offset: 1), let tomorrow = day(p, iso: tomorrowIso),
-              let first = earliest(tomorrow.channels[channel] ?? [], startingAfter: -.infinity) else { return nil }
-        return (first, tomorrowIso)
+        guard today != nil, let from = dayNumber(iso) else { return nil }
+        // Nothing more today: the earliest strip on any later day of the loaded month, not only
+        // tomorrow (Fable, 2026-11-16). antenna-indus opens on 12 November, and reading one day
+        // ahead left it with no return time from the 1st to the 10th. Each strip is placed by its
+        // own day, so one filed tomorrow past 86400 is weighed against the day after's.
+        // ponytail: stops at the month's last day; the next month's file is not read here.
+        var later: (slot: Programming.Slot, date: String)? = nil
+        var laterAt = Double.infinity
+        for d in p.days {
+            guard let n = dayNumber(d.date), n > from else { continue }
+            for slot in d.channels[channel] ?? [] {
+                let s = Double(n - from) * daySeconds + slot.startSecond
+                if s < laterAt { later = (slot, d.date); laterAt = s }
+            }
+        }
+        return later
+    }
+
+    private static let weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    private static let monthNames = ["January", "February", "March", "April", "May", "June", "July", "August",
+                                     "September", "October", "November", "December"]
+
+    /// When a dark channel comes back, as every surface prints it after "returns at": the strip's
+    /// start and the zone, and its day as well once it is a day or more away, where the hour alone
+    /// would read as the next time the clock shows it ("13:03 PKT on Thursday 12 November"). Nil
+    /// when the loaded month holds nothing more on the channel. kj-station-clock.js returnLabel.
+    static func returnLabel(_ p: Programming, channel: String, iso: String, second: Double) -> String? {
+        guard let next = nextSlot(p, channel: channel, iso: iso, minute: Int((second / 60).rounded(.down)), second: second),
+              let from = dayNumber(iso), let filed = dayNumber(next.date) else { return nil }
+        let at = "\(next.slot.start) \(tzLabel)"
+        if Double(filed - from) * daySeconds + next.slot.startSecond - second < daySeconds { return at }
+        let airs = filed + Int((next.slot.startSecond / daySeconds).rounded(.down))
+        let civil = civil(fromDayNumber: airs)
+        let weekday = weekdays[((airs + 4) % 7 + 7) % 7]   // day 0, 1970-01-01, was a Thursday
+        return "\(at) on \(weekday) \(civil.day) \(monthNames[civil.month - 1])"
     }
 
     static func clockLabel(_ minutes: Int) -> String {
@@ -242,6 +273,12 @@ enum StationClock {
     static func returnTime(_ p: Programming, channelId: String, at date: Date) -> String? {
         let now = stationNow(date)
         return nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds))?.slot.start
+    }
+
+    /// `returnLabel` for a moment: what the off-air plate and the guide print after "returns at".
+    static func returnLabel(_ p: Programming, channelId: String, at date: Date) -> String? {
+        let now = stationNow(date)
+        return returnLabel(p, channel: channelId, iso: now.iso, second: Double(now.seconds))
     }
 
     /// The clock read in the frame of the day a strip is filed under: past 86 400 the day after,
@@ -395,17 +432,6 @@ enum StationClock {
         programmeId(p, index: index).flatMap { p.programmes[$0] }
     }
 
-    /// The strip with the smallest start above `second`; on a tie the earlier one in the
-    /// file, which is what a stable sort followed by "first match" gives in the JS.
-    private static func earliest(_ strips: [Programming.Slot], startingAfter second: Double) -> Programming.Slot? {
-        var best: Programming.Slot?
-        for strip in strips where strip.startSecond > second {
-            if let held = best, held.startSecond <= strip.startSecond { continue }
-            best = strip
-        }
-        return best
-    }
-
     private static func pad2(_ n: Int) -> String { n < 10 ? "0\(n)" : "\(n)" }
 
     private static func isoString(_ civil: (year: Int, month: Int, day: Int)) -> String {
@@ -415,11 +441,16 @@ enum StationClock {
     /// The calendar day `offset` days from an ISO day, by day-number arithmetic. Nil for a string
     /// that is not a real yyyy-MM-dd date (the JS gets an Invalid Date there and finds no day).
     private static func isoDay(_ iso: String, offset: Int) -> String? {
+        dayNumber(iso).map { isoString(civil(fromDayNumber: $0 + offset)) }
+    }
+
+    /// The day number of an ISO day, nil for a string that is not a real yyyy-MM-dd date.
+    private static func dayNumber(_ iso: String) -> Int? {
         let parts = iso.split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
               let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
               (1...12).contains(month), day >= 1, day <= daysIn(month: month, year: year) else { return nil }
-        return isoString(civil(fromDayNumber: dayNumber(year: year, month: month, day: day) + offset))
+        return dayNumber(year: year, month: month, day: day)
     }
 
     private static func daysIn(month: Int, year: Int) -> Int {

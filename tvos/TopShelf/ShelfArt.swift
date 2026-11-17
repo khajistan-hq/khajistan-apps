@@ -72,7 +72,7 @@ enum ShelfArt {
             c.text("OFF AIR", size: 150, weight: .black, em: -0.075, hex: skin.inkHex, x: margin - 8, top: 260)
             var y: CGFloat = 470
             if let returns, !returns.isEmpty {
-                y = c.text("Returns at \(returns) \(StationClock.tzLabel)", size: 40, weight: .black, em: -0.03,
+                y = c.text("Returns at \(returns)", size: 40, weight: .black, em: -0.03,
                            hex: skin.inkHex, x: margin, top: y, maxWidth: width).maxY + 36
             }
             if let line, !line.isEmpty {

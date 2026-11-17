@@ -158,10 +158,11 @@ final class TransmissionStore {
         return StationClock.upcoming(p, channelId: id, at: date, count: count)
     }
 
-    /// When the channel is next on air, for the moment nothing is.
-    func returnTime(channel: Int, at date: Date) -> String? {
+    /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
+    /// it is a day or more away (StationClock.returnLabel).
+    func returnLabel(channel: Int, at date: Date) -> String? {
         guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
-        return StationClock.returnTime(p, channelId: id, at: date)
+        return StationClock.returnLabel(p, channelId: id, at: date)
     }
 
     // MARK: - Loading the month
@@ -501,7 +502,7 @@ final class TransmissionStore {
 
     private func goOffAir(_ p: Programming, channelId: String?, at date: Date, generation gen: Int) {
         player.stop()
-        let returns = channelId.flatMap { StationClock.returnTime(p, channelId: $0, at: date) }
+        let returns = channelId.flatMap { StationClock.returnLabel(p, channelId: $0, at: date) }
         phase = .offAir(channelName: channelName(channelNumber), returns: returns)
         watchForReturn(generation: gen)
     }

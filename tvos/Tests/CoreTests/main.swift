@@ -1229,10 +1229,14 @@ func slotAtAndOnAirOnTheSyntheticSchedule() throws {
     let unknownShow = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 12, 0, 0)))
     try expectEqual(unknownShow.show, nil)
     try expectEqual(unknownShow.programmeId, "p0")
-    // End of the grid: the last strip of the last day has no next strip.
+    // The next strip is on the next day the schedule holds with one, however far (2026-11-16):
+    // after 2026-10-11 that is 2026-12-31.
     let late = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 11, 23, 59, 59)))
-    try expectEqual(late.nextStart, nil)
+    try expectEqual(late.nextStart, "00:00")
+    try expectEqual(late.nextShow?.slug, "a")
     try expectEqual(late.endLabel, "00:00")
+    // End of the grid: the last strip of the last day has no next strip.
+    try expectEqual(try require(StationClock.onAir(p, channel: 1, at: pkt(2028, 3, 1, 23, 59, 59))).nextStart, nil)
     // On the last day of the grid the next strip is the first of the next calendar day.
     let rollover = try require(StationClock.onAir(p, channel: 1, at: pkt(2026, 10, 10, 23, 30, 0)))
     try expectEqual(rollover.nextStart, "00:00")
@@ -1253,8 +1257,11 @@ func nextSlotRollsOverEveryKindOfDayEnd() throws {
         let next = try require(StationClock.nextSlot(p, channel: "transfers", iso: r.from, minute: 1439), r.from)
         try expectEqual(next.date, r.to, r.from)
     }
+    // Past a gap of more than a day: the next day the schedule holds (2026-11-16, Fable).
+    let overGap = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439))
+    try expectEqual(overGap.date, "2028-02-28")
     // Nothing after the last day, an unknown day, an unknown channel, and a date that is not a date.
-    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2028-03-01", minute: 1439) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2031-01-01", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "nope", iso: "2026-10-10", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2026-02-30", minute: 1439) == nil, true)
@@ -1266,6 +1273,57 @@ func nextSlotRollsOverEveryKindOfDayEnd() throws {
     // Two strips starting at the same minute: the earlier one in the file, as a stable sort gives.
     let tie = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2026-09-01", minute: -1))
     try expectEqual(tie.slot.programmes, [0])
+}
+
+/// A channel dark for days (Fable, 2026-11-16): antenna-indus opened on 12 November and had no
+/// return time from the 1st to the 10th, because nextSlot looked one day ahead. The same cases as
+/// archive tests/station_clock_next_test.mjs.
+func gapScheduleJSON(extraDays: String = "") -> String {
+    let empty = (1...13).filter { $0 != 12 }.map { #"{"date":"2026-11-\#(String(format: "%02d", $0))","channels":{"g":[]}}"# }
+    let twelfth = #"{"date":"2026-11-12","channels":{"g":[{"start":"13:03","start_minute":783,"minutes":10,"start_second":47024.7,"seconds":600,"show":"open","programmes":[0]},{"start":"20:00","start_minute":1200,"minutes":10,"start_second":72000,"seconds":600,"show":"open","programmes":[1]}]}}"#
+    var days = Array(empty.prefix(11)) + [twelfth] + Array(empty.suffix(1))
+    if !extraDays.isEmpty { days.append(extraDays) }
+    return #"{"_meta":{"channels":[{"id":"g","number":21,"name":"Channel 21 · Gap"}]},"shows":{"open":{"slug":"open","name":"Opening"}},"programme_order":["G1","G2","G3"],"programmes":{"G1":{"id":"G1","title":"g1","seconds":600},"G2":{"id":"G2","title":"g2","seconds":600},"G3":{"id":"G3","title":"g3","seconds":600}},"days":["# + days.joined(separator: ",") + "]}"
+}
+
+func returnTimeLooksPastTomorrow() throws {
+    let p = try decode(Programming.self, gapScheduleJSON())
+    try expectEqual(p.days.count, 13)
+    // The 1st at noon: the 12th's first strip, with its day.
+    let next = try require(StationClock.nextSlot(p, channel: "g", iso: "2026-11-01", minute: 720, second: 43_200))
+    try expectEqual([next.slot.start, next.date], ["13:03", "2026-11-12"])
+    try expectEqual(StationClock.returnLabel(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0)), "13:03 PKT on Thursday 12 November")
+    try expectEqual(StationClock.onAir(p, channel: 21, at: pkt(2026, 11, 1, 12, 0, 0)), nil)
+    try expectEqual(StationClock.upcoming(p, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0), count: 3).map(\.startLabel), ["13:03", "20:00"])
+    // The day appears at a day or more away, the hour alone under it.
+    try expectEqual(StationClock.returnLabel(p, channel: "g", iso: "2026-11-11", second: 47_024.7), "13:03 PKT on Thursday 12 November")
+    try expectEqual(StationClock.returnLabel(p, channel: "g", iso: "2026-11-11", second: 47_025.7), "13:03 PKT")
+    try expectEqual(StationClock.returnLabel(p, channelId: "g", at: pkt(2026, 11, 11, 23, 0, 0)), "13:03 PKT")
+    // Negative: past the month's last strip, and on a day the file lacks, nothing.
+    try expectEqual(StationClock.nextSlot(p, channel: "g", iso: "2026-11-12", minute: 1260, second: 75_600) == nil, true)
+    try expectEqual(StationClock.returnLabel(p, channelId: "g", at: pkt(2026, 11, 12, 21, 0, 0)), nil)
+    try expectEqual(StationClock.nextSlot(p, channel: "g", iso: "2026-11-20", minute: 0, second: 0) == nil, true)
+    // A day string that is not a real date is never a later day (Date reads 2026-11-31 as 1 December).
+    let bad = try decode(Programming.self, gapScheduleJSON(extraDays: #"{"date":"2026-11-31","channels":{"g":[{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[0]}]}}"#))
+    try expectEqual(StationClock.nextSlot(bad, channel: "g", iso: "2026-11-12", minute: 1260, second: 75_600) == nil, true)
+}
+
+func returnTimeWeighsEachStripByItsOwnDay() throws {
+    // Filed on the 5th at 25:00 (01:00 on the 6th), and the 6th's own 00:30: the 6th's is first.
+    let late = #"{"date":"2026-11-05","channels":{"g":[{"start":"01:00","start_minute":1500,"minutes":10,"start_second":90000,"seconds":600,"show":"open","programmes":[2]}]}}"#
+    let early = #"{"date":"2026-11-06","channels":{"g":[{"start":"00:30","start_minute":30,"minutes":10,"start_second":1800,"seconds":600,"show":"open","programmes":[1]}]}}"#
+    let both = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: #"{"date":"2026-11-05","channels":{"g":[]}}"#, with: late)
+        .replacingOccurrences(of: #"{"date":"2026-11-06","channels":{"g":[]}}"#, with: early))
+    let first = try require(StationClock.nextSlot(both, channel: "g", iso: "2026-11-02", minute: 720, second: 43_200))
+    try expectEqual([first.slot.start, first.date], ["00:30", "2026-11-06"])
+    // Without the 6th's strip, the 5th's late one, labelled with the day it airs on (the 6th).
+    let lateOnly = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: #"{"date":"2026-11-05","channels":{"g":[]}}"#, with: late))
+    try expectEqual(try require(StationClock.nextSlot(lateOnly, channel: "g", iso: "2026-11-02", minute: 720, second: 43_200)).date, "2026-11-05")
+    try expectEqual(StationClock.returnLabel(lateOnly, channel: "g", iso: "2026-11-02", second: 43_200), "01:00 PKT on Friday 6 November")
+    // A tie on the first later day keeps the file's first, as the site's sort did.
+    let tie = #"{"date":"2026-11-03","channels":{"g":[{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[2]},{"start":"09:00","start_minute":540,"minutes":10,"start_second":32400,"seconds":600,"show":"open","programmes":[1]}]}}"#
+    let tied = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: #"{"date":"2026-11-03","channels":{"g":[]}}"#, with: tie))
+    try expectEqual(try require(StationClock.nextSlot(tied, channel: "g", iso: "2026-11-01", minute: 720, second: 43_200)).slot.programmes, [2])
 }
 
 func followingWalksTheRosterAndHandsBackToTheClock() throws {
@@ -1323,16 +1381,18 @@ func upcomingListsTheNextStripsInOrder() throws {
     // Off air between strips: up next is the strip it returns with.
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 8, 0, 0), count: 1)),
                     ["2026-10-10 23:00-00:00 a"])
-    // The last strip of the day hands over to the first of the next day...
+    // The last strip of the day hands over to the first of the next day, and on over the gaps to
+    // each later day the schedule holds...
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 10, 23, 30, 0), count: 5)),
-                    ["2026-10-11 00:00-00:00 -"])
+                    ["2026-10-11 00:00-00:00 -", "2026-12-31 00:00-00:00 a", "2027-01-01 00:00-00:00 b",
+                     "2028-02-28 00:00-00:00 a", "2028-02-29 00:00-00:00 b"])
     // ...and the last strip of the grid has nothing after it, however many are asked for.
-    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 10, 11, 12, 0, 0), count: 5).count, 0)
+    try expectEqual(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 3, 1, 12, 0, 0), count: 5).count, 0)
     // Month and year boundaries the grid holds are crossed; the day after them is not invented.
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 4, 30, 12, 0, 0), count: 3)),
-                    ["2026-05-01 00:00-00:00 b"])
+                    ["2026-05-01 00:00-00:00 b", "2026-09-01 00:00-01:00 a", "2026-10-10 06:00-07:00 a"])
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2026, 12, 31, 12, 0, 0), count: 3)),
-                    ["2027-01-01 00:00-00:00 b"])
+                    ["2027-01-01 00:00-00:00 b", "2028-02-28 00:00-00:00 a", "2028-02-29 00:00-00:00 b"])
     try expectEqual(labels(StationClock.upcoming(p, channelId: "transfers", at: pkt(2028, 2, 28, 12, 0, 0), count: 2)),
                     ["2028-02-29 00:00-00:00 b", "2028-03-01 00:00-00:00 a"])
     // Nothing for a count of zero, an unknown channel, or a day the schedule does not hold.
@@ -4810,6 +4870,8 @@ let tests: [(String, () throws -> Void)] = [
     ("The channel list follows the schedule order, Mujra first", channelListFollowsTheScheduleOrder),
     ("Channel Up and Down go round all seven channels", channelUpAndDownGoRoundTheDial),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),
+    ("Return time looks past tomorrow, and says the day a day or more off", returnTimeLooksPastTomorrow),
+    ("Return time weighs each strip by its own day", returnTimeWeighsEachStripByItsOwnDay),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),

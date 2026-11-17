@@ -182,7 +182,8 @@ struct TransmissionView: View {
                 number: number,
                 line: store.channelLine(number),
                 onAir: store.nowOn(channel: number, at: date),
-                upcoming: store.upcoming(channel: number, at: date)
+                upcoming: store.upcoming(channel: number, at: date),
+                returns: store.returnLabel(channel: number, at: date)
             )
         }
         .onPlayPauseCommand { choose(number) }
@@ -224,6 +225,8 @@ private struct ChannelCardLabel: View {
     let line: String?
     let onAir: OnAir?
     let upcoming: [ScheduleStrip]
+    /// When an off-air channel is back, the clock's label (StationClock.returnLabel).
+    let returns: String?
 
     var body: some View {
         // Three to a screen at the page's inset; the rest are a scroll to the right.
@@ -262,9 +265,10 @@ private struct ChannelCardLabel: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// The website's off-air line: "Back at 23:00 PKT with The Feature."
+    /// The website's off-air line: "Back at 23:00 PKT with The Feature.", with the day once the
+    /// channel is a day or more from coming back.
     private func backLine(_ strip: ScheduleStrip) -> String {
-        var text = "Back at \(strip.startLabel) \(StationClock.tzLabel)"
+        var text = "Back at \(returns ?? "\(strip.startLabel) \(StationClock.tzLabel)")"
         if let show = strip.show?.name, !show.isEmpty { text += " with \(show)" }
         return text + "."
     }

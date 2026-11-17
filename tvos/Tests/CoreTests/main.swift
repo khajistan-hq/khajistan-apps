@@ -4897,7 +4897,21 @@ func pipCaptionFeedReadsEveryTick() throws {
     try expectEqual(reads, 2)
 }
 
+/// The window's own Play brings a low sound back up, but not a muted broadcast awaiting its rejoin.
+func pipSoundFadesBackOnlyWhereItShould() throws {
+    try expect(PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "a film paused mid-fade comes back up")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: true, nowPlaying: true, volume: 0, holdsSound: false),
+               "a muted broadcast is not heard at its old place before the rejoin")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: false, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "outside the window a Play read on Paused is a late callback")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 1, holdsSound: false))
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: true))
+    try expect(!PiPSound.fadesBack(paused: false, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false))
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
     ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
     ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),
     ("pipLifecycleReadsWhoClosedTheWindow", pipLifecycleReadsWhoClosedTheWindow),

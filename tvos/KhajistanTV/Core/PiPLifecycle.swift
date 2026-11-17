@@ -144,3 +144,13 @@ enum PiPCaptionFeed {
         return text
     }
 }
+
+/// Whether a player picked up by the PiP window's own Play brings its sound back up: only when the
+/// window carries it, it was paused and now plays, its sound was left low (a fade a Pause cut short)
+/// and nothing holds the sound down — and not while muted, which is a broadcast paused from the
+/// window waiting for its rejoin to replace the old place.
+enum PiPSound {
+    static func fadesBack(paused: Bool, followsWindow: Bool, muted: Bool, nowPlaying: Bool, volume: Float, holdsSound: Bool) -> Bool {
+        paused && followsWindow && !muted && nowPlaying && volume < 1 && !holdsSound
+    }
+}

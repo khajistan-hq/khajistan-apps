@@ -580,16 +580,20 @@ struct TransmissionPlayerView: View {
         pip.onCaptionToggle = { follower.subtitles.cycle() }
         pip.skin = { model.skin }
         // A paused transmission is not the transmission any more: Play joins it again, live.
+        // A Pause pressed while the channel retunes waits for the new picture; a Play after it wins.
+        final class PendingPause { var task: Task<Void, Never>? }
+        let pending = PendingPause()
         pip.onSetPlaying = { playing in
+            pending.task?.cancel()
+            pending.task = nil
             if playing {
                 Task { await store.rejoinLive() }
             } else if store.player.state == .playing || store.player.state == .paused {
                 store.player.pause()
             } else {
-                // Pressed while the channel retunes: it pauses once the new picture has come.
-                Task {
+                pending.task = Task {
                     await store.player.settled()
-                    if store.player.state == .playing { store.player.pause() }
+                    if !Task.isCancelled, store.player.state == .playing { store.player.pause() }
                 }
             }
         }

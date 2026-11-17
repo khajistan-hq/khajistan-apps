@@ -305,6 +305,8 @@ final class PlayerController {
     }
 
     func stop() {
+        // Muted by the PiP window for a broadcast's rejoin: the next signal is heard.
+        player.isMuted = false
         fadeTask?.cancel()
         fadeInPending = false
         generation += 1
@@ -433,7 +435,9 @@ final class PlayerController {
         // The picture-in-picture window's own Play, read here first (the observer runs before the
         // window's 100 ms reading): a sound left low by a fade that a Pause cut short comes back up
         // once it plays.
-        if state == .paused, followsWindow, player.timeControlStatus != .paused, volume < 1, !holdsSound {
+        // Not while muted: a broadcast paused from the window is muted until its rejoin replaces it.
+        if PiPSound.fadesBack(paused: state == .paused, followsWindow: followsWindow, muted: player.isMuted,
+                              nowPlaying: player.timeControlStatus != .paused, volume: volume, holdsSound: holdsSound) {
             fadeInPending = true
         }
         switch player.timeControlStatus {

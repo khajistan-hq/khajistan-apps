@@ -7,7 +7,11 @@ final class PlayerController {
     let player = NSObject()
     func stop() { state = .idle; SharedNowPlaying.title = nil }
     func pause() { state = .paused }
-    func settled() async {}
+    var settling: CheckedContinuation<Void, Never>?
+    var holdsSettle = false
+    func settled() async {
+        if holdsSettle { await withCheckedContinuation { settling = $0 } }
+    }
 }
 final class Watch {
     var cancelled = false
@@ -325,6 +329,33 @@ func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     return true
 }
 Task {
+    // Pause pressed while the channel retunes, then Play before the picture comes: Play wins.
+    let retune = Probe()
+    retune.startPictureInPicture()
+    retune.store.player.state = .tuning
+    retune.store.player.holdsSettle = true
+    retune.pip.onSetPlaying?(false)
+    _ = await waitForBoundary { retune.store.player.settling != nil }
+    retune.pip.onSetPlaying?(true)
+    retune.store.player.state = .playing
+    retune.store.player.settling?.resume()
+    for _ in 0..<20 { await Task.yield() }
+    let playWins = retune.store.player.state == .playing
+    print("\(playWins ? "PASS" : "FAIL") Pause then Play while the channel retunes ends playing")
+    if !playWins { failures += 1 }
+    // A Pause alone while it retunes pauses it once the picture has come.
+    let alone = Probe()
+    alone.startPictureInPicture()
+    alone.store.player.state = .tuning
+    alone.store.player.holdsSettle = true
+    alone.pip.onSetPlaying?(false)
+    _ = await waitForBoundary { alone.store.player.settling != nil }
+    alone.store.player.state = .playing
+    alone.store.player.settling?.resume()
+    _ = await waitForBoundary { alone.store.player.state == .paused }
+    let pauseKept = alone.store.player.state == .paused
+    print("\(pauseKept ? "PASS" : "FAIL") a Pause pressed while the channel retunes pauses it once it plays")
+    if !pauseKept { failures += 1 }
     _ = await waitForBoundary { rejoin.store.rejoined == 1 }
     let rejoined = rejoin.store.rejoined == 1
     print("\(rejoined ? "PASS" : "FAIL") Play (the bar's, the remote's or the window's own) rejoins the channel live")

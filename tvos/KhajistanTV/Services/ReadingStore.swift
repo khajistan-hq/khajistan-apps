@@ -856,7 +856,7 @@ enum RRPageDisk {
     }
 
     static func write(_ data: Data, _ path: String) {
-        try? data.write(to: file(path), options: RRPrivateFiles.writeOptions)
+        RRPrivateFiles.write(data, to: file(path))
     }
 
     /// Drops what is past its days, then the oldest until the folder fits the budget.

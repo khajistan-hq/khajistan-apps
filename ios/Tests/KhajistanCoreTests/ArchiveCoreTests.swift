@@ -88,6 +88,22 @@ func downloadsComeOnlyFromTheArchivesHosts() throws {
         try expect(!ArchiveURL.allowsDownload(URL(string: value)))
     }
     try expect(!ArchiveURL.allowsDownload(nil))
+    // A buyer's file is a signed URL into the archive's own Storage; nothing else on that host.
+    let storage = "https://\(SupabaseRoute.host)/storage/v1/object"
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/sign/digital/a.pdf?token=t")))
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/public/covers/a.jpg")))
+    for value in ["https://\(SupabaseRoute.host)/rest/v1/orders", "https://\(SupabaseRoute.host)/functions/v1/my-downloads",
+                  "https://evil.supabase.co/storage/v1/object/sign/a.pdf", "http://\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://x@\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    // The browser's response decision, as ArchiveBrowser calls it.
+    let site = URL(string: "https://khajistan-archive.pages.dev/a.pdf"), evil = URL(string: "https://evil.example/a.pdf")
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "") == .allow)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "Attachment; filename=a.pdf") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: false, contentDisposition: "") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: false, contentDisposition: "") == .download)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: true, contentDisposition: "attachment") == .download)
 }
 
 // MARK: - Sky (the website's KJSky, differential)

@@ -2266,6 +2266,12 @@ func readingPageCacheIsProtectedAndNotBackedUp() throws {
     let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isExcludedFromBackupKey])
     try expect(values.isDirectory == true)
     try expect(values.isExcludedFromBackup == true, "the page folder is excluded from backup")
+    // A purged folder is made and marked again by the next write (RRPageDisk.write goes through it).
+    try FileManager.default.removeItem(at: folder)
+    let page = folder.appendingPathComponent("p.jpg")
+    RRPrivateFiles.write(Data([1, 2, 3]), to: page)
+    try expect((try? Data(contentsOf: page)) == Data([1, 2, 3]), "the write lands after a purge")
+    try expect(try folder.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
 }
 
 func readingPageCountsClamp() throws {

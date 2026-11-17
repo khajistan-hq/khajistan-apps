@@ -1045,6 +1045,14 @@ enum RRPrivateFiles {
         try? marked.setResourceValues(values)
         return folder
     }
+
+    /// Writes with `writeOptions`; if the system purged the folder while the app ran, makes and
+    /// marks it again and writes once more.
+    static func write(_ data: Data, to file: URL) {
+        if (try? data.write(to: file, options: writeOptions)) != nil { return }
+        prepare(file.deletingLastPathComponent())
+        try? data.write(to: file, options: writeOptions)
+    }
 }
 
 /// A shelf load belongs to one preview credential context. Returning to an earlier password

@@ -232,12 +232,14 @@ extension ArchiveBrowser: WKNavigationDelegate {
             error = "The archive returned an error (\(http.statusCode)). Try reloading this page."
         }
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        let isDownload = !response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment")
-        if isDownload, !ArchiveURL.allowsDownload(response.response.url) {
+        switch ArchiveURL.decideResponse(url: response.response.url, canShowMIMEType: response.canShowMIMEType,
+                                         contentDisposition: disposition) {
+        case .allow: decisionHandler(.allow)
+        case .download: decisionHandler(.download)
+        case .refuse:
             downloadMessage = Self.foreignDownload
-            decisionHandler(.cancel); return
+            decisionHandler(.cancel)
         }
-        decisionHandler(isDownload ? .download : .allow)
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
@@ -331,8 +333,8 @@ extension ArchiveBrowser: WKDownloadDelegate {
         let temporary = downloads.removeValue(forKey: ObjectIdentifier(download))
         if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
         activeDownloads = downloads.count
-        // A download refused before it had a file is cancelled by WebKit; keep the refusal's message.
-        if temporary == nil, (error as NSError).code == NSURLErrorCancelled { return }
+        // A download refused before it had a file fails however WebKit words it; keep the refusal.
+        if temporary == nil, downloadMessage == Self.foreignDownload { return }
         downloadMessage = "Download failed: \(error.localizedDescription). Return to the page to try again."
     }
 }

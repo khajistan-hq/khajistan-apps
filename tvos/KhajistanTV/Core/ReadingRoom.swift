@@ -1031,6 +1031,30 @@ enum RRSite {
     }
 }
 
+/// Page scans kept on disk: unreadable until the device is first unlocked after a restart, and
+/// never in a backup. RRPageDisk (Services/ReadingStore.swift) writes through this.
+enum RRPrivateFiles {
+    static let writeOptions: Data.WritingOptions = [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+
+    /// Makes `folder` and marks it excluded from backup, so nothing written inside is backed up.
+    @discardableResult
+    static func prepare(_ folder: URL) -> URL {
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var marked = folder
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try? marked.setResourceValues(values)
+        return folder
+    }
+
+    /// Writes with `writeOptions`; if the system purged the folder while the app ran, makes and
+    /// marks it again and writes once more.
+    static func write(_ data: Data, to file: URL) {
+        if (try? data.write(to: file, options: writeOptions)) != nil { return }
+        prepare(file.deletingLastPathComponent())
+        try? data.write(to: file, options: writeOptions)
+    }
+}
+
 /// A shelf load belongs to one preview credential context. Returning to an earlier password
 /// still creates a new generation, so an older request cannot publish into a newer shelf.
 struct RRShelfLoadContext {

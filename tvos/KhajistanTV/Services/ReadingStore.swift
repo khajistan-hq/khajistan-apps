@@ -836,9 +836,7 @@ enum RRShelfDisk {
 enum RRPageDisk {
     static let folder: URL = {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let folder = base.appendingPathComponent("ReadingRoomPages", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
+        return RRPrivateFiles.prepare(base.appendingPathComponent("ReadingRoomPages", isDirectory: true))
     }()
     static let life: TimeInterval = 3 * 24 * 3600
     static let budget = 400 * 1024 * 1024
@@ -858,7 +856,7 @@ enum RRPageDisk {
     }
 
     static func write(_ data: Data, _ path: String) {
-        try? data.write(to: file(path), options: .atomic)
+        RRPrivateFiles.write(data, to: file(path))
     }
 
     /// Drops what is past its days, then the oldest until the folder fits the budget.

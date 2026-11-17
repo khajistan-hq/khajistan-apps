@@ -44,6 +44,9 @@ final class ReceiverGuideUITests: XCTestCase {
         let start = current.label
         let guideControl = app.buttons["guideControl"]
         XCTAssertTrue(guideControl.waitForExistence(timeout: 30), "the strip offers the guide once the channel plays")
+        // The apps print no "broadcast by" line; the website does (owner, 2026-11-16).
+        let broadcastBy = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'broadcast by'"))
+        XCTAssertEqual(broadcastBy.count, 0, "the strip prints no 'broadcast by' line: \(broadcastBy.allElementsBoundByIndex.map(\.label))")
         // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
         // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
         kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived

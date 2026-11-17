@@ -17,6 +17,8 @@ struct ReceiverGuide: View {
     let loading: Bool
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The rows' height when last drawn with a list, held while the next region loads.
+    @State private var rowsHeight: CGFloat = 0
 
     /// Keyed by channel, so a press slides the rows along as a list scrolls.
     private var keys: [GuideKey] {
@@ -34,13 +36,13 @@ struct ReceiverGuide: View {
                         .accessibilityIdentifier("guideRegion")
                     if !loading { Text("\(list.count)").kjSmall(faint: true) }
                 }
-                if loading {
-                    Text("Loading").kjSmall(faint: true)
-                } else if list.isEmpty {
+                if !loading, list.isEmpty {
                     Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall(faint: true)
                 }
                 // Only the rows that fit, around the lit one: a region holds up to ~500 channels,
                 // and drawing them all on every press made the guide slow (owner, 2026-11-04).
+                // While a region turn loads, the rows' space keeps the height it last had and
+                // says Loading in it, so the panel does not drop to its header and jump back.
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(keys, id: \.self) { key in
                         VStack(alignment: .leading, spacing: 0) {
@@ -50,6 +52,13 @@ struct ReceiverGuide: View {
                             Hairline()
                         }
                     }
+                }
+                .frame(minHeight: loading ? rowsHeight : nil, alignment: .topLeading)
+                .overlay(alignment: .topLeading) {
+                    if loading { Text("Loading").kjSmall(faint: true) }
+                }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                    if !loading { rowsHeight = height }
                 }
                 .padding(.vertical, 8)
             }
@@ -63,7 +72,7 @@ struct ReceiverGuide: View {
             // the animations below, so it wins when `loading` changes.
             .transaction(value: loading) { $0.animation = nil }
             // On the whole panel, so its ground grows and shrinks with the rows it holds.
-            .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: keys)
+            .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)
             // The panel itself carries the name, so a test can read where it sits.
             .accessibilityElement(children: .contain)
@@ -125,7 +134,7 @@ struct TransmissionGuide: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.ground, ignoresSafeAreaEdges: .all)
             // On the whole panel, so its ground grows and shrinks with the rows it holds.
-            .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: keys)
+            .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transmissionGuide")

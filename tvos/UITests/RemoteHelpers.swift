@@ -23,6 +23,7 @@ extension XCTestCase {
         let state = app.staticTexts["playerState"]
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
+        var turnedDown = 0
         for attempt in 0..<tries {
             // After Down, only the next channel playing counts: the one being left can still
             // reach Playing before the cut (Bugbot on PR 66).
@@ -33,13 +34,21 @@ extension XCTestCase {
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
             }, object: nil)
             // A channel that plays but fails `accept` moves on at once, not after the timeout.
-            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed,
-               accept(current.exists ? current.label : "") { return }
-            tried.append("\(current.exists ? current.label : "?"): \(state.label)")
+            let played = XCTWaiter.wait(for: [playing], timeout: 30) == .completed
+            let id = current.exists ? current.label : "?"
+            if played {
+                if accept(current.exists ? current.label : "") { return }
+                turnedDown += 1
+                tried.append("\(id): played, not accepted")
+            } else {
+                tried.append("\(id): \(state.label)")
+            }
         }
-        let why = "No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
-        // The local test video always plays: if it did not, the test media is broken.
-        guard kjLiveMedia else { XCTFail(why); return }
+        let why = "No accepted channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
+        // The local test video always plays: if it did not, the test media is broken. When every
+        // channel played and `accept` turned each down, no carrier was dead: the filter or the
+        // list is wrong, and that fails too, rather than reading as a dead network.
+        guard kjLiveMedia, turnedDown < tries else { XCTFail(why); return }
         throw XCTSkip(why)
     }
 

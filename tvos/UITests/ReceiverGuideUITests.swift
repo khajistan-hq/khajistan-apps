@@ -17,6 +17,8 @@ final class ReceiverGuideUITests: XCTestCase {
     /// keeps the height the last region's rows had. Dakhan has no television in the recorded list,
     /// and only the extended atlas reaches it.
     func testAnEmptyRegionSaysSoInTheGuide() throws {
+        // A live run reads the live lists, where Dakhan may have television.
+        try XCTSkipIf(kjLiveMedia, "needs the recorded Dakhan list, which has no television")
         let app = XCUIApplication()
         app.launchArguments += ["-kjskin", "day", "-kj.extendedAtlas", "YES"]
         kjLaunch(app)
@@ -51,9 +53,12 @@ final class ReceiverGuideUITests: XCTestCase {
             kjPause(0.8)
         }
         XCTAssertTrue(region.label.contains("Dakhan"), "Right in the guide reaches Dakhan: \(region.label)")
-        let none = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No '")).firstMatch
+        // Inside the guide: the strip can print a "No captions: …" line of its own.
+        let none = guide.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'No television in'")).firstMatch
         XCTAssertTrue(none.waitForExistence(timeout: 10), "the guide says Dakhan has no television")
         XCTAssertGreaterThan(none.frame.width, 100, "the line is drawn, not laid out in no width: \(none.frame)")
+        XCTAssertTrue(guide.frame.contains(none.frame), "the line sits inside the guide panel: \(none.frame) in \(guide.frame)")
+        XCTAssertGreaterThan(none.frame.minY, region.frame.maxY, "the line sits under the region name, in the rows' space")
         XCTAssertEqual(guide.frame.minY, before, accuracy: 2, "the panel keeps the height the region before had")
         kjScreenshot("guide-empty-region", app: app)
     }

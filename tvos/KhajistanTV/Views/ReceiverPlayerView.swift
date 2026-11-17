@@ -537,6 +537,7 @@ struct ReceiverPlayerView: View {
     }
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
+    /// The row already on screen is the exception: it closes the guide, as Back does.
     private func pick(_ target: Channel) {
         // The channel already on screen: exactly Back (the list stays the one it was tuned from,
         // and a dead signal moves on).

@@ -536,6 +536,9 @@ struct ReceiverPlayerView: View {
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
     private func pick(_ target: Channel) {
+        // The channel already on screen: exactly Back (the list stays the one it was tuned from,
+        // and a dead signal moves on).
+        guard target.id != (destination ?? current).id else { return closeGuide() }
         stopMovingOn()
         withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { guideRow = nil }
         armed = nil
@@ -543,12 +546,6 @@ struct ReceiverPlayerView: View {
         if surfChoice == nil, guideList.count > 1 {
             list = guideList
             if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
-        }
-        guard target.id != (destination ?? current).id else {
-            // The channel already on screen: the same as leaving the guide with Back.
-            wake()
-            if isFailed { moveOnFromDeadSignal() }
-            return
         }
         if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target

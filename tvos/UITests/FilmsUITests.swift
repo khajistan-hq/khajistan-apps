@@ -133,9 +133,10 @@ final class FilmsUITests: XCTestCase {
                     if id != "filmPlay" { row.append(frame) }
                 }
                 // Play alone on the first row, the others under it, left to right without touching.
+                // Labels are measured, so two plates (26 pt padding each side) clear by 52 between labels.
                 for (i, frame) in row.enumerated() {
                     XCTAssertGreaterThan(frame.minY, play.frame.maxY, "\(skin) \(handle): button \(i + 1) must sit under Play")
-                    if i > 0 { XCTAssertGreaterThan(frame.minX, row[i - 1].maxX, "\(skin) \(handle): buttons \(i) and \(i + 1) overlap") }
+                    if i > 0 { XCTAssertGreaterThanOrEqual(frame.minX, row[i - 1].maxX + 52, "\(skin) \(handle): buttons \(i) and \(i + 1) overlap") }
                 }
                 print("FILMBUTTONS \(skin) \(handle) " + drawn.joined(separator: " | "))
                 XCTAssertGreaterThanOrEqual(drawn.count, 3, "\(skin): Play, Watchlist and Website must draw")

@@ -3019,21 +3019,30 @@ func dancerVideoStepsHoldTwoRuns() throws {
     try expectEqual(casts, Set(DancerCast.keys), "the hold walked on every figure")
 }
 
-// The Swift lists are the site's lists: MOVES and HOLD read out of kj-scope.js, in order.
+// The Swift lists are the site's lists. Tests/Fixtures/dancer-moves.json is MOVES and HOLD as
+// scripts/dancer-moves-fixture.mjs read them out of kj-scope.js; it is compared on every run, CI
+// included. Where the site is checked out (KJ_ARCHIVE), the fixture is also checked against it,
+// so a stale fixture is caught too.
 func dancerMovesMatchKjScope() throws {
-    let js = String(decoding: try realFile("scripts/kj-scope.js"), as: UTF8.self)
+    struct Fixture: Decodable { let moves: [String]; let hold: [String] }
+    let data = try Data(contentsOf: fixtureURL.deletingLastPathComponent().appendingPathComponent("dancer-moves.json"))
+    let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+    try expectEqual(DancerMoves.all, fixture.moves, "DancerMoves.all against the site's MOVES")
+    try expectEqual(DancerMoves.hold, Set(fixture.hold), "DancerMoves.hold against the site's HOLD")
+
+    guard let raw = try? realFile("scripts/kj-scope.js") else { return }   // CI: fixture only
+    let js = String(decoding: raw, as: UTF8.self)
     func names(after marker: String, until close: Character) throws -> [String] {
         let start = try require(js.range(of: marker)).upperBound
         let end = try require(js[start...].firstIndex(of: close))
-        let body = js[start..<end]
         var out: [String] = [], cur = "", inside = false
-        for ch in body {
+        for ch in js[start..<end] {
             if ch == "\"" { if inside { out.append(cur); cur = "" }; inside.toggle() } else if inside { cur.append(ch) }
         }
         return out
     }
-    try expectEqual(try names(after: "var MOVES = [", until: "]"), DancerMoves.all)
-    try expectEqual(Set(try names(after: "var HOLD = {", until: "}")), DancerMoves.hold)
+    try expectEqual(try names(after: "var MOVES = [", until: "]"), fixture.moves, "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
+    try expectEqual(Set(try names(after: "var HOLD = {", until: "}")), Set(fixture.hold), "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
 }
 
 // Hands on hips by number: the elbow goes OUT and the forearm comes back DOWN and IN to the hip.
@@ -4929,7 +4938,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
     ("Dancer moves follow the site", dancerMovesFollowTheSite),
     ("Dancer video steps hold two runs", dancerVideoStepsHoldTwoRuns),
-    ("Dancer moves match kj-scope.js", dancerMovesMatchKjScope),
+    ("Dancer moves match the site (fixture; kj-scope.js when present)", dancerMovesMatchKjScope),
     ("Dancer Hands on hips: elbow out, hand to the hip", dancerHandsOnHipsPose),
     ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
     ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),

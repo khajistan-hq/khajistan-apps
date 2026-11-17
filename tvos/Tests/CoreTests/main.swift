@@ -1385,6 +1385,33 @@ func lastProgrammeHandsOverWhateverTheFloatSum() throws {
     let round = try require(StationClock.onAir(short, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0)))
     try expectEqual([round.programmeId, round.nextProgrammeId, round.nextName], ["P6", "P1", "Khawree Mi Zargai Sha"])
     try expectEqual(round.nextInSlot, true)
+    // The half-second edge, written here rather than read from handoverTolerance: 0.4 s short of
+    // the strip hands over, 0.6 s short runs round.
+    for (length, next) in [("2980.2", "B1"), ("2980.4", "P1")] {
+        let start = String(5964.1 + Double(length)!)
+        let edge = try decode(Programming.self, radioStripJSON(length: length, nextStart: start))
+        try expectEqual(try require(StationClock.onAir(edge, channel: 13, at: pkt(2026, 11, 1, 2, 25, 0))).nextProgrammeId, next, "strip of \(length)")
+    }
+}
+
+/// The 03:05 strip on channel `mujra`, 1 November 2026 (Fable, 2026-11-16): its 23rd programme
+/// starts at second 17780, and taking 6624.8 seconds down the roster leaves 313.0999999999988 of
+/// the 22nd's 313.1, so the clock still read the 22nd as on. As in station_clock_next_test.mjs.
+func handoverAHairBeforeItsSecondIsOnAtThatSecond() throws {
+    let lengths = [266.7, 266.6, 319.4, 297.2, 368.8, 424.6, 335.5, 318.6, 284.3, 263.4, 267.5, 293, 267.9,
+                   267.5, 309.1, 267.5, 333.5, 252.2, 273.2, 316.1, 319.1, 313.1, 349.1, 293.8]
+    let programmes = lengths.enumerated().map { #""M\#($0.offset)":{"id":"M\#($0.offset)","title":"m","seconds":\#($0.element)}"# }
+    let order = lengths.indices.map { "\"M\($0)\"" }.joined(separator: ",")
+    let roster = lengths.indices.map(String.init).joined(separator: ",")
+    let p = try decode(Programming.self, #"{"_meta":{"channels":[{"id":"mujra","number":1,"name":"Mujra"}]},"shows":{"m":{"slug":"m","name":"Mujra"}},"programme_order":["# + order + #"],"programmes":{"# + programmes.joined(separator: ",") + #"},"days":[{"date":"2026-11-01","channels":{"mujra":[{"start":"03:05","start_minute":185,"minutes":122,"start_second":11155.2,"seconds":7267.7,"show":"m","programmes":["# + roster + #"]}]}}]}"#)
+    let slot = try require(p.days.first?.channels["mujra"]?.first)
+    let at = StationClock.positionInSlot(p, slot: slot, second: 17_780)
+    try expectEqual(at.index, 22)
+    try expectEqual(at.into, 0)
+    // Negative: the second before is still the 22nd, a second from its end.
+    let before = StationClock.positionInSlot(p, slot: slot, second: 17_779)
+    try expectEqual(before.index, 21)
+    try expectClose(before.into, 312.1)
 }
 
 func returnTimeWeighsEachStripByItsOwnDay() throws {
@@ -1564,7 +1591,7 @@ func realUpcomingAgreesWithOnAir() throws {
 /// that second crosses a minute.
 func realFollowingAgreesWithOnAirAtEveryHandover() throws {
     let p = try realProgramming("2026-11")
-    var checked = 0, lastOfRoster = 0, mismatches: [String] = []
+    var checked = 0, lastOfRoster = 0, short = 0, mismatches: [String] = []
     for day in p.days {
         let parts = day.date.split(separator: "-").compactMap { Int($0) }
         let midnight = pkt(parts[0], parts[1], parts[2])
@@ -1573,25 +1600,34 @@ func realFollowingAgreesWithOnAirAtEveryHandover() throws {
                 var h = slot.startSecond
                 for i in 1..<slot.programmes.count {
                     h += StationClock.runSeconds(p.programmes[p.programme_order[slot.programmes[i - 1]]])
-                    // The second before the handover, and the first whole second after it.
-                    let before = midnight.addingTimeInterval((h - 1).rounded(.down))
-                    let after = midnight.addingTimeInterval(h.rounded(.up))
-                    guard let current = StationClock.onAir(p, channelId: channel, at: before),
-                          current.slot == slot, current.rosterIndex == i - 1,
-                          let fresh = StationClock.onAir(p, channelId: channel, at: after),
-                          fresh.slot == slot, fresh.rosterIndex == i else { continue }
+                    // The second before the handover, and the first whole second after it, from
+                    // the handover as written (the builder works to the millisecond): the float
+                    // sum here drifts both ways, 17779.999999999996 for 17780 and 53189.000000000015
+                    // for 53189.
+                    let mark = (h * 1000).rounded() / 1000
+                    let before = midnight.addingTimeInterval((mark - 1).rounded(.down))
+                    let after = midnight.addingTimeInterval(mark.rounded(.up))
+                    // A programme under two seconds can hold no whole second of its own on
+                    // either side; those are counted and passed over, never anything else.
+                    let previousRun = StationClock.runSeconds(p.programmes[p.programme_order[slot.programmes[i - 1]]])
+                    if previousRun < 2 { short += 1; continue }
+                    let current = try require(StationClock.onAir(p, channelId: channel, at: before), "\(day.date) \(channel) \(slot.start) #\(i)")
+                    let fresh = try require(StationClock.onAir(p, channelId: channel, at: after), "\(day.date) \(channel) \(slot.start) #\(i)")
                     let handed = try require(StationClock.following(current, in: p, at: after))
+                    let indices = [current.rosterIndex, fresh.rosterIndex, handed.rosterIndex]
                     let a = [handed.programmeId, handed.nextProgrammeId, handed.nextName, handed.nextStart, handed.nextInSlot ? "in" : "out"]
                     let b = [fresh.programmeId, fresh.nextProgrammeId, fresh.nextName, fresh.nextStart, fresh.nextInSlot ? "in" : "out"]
-                    if a != b, mismatches.count < 5 { mismatches.append("\(day.date) \(channel) \(slot.start) #\(i): \(a) vs \(b)") }
-                    if a != b { mismatches.append("") }
+                    if indices != [i - 1, i, i] || current.slot != slot || fresh.slot != slot || a != b {
+                        if mismatches.count < 5 { mismatches.append("\(day.date) \(channel) \(slot.start) #\(i): roster \(indices), \(a) vs \(b)") }
+                        mismatches.append("")
+                    }
                     checked += 1
                     if i == slot.programmes.count - 1 { lastOfRoster += 1 }
                 }
             }
         }
     }
-    print("      \(checked) handovers (\(lastOfRoster) onto a roster's last), \(mismatches.filter(\.isEmpty).count) disagree")
+    print("      \(checked) handovers (\(lastOfRoster) onto a roster's last), \(mismatches.filter(\.isEmpty).count) disagree, \(short) after a programme under 2 s passed over")
     try expect(mismatches.isEmpty, mismatches.filter { !$0.isEmpty }.joined(separator: "\n"))
     try expect(checked >= 10_000, "only \(checked) handovers checked")
 }
@@ -5008,6 +5044,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Up next names only a strip under a day away", upNextNamesOnlyAStripUnderADayAway),
     ("following() reads Up next from the clock", followingReadsUpNextFromTheClock),
     ("The last programme of a full roster hands over, whatever the float sum", lastProgrammeHandsOverWhateverTheFloatSum),
+    ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),

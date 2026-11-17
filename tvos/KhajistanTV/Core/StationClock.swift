@@ -63,8 +63,14 @@ enum StationClock {
     /// (kj-station-clock.js HANDOVER_TOLERANCE). The builder writes a strip's length as the sum of
     /// its programmes, and the clock adds the same lengths in another order: 216.6 + ... + 552.4 is
     /// 2979.7999999999997 against a strip of 2979.8, which read as the roster going round again and
-    /// put the strip's own opener in Up next (Fable, 2026-11-16).
+    /// put the strip's own opener in Up next (Fable, 2026-11-16). The builder also rounds a strip's
+    /// length to the millisecond.
     static let handoverTolerance = 0.5
+    /// The same drift inside a roster (kj-station-clock.js SUM_EPSILON): taking programme lengths
+    /// off the elapsed time puts a handover written at second 17780 a hair later, and at 17780 the
+    /// clock still read the programme that had ended. A microsecond is far above the drift and far
+    /// below a clock tick.
+    static let sumEpsilon = 1e-6
     static let tzLabel = "PKT"
 
     // MARK: Station time
@@ -169,7 +175,7 @@ enum StationClock {
         guard total > 0 else { return (0, 0) }
         var remaining = elapsed.truncatingRemainder(dividingBy: total)
         for (index, length) in lengths.enumerated() {
-            if remaining < length { return (index, remaining) }
+            if remaining < length - sumEpsilon { return (index, max(0, remaining)) }
             remaining -= length
         }
         return (0, 0)

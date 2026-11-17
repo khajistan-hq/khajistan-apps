@@ -70,11 +70,9 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(6)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["playerState"].waitForExistence(timeout: 30), "the film opens full screen again")
-        let time = app.staticTexts["filmTime"]
-        XCTAssertTrue(time.waitForExistence(timeout: 10), "the film's time shows")
-        let seconds = time.label.split(separator: "/").first.map { part -> Int in
-            part.trimmingCharacters(in: .whitespaces).split(separator: ":").reduce(0) { $0 * 60 + (Int($1) ?? 0) }
-        } ?? 0
+        let time = app.descendants(matching: .any)["filmProgress"]
+        XCTAssertTrue(time.waitForExistence(timeout: 10), "the film's progress shows")
+        let seconds = Int(time.value as? String ?? "") ?? 0
         XCTAssertGreaterThanOrEqual(seconds, 6, "the film carries on from where the window had it (\(time.label)), not from the start")
         XCTAssertTrue(app.otherElements["pipBar"].waitForNonExistence(timeout: 10), "the bar goes with the window")
         XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "captions come back full screen")

@@ -20,6 +20,8 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
     struct Caption: Equatable {
         var text: String
         var skin: Skin
+        /// The viewer's choice: the plate, or yellow text with a black edge (CaptionStyle).
+        var style: CaptionStyle = .current
     }
 
     /// The caption to draw now, nil for none. ponytail: one shared caption, as there is one window
@@ -60,7 +62,7 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
 
     /// The plate for `caption` on a frame this size, drawn once and kept while the caption shows.
     private func plate(_ caption: Caption, width: Int, height: Int) -> (key: String, image: CGImage, rect: CGRect)? {
-        let key = "\(caption.text)\u{1F}\(caption.skin)\u{1F}\(width)x\(height)"
+        let key = "\(caption.text)\u{1F}\(caption.skin)\u{1F}\(caption.style)\u{1F}\(width)x\(height)"
         return cacheLock.withLock {
             if let plate, plate.key == key { return plate }
             guard let made = Self.plate(caption, frame: CGSize(width: width, height: height)) else { return nil }
@@ -108,12 +110,15 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
                                          options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
         let (plate, textRect) = PiPCaptionLayout.plate(text: CGSize(width: ceil(measured.width), height: ceil(measured.height)),
                                                        fontSize: size, frame: frame)
+        let bare = caption.style == .bare
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        format.opaque = true
+        format.opaque = !bare
         let image = UIGraphicsImageRenderer(size: plate.size, format: format).image { drawing in
-            colour(caption.skin.captionPlateHex).setFill()
-            drawing.fill(CGRect(origin: .zero, size: plate.size))
+            if !bare {
+                colour(caption.skin.captionPlateHex).setFill()
+                drawing.fill(CGRect(origin: .zero, size: plate.size))
+            }
             text.draw(with: textRect.offsetBy(dx: -plate.minX, dy: -plate.minY), options: [.usesLineFragmentOrigin, .usesFontLeading], context: nil)
         }
         return image.cgImage.map { ($0, plate) }
@@ -123,7 +128,8 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
     /// direction so Urdu, Persian and Arabic read right to left.
     static func attributed(_ caption: Caption, fontSize: CGFloat) -> NSAttributedString {
         let font = UIFont.systemFont(ofSize: fontSize, weight: .semibold)
-        let ink = colour(caption.skin.captionTextHex)
+        let bare = caption.style == .bare
+        let ink = colour(bare ? Skin.bareCaptionHex : caption.skin.captionTextHex)
         let out = NSMutableAttributedString()
         let lines = CaptionText.lines(caption.text)
         for (index, line) in lines.enumerated() {
@@ -132,8 +138,13 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
             paragraph.baseWritingDirection = CaptionText.isRightToLeft(line) ? .rightToLeft : .leftToRight
             paragraph.lineSpacing = PiPCaptionLayout.lineSpacing(fontSize: fontSize)
             paragraph.paragraphSpacing = PiPCaptionLayout.lineSpacing(fontSize: fontSize)
-            out.append(NSAttributedString(string: index + 1 < lines.count ? line + "\n" : line,
-                                          attributes: [.font: font, .foregroundColor: ink, .paragraphStyle: paragraph]))
+            var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink, .paragraphStyle: paragraph]
+            // Text only: a black edge, as the full-screen view's, so it reads on the picture.
+            if bare {
+                attributes[.strokeColor] = UIColor.black
+                attributes[.strokeWidth] = -4.0
+            }
+            out.append(NSAttributedString(string: index + 1 < lines.count ? line + "\n" : line, attributes: attributes))
         }
         return out
     }

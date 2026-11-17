@@ -203,4 +203,39 @@ final class SkinWalkUITests: XCTestCase {
         XCTAssertTrue(app.buttons["skin-toggle"].waitForExistence(timeout: 20))
         XCTAssertEqual(skinState(app), "smut", "the choice is kept across a launch")
     }
+
+    /// The subtitle look (owner, 2026-11-17): the plate until chosen, "Text only" one press away,
+    /// and the choice kept across a launch.
+    func testChoosingTextOnlySubtitlesPersists() {
+        // No launch argument for the setting: it would outrank what the button saves.
+        var app = launch(["-kjskin", "day", "-kjtab", "account"])
+        let toggle = app.buttons["caption-style-toggle"]
+        func style() -> String { (app.staticTexts["captionStyleState"].value as? String) ?? "?" }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
+        let before = style()
+        XCTAssertTrue(["plate", "bare"].contains(before), "the subtitle look reads \(before)")
+        // Put it back even if a check below fails, so the next run starts where this one did.
+        addTeardownBlock {
+            let again = XCUIApplication()
+            again.launchArguments = ["-kjskin", "day", "-kjtab", "account"]
+            self.kjLaunch(again)
+            let button = again.buttons["caption-style-toggle"]
+            guard button.waitForExistence(timeout: 20),
+                  (again.staticTexts["captionStyleState"].value as? String) != before else { return }
+            _ = self.focus(button, by: .down)
+            XCUIRemote.shared.press(.select)
+        }
+        let after = before == "plate" ? "bare" : "plate"
+        XCTAssertTrue(focus(toggle, by: .down), "the subtitle button must take focus")
+        XCUIRemote.shared.press(.select)
+        wait(upTo: 3) { style() == after }
+        XCTAssertEqual(style(), after, "one press moves to the other look")
+        // The kicker style sets the label in capitals, so case is not compared.
+        XCTAssertEqual(toggle.label.lowercased(), after == "bare" ? "subtitles: text only. switch to plate." : "subtitles: plate. switch to text only.")
+        app.terminate()
+
+        app = launch(["-kjskin", "day", "-kjtab", "account"])
+        XCTAssertTrue(app.buttons["caption-style-toggle"].waitForExistence(timeout: 20))
+        XCTAssertEqual(style(), after, "the choice is kept across a launch")
+    }
 }

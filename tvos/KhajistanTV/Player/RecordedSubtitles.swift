@@ -68,10 +68,14 @@ final class RecordedSubtitles {
     /// The skin's caption colours for the text tvOS draws itself: bold and half again as large,
     /// since the window shows it at a third of the size (Apple TV HD, 2026-11-17: yellow on the
     /// Grove plate in the window). Set again by the window when the skin turns.
-    static func styleRules(_ skin: Skin) -> [AVTextStyleRule] {
-        [AVTextStyleRule(textMarkupAttributes: [
-            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(skin.captionTextHex),
-            kCMTextMarkupAttribute_BackgroundColorARGB as String: Skin.argb(skin.captionPlateHex),
+    /// The viewer's "Text only" choice (CaptionStyle) draws yellow text with a black edge and no plate.
+    static func styleRules(_ skin: Skin, style: CaptionStyle = .current) -> [AVTextStyleRule] {
+        let bare = style == .bare
+        return [AVTextStyleRule(textMarkupAttributes: [
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(bare ? Skin.bareCaptionHex : skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: bare ? [0, 0, 0, 0] : Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_CharacterEdgeStyle as String: bare ? kCMTextMarkupCharacterEdgeStyle_Uniform as String
+                                                                      : kCMTextMarkupCharacterEdgeStyle_None as String,
             kCMTextMarkupAttribute_BoldStyle as String: true,
             kCMTextMarkupAttribute_RelativeFontSize as String: 150,
         ])].compactMap { $0 }

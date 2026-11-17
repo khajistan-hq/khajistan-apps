@@ -248,6 +248,15 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,
   with its chosen subtitles drawn by AVPlayer in the window; full screen opens it again over
   whatever is on top, where it had got to.
+- **Moving through the film** (owner, 2026-11-17: "all controls should work like apple tv player",
+  after trying Apple's own player and keeping ours): as Apple's player. A click left or right
+  goes back or forward ten seconds. A press held on the clickpad's edge scans, 8× and then 24×
+  after two seconds and 64× after five, and plays on from where it is let go. A swipe across the
+  touch surface pauses on the place it reaches; Select or Play/Pause plays from there, Back puts
+  the film back. While the panel is up it shows the bar: the time played, a thin bar in ink on a
+  faint track, and the time left (-1:02:03), with the scan speed or the scrub's way out between.
+  tvOS gives SwiftUI an arrow once, when it is let go, so a hold is read through GameController
+  (the clickpad is button A, the thumb's place the dpad) and the release is not also a click.
 
 ## Sign in
 
@@ -468,6 +477,14 @@ type, and on Transmission UP NEXT with its time and show at the right. It rises 
 over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal tunes: the ground
 says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
 "i dont want info like 'regional broadcast by...' the apple tv").
+
+**Subtitles: Plate or Text only** (owner, 2026-11-17: "a caption option without the background
+(only yellow text) that one can choose"). Account carries one button, as the colours do. The
+plate below is the default. Text only is the house yellow `#F3FB04` in every skin, with a 2pt black
+edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
+The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
+sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,
+and yellow text on the day ground cannot be read. A scan is silent, as Apple's is.
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no

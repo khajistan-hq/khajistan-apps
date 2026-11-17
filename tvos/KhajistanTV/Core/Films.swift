@@ -232,3 +232,40 @@ enum Films {
         return fractional.date(from: text)
     }
 }
+
+/// How the full film moves under the remote, as Apple's player moves it (owner, 2026-11-17:
+/// "all controls should work like apple tv player"): a click left or right skips ten seconds, a
+/// held arrow scans faster the longer it is held, and a swipe across the touch surface scrubs.
+enum FilmTransport {
+    static let skip: Double = 10
+    /// How often a held arrow moves the film.
+    static let scanTick: Double = 0.25
+
+    /// The scan speed for an arrow held `seconds`: 8×, then 24× after two seconds, 64× after five.
+    /// ponytail: fixed steps, tune them on the TV if they feel slow or fast.
+    static func scanSpeed(heldFor seconds: Double) -> Int {
+        seconds < 2 ? 8 : seconds < 5 ? 24 : 64
+    }
+
+    /// Seconds of film one scan tick moves.
+    static func scanStep(heldFor seconds: Double) -> Double {
+        Double(scanSpeed(heldFor: seconds)) * scanTick
+    }
+
+    /// A swipe's travel in remote points as seconds of film: about 1,000 points, one long swipe,
+    /// moves a tenth of the film, and never less than a minute. ponytail: tune on the TV.
+    static func scrubSeconds(points: Double, duration: Double?) -> Double {
+        points / 1000 * max((duration ?? 0) / 10, 60)
+    }
+
+    /// A place kept inside the film: not before its start, not past its last second.
+    static func clamp(_ seconds: Double, duration: Double?) -> Double {
+        let upper = duration.map { max($0 - 1, 0) } ?? .greatestFiniteMagnitude
+        return min(max(seconds, 0), upper)
+    }
+
+    /// What is left, as Apple's bar shows it: "-1:02:03".
+    static func remaining(_ position: Double, of duration: Double) -> String {
+        "-" + Mixes.clock(max(duration - position, 0))
+    }
+}

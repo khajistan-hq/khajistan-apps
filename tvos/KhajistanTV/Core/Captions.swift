@@ -111,9 +111,29 @@ extension Skin {
 
     var captionTextHex: UInt32 { self == .day ? 0x000000 : 0xF3FB04 }
 
+    /// The text of a caption shown without its plate: the house yellow in every skin, as the
+    /// website's Screening Room draws it (kj-captions.css `data-kj-captions="bare"`).
+    static let bareCaptionHex: UInt32 = 0xF3FB04
+
     /// A hex colour as CoreMedia's text markup takes it: alpha, red, green, blue, each 0 to 1.
     static func argb(_ hex: UInt32) -> [Double] {
         [1, Double((hex >> 16) & 0xFF) / 255, Double((hex >> 8) & 0xFF) / 255, Double(hex & 0xFF) / 255]
+    }
+}
+
+/// How captions and subtitles are drawn, chosen by the viewer on Account (owner, 2026-11-17: "a
+/// caption option without the background (only yellow text) that one can choose"). The plate is
+/// the house default; "Text only" is yellow text with a thin black edge on the picture.
+enum CaptionStyle: String, CaseIterable {
+    case plate, bare
+    static let key = "kj-caption-style"
+
+    var label: String { self == .plate ? "Plate" : "Text only" }
+    var next: CaptionStyle { self == .plate ? .bare : .plate }
+
+    /// The viewer's choice; the plate until one is made.
+    static var current: CaptionStyle {
+        UserDefaults.standard.string(forKey: key).flatMap(CaptionStyle.init(rawValue:)) ?? .plate
     }
 }
 

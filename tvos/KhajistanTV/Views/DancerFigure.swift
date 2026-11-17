@@ -109,6 +109,9 @@ private func stripe(_ g: inout Pen, _ x: Double, _ y: Double, _ len: Double, _ t
     g.fillStyle = g.C.green
 }
 
+/// The left arm's angle as the mirror image of the right's, so a pair reads as one gesture.
+private func mir(_ side: Double, _ r: Double) -> Double { side > 0 ? r : .pi - r }
+
 private struct LimbPose { var thigh = 0.0, shin = 0.0, arm = 0.0, fore = 0.0, shDy = 0.0 }
 
 private func pose(_ name: String, _ p: Double, _ side: Double, _ bass: Double, _ mid: Double, _ spin: Double, _ sub: Double) -> LimbPose {
@@ -232,6 +235,53 @@ private func pose(_ name: String, _ p: Double, _ side: Double, _ bass: Double, _
         o.thigh = DOWN - side * (0.20 + lift * 0.25)
         o.shin = DOWN - side * 0.08
         o.arm = DOWN - side * (1.15 + alt * 0.20); o.fore = -side * 0.25
+    // The 2026-11-16 video steps, ported from kj-scope.js. `r` is the RIGHT arm's angle.
+    case "Wings":                    // both arms flap together: down, out, up to a V
+        let w = (sin(p) + 1) / 2
+        o.thigh = DOWN - side * (0.24 + w * 0.06)
+        o.shin = DOWN - side * 0.06
+        o.arm = mir(side, mix(1.05, -0.75, w)); o.fore = -side * (0.10 - w * 0.25)
+        o.shDy = -w * 0.010
+    case "Sweep":                    // one arm thrown out and up, the other across the chest
+        o.thigh = DOWN - side * (0.30 + lift * 0.20)
+        o.shin = DOWN - side * 0.10
+        o.arm = alt > 0 ? mir(side, -0.55) : mir(side, .pi - 0.35)
+        o.fore = alt > 0 ? -side * 0.10 : side * 0.45
+    case "Hands on knees":           // bent over, hands on the knees, the hips bouncing
+        o.thigh = DOWN - side * 0.34
+        o.shin = DOWN + side * 0.20
+        o.arm = DOWN - side * 0.05; o.fore = side * 0.15
+    case "Hands on hips":            // akimbo, one knee popping in on each beat
+        o.thigh = DOWN - lift * 0.32 + side * (0.14 - lift * 0.30)
+        o.shin = DOWN + lift * 0.34 + side * 0.05
+        o.arm = mir(side, 0.65); o.fore = mir(side, 2.35) - o.arm   // elbow out, hand back to the hip
+        o.shDy = alt * 0.006
+    case "Arm swing":                // one hand on the hip, the other swung up and over
+        let free = (sub < 4 ? 1.0 : -1.0) == side
+        o.thigh = DOWN - side * (0.26 + lift * 0.10)
+        o.shin = DOWN - side * 0.06
+        if free { o.arm = mir(side, mix(2.05, -1.95, (sin(p) + 1) / 2)); o.fore = -side * 0.15 }
+        else { o.arm = mir(side, 0.65); o.fore = mir(side, 2.35) - o.arm }
+    case "Arm wave":                 // one arm straight out, the other folded across the chest
+        o.thigh = DOWN - side * (0.34 + lift * 0.08)
+        o.shin = DOWN - side * 0.10
+        o.arm = mir(side, alt > 0 ? -0.05 : 0.12)
+        o.fore = alt > 0 ? 0 : -side * (.pi - 0.30)
+        o.shDy = -lift * 0.008
+    case "Airplane":                 // arms wide, palms up, banking side to side
+        let bank = sin(p) * 0.32
+        o.thigh = DOWN - side * 0.08 - lift * 0.25
+        o.shin = DOWN + lift * 0.22
+        o.arm = (side > 0 ? 0 : .pi) + bank; o.fore = -side * 0.12
+    case "Turn":                     // a full turn on the spot, one arm overhead
+        o.thigh = DOWN - side * 0.10 - lift * 0.30
+        o.shin = DOWN + lift * 0.25
+        o.arm = side > 0 ? UP + 0.25 : DOWN + 0.70; o.fore = side > 0 ? -0.30 : 0.40
+    case "Arm roll":                 // forearms rolling over each other in front of the chest
+        o.thigh = DOWN - side * 0.16
+        o.shin = DOWN - side * 0.05
+        o.arm = mir(side, 0.55 + fast * 0.30)
+        o.fore = mir(side, .pi - 0.20 + fast * 0.25) - o.arm
     default:                         // running man
         o.thigh = DOWN - lift * 1.05 + side * 0.06
         o.shin = DOWN + lift * 0.75 + side * 0.04
@@ -263,19 +313,21 @@ func drawDancer(_ g: inout Pen, w: Double, h: Double, cast ch: DancerCast, move 
     let drop = pow(1 - b.phase, 2)
     let fast2 = sin(phase * 2)
     // Voguing's own running order, in beats of the move's run: 0–1 hands, 2–4 duckwalk, 5 the dip.
-    let sub = name == "Voguing" ? Double(b.count % ch.cycle) + b.phase : 0
+    // The video steps read it too: Arm swing changes hands half way, Turn counts its turns.
+    let sub = Double(b.count % ch.cycle) + b.phase
     let duckwalk: Double = name == "Voguing" && sub >= 2 && sub < 5 ? 1 : 0
     var dip = 0.0
     if name == "Voguing" && sub >= 5 && sub < 6 {
         let d = sub - 5                                // fall fast, hold the floor, get up
         dip = d < 0.18 ? easeIn(d / 0.18) : d < 0.75 ? 1 : 1 - easeOut((d - 0.75) / 0.25)
     }
-    let squat = name == "Twerk" ? H * 0.05 : duckwalk * H * 0.17 + dip * H * 0.30
+    let knees: Double = name == "Hands on knees" ? 1 : 0   // bent over: the trunk folds down
+    let squat = name == "Twerk" ? H * 0.05 : knees > 0 ? H * 0.07 : duckwalk * H * 0.17 + dip * H * 0.30
     let bounce = bass * H * 0.04 * ch.bassGain +
         (drop * H * 0.05 +
          (DancerMoves.hop.contains(name) ? abs(sw) * H * 0.05 : 0) +
          (name == "Fist pumps" ? max(0, sw) * H * 0.09 : 0) +
-         (name == "Twerk" ? fast2 * H * 0.042 : 0)) * ch.bounce * (1 - dip)
+         (name == "Twerk" || knees > 0 ? fast2 * H * 0.042 : 0)) * ch.bounce * (1 - dip)
     let leanBase: Double
     switch name {
     case "Side shuffle": leanBase = sw * 0.8
@@ -286,6 +338,9 @@ func drawDancer(_ g: inout Pen, w: Double, h: Double, cast ch: DancerCast, move 
     case "Cocek": leanBase = sw * 0.9
     case "Kawliya": leanBase = sw * 1.5
     case "Krumping": leanBase = sw * 0.9
+    case "Sweep": leanBase = sw * 0.8
+    case "Airplane": leanBase = sw * 0.6
+    case "Arm roll": leanBase = fast2 * 0.35
     case "Voguing": leanBase = duckwalk * sw * 0.45 - dip * 1.4
     case "Shimmy": leanBase = sw * 0.05
     default: leanBase = sw * 0.2
@@ -296,7 +351,7 @@ func drawDancer(_ g: inout Pen, w: Double, h: Double, cast ch: DancerCast, move 
     let thick = max(3, H * 0.038) * ch.limbW
     let hipY = footY - H * 0.41 - bounce + squat
     let hipX = cx + (name == "Pole spin" ? -H * 0.10 : sw * H * 0.045)
-    let shY = hipY - H * ch.torso
+    let shY = hipY - H * ch.torso * (1 - knees * 0.42)
     let shX = hipX + lean * H * 0.06
     let HIP = H * ch.hipW, SHOULDER = H * ch.shoulderW
 
@@ -311,6 +366,13 @@ func drawDancer(_ g: inout Pen, w: Double, h: Double, cast ch: DancerCast, move 
 
     // The death drop turns the whole body about the hips.
     if dip > 0 { g.save(); g.translate(hipX, hipY); g.rotate(dip * 1.15); g.translate(-hipX, -hipY) }
+
+    // Turn: the flat figure turns about its own centre line, two turns a run.
+    let turn = name == "Turn" ? cos(sub / 4 * .pi * 2) : 1
+    if turn != 1 {
+        g.save(); g.translate(hipX, 0)
+        g.scale(turn < 0 ? min(-0.12, turn) : max(0.12, turn), 1); g.translate(-hipX, 0)
+    }
 
     g.fillStyle = g.C.green
     for side in [-1.0, 1.0] {
@@ -349,6 +411,7 @@ func drawDancer(_ g: inout Pen, w: Double, h: Double, cast ch: DancerCast, move 
     g.fillRect(headX - hr, headY - hr, hr * 2, hr * 2)
     g.fillStyle = g.C.green
     g.fillRect(headX - hr * 1.12, headY - hr * 0.62, hr * 2.24, hr * 0.3)
+    if turn != 1 { g.restore() }
     if dip > 0 { g.restore() }
 }
 

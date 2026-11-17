@@ -2965,7 +2965,9 @@ func dancerStageEntersDancesAndLeaves() throws {
 }
 
 func dancerMovesFollowTheSite() throws {
-    try expectEqual(DancerMoves.all.count, 23)
+    try expectEqual(DancerMoves.all.count, 32)
+    try expectEqual(DancerMoves.hold.count, 9)
+    try expect(DancerMoves.hold.isSubset(of: Set(DancerMoves.all)), "every held step is a move")
     try expect(!DancerMoves.list(for: .base).contains("Kawliya"), "Kawliya belongs to the long-haired figure")
     try expect(DancerMoves.list(for: .hairy).contains("Kawliya"))
     var rng = SplitMix(state: 99)
@@ -2980,6 +2982,32 @@ func dancerMovesFollowTheSite() throws {
     // Twerk is weighted four to one.
     let twerk = Double(counts["Twerk"] ?? 0), dabke = Double(counts["Dabke"] ?? 1)
     try expect(twerk / dabke > 3 && twerk / dabke < 5, "Twerk \(twerk) against Dabke \(dabke)")
+}
+
+// Owner, 2026-11-16: the video steps repeat longer — 16 beats each, every other move 8.
+func dancerVideoStepsHoldTwoRuns() throws {
+    var rng = SplitMix(state: 7)
+    var stage = DancerStage(random: { rng.next() })
+    var now = 0.0, count = 0
+    func frame() -> DancerStage.Frame {
+        let f = stage.step(now: now, grooving: { _ in true }, beat: 0.6, groove: 0.45, count: count)
+        now += 1000.0 / 60
+        return f
+    }
+    while stage.name != .on { _ = frame() }
+    var moves: [String] = []
+    for beat in (count + 1)...(count + 1600) {
+        count = beat
+        if case .dance(let m) = frame() { moves.append(m) } else { moves.append("") }
+    }
+    // Runs of one move, the first and last cut off by the window.
+    var runs: [(String, Int)] = []
+    for m in moves { if let last = runs.last, last.0 == m { runs[runs.count - 1].1 += 1 } else { runs.append((m, 1)) } }
+    let whole = runs.dropFirst().dropLast()
+    try expect(whole.contains { DancerMoves.hold.contains($0.0) }, "no video step came up in 1600 beats")
+    for (m, n) in whole {
+        try expectEqual(n, DancerMoves.hold.contains(m) ? 16 : 8, m)
+    }
 }
 
 // MARK: - Runner
@@ -4861,6 +4889,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Beat gate hysteresis and reset", beatGateHysteresis),
     ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
     ("Dancer moves follow the site", dancerMovesFollowTheSite),
+    ("Dancer video steps hold two runs", dancerVideoStepsHoldTwoRuns),
     ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
     ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),
     ("Screening Room: the offer line (marqueeOffer)", vodOfferLine),

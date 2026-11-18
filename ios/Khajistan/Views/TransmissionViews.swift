@@ -74,7 +74,7 @@ struct TransmissionSection: View {
                             Button { choose(number) } label: {
                                 ChannelCard(name: store.channelName(number), line: store.channelLine(number),
                                             onAir: store.nowOn(channel: number, at: ServerClock.now(context.date)),
-                                            returns: store.returnTime(channel: number, at: ServerClock.now(context.date)))
+                                            returns: store.returnLabel(channel: number, at: ServerClock.now(context.date)))
                             }
                             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 0, bottom: 14, trailing: 0)))
                             .accessibilityIdentifier("transmission-channel-\(number)")
@@ -157,7 +157,7 @@ private struct ChannelCard: View {
                     Text("Up next \(start)" + (air.nextShow.map { " \u{00B7} \($0.name)" } ?? "")).kjSmall(faint: true)
                 }
             } else if let returns, !returns.isEmpty {
-                Text("Returns at \(returns) \(StationClock.tzLabel)").kjBody()
+                Text("Returns at \(returns)").kjBody()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -226,7 +226,7 @@ struct TransmissionPlayerView: View {
                 Button(kicker: "Sign in") { showSignIn = true }.buttonStyle(HouseButtonStyle(solid: true))
             }
         case .offAir(channelName: let name, returns: let returns):
-            message(returns.map { "\(name) returns at \($0) \(StationClock.tzLabel)." } ?? "\(name) is off air.", title: "Off air") {
+            message(returns.map { "\(name) returns at \($0)." } ?? "\(name) is off air.", title: "Off air") {
                 Text("Swipe up or down to switch channel.").kjSmall(faint: true)
             }
             .channelGestures(step: switchChannel, tap: {})

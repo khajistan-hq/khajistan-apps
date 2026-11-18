@@ -94,18 +94,6 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     /// The receiver payload carries explicit transcription/translation rights refusals.
     var captionsDenied: Bool? = nil
 
-    /// The attribution's first clause, "Direct broadcast by …", which is what a player prints
-    /// (owner, 2026-10-08). The rest of the record's sentence stays in the data and on the website.
-    var sourceLine: String? {
-        guard let attributionText else { return nil }
-        var first = attributionText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? attributionText
-        // Most records close the clause with a full stop before the third-party notice (owner,
-        // 2026-11-09: "redundant"). Cut at the notice, not at a full stop: names carry them (98.5).
-        if let notice = first.range(of: ". Playback uses") { first = String(first[..<notice.lowerBound]) }
-        let line = first.trimmingCharacters(in: .whitespaces)
-        return line.isEmpty ? nil : line
-    }
-
     /// The stream the channel says is live. Nil when none is named or the name matches nothing.
     var activeStream: Stream? {
         guard let activeStreamId else { return nil }

@@ -48,6 +48,9 @@ final class PlayerController {
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
+    /// The address of the last signal started, as its item's asset holds it: tells this
+    /// programme's item from the previous one still playing during a handover.
+    @ObservationIgnored private(set) var attachedURL: URL?
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now
     #endif
@@ -73,6 +76,7 @@ final class PlayerController {
         // Muted by the PiP window while paused for a rejoin: a new item (the rejoin, or a handover
         // that came first) is heard.
         player.isMuted = false
+        attachedURL = url
         generation += 1
         let gen = generation
         #if DEBUG

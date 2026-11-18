@@ -5364,23 +5364,54 @@ func storedSubtitlesAnswer() throws {
     try expectEqual(sent, ["p_programme": "tv-jj-x"])
     try expect(StoredSubtitles.request(programme: "", accessToken: "tok") == nil)
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
+    // Asked at once, then again after failures, growing, under a minute in all.
+    try expectEqual(StoredSubtitles.retryDelays.first, 0)
+    try expect(zip(StoredSubtitles.retryDelays, StoredSubtitles.retryDelays.dropFirst()).allSatisfy { $0 < $1 }, "delays grow")
+    try expect(StoredSubtitles.retryDelays.reduce(0, +) < 60, "retries end inside a minute")
 }
 
 /// The Roman line under a Persian programme name (owner, 2026-11-17: "name of film should also be
-/// in roman"), and the year, both decoded from the schedule the site writes.
+/// in roman"), the guide's line, and the year, all from the schedule the site writes.
 func programmeDecodesRomanTitleAndYear() throws {
     func decode(_ json: String) throws -> Programming.Programme {
         try JSONDecoder().decode(Programming.Programme.self, from: Data(json.utf8))
     }
     let film = try decode(#"{"id":"a","title":"x","display_title":"اول هیکل","display_title_en":" Aval Heykal ","year":1967}"#)
-    try expectEqual(film.latinTitle, "Aval Heykal")
+    try expectEqual(film.secondTitle, "Aval Heykal")
     try expectEqual(film.year, 1967)
-    // No Roman form, no display name, or the same name twice: no second line.
-    try expect(try decode(#"{"id":"b","title":"x","display_title":"دشمن"}"#).latinTitle == nil)
-    try expect(try decode(#"{"id":"c","title":"x","display_title_en":"Orphan"}"#).latinTitle == nil)
-    try expect(try decode(#"{"id":"d","title":"x","display_title":"Arman","display_title_en":"Arman"}"#).latinTitle == nil)
-    try expect(try decode(#"{"id":"e","title":"x","display_title":"دشمن","display_title_en":"  "}"#).latinTitle == nil)
+    // No second form, no display name, or the same name twice: no second line.
+    try expect(try decode(#"{"id":"b","title":"x","display_title":"دشمن"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"c","title":"x","display_title_en":"Orphan"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"d","title":"x","display_title":"Arman","display_title_en":"Arman"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"e","title":"x","display_title":"دشمن","display_title_en":"  "}"#).secondTitle == nil)
     try expect(try decode(#"{"id":"f","title":"x"}"#).year == nil)
+    // A year that is not a number, or a name that is not a string, is dropped, not fatal to the month.
+    let odd = try decode(#"{"id":"g","title":"x","display_title":"دشمن","display_title_en":7,"year":"1970s"}"#)
+    try expect(odd.year == nil && odd.secondTitle == nil)
+
+    func air(_ p: Programming.Programme, nowName: String?) -> OnAir {
+        var a = OnAir(channelId: "iran-film", date: "2026-11-04",
+                      slot: Programming.Slot(start: "00:00", start_minute: 0, minutes: 1440, show: "filmfarsi", programmes: [0]),
+                      rosterIndex: 0, show: Programming.Show(slug: "filmfarsi", name: "Filmfarsi", line: nil, channel: "iran-film"),
+                      programmeId: p.id, programme: p, into: 0, seekTo: 0, startLabel: "00:00", endLabel: "24:00")
+        a.nowName = nowName
+        return a
+    }
+    // The headline is the film's own name: the second line and the guide's isolated pair.
+    let on = air(film, nowName: "اول هیکل")
+    try expectEqual(on.secondTitle, "Aval Heykal")
+    try expectEqual(on.guideLine, "\u{2068}اول هیکل\u{2069} \u{00B7} Aval Heykal")
+    // The show stands in for an untitled programme: no second line under the show's name.
+    let standIn = air(film, nowName: "Filmfarsi")
+    try expect(standIn.secondTitle == nil)
+    try expectEqual(standIn.guideLine, "Filmfarsi")
+    try expectEqual(air(film, nowName: nil).guideLine, "Filmfarsi")
+    // The year shows, unless a name on the strip already carries it.
+    try expectEqual(on.shownYear(headline: "اول هیکل"), "1967")
+    let dated = try decode(#"{"id":"h","title":"x","display_title":"آرایشگاه آفتاب","display_title_en":"Arayeshgah-e Aftab, dir. Naser Taghvai (1977)","year":1977}"#)
+    try expect(air(dated, nowName: "آرایشگاه آفتاب").shownYear(headline: "آرایشگاه آفتاب") == nil, "the Roman name carries the year")
+    let inName = try decode(#"{"id":"i","title":"x","display_title":"Badla (1987)","year":1987}"#)
+    try expect(air(inName, nowName: "Badla (1987)").shownYear(headline: "Badla (1987)") == nil, "the headline carries the year")
 }
 
 let tests: [(String, () throws -> Void)] = [

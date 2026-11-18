@@ -51,14 +51,34 @@ final class RecordedSubtitles {
     /// True when a track was handed over.
     @discardableResult
     func handOff() -> Bool {
+        guard group != nil else { return false }
         // A stored file in a language the manifest lacks (a staged Urdu beside a Stream
-        // programme's English) is not a track AVPlayer holds: nothing to hand over while it is on.
-        guard group != nil, !(current.map { fileCues[$0] != nil } ?? false) else { return false }
+        // programme's English) is not a track AVPlayer holds and the window cannot draw it on a
+        // stream: the window takes the manifest language the viewer would get, without
+        // remembering it, so the corner shows subtitles rather than none.
+        if let current, fileCues[current] != nil {
+            let stored = choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }
+            apply(SubtitleChoice.desired(available: manifestCodes, stored: stored, preferred: Locale.preferredLanguages))
+        }
         if let output, let item { item.remove(output) }
         output = nil
         text = nil
         return true
     }
+
+    /// The window has closed and a screen takes the channel back: the suppressing output goes on
+    /// again, so tvOS stops drawing the track before the screen's own load replaces it.
+    func reclaim() {
+        guard isHandedOff, let item else { return }
+        let legible = AVPlayerItemLegibleOutput()
+        legible.suppressesPlayerRendering = true
+        legible.setDelegate(relay, queue: .main)
+        item.add(legible)
+        output = legible
+    }
+
+    /// The manifest's languages, in order: what AVPlayer can draw itself.
+    private var manifestCodes: [String] { tracks.map(\.code).filter { options[$0] != nil } }
 
     /// True once the track is drawn by AVPlayer rather than this object (`handOff()`).
     var isHandedOff: Bool { group != nil && output == nil }
@@ -106,7 +126,8 @@ final class RecordedSubtitles {
 
     /// The next language, then off, then the first again.
     func cycle() {
-        let codes = tracks.map(\.code)
+        // Handed to AVPlayer (the PiP window over a stream), only what it can draw is offered.
+        let codes = isHandedOff ? manifestCodes : tracks.map(\.code)
         guard !codes.isEmpty else { return }
         let next: String?
         if let current, let index = codes.firstIndex(of: current) {

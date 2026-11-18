@@ -84,7 +84,7 @@ final class NowNextUITests: XCTestCase {
         let name = app.staticTexts.matching(identifier: "stripName").firstMatch
         XCTAssertTrue(name.exists, "the strip carries the name")
         XCTAssertTrue(name.label.contains("اول هیکل"), name.label)
-        let latin = app.staticTexts.matching(identifier: "stripLatinName").firstMatch
+        let latin = app.staticTexts.matching(identifier: "stripSecondName").firstMatch
         XCTAssertTrue(latin.exists && app.frame.intersects(latin.frame), "the Roman form is on the strip")
         XCTAssertEqual(latin.label, "Aval Heykal, with Naser Malek-Motiei")
         XCTAssertGreaterThan(latin.frame.minY, name.frame.minY, "it sits under the Persian name")
@@ -96,8 +96,10 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(guide.waitForExistence(timeout: 10), "right opens the guide")
         kjPause(0.8)
         kjScreenshot("roman-title-guide-grove", app: app)
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Aval Heykal")).firstMatch.exists,
-                      "the guide's line for channel 1 carries the Roman form")
+        // Inside the guide, one line carrying both names: the faded strip's own Roman line cannot pass this.
+        let pair = guide.descendants(matching: .staticText)
+            .containing(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "اول هیکل", "Aval Heykal")).firstMatch
+        XCTAssertTrue(pair.exists, "the guide's line for channel 1 carries both names")
 
         // Negative: an English-only programme has no second line.
         XCUIRemote.shared.press(.menu)
@@ -109,7 +111,7 @@ final class NowNextUITests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any)["transmissionChannel"].label, "2", "channel up reaches channel 2")
         let english = app.staticTexts.matching(identifier: "stripName").firstMatch
         XCTAssertTrue(english.exists && english.label.contains("Test Programme 2"), "channel 2's strip is up: \(english.label)")
-        XCTAssertFalse(app.staticTexts.matching(identifier: "stripLatinName").firstMatch.exists, "no Roman line under an English name")
+        XCTAssertFalse(app.staticTexts.matching(identifier: "stripSecondName").firstMatch.exists, "no Roman line under an English name")
         // The year the record carries is on the detail line (owner, 2026-11-15: country, then year).
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "1965")).firstMatch.exists,
                       "the strip shows the programme's year")

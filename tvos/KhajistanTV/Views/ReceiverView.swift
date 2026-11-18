@@ -44,8 +44,9 @@ struct ReceiverView: View {
         .onChange(of: mediumRaw) { cancelSurf() }
         .onChange(of: model.extendedAtlas) { cancelSurf() }
         .onChange(of: model.receiverPath) { cancelSurf() }
-        // The id restarts the load when the switch moves, so the map follows it.
-        .task(id: model.extendedAtlas) { await load() }
+        // The id restarts the load when the switch moves, so the map follows it, and when the
+        // preview password changes, which decides whether the whole dial is served.
+        .task(id: DialKey(extended: model.extendedAtlas, password: model.auth.previewPassword)) { await load() }
         // Nothing plays until it is chosen (owner, 2026-10-29: "it goes straight to playing a
         // channel, which is not what I want. I need to be able to select a channel and then play
         // it"). Surf is focused at launch, so a channel is still one press away.
@@ -53,6 +54,11 @@ struct ReceiverView: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         // Read again when the index lands: a link that opened the app arrives before it.
         .task(id: PendingLink(link: model.link, indexReady: model.receiver.index != nil)) { follow(model.link) }
+    }
+
+    private struct DialKey: Hashable {
+        let extended: Bool
+        let password: String?
     }
 
     private struct PendingLink: Hashable {
@@ -137,6 +143,12 @@ struct ReceiverView: View {
             // Surf, one count and the switch. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("receiverLiveNow")
+            if let note = model.receiver.signInNote {
+                Text(note).kjBody()
+                    .accessibilityIdentifier("receiverSignInNote")
+            }
             HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
                 .focused($switchFocused)
                 .accessibilityIdentifier("beyondTheAtlas")

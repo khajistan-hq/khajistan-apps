@@ -68,21 +68,52 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// Reach the Receiver's region strip with remote presses, including when focus has moved
-    /// into a channel shelf below it. Never selects or changes the highlighted channel.
-    @discardableResult
-    func kjFocusStrip(_ app: XCUIApplication) -> Bool {
+    /// Reach the Receiver's region list (the A–Z list beside the map, the front's one way to a
+    /// region since 2026-11-17) with remote presses, including when focus has moved into a shelf
+    /// below the front. Never selects. Its rows carry `region-<id>`.
+    func kjFocusRegions(_ app: XCUIApplication) -> Bool {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<10 {
+        for _ in 0..<14 {
             if focused.exists { return true }
             let current = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            let belowStrip = current.exists && !current.identifier.hasPrefix("nav-") && regions.firstMatch.exists
-                && current.frame.midY > regions.firstMatch.frame.midY
-            XCUIRemote.shared.press(belowStrip ? .up : .down)
+            let list = app.descendants(matching: .any).matching(identifier: "regionList").firstMatch
+            if current.exists, current.identifier.hasPrefix("nav-") {
+                XCUIRemote.shared.press(.down)
+            } else if current.exists, list.exists, current.frame.minY > list.frame.maxY {
+                XCUIRemote.shared.press(.up)
+            } else {
+                XCUIRemote.shared.press(.right)
+            }
             kjPause(0.35)
         }
         return focused.exists
+    }
+
+    /// Reach the foot of the front: the Beyond the atlas switch, at the bottom of the sidebar. One
+    /// press down from it lands on the first shelf under the front (Liked, or News).
+    @discardableResult
+    func kjFocusFrontFoot(_ app: XCUIApplication) -> Bool {
+        let toggle = app.buttons["beyondTheAtlas"]
+        guard toggle.waitForExistence(timeout: 30) else { return false }
+        return kjFocus(toggle, app: app)
+    }
+
+    /// Reach one region's row in the list (`indus` for `region-indus`), walking up or down it.
+    @discardableResult
+    func kjFocusRegion(_ app: XCUIApplication, _ id: String) -> Bool {
+        guard kjFocusRegions(app) else { return false }
+        let target = app.buttons["region-\(id)"]
+        let focused = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-' AND hasFocus == true")).firstMatch
+        for _ in 0..<60 {
+            guard target.exists else { return false }
+            if target.hasFocus { return true }
+            // Focus may be mid-move after a press: wait for it to land rather than give up.
+            guard focused.exists else { kjPause(0.3); continue }
+            XCUIRemote.shared.press(target.frame.midY > focused.frame.midY ? .down : .up)
+            kjPause(0.3)
+        }
+        return target.exists && target.hasFocus
     }
 
     /// Presses toward `element` until it has focus, steering by where it sits against the focused

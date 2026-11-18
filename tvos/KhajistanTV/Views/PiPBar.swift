@@ -112,7 +112,6 @@ struct PiPBarHost: ViewModifier {
             // Back with the window up and the bar not lit: the bar. A page's own Back handler
             // sits nearer the focus and comes first; the Receiver front hands it on (ReceiverView).
             .onExitCommand(perform: model.activePiP != nil && focus == nil && PiPBarStack.shared.top == id ? { focus = .fullScreen } : nil)
-            .onChange(of: focus) { _, lit in if PiPBarStack.shared.top == id { model.pipBarFocused = lit != nil } }
     }
 }
 

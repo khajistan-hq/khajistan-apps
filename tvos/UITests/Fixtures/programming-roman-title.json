@@ -52,7 +52,9 @@
    "seconds": 86400,
    "nominal_minutes": 1440,
    "show": "show-2",
-   "channel": 2
+   "channel": 2,
+   "year": 1965,
+   "country": "Pakistan"
   }
  },
  "days": [

@@ -51,7 +51,9 @@ final class RecordedSubtitles {
     /// True when a track was handed over.
     @discardableResult
     func handOff() -> Bool {
-        guard group != nil else { return false }
+        // A stored file in a language the manifest lacks (a staged Urdu beside a Stream
+        // programme's English) is not a track AVPlayer holds: nothing to hand over while it is on.
+        guard group != nil, !(current.map { fileCues[$0] != nil } ?? false) else { return false }
         if let output, let item { item.remove(output) }
         output = nil
         text = nil

@@ -106,7 +106,14 @@ final class NowNextUITests: XCTestCase {
         kjPause(12)
         XCUIRemote.shared.press(.select)
         kjPause(0.8)
+        XCTAssertEqual(app.descendants(matching: .any)["transmissionChannel"].label, "2", "channel up reaches channel 2")
+        let english = app.staticTexts.matching(identifier: "stripName").firstMatch
+        XCTAssertTrue(english.exists && english.label.contains("Test Programme 2"), "channel 2's strip is up: \(english.label)")
         XCTAssertFalse(app.staticTexts.matching(identifier: "stripLatinName").firstMatch.exists, "no Roman line under an English name")
+        // The year the record carries is on the detail line (owner, 2026-11-15: country, then year).
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "1965")).firstMatch.exists,
+                      "the strip shows the programme's year")
+        kjScreenshot("roman-title-english-no-second-line", app: app)
     }
 
     func testMehfilNamesTheChannelAndTheProgramme() {

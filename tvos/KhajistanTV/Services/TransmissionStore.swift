@@ -158,6 +158,13 @@ final class TransmissionStore {
         return StationClock.upcoming(p, channelId: id, at: date, count: count)
     }
 
+    /// What a channel airs from `from` to `to`, programme by programme, for the guide's time grid.
+    /// Empty when no schedule is held or the schedule does not name the channel.
+    func timeline(channel: Int, from: Date, to: Date) -> [GuideSlot] {
+        guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return [] }
+        return StationClock.timeline(p, channelId: id, from: from, to: to)
+    }
+
     /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
     /// it is a day or more away (StationClock.returnLabel).
     func returnLabel(channel: Int, at date: Date) -> String? {

@@ -113,6 +113,60 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
     }
 
+    /// The guide is a time grid (owner, 2026-11-17: "it needs to be showing schedule on an hourly
+    /// basis"): half-hour marks across the top, each channel's programmes as blocks along its row,
+    /// the one on now lit. Right lights the next programme, Left goes back, never before now.
+    /// An off-air channel picked from it no longer strands the viewer: the guide opens over the
+    /// off-air card too (it opened only over a picture, from #79).
+    func testGuideIsATimeGridAndOpensOffAir() {
+        let app = open(channel: 5, skin: "day")
+        kjPause(12)
+        XCUIRemote.shared.press(.left)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "left on the picture opens the guide")
+        kjPause(0.8)
+        kjScreenshot("guide-grid-open", app: app)
+        let lit = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch5-' AND selected == true")).firstMatch
+        XCTAssertTrue(lit.exists, "a programme on channel 5 is lit")
+        let first = lit.label
+        // 12:10 PKT in the fixture: the lit block's times take in now.
+        XCTAssertTrue(first.contains("PKT"), "the block reads its times: \(first)")
+        let blocks = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch5-'"))
+        XCTAssertGreaterThan(blocks.count, 1, "channel 5's row carries more than the programme on now")
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(lit.exists, "a programme stays lit after Right")
+        XCTAssertNotEqual(lit.label, first, "Right lights the next programme")
+        kjScreenshot("guide-grid-right", app: app)
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertEqual(lit.label, first, "Left comes back to the programme on now")
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertEqual(lit.label, first, "Left stops at now")
+        // Channel 6 is off air in the fixture: Down lights it, and its row says so.
+        XCUIRemote.shared.press(.down)
+        kjPause(0.6)
+        XCTAssertTrue(app.descendants(matching: .any)["guide-ch6"].isSelected, "Down lights channel 6")
+        let dark = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch6-' AND selected == true")).firstMatch
+        XCTAssertTrue(dark.exists && dark.label.hasPrefix("Off air"), "channel 6's lit block is off air: \(dark.label)")
+        kjScreenshot("guide-grid-off-air-row", app: app)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Select closes the guide")
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        _ = tuned.waitForExistence(timeout: 10)
+        kjPause(8)
+        // The off-air card: Right still opens the guide, so the viewer can go somewhere on.
+        XCUIRemote.shared.press(.right)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the off-air card opens the guide")
+        kjScreenshot("guide-grid-over-off-air", app: app)
+        XCUIRemote.shared.press(.up)
+        kjPause(0.6)
+        XCTAssertTrue(app.descendants(matching: .any)["guide-ch5"].isSelected, "Up lights channel 5 again")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+    }
+
     private func waitUntilGone(_ element: XCUIElement, _ timeout: TimeInterval) -> Bool {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed

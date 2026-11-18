@@ -211,6 +211,21 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
   When the slot ends the channel hands over to the next strip, as the website's tuneToNow
   does once a minute. Off air is OFF AIR in display type with the return time.
+- **Guide: a time grid** (owner, 2026-11-17: "it needs to be showing schedule on an hourly
+  basis"; the time grid was the owner's choice of three). Left or Right on the bare picture, or
+  the strip's Guide control, raises it from the bottom, on air, off air and while a channel tunes,
+  so an off-air channel never leaves the viewer without it. Channels run down the side (number,
+  mark, name, ● LIVE on the one tuned while something is on it), three hours run across under
+  half-hour marks in PKT, with a short accent bar at now, and each programme is a block as long as
+  it airs: its title and its times on the lift plate, an off-air stretch with no plate and *back at*
+  its return. Over the grid the lit programme reads in full (its title, then the channel and its
+  times), since a short programme's block is too narrow for its name. One block is lit (the focus
+  plate, no lift: a block can be most of the screen wide). Up and Down change channel and keep the
+  moment; Right lights the next programme, as far as twelve hours ahead; Left the one before, never
+  one that has ended. The window moves in half hours to keep the lit programme in view. Select
+  tunes the lit channel, whatever the lit programme's time; Menu closes it. The times come from the
+  station clock itself, asked at each programme's start (StationClock.timeline), so the grid can
+  never disagree with what airs.
 
 ## The Screening Room
 

@@ -2036,6 +2036,115 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
     try expect(wrapped >= 1, "no roster wrapped")
 }
 
+// MARK: - The guide's time grid
+
+/// Every slot of a timeline against the clock itself, aligned on the moment and not on position:
+/// at each sampled second, the slot that contains it names what `onAir` says is on.
+func timelineAgreesWithTheClock(_ p: Programming, channel: String, from: Date, to: Date, every step: TimeInterval) throws -> [GuideSlot] {
+    let slots = StationClock.timeline(p, channelId: channel, from: from, to: to)
+    try expect(!slots.isEmpty, "\(channel): no slots")
+    try expectEqual(slots.first?.start ?? .distantFuture <= from, true)
+    try expect((slots.last?.end ?? .distantPast) >= to, "\(channel): the timeline stops before \(to)")
+    for (a, b) in zip(slots, slots.dropFirst()) {
+        try expect(a.end == b.start, "\(channel): a gap or an overlap at \(a.end) / \(b.start)")
+        try expect(a.start < a.end, "\(channel): an empty slot at \(a.start)")
+    }
+    var t = from
+    var checked = 0
+    while t < to {
+        let air = StationClock.onAir(p, channelId: channel, at: t)
+        let slot = try require(slots.first { $0.contains(t) })
+        // A programme's end falls inside a second; the clock reads whole seconds, so the second
+        // a programme ends in is read as that programme. Only whole-second moments are sampled.
+        if let air {
+            try expectEqual(slot.title, air.nowName ?? air.show?.name ?? "")
+        } else {
+            try expect(slot.isOffAir, "\(channel): \(t) is off air, the grid says \(slot.title ?? "")")
+        }
+        checked += 1
+        t = t.addingTimeInterval(step)
+    }
+    try expect(checked > 10, "only \(checked) moments checked")
+    return slots
+}
+
+func guideTimelineSynthetic() throws {
+    let p = try syntheticSchedule()
+    // 06:00-07:00 runs Zero (600 s), One (270 s), the untitled 300 s one, round again; the strip's
+    // end cuts the last. 07:00-08:00 is Three (60 s) sixty times; dark until 23:00.
+    let slots = try timelineAgreesWithTheClock(p, channel: "transfers", from: pkt(2026, 10, 10, 6, 0), to: pkt(2026, 10, 10, 23, 30), every: 23)
+    try expectEqual(slots.first?.start, pkt(2026, 10, 10, 6, 0))
+    try expectEqual(slots.first?.end, pkt(2026, 10, 10, 6, 10))
+    try expectEqual(slots.first?.title, "Show A")   // no display title: the show's name, as Now prints it
+    try expectEqual(slots[1].end, pkt(2026, 10, 10, 6, 14, 30))
+    // The strip's end cuts the roster: the slot before 07:00 ends at 07:00, and Three opens there.
+    let seven = try require(slots.firstIndex { $0.start == pkt(2026, 10, 10, 7, 0) })
+    try expectEqual(slots[seven].title, "Show B")
+    try expectEqual(slots[seven - 1].end, pkt(2026, 10, 10, 7, 0))
+    // One dark stretch from 08:00 to 23:00, not one per reading.
+    let dark = slots.filter(\.isOffAir)
+    try expectEqual(dark.count, 1)
+    try expectEqual(dark.first?.start, pkt(2026, 10, 10, 8, 0))
+    try expectEqual(dark.first?.end, pkt(2026, 10, 10, 23, 0))
+    // Asked from inside a programme, the first slot starts when the programme did.
+    let mid = StationClock.timeline(p, channelId: "transfers", from: pkt(2026, 10, 10, 6, 5), to: pkt(2026, 10, 10, 6, 20))
+    try expectEqual(mid.first?.start, pkt(2026, 10, 10, 6, 0))
+    // A channel the schedule does not carry that day is one dark stretch to the end asked for.
+    let none = StationClock.timeline(p, channelId: "audio", from: pkt(2026, 10, 10, 9, 0), to: pkt(2026, 10, 10, 12, 0))
+    try expectEqual(none, [GuideSlot(start: pkt(2026, 10, 10, 9, 0), end: pkt(2026, 10, 10, 12, 0), title: nil)])
+    // The cap holds for a schedule that cannot end.
+    try expectEqual(StationClock.timeline(p, channelId: "transfers", from: pkt(2026, 10, 10, 7, 0), to: pkt(2026, 10, 10, 8, 0), limit: 5).count, 5)
+}
+
+func guideTimelineRealMonth() throws {
+    let p = try realProgramming("2026-11")
+    let from = pkt(2026, 11, 14, 22, 0)   // across midnight, where strips run past the day they are filed on
+    for channel in p._meta.channels {
+        _ = try timelineAgreesWithTheClock(p, channel: channel.id, from: from, to: from.addingTimeInterval(12 * 3600), every: 97)
+    }
+}
+
+func guideGridMoves() throws {
+    let s: [GuideSlot] = [
+        GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 20), title: "A"),
+        GuideSlot(start: pkt(2026, 11, 17, 12, 20), end: pkt(2026, 11, 17, 13, 0), title: "B"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 0), end: pkt(2026, 11, 17, 18, 0), title: nil),
+        GuideSlot(start: pkt(2026, 11, 17, 18, 0), end: pkt(2026, 11, 18, 2, 0), title: "C"),
+    ]
+    let now = pkt(2026, 11, 17, 12, 10)
+    var g = GuideGrid(row: 3, now: now)
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    try expectEqual(g.lit(in: s), 0)                      // A is on now
+    try expectEqual(g.marks.count, 6)
+    g.later(on: s); try expectEqual(g.lit(in: s), 1); try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 20))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    g.later(on: s); try expectEqual(g.lit(in: s), 2)      // the dark stretch is a block too
+    g.later(on: s); try expectEqual(g.lit(in: s), 3)
+    // 18:00 is past the window's last half hour: the window follows in half hours.
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 16, 0))
+    try expect(g.cursor < g.windowEnd.addingTimeInterval(-GuideGrid.step), "the lit start is not in view")
+    g.later(on: s); try expectEqual(g.lit(in: s), 3)      // nothing after C: Right stays
+    g.earlier(on: s); try expectEqual(g.lit(in: s), 2); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 13, 0))
+    g.earlier(on: s); g.earlier(on: s); try expectEqual(g.lit(in: s), 0)
+    // Never before now: A began at 11:00, the cursor and the window stay at now's half hour.
+    try expectEqual(g.cursor, now); try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    g.earlier(on: s); try expectEqual(g.cursor, now)
+    // Up and Down keep the moment and go round the list.
+    g.move(rows: 1, count: 4); try expectEqual(g.row, 0)
+    g.move(rows: -1, count: 4); try expectEqual(g.row, 3)
+    g.move(rows: 1, count: 0); try expectEqual(g.row, 3)
+    // Right stops at the horizon: a programme twelve hours or more away is not lit.
+    let far = [GuideSlot(start: now.addingTimeInterval(-60), end: now.addingTimeInterval(13 * 3600), title: nil),
+               GuideSlot(start: now.addingTimeInterval(13 * 3600), end: now.addingTimeInterval(14 * 3600), title: "Late")]
+    var h = GuideGrid(row: 0, now: now)
+    h.later(on: far); try expectEqual(h.lit(in: far), 0)
+    // A row with nothing lights nothing, and Right and Left do not move.
+    var e = GuideGrid(row: 0, now: now)
+    try expectEqual(e.lit(in: []), nil)
+    e.later(on: []); e.earlier(on: []); try expectEqual(e.cursor, now)
+}
+
 // MARK: - Real files
 
 var realProgrammingCache: [String: Programming] = [:]
@@ -5241,6 +5350,9 @@ let tests: [(String, () throws -> Void)] = [
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("Guide timeline: the clock's answer, end to end", guideTimelineSynthetic),
+    ("Guide timeline: a real month across midnight", guideTimelineRealMonth),
+    ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),
     ("Now and next: the next programme", nextProgrammeRule),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),

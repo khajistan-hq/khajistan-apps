@@ -45,6 +45,18 @@ struct ScheduleStrip: Equatable, Sendable {
     var endLabel: String { StationClock.endLabel(slot) }
 }
 
+/// One block of the guide's time grid: a programme from its start to its end, or a stretch the
+/// channel is off air (no title).
+struct GuideSlot: Hashable, Sendable {
+    let start: Date
+    let end: Date
+    /// The programme's title as every surface prints it (OnAir.nowName); nil while off air.
+    let title: String?
+
+    var isOffAir: Bool { title == nil }
+    func contains(_ moment: Date) -> Bool { start <= moment && moment < end }
+}
+
 /// The one answer to "what is on Khajistan TV right now", ported from kj-station-clock.js.
 ///
 /// A SIGNAL COMES FROM SOMEWHERE: every reading is taken in Pakistan Standard Time (UTC+5, no
@@ -582,6 +594,55 @@ enum StationClock {
         let dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
         return era * 146_097 + dayOfEra - 719_468
     }
+
+    // MARK: The guide's time grid
+
+    /// The moment `second` seconds into station day `iso` (station time is UTC+5).
+    static func date(iso: String, second: Double) -> Date? {
+        dayNumber(iso).map { Date(timeIntervalSince1970: Double($0) * daySeconds + second - Double(utcOffsetMinutes * 60)) }
+    }
+
+    /// What a channel airs from `from` to `to`, programme by programme, and the stretches it is
+    /// off air, end to end, for the guide's time grid (owner, 2026-11-17: "showing schedule on an
+    /// hourly basis"). Each programme is asked of `onAir` at its own start, so the grid keeps every
+    /// rule the player keeps: a roster that runs round, a strip past midnight, a strip's end
+    /// cutting its last programme. A programme under a second is stepped over. `limit` caps the
+    /// walk for a schedule that cannot end.
+    static func timeline(_ p: Programming, channelId: String, from: Date, to: Date, limit: Int = 400) -> [GuideSlot] {
+        var out: [GuideSlot] = []
+        var at = from
+        while at < to, out.count < limit {
+            let whole = at.timeIntervalSince1970.rounded(.down)
+            if let air = onAir(p, channelId: channelId, at: at) {
+                var start = Date(timeIntervalSince1970: whole - air.into)
+                // A programme starts where the one before ended: the clock places both from whole
+                // seconds and fractional lengths, and they can disagree inside a second.
+                if let last = out.last, abs(last.end.timeIntervalSince(start)) < 1 { start = last.end }
+                var end = start.addingTimeInterval(runSeconds(air.programme))
+                if let slotEnd = date(iso: air.date, second: air.slot.endSecond), slotEnd < end { end = slotEnd }
+                // The clock reads whole seconds: a programme ending inside this second is over.
+                end = max(end, Date(timeIntervalSince1970: whole + 1))
+                out.append(GuideSlot(start: start, end: end, title: air.nowName ?? air.show?.name ?? ""))
+                at = Date(timeIntervalSince1970: end.timeIntervalSince1970.rounded(.up))
+            } else {
+                let now = stationNow(at)
+                var end = to
+                if let next = nextSlot(p, channel: channelId, iso: now.iso, minute: now.minutes, second: Double(now.seconds)),
+                   let ahead = secondsAhead(next, iso: now.iso, second: Double(now.seconds)) {
+                    end = min(to, Date(timeIntervalSince1970: whole + max(1, ahead)))
+                }
+                end = max(end, Date(timeIntervalSince1970: whole + 1))
+                // One stretch off air, however many readings it took to cross.
+                if let last = out.last, last.isOffAir, last.end >= at {
+                    out[out.count - 1] = GuideSlot(start: last.start, end: end, title: nil)
+                } else {
+                    out.append(GuideSlot(start: at, end: end, title: nil))
+                }
+                at = end
+            }
+        }
+        return out
+    }
 }
 
 /// The server's time, not the device's (2026-11-10, ported from kj-station-clock.js). A device
@@ -645,5 +706,89 @@ enum ServerClock {
         if let read = await task.value { return read }
         lock.withLock { if reading == task { reading = nil } }   // a failed reading is not kept
         return currentSkew
+    }
+}
+
+/// Where the guide's time grid stands, and how the remote moves it (owner, 2026-11-17: "showing
+/// schedule on an hourly basis"). Channels run down the side and time across, three hours at a
+/// time. One programme is lit: Up and Down change the channel and keep the moment, Right lights
+/// the next programme on the channel and Left the one before, never one that has already ended.
+/// The window moves in half hours, enough to keep the lit programme's start in view, and never
+/// starts before the half hour now is in.
+struct GuideGrid: Equatable, Sendable {
+    /// Three hours across the screen.
+    static let span: TimeInterval = 3 * 3600
+    /// The window moves by half hours, the marks along its top.
+    static let step: TimeInterval = 30 * 60
+    /// How far ahead Right reaches.
+    static let horizon: TimeInterval = 12 * 3600
+
+    /// The lit channel, an index into the guide's channel list.
+    var row: Int
+    /// The lit moment: now, or the start of a later programme.
+    var cursor: Date
+    /// The left edge of the three hours on screen.
+    var windowStart: Date
+    let now: Date
+
+    init(row: Int, now: Date) {
+        self.row = row
+        self.now = now
+        cursor = now
+        windowStart = Self.halfHour(now)
+    }
+
+    var windowEnd: Date { windowStart.addingTimeInterval(Self.span) }
+    var horizonEnd: Date { now.addingTimeInterval(Self.horizon) }
+
+    /// The half hour a moment falls in. Station time is UTC+5, a whole number of hours, so the
+    /// half hours fall at the same instants in station time as in UTC.
+    static func halfHour(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 / step).rounded(.down) * step)
+    }
+
+    /// The lit programme on a channel's row: the one airing at the lit moment, else the first
+    /// after it. Nil for a row with nothing at or after it.
+    func lit(in slots: [GuideSlot]) -> Int? {
+        slots.firstIndex { $0.contains(cursor) } ?? slots.firstIndex { $0.start >= cursor }
+    }
+
+    /// Right: the next programme on the lit channel, within the horizon.
+    mutating func later(on slots: [GuideSlot]) {
+        guard let index = lit(in: slots), index + 1 < slots.count else { return }
+        let next = slots[index + 1]
+        guard next.start < horizonEnd else { return }
+        cursor = max(next.start, now)
+        follow()
+    }
+
+    /// Left: the programme before, never earlier than now.
+    mutating func earlier(on slots: [GuideSlot]) {
+        if let index = lit(in: slots), index > 0, slots[index - 1].end > now {
+            cursor = max(slots[index - 1].start, now)
+        } else {
+            cursor = now
+        }
+        follow()
+    }
+
+    /// Up and Down: the channel before or after, round the list. The moment stays.
+    mutating func move(rows step: Int, count: Int) {
+        guard count > 0 else { return }
+        row = ((row + step) % count + count) % count
+    }
+
+    /// Moves the window by half hours until the lit moment sits in it with half an hour to spare
+    /// on the right, and never before the half hour now is in.
+    mutating func follow() {
+        let first = Self.halfHour(now)
+        while cursor >= windowEnd.addingTimeInterval(-Self.step) { windowStart.addTimeInterval(Self.step) }
+        while cursor < windowStart, windowStart > first { windowStart.addTimeInterval(-Self.step) }
+        if windowStart < first { windowStart = first }
+    }
+
+    /// The half-hour marks along the window's top.
+    var marks: [Date] {
+        stride(from: 0, to: Self.span, by: Self.step).map { windowStart.addingTimeInterval($0) }
     }
 }

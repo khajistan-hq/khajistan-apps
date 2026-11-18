@@ -113,7 +113,7 @@ final class AppModel {
     init() {
         let auth = AuthStore()
         self.auth = auth
-        self.receiver = ReceiverStore()
+        self.receiver = ReceiverStore { [weak auth] in auth?.previewPassword }
         self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
         // The station clock's server reading starts now, alongside everything else launch fetches.
@@ -161,6 +161,7 @@ final class AppModel {
         }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
+            self?.receiver.credentialDidChange()
             self?.invalidateTransmissionAccess()
         }
         observeTransmissionAccess()

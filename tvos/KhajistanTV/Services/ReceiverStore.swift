@@ -36,12 +36,25 @@ final class ReceiverStore {
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
+    /// The preview password the dial on hand was read for; whether the site took it; and the one
+    /// it refused, which is not sent again until it changes (a repeated wrong password locks the
+    /// site's sign-in for everyone on this network).
+    @ObservationIgnored private var dialPassword: String?
+    @ObservationIgnored private var signedIn = false
+    @ObservationIgnored private var refused: String?
     private let urlSession: URLSession
+    /// The preview password, read when the index loads.
+    private let previewPassword: @MainActor () -> String?
 
     /// How long a fetched index or set of feeds is trusted before the next look.
     private static let staleAfter: TimeInterval = 600
 
-    init() {
+    /// The site serves the whole dial only to a request that carries its password cookie, and
+    /// the confirmed broadcaster streams alone to every other (owner, 2026-11-16; _worker.js
+    /// holdsSitePassword). With a preview password set, the index is asked for through the site's
+    /// own sign-in, POST /gate, which sets that cookie in this session for every later request.
+    init(previewPassword: @escaping @MainActor () -> String? = { nil }) {
+        self.previewPassword = previewPassword
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 25
         config.timeoutIntervalForResource = 30
@@ -56,12 +69,23 @@ final class ReceiverStore {
 
     func loadIndex() async {
         guard !isLoading else { return }
+        let password = previewPassword()
+        if password != dialPassword {
+            credentialDidChange()
+            dialPassword = password
+        }
         if index != nil, let at = indexFetchedAt, Date().timeIntervalSince(at) < Self.staleAfter { return }
         isLoading = true
         defer { isLoading = false }
         if index == nil { indexError = nil }
         do {
-            let (data, response) = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            var reply: (Data, URLResponse)?
+            if let password, !signedIn, password != refused { reply = await gate(password) }
+            if reply == nil {
+                reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            }
+            guard let reply else { throw ReceiverStoreError.unreadable }
+            let (data, response) = reply
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw ReceiverStoreError.http(code) }
             let decoded: ReceiverIndex
@@ -81,6 +105,42 @@ final class ReceiverStore {
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
+    }
+
+    /// Signs in with the preview password and answers with the index the signed-in session is
+    /// served. POST /gate redirects to `next` with the cookie set, so the redirect is the index.
+    /// Nil when the password was refused, the sign-in was throttled or did not answer: the caller
+    /// then reads the public index, and the next load tries again.
+    private func gate(_ password: String) async -> (Data, URLResponse)? {
+        var request = URLRequest(url: KJConfig.site.appendingPathComponent("gate"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let indexPath = Self.dataURL("receiver-index.json").path
+        let field = { (value: String) in value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
+        request.httpBody = Data("password=\(field(password))&next=\(field(indexPath))".utf8)
+        guard let reply = try? await urlSession.data(for: request) else { return nil }
+        let code = (reply.1 as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200, reply.1.url?.path == indexPath, hasSiteCookie else {
+            // A refusal lands on the sign-in page; a throttle (429) or outage (503) is tried later.
+            if code == 200 { refused = password }
+            return nil
+        }
+        signedIn = true
+        return reply
+    }
+
+    private var hasSiteCookie: Bool {
+        urlSession.configuration.httpCookieStorage?.cookies(for: KJConfig.site)?.contains { $0.name == "kj_gate" } == true
+    }
+
+    /// A new or removed preview password: the site cookie goes, and the dial is read again.
+    func credentialDidChange() {
+        let storage = urlSession.configuration.httpCookieStorage
+        storage?.cookies(for: KJConfig.site)?.forEach { storage?.deleteCookie($0) }
+        signedIn = false
+        indexFetchedAt = nil
+        controlsFetchedAt = nil
+        shards.removeAll()
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera

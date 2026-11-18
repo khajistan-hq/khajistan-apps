@@ -65,8 +65,8 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertNotEqual(app.state, .runningForeground, "Back from the atlas, with nothing behind it, leaves the app")
     }
 
-    /// The focus helper must also recover after the remote has moved below the region strip.
-    func testRegionStripCanBeReachedFromTheShelfBelow() {
+    /// The focus helper must also recover after the remote has moved below the region list.
+    func testRegionListCanBeReachedFromTheShelfBelow() {
         let app = XCUIApplication()
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
@@ -76,10 +76,10 @@ final class BackToAtlasUITests: XCTestCase {
             XCUIRemote.shared.press(.down)
             kjPause(0.35)
         }
-        XCTAssertTrue(genre.exists, "start on a channel shelf below the region strip")
-        XCTAssertTrue(kjFocusStrip(app), "focus must return upward to the region strip")
+        XCTAssertTrue(genre.exists, "start on a channel shelf below the front")
+        XCTAssertTrue(kjFocusRegions(app), "focus must return upward to the region list")
         XCTAssertTrue(regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists,
-                      "an actual region card must have focus")
+                      "an actual region row must have focus")
     }
 
     /// Back pressed in the top bar while a region is open pops to the map. The top bar sits
@@ -90,8 +90,8 @@ final class BackToAtlasUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        XCTAssertTrue(focused.exists, "a region must take focus in the strip")
+        XCTAssertTrue(kjFocusRegions(app), "focus must reach the region list")
+        XCTAssertTrue(focused.exists, "a region must take focus in the list")
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 5), "the region page must replace the map")
         for _ in 0..<8 { XCUIRemote.shared.press(.up) }

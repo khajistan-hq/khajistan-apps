@@ -1,8 +1,10 @@
 import SwiftUI
 
-/// The receiver's front, and the front is the map. At left, what the receiver is and how much is
-/// on air; at right, the regions to open. The switch under the figures widens the map beyond the
-/// atlas.
+/// The receiver's front, and the front is the map. At left, Surf, how much is on air and the switch
+/// that widens the map beyond the atlas; at right, the regions A to Z. The shelves follow under it.
+/// Simplified on 2026-11-17 (owner, "simplify home page", choices made that day): no RECEIVER title,
+/// as the top bar names the section; one row of Surf choices; the regions once as a list, with the
+/// map lit for the name focused, where the picture strip under the map repeated them a third time.
 struct ReceiverView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -16,11 +18,11 @@ struct ReceiverView: View {
     @State private var surfTask: Task<Void, Never>?
     @State private var surfRevision = 0
     @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
-    @AppStorage(SurfGenre.key) private var genreRaw = SurfGenre.any.rawValue
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
-    /// Once per launch: coming back from a region keeps the focus on the region.
+    /// The switch at the foot of the sidebar, where Up from the first shelf lands.
+    @FocusState private var switchFocused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -40,7 +42,6 @@ struct ReceiverView: View {
         }
         .onDisappear { cancelSurf() }
         .onChange(of: mediumRaw) { cancelSurf() }
-        .onChange(of: genreRaw) { cancelSurf() }
         .onChange(of: model.extendedAtlas) { cancelSurf() }
         .onChange(of: model.receiverPath) { cancelSurf() }
         // The id restarts the load when the switch moves, so the map follows it, and when the
@@ -84,23 +85,19 @@ struct ReceiverView: View {
     @ViewBuilder
     private var content: some View {
         if let index = model.receiver.index {
-            // The page scrolls. First the front, the sidebar beside the map and its strip; then
-            // the shelves, full width, as the TV app lays its rows. A press down from the strip
+            // The page scrolls. First the front, the sidebar beside the map and the list; then
+            // the shelves, full width, as the TV app lays its rows. A press down from the front
             // scrolls to them (owner, 2026-10-06: they "should expand into their contents on
             // home page", and "behave like apple tv native films/tv app").
             ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 12) {
-                    // Two bands, owner 2026-10-29 ("symmetrically ... make the map bigger"): the
-                    // sidebar beside the map, then the region cards across the full width, on
-                    // the same grid as the shelves under them.
                     VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
-                               // Focus on the strip: the strip at the foot of the screen and the
-                               // map above it, so the region it lights is in view, never a sliver
-                               // of the map under the top bar.
-                               stripFocused: { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.stripAnchor, anchor: .bottom) } })
+                               // Focus in the list: the page back at its top, so the map the list
+                               // lights is whole, never a sliver under the top bar.
+                               listFocused: { toTop(proxy) })
                         .padding(.bottom, 12)
                     // In a stack of their own with no spacing: a front with no likes has no gap
                     // where the shelf would be. The shelf brings its own 12 points above it.
@@ -115,14 +112,20 @@ struct ReceiverView: View {
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
                 .padding(.bottom, KJLayout.inset)
+                // On the page's whole content, padding included: scrolled to, the page sits
+                // exactly as it opened, with no step of the top padding.
+                .id(AtlasPanel.topAnchor)
             }
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
+            // Up from the first shelf lands on the switch, and Back lands on Surf: the page back
+            // at its top for either, as for the list, so the front is never left half under the bar.
+            .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
             .defaultFocus($surfFocused, true)
-            // Back from deep in the front (a shelf, the strip) goes to Surf first; Back from
+            // Back from deep in the front (a shelf, the list) goes to Surf first; Back from
             // Surf leaves the app, as tvOS does from a root screen.
             .onExitCommand(perform: surfFocused ? nil : { surfFocused = true })
         } else if let message = model.receiver.indexError {
@@ -136,10 +139,8 @@ struct ReceiverView: View {
 
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            // Less to read (owner, 2026-10-29: "simplified its too much text"): the name, Surf,
-            // one count and the switch. The pictures are under the map.
-            Text("Receiver")
-                .kjDisplay()
+            // Less to read (owner, 2026-10-29: "simplified its too much text", and 2026-11-17):
+            // Surf, one count and the switch. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
                 .accessibilityElement(children: .combine)
@@ -148,14 +149,18 @@ struct ReceiverView: View {
                 Text(note).kjBody()
                     .accessibilityIdentifier("receiverSignInNote")
             }
-            HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: extendedBinding)
+            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
+                .focused($switchFocused)
                 .accessibilityIdentifier("beyondTheAtlas")
                 // The plate's padding is pulled back so the switch sits on the page margin.
                 .padding(.leading, -26)
         }
-        // The strip runs under it now, so a press up from the strip reaches the switch.
         .frame(width: 520, alignment: .leading)
         .focusSection()
+    }
+
+    private func toTop(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(AtlasPanel.topAnchor, anchor: .top) }
     }
 
     private func figure(_ count: Int?) -> String {
@@ -188,7 +193,7 @@ struct ReceiverView: View {
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
-            // The top bar and the strip each claim the first focus; this one is placed last.
+            // The top bar and the list each claim the first focus; this one is placed last.
             .task {
                 guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
                 model.surfFocusedOnce = true
@@ -199,15 +204,26 @@ struct ReceiverView: View {
             .disabled(shuffling || model.receiver.index == nil)
             // The plate's padding is pulled back so the label sits on the page margin.
             .padding(.leading, -26)
-            chips(ShuffleMedium.allCases.map { ($0.rawValue, $0.label) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
-            chips(SurfGenre.allCases.map { ($0.rawValue, $0.label) }, current: genreRaw, id: "surf-genre") { genreRaw = $0 }
+            // One row (owner, 2026-11-17). The genre row went: Music and Film & drama are shelves
+            // under the front, and their player surfs that genre with up and down.
+            chips(ShuffleMedium.allCases.map { ($0.rawValue, Self.shortLabel($0)) }, current: mediumRaw, id: "shuffle-medium") { mediumRaw = $0 }
             if let surfNote { Text(surfNote).kjSmall(faint: true) }
         }
     }
 
     private var medium: ShuffleMedium { .stored(mediumRaw) }
-    private var genre: SurfGenre { .stored(genreRaw) }
-    private var choiceNow: SurfChoice { SurfChoice(medium: medium, scope: scope, genre: genre) }
+    /// Any genre, always: a genre kept on the device from the old genre row has no chip left to
+    /// show it, and must not narrow Surf unseen.
+    private var choiceNow: SurfChoice { SurfChoice(medium: medium, scope: scope, genre: .any) }
+
+    /// The chips' words on the front: TV and Radio, as the row says only the one thing.
+    private static func shortLabel(_ medium: ShuffleMedium) -> String {
+        switch medium {
+        case .all: return "All"
+        case .tv: return "TV"
+        case .radio: return "Radio"
+        }
+    }
 
     /// Surf follows the Beyond the atlas switch: the atlas when it is off, everywhere when it is on.
     /// One control for both (owner, 2026-10-29), where the front had a switch and a row of chips.
@@ -339,7 +355,7 @@ struct ReceiverView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Opens a region from the strip. The region is the index's own line for it; a map shape the
+    /// Opens a region from the list. The region is the index's own line for it; a map shape the
     /// index has no line for is still opened, as what the map says it is.
     private func open(_ mapRegion: MapRegion) {
         guard let index = model.receiver.index else { return }
@@ -385,10 +401,9 @@ struct ReceiverView: View {
     }
 }
 
-/// The map and the strip of regions under it, with the strip's focus. Kept in a view of its own
-/// so a step along the strip re-evaluates only this, not the whole front with its shelves of
-/// cards (2026-10-06: every step re-evaluated the page, measured as late frames on the owner's
-/// Apple TV HD).
+/// The map and the A–Z list of regions beside it, with the list's focus. Kept in a view of its own
+/// so a step along the list re-evaluates only this, not the whole front with its shelves of cards
+/// (2026-10-06: every step re-evaluated the page, measured as late frames on the owner's Apple TV HD).
 private struct AtlasPanel: View {
     let composed: ComposedMap?
     let mapError: String?
@@ -396,35 +411,30 @@ private struct AtlasPanel: View {
     let open: (MapRegion) -> Void
     /// The sidebar, beside the map.
     let leading: AnyView
-    /// Called as focus comes onto the region strip from elsewhere.
-    var stripFocused: () -> Void = {}
-    static let stripAnchor = "atlasStrip"
+    /// Called as focus comes into the region list from elsewhere.
+    var listFocused: () -> Void = {}
+    static let topAnchor = "atlasTop"
     @Environment(AppModel.self) private var model
-    @FocusState private var focusedRegion: String?
-    /// The region lit in the A–Z list at the right of the map. Its own focus state: the strip and
-    /// the list both carry every region, and one value bound to both is ambiguous.
+    /// The region lit in the A–Z list. The map lights the same region.
     @FocusState private var listedRegion: String?
-    /// Up to three television channels per region, by region id: the card shows the first whose
-    /// still has come.
-    @State private var picks: [String: [Channel]] = [:]
-    /// The picks west to east: what the front asks stills for.
-    @State private var wanted: [Channel] = []
 
     var body: some View {
         Group {
             if let mapError {
                 HStack(alignment: .center, spacing: 40) { leading; failure(mapError) }
             } else if let composed {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .center, spacing: 40) {
-                        leading
-                        RegionMapView(map: composed, highlighted: listedRegion ?? focusedRegion)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: Self.mapHeight)
-                        regionList(composed)
-                    }
-
-                    regionStrip(composed).id(Self.stripAnchor)
+                // One top line: Surf level with the list's heading, the map's band beside them.
+                HStack(alignment: .top, spacing: 40) {
+                    leading
+                    RegionMapView(map: composed, highlighted: listedRegion)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: Self.mapHeight)
+                        // For the UI tests: the region the map lights, read as the map's value.
+                        .accessibilityElement()
+                        .accessibilityLabel("Map")
+                        .accessibilityValue(composed.regions.first { $0.id == listedRegion }?.label ?? "")
+                        .accessibilityIdentifier("atlasMap")
+                    regionList(composed)
                 }
                 // Room for a focused plate's lift at the top edge.
                 .padding(.top, 8)
@@ -438,22 +448,20 @@ private struct AtlasPanel: View {
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .focusSection()
-        .defaultFocus($focusedRegion, "indus")
-        .onChange(of: focusedRegion == nil) { _, left in if !left { stripFocused() } }
-        // Back from a region page starts a fresh share and asks again for what was wanted.
-        .onAppear { model.stills.beginVisit(); model.stills.want(wanted) }
+        .onChange(of: listedRegion == nil) { _, left in if !left { listFocused() } }
+        // Each visit to the front starts a fresh share of stills for the shelves under it.
+        .onAppear { model.stills.beginVisit() }
         .onDisappear { model.stills.endVisit() }
         #if DEBUG
-        // `-kjautowalk YES` steps focus along the region strip, for measuring on a device with
-        // no one at the remote (FrameMeter prints how many frames come late meanwhile).
+        // `-kjautowalk YES` steps focus down the region list and back, for measuring on a device
+        // with no one at the remote (FrameMeter prints how many frames come late meanwhile).
         .task(id: composed == nil) {
             guard UserDefaults.standard.bool(forKey: "kjautowalk"), let composed else { return }
-            let ids = composed.regions.filter(\.opensChannels)
-                .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }.map(\.id)
+            let ids = Self.listed(composed).map(\.id)
             try? await Task.sleep(for: .seconds(4))
             print("KJWALK start")
             for id in ids + ids.reversed() {
-                focusedRegion = id
+                listedRegion = id
                 try? await Task.sleep(for: .milliseconds(300))
             }
             print("KJWALK end")
@@ -461,49 +469,21 @@ private struct AtlasPanel: View {
         #endif
     }
 
-    /// Every region that opens channels, west to east by where it sits on the map, so a press
-    /// right on the remote moves east across the map. Focus here is what the map highlights.
-    /// Each is a picture card (owner, 2026-10-29: "visual hook like the posters of screening room"):
-    /// the region's name over a still of one of its television channels, taken on this device as
-    /// the region page takes them. A region with no still yet, or no television, shows its name.
-    private func regionStrip(_ map: ComposedMap) -> some View {
-        let regions = map.regions
+    /// Every region that opens channels, A to Z.
+    private static func listed(_ map: ComposedMap) -> [MapRegion] {
+        map.regions
             .filter(\.opensChannels)
-            .sorted { ($0.centroid.x, $0.centroid.y) < ($1.centroid.x, $1.centroid.y) }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            // The shelves' grid: their card size and spacing, so the columns line up.
-            LazyHStack(spacing: 32) {
-                ForEach(regions) { region in
-                    Button {
-                        open(region)
-                    } label: {
-                        PictureCard(title: region.label,
-                                    still: (picks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
-                                    width: Self.cardWidth, height: Self.cardHeight)
-                    }
-                    .buttonStyle(HouseCardStyle())
-                    .focused($focusedRegion, equals: region.id)
-                    .accessibilityIdentifier("region-\(region.id)")
-                    .accessibilityLabel(region.label)
-                }
-            }
-            .padding(.vertical, 40)
-        }
-        .scrollClipDisabled()
-        .frame(height: Self.cardHeight + 80)
-        .task(id: regions.map(\.id)) { await pick(regions) }
+            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
     }
 
     /// Every region that opens channels, A to Z, at the right of the map (Joey, 2026-11-02: "a
     /// list on the right side of the screen that when you scroll down and highlight it,
     /// highlights that particular region"). A name lit here lights its shape on the map; Select
-    /// opens the region's page, its television and its radio on shelves of their own.
-    /// It repeats the picture strip under the map on purpose: asked whether to drop the strip, the
-    /// owner chose to keep both (2026-11-03).
+    /// opens the region's page, its television and its radio on shelves of their own. It is the
+    /// front's one way to a region (owner, 2026-11-17): the picture strip that ran under the map
+    /// went, and the region page carries the pictures.
     private func regionList(_ map: ComposedMap) -> some View {
-        let regions = map.regions
-            .filter(\.opensChannels)
-            .sorted { $0.label.localizedCaseInsensitiveCompare($1.label) == .orderedAscending }
+        let regions = Self.listed(map)
         return VStack(alignment: .leading, spacing: 8) {
             Kicker("Regions A\u{2013}Z")
             ScrollView(.vertical, showsIndicators: false) {
@@ -522,9 +502,11 @@ private struct AtlasPanel: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                        // 50 points a row: the atlas's twelve regions fit the map's band whole,
+                        // with no last row cut flat at its foot (2026-11-17).
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
                         .focused($listedRegion, equals: region.id)
-                        .accessibilityIdentifier("regionList-\(region.id)")
+                        .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.label)
                         .accessibilityValue(region.live.map { "\($0) live" } ?? "")
                     }
@@ -536,37 +518,12 @@ private struct AtlasPanel: View {
         }
         .frame(width: Self.listWidth, height: Self.mapHeight, alignment: .topLeading)
         .focusSection()
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("regionList")
     }
 
     static let listWidth: CGFloat = 320
-    static let cardWidth = ChannelCard.width
-    static let cardHeight = ChannelCard.height
-    /// Was 520 beside a 560-point sidebar, with the strip under the map only.
     static let mapHeight: CGFloat = 640
-
-    /// One television channel per region, west to east, and the stills for them. The lists are the
-    /// region shards the region page reads, so opening a region afterwards reads nothing new.
-    private func pick(_ regions: [MapRegion]) async {
-        for region in regions where picks[region.id] == nil {
-            guard !Task.isCancelled else { return }
-            let channels = (try? await model.receiver.channels(regionId: region.id, cameras: false)) ?? []
-            picks[region.id] = Array(channels.filter { $0.mediaType == "tv" }.prefix(6))
-        }
-        // First choices, then a spare only for a region whose card is still a plate (a black frame
-        // or a dead stream), so no still is spent on a region that already has a picture.
-        for rank in 0..<6 {
-            guard !Task.isCancelled else { return }
-            let lacking = regions.filter { region in
-                !(picks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
-            }
-            wanted = lacking.compactMap { picks[$0.id]?.dropFirst(rank).first }
-            if wanted.isEmpty { return }
-            model.stills.want(wanted)
-            // The plan takes one still every 1.5 s at most and gives each up to 10 s.
-            try? await Task.sleep(for: .seconds(Double(wanted.count) * 4))
-        }
-    }
 }
 
 /// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
@@ -605,8 +562,8 @@ private struct GenreShelves: View {
     ]
     /// A kind with fewer channels than this is not a shelf yet.
     private static let fewest = 3
-    /// The shelves whose first cards get live stills, and how many each. The region cards above
-    /// take their share first; 24 a visit in all (StillPlan).
+    /// The shelves whose first cards get live stills, and how many each. Liked takes its share
+    /// first; 24 a visit in all (StillPlan).
     private static let pictured: [String] = ["news", "music"]
     private static let picturedCards = 4
 

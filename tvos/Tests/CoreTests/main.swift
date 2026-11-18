@@ -838,7 +838,7 @@ func authRequests() throws {
 
     let logout = AuthAPI.logoutRequest(accessToken: "AT")
     try expectEqual(logout.httpMethod, "POST")
-    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout")
+    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout?scope=local")
     try expectEqual(logout.value(forHTTPHeaderField: "Authorization"), "Bearer AT")
     try expectEqual(logout.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
     try expectEqual(logout.value(forHTTPHeaderField: "Content-Type"), "application/json")

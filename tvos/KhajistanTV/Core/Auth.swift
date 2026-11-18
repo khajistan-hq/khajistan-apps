@@ -52,7 +52,7 @@ enum AuthAPI {
     }
 
     static func logoutRequest(accessToken: String) -> URLRequest {
-        post("/auth/v1/logout", bearer: accessToken, body: nil)
+        post("/auth/v1/logout?scope=local", bearer: accessToken, body: nil)
     }
 
     // MARK: - Two-step sign-in (kj-mfa.js on the site)

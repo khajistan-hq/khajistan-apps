@@ -142,6 +142,8 @@ struct ReceiverView: View {
                 .kjDisplay()
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("receiverLiveNow")
             if let note = model.receiver.signInNote {
                 Text(note).kjBody()
                     .accessibilityIdentifier("receiverSignInNote")

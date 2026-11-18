@@ -64,6 +64,9 @@ struct Programming: Decodable, Sendable {
                   let en = display_title_en?.trimmingCharacters(in: .whitespacesAndNewlines), !en.isEmpty, en != shown else { return nil }
             return en
         }
+
+        /// "Part 4 of 5": the tape or part number, moved off the title (owner, 2026-11-16).
+        var part: String? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -109,7 +112,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title, display_title_en, year
+        case display_title, display_title_en, year, part
     }
 
     init(from decoder: Decoder) throws {
@@ -132,6 +135,8 @@ extension Programming.Programme {
         subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
         display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
         display_title_en = try values.decodeIfPresent(String.self, forKey: .display_title_en)
-        year = try values.decodeIfPresent(Int.self, forKey: .year)
+        // Lenient, like `title`: a wrong type on one record must not lose the whole month.
+        year = try? values.decodeIfPresent(Int.self, forKey: .year)
+        part = try? values.decodeIfPresent(String.self, forKey: .part)
     }
 }

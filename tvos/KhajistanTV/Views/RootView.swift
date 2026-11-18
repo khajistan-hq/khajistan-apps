@@ -150,7 +150,8 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         switch model.section {
-        case .receiver: ReceiverView()
+        // Drawn afresh when the dial changes kind, so no shelf keeps the other dial's channels.
+        case .receiver: ReceiverView().id(model.receiver.dialID)
         case .transmission: TransmissionView()
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()

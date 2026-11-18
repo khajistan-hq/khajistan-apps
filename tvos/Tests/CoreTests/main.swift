@@ -563,6 +563,24 @@ func carrierURLEncodesTheStreamID() throws {
     try expect(ReceiverRules.carrierURL(streamID: "station+1&x=#fragment").absoluteString.hasSuffix("stream=station%2B1%26x%3D%23fragment"))
 }
 
+func gateOutcomes() throws {
+    let next = "/data/open-frequencies/receiver-index.json"
+    func outcome(_ status: Int, _ path: String?, _ cookie: Bool) -> ReceiverRules.GateOutcome {
+        ReceiverRules.gateOutcome(status: status, landedOn: path, next: next, cookieSet: cookie)
+    }
+    try expectEqual(outcome(200, next, true), .signedIn)
+    // Landed on the index without the cookie: not signed in, and not a refusal either.
+    try expectEqual(outcome(200, next, false), .tryLater)
+    try expectEqual(outcome(200, "/gate", false), .refused)
+    try expectEqual(outcome(200, "/gate.html", false), .refused)
+    // A throttle, an outage, a captive portal or a moved host never marks a password refused.
+    try expectEqual(outcome(429, "/gate", false), .tryLater)
+    try expectEqual(outcome(503, next, false), .tryLater)
+    try expectEqual(outcome(200, "/", true), .tryLater)
+    try expectEqual(outcome(200, "/login", false), .tryLater)
+    try expectEqual(outcome(200, nil, false), .tryLater)
+}
+
 func carrierAnswerIsValidated() throws {
     let url = try ReceiverRules.carrier(from: Data(#"{"stream":"s","url":"https://example.com/live/index.m3u8"}"#.utf8))
     try expectEqual(url.absoluteString, "https://example.com/live/index.m3u8")
@@ -5422,6 +5440,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Site sign-in outcomes", gateOutcomes),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
     ("Deep links parse", deepLinksParse),

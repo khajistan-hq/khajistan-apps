@@ -263,7 +263,12 @@ struct ReceiverPlayerView: View {
             guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
             await NowPlaying.watch(current.id, active: { controller.state == .playing }) { song = $0 }
         }
-        .onDisappear { stopEverything() }
+        // The Receiver is not redrawn under an open player (ReceiverStore.playerDidOpen).
+        .onAppear { model.receiver.playerDidOpen() }
+        .onDisappear {
+            stopEverything()
+            model.receiver.playerDidClose()
+        }
     }
 
     // MARK: - Overlay

@@ -52,10 +52,10 @@ final class ShelfUITests: XCTestCase {
     private func downPastGenres(_ skin: String, _ app: XCUIApplication) -> Int {
         // The genre shelves arrive after every region list has been read: wait for them, or the
         // walk below would pass on a front that has none.
-        let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-'"))
-        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "\(skin): the front carries a News shelf")
+        let news = app.buttons.matching(NSPredicate(format: "identifier == 'genre-news'"))
+        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "\(skin): the front carries the News theme")
         press(.down, app: app)
-        XCTAssertTrue(focusedID(app).hasPrefix("genre-news-"), "\(skin): the first shelf under the front is News, got \(focusedID(app))")
+        XCTAssertTrue(focusedID(app).hasPrefix("genre-"), "\(skin): the themes row is first under the front, got \(focusedID(app))")
         var crossed = 0
         while crossed < 10, focusedID(app).hasPrefix("genre-") {
             crossed += 1

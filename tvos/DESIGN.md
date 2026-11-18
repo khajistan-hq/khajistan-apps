@@ -116,9 +116,13 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   genre row (2026-11-04) went the same day, because the Music and Film & drama shelves surf
   their genre in the player.
 - **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
-  shelf (Liked, or News) peeks under them with its live pictures, as the TV app lays its rows.
-  In the store build all eleven stay (owner, 2026-11-17): Liked, News, Music, Film & drama,
-  Faith, Culture, Sport, Children, Street cameras, the Screening Room and Transmission (once the
+  row (Liked, or Themes) peeks under them, as the TV app lays its rows.
+  **Themes** (owner, 2026-11-18) is one row of names with no pictures: News, Music, Film & drama,
+  Faith, Culture, Sport, Children, each with its live count. Select plays the theme's first
+  channel, and up and down in the player surf every channel of that theme. Until that day each
+  theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
+  "Street cameras"). In the store build these stay: Liked, Themes, CCTV, the Screening Room and
+  Transmission (once the
   schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
   Bazaar, Chat) after the genre shelves. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the

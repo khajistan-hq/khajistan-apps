@@ -268,7 +268,7 @@ struct ReceiverView: View {
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
+            Shelf("CCTV", count: "\(CameraRegions.total(index).formatted()) live, by region") {
                 ForEach(regions) { region in
                     Button {
                         model.camerasFirst = region.id
@@ -514,10 +514,12 @@ private struct AtlasPanel: View {
     static let mapHeight: CGFloat = 640
 }
 
-/// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
-/// 2026-11-04: news was not on the front as a category). The kinds are the region lists' own
-/// `genres`; a channel sits on every shelf it is tagged for. The shelves follow the Beyond the
-/// atlas switch, and up and down in the player surf the shelf the channel came from.
+/// Live channels by theme across the atlas, as one row of names with no pictures (owner,
+/// 2026-11-18: the News-to-Children carousels "should be shown as not carousels but simpler way no
+/// thumbnails more like themes that people can click and all channels with those themes play").
+/// Select on a theme plays its first channel, and up and down in the player surf every channel of
+/// that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
+/// is tagged for. The row follows the Beyond the atlas switch.
 private struct GenreShelves: View {
     private struct Kind: Identifiable {
         let id: String
@@ -548,49 +550,56 @@ private struct GenreShelves: View {
         Kind(id: "sport", label: "Sport", tags: ["sport"]),
         Kind(id: "children", label: "Children", tags: ["children"]),
     ]
-    /// A kind with fewer channels than this is not a shelf yet.
+    /// A theme with fewer channels than this is not shown yet.
     private static let fewest = 3
-    /// The shelves whose first cards get live stills, and how many each. Liked takes its share
-    /// first; 24 a visit in all (StillPlan).
-    private static let pictured: [String] = ["news", "music"]
-    private static let picturedCards = 4
 
     @Environment(AppModel.self) private var model
     @State private var rows: [Row] = []
     @State private var playing: Pick?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(rows) { row in
-                Shelf(row.kind.label, count: "\(row.channels.count) live") {
-                    ForEach(row.channels) { channel in
-                        let liked = model.saves.isSaved(channel)
-                        let still = model.stills.image(for: channel.id)
+        // A stack, not a Group: with no rows yet there would be no child to carry the task.
+        VStack(alignment: .leading, spacing: 8) {
+            if !rows.isEmpty {
+                Text("Themes").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(rows) { row in
                         Button {
-                            playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+                            play(row)
                         } label: {
-                            PictureCard(channel: channel, still: still, liked: liked)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.kind.label).kjName(30).lineLimit(1)
+                                Text("\(row.channels.count) live").kjSmall(faint: true).monospacedDigit()
+                            }
                         }
-                        .buttonStyle(HouseCardStyle())
-                        // Play/Pause on a card plays it, as on Apple's TV app.
-                        .onPlayPauseCommand { playing = Pick(channel: channel, list: row.channels, title: row.kind.label) }
-                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
-                        .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
+                        .buttonStyle(HouseButtonStyle())
+                        // Play/Pause plays it too, as on Apple's TV app.
+                        .onPlayPauseCommand { play(row) }
+                        .accessibilityLabel("\(row.kind.label), \(row.channels.count) live")
+                        .accessibilityIdentifier("genre-\(row.id)")
                     }
                 }
-                .accessibilityIdentifier("genre-\(row.id)")
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+                // Room under the row for a focused plate's lift before the next shelf.
+                .padding(.bottom, 28)
             }
         }
+        .focusSection()
         .task(id: model.extendedAtlas) { await load() }
-        // Back from a player: the visit ended, and with it the wanted lists.
-        .onAppear { wantStills() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
     }
 
+    private func play(_ row: Row) {
+        guard let first = row.channels.first else { return }
+        playing = Pick(channel: first, list: row.channels, title: row.kind.label)
+    }
+
     /// Every region list in the atlas shown, read together (each is cached after its first read),
-    /// then sorted into the kinds in region order, each channel once per shelf.
+    /// then sorted into the themes in region order, each channel once per theme.
     private func load() async {
         guard let index = model.receiver.index else { return }
         let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
@@ -614,14 +623,6 @@ private struct GenreShelves: View {
             }
             return shelf.count >= Self.fewest ? Row(kind: kind, channels: shelf) : nil
         }
-        wantStills()
-    }
-
-    private func wantStills() {
-        let first = Self.pictured.flatMap { id in
-            rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
-        }
-        if !first.isEmpty { model.stills.wantNext(first, place: 1) }
     }
 }
 

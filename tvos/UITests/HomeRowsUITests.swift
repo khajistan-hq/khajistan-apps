@@ -18,7 +18,7 @@ final class HomeRowsUITests: XCTestCase {
     /// The shelf a focused card belongs to, by its identifier.
     private func shelf(of id: String) -> String? {
         let prefixes: [(String, String)] = [
-            ("genre-news-", "news"), ("genre-music-", "music"), ("genre-", "genres"),
+            ("genre-", "themes"),
             ("home-door-", "doors"), ("cameras-", "cameras"), ("film-", "films"), ("home-transmission-", "transmission"),
             ("rr-title-", "reading"), ("home-all-the Reading Room", "reading"),
             ("home-pnv-", "picsvids"), ("home-all-Pics/Vids", "picsvids"),
@@ -52,7 +52,7 @@ final class HomeRowsUITests: XCTestCase {
         // launch (a test run has none), so it is not required here.
         // The shelves this build carries (StoreBuild.includes): the store build has no Reading Room,
         // and Pics/Vids only for Friends; its doors shelf shows only with two doors or more.
-        var required = ["news", "music"]
+        var required = ["themes"]
         #if !KJ_APP_STORE
         required += ["doors", "reading", "picsvids"]
         #elseif KJ_FRIENDS
@@ -71,22 +71,24 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "up returns to the front, got \(back)")
     }
 
-    /// News is a shelf on the front (owner, 2026-11-04), and its first cards get live stills, which
-    /// VoiceOver reads as "live picture". Stills are taken one at a time, region cards first.
-    func testNewsShelfCarriesLivePictures() {
+    /// The themes are one row of names with no pictures (owner, 2026-11-18), and Select on one
+    /// plays a channel of that theme.
+    func testThemesAreNamesAndPlay() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
         kjLaunch(app)
-        let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-'"))
-        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front carries a News shelf")
-        let pictured = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-' AND label CONTAINS 'live picture'"))
-        let two = NSPredicate { _, _ in pictured.count >= 2 }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: two, object: nil)], timeout: 120), .completed,
-                       "the first News cards get live stills; pictured \(pictured.count) of \(news.count)")
-        print("KJNEWS cards \(news.count), pictured \(pictured.count)")
+        let news = app.buttons["genre-news"]
+        XCTAssertTrue(news.waitForExistence(timeout: 90), "the front carries the News theme")
+        XCTAssertTrue(news.label.hasSuffix("live"), "a theme reads its name and its live count, got \(news.label)")
+        let themes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'"))
+        XCTAssertLessThanOrEqual(themes.count, 7, "one button a theme, not one a channel; got \(themes.count)")
         XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
-        kjScreenshot("home-news-pictures", app: app)
+        kjScreenshot("home-themes", app: app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-' AND hasFocus == true")).firstMatch.exists,
+                      "down from the front lands on a theme")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 30), "Select on a theme opens the player")
     }
 }

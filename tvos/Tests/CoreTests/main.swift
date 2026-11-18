@@ -2316,6 +2316,21 @@ func guideTimelineAcrossTheMonth() throws {
         let slots = try timelineAgreesWithTheClock([nov, dec], channel: channel, from: from, to: to, every: 211)
         try expect((slots.last?.end ?? from) >= to, "channel \(channel): the row stops at \(slots.last?.end ?? from)")
         past += slots.filter { $0.start >= end && !$0.isOffAir }.count
+        // December alone, as the store holds it once the month has turned: from midnight and from
+        // half past, the rows agree with December's clock (a run carried over from 30 November
+        // starts where December's file does); read from 23:30 on the 30th, nothing December's
+        // clock has on is drawn off air.
+        for start in [end, end.addingTimeInterval(1800)] {
+            try timelineAgreesWithTheClock([dec], channel: channel, from: start, to: start.addingTimeInterval(GuideGrid.horizon + GuideGrid.span), every: 173)
+        }
+        let early = StationClock.timeline([dec], channel: channel, from: end.addingTimeInterval(-1800), to: end.addingTimeInterval(6 * 3600))
+        var probe = end
+        while probe < end.addingTimeInterval(6 * 3600) {
+            if StationClock.onAir(dec, channel: channel, at: probe) != nil {
+                try expect(!(early.first { $0.contains(probe) }?.isOffAir ?? false), "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
+            }
+            probe = probe.addingTimeInterval(97)
+        }
         // November alone: the row ends at the month's end, with nothing read past it.
         let alone = StationClock.timeline([nov], channel: channel, from: from, to: to)
         try expect(!alone.contains { $0.start >= end }, "channel \(channel): a block after the month's end with no December held")

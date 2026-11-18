@@ -34,6 +34,8 @@ final class TransmissionStore {
     /// month's end (loadNextMonth); nil otherwise, or when that month is not published yet.
     private(set) var nextProgramming: Programming?
     @ObservationIgnored private var nextMonthLoad: (month: String, task: Task<Bool, Never>)?
+    /// When the month after was fetched: it becomes the month held at the turn, and keeps its age.
+    @ObservationIgnored private var nextFetchedAt: TimeInterval?
     /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
     /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
     /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
@@ -214,6 +216,7 @@ final class TransmissionStore {
             try JSONDecoder().decode(Programming.self, from: body)
         }).value, StationClock.stationMonth(StationClock.monthEnd(decoded)?.addingTimeInterval(-1) ?? .distantPast) == key else { return false }
         nextProgramming = decoded
+        nextFetchedAt = ProcessInfo.processInfo.systemUptime
         return true
     }
 
@@ -258,7 +261,8 @@ final class TransmissionStore {
             nextProgramming = nil
             month = monthKey
             schedule = .ready
-            fetchedAt = ProcessInfo.processInfo.systemUptime
+            // Its own age: fetched up to a day before, it is refreshed as any held month is.
+            fetchedAt = nextFetchedAt ?? 0
             refreshing = false
             return
         }
@@ -351,6 +355,9 @@ final class TransmissionStore {
         // A failed refresh keeps the schedule already on screen; it is tried again next time.
         if refreshing, programming != nil { refreshing = false; return }
         programming = nil
+        // The month after goes too: a set the server refused must not take it as the month held at
+        // the turn without asking.
+        nextProgramming = nil
         month = nil
         schedule = state
     }

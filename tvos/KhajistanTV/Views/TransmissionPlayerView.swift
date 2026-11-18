@@ -515,8 +515,10 @@ struct TransmissionPlayerView: View {
             }.value
             guard generation == guideFillGeneration else { return }
             for (index, slots) in read where guideRows.indices.contains(index) {
-                guideRows[index].slots = slots
                 guideFilling.remove(index)
+                // An empty reading (the schedule dropped meanwhile) never blanks a row on screen.
+                if slots.isEmpty, !guideRows[index].slots.isEmpty { continue }
+                guideRows[index].slots = slots
                 guideStale.remove(index)
             }
         }

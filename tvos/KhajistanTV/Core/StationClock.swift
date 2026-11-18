@@ -658,6 +658,10 @@ enum StationClock {
         // run reads the same start and name whenever the guide is opened (Fable, round 2: opened at
         // 11:00 a run that began at 10:07 read 10:57).
         var at = runStart(months, channel: number, at: from) ?? from
+        // Never before the first day the months held can read: a run carried over from the month
+        // before, or a guide read from before the month turned, starts where the file does (Fable,
+        // round 4: from 00:00 on 1 December with December alone, 8 of 29 rows read off air).
+        if let day = months.first?.days.map(\.date).min(), let start = date(iso: day, second: 0), at < start { at = start }
         var last: (p: Programming, id: String, end: Date)?
         for p in months {
             guard at < to, let end = monthEnd(p) else { continue }

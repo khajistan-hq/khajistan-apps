@@ -220,8 +220,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   it airs: its title and its times on the lift plate, an off-air stretch with no plate and *back at*
   its return. A run of programmes under ten minutes in one strip is one block named for its show
   (lit while it airs, the headline adds the programme on air, kept current every half minute:
-  *now: Jugni*); anything under a minute, an off-air seam or a lone item after a programme, is part
-  of the block before it, and never of an off-air stretch. Near a month's end the next month's schedule is fetched; until it is held, a row ends
+  *now: Jugni*); anything under a minute is part of the block before it (an off-air seam joins a
+  programme or an off-air stretch), except a programme after an off-air stretch, which keeps its
+  own block: off air never covers something on. Near a month's end the next month's schedule is fetched; until it is held, a row ends
   where the month does rather than read the month after as off air (a programme begun before
   midnight is drawn whole), and a row never read yet says Loading. A refill keeps the blocks on
   screen until the new reading lands. Over the grid the lit programme reads in full (its title, then the channel and its

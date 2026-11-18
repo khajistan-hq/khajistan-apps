@@ -166,11 +166,7 @@ final class PiPWindowUITests: XCTestCase {
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
-            XCUIRemote.shared.press(.right)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach Indus in the region list")
         XCUIRemote.shared.press(.select)
         let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND NOT (identifier BEGINSWITH 'channel-radio-') AND label CONTAINS 'live picture'")).firstMatch
         XCTAssertTrue(tv.waitForExistence(timeout: 60), "a television channel is listed")

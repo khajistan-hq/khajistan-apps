@@ -767,7 +767,10 @@ struct HouseSwitch: View {
             SwitchLabel(title: title, detail: detail, isOn: isOn)
         }
         .buttonStyle(HouseButtonStyle())
-        .accessibilityValue(isOn ? "On" : "Off")
+        // Named here, not read off the label: with no detail line the label is the one kicker,
+        // and its uppercase reached the value too ("OFF"), 2026-11-17.
+        .accessibilityLabel(Text(verbatim: title))
+        .accessibilityValue(Text(verbatim: isOn ? "On" : "Off"))
     }
 }
 

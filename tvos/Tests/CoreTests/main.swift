@@ -3369,7 +3369,9 @@ func dancerStageEntersDancesAndLeaves() throws {
 }
 
 func dancerMovesFollowTheSite() throws {
-    try expectEqual(DancerMoves.all.count, 23)
+    try expectEqual(DancerMoves.all.count, 32)
+    try expectEqual(DancerMoves.hold.count, 9)
+    try expect(DancerMoves.hold.isSubset(of: Set(DancerMoves.all)), "every held step is a move")
     try expect(!DancerMoves.list(for: .base).contains("Kawliya"), "Kawliya belongs to the long-haired figure")
     try expect(DancerMoves.list(for: .hairy).contains("Kawliya"))
     var rng = SplitMix(state: 99)
@@ -3384,6 +3386,80 @@ func dancerMovesFollowTheSite() throws {
     // Twerk is weighted four to one.
     let twerk = Double(counts["Twerk"] ?? 0), dabke = Double(counts["Dabke"] ?? 1)
     try expect(twerk / dabke > 3 && twerk / dabke < 5, "Twerk \(twerk) against Dabke \(dabke)")
+}
+
+// Owner, 2026-11-16: the video steps repeat longer — 16 beats each, every other move 8.
+// Walked for BOTH figures: the long-haired one draws from a different list (Kawliya), so the
+// held index points at a different name there.
+func holdRuns(seed: UInt64) throws -> String {
+    var rng = SplitMix(state: seed)
+    var stage = DancerStage(random: { rng.next() })
+    var now = 0.0, count = 0
+    func frame() -> DancerStage.Frame {
+        let f = stage.step(now: now, grooving: { _ in true }, beat: 0.6, groove: 0.45, count: count)
+        now += 1000.0 / 60
+        return f
+    }
+    while stage.name != .on { _ = frame() }
+    var moves: [String] = []
+    for beat in (count + 1)...(count + 1600) {
+        count = beat
+        if case .dance(let m) = frame() { moves.append(m) } else { moves.append("") }
+    }
+    // Runs of one move, the first and last cut off by the window.
+    var runs: [(String, Int)] = []
+    for m in moves { if let last = runs.last, last.0 == m { runs[runs.count - 1].1 += 1 } else { runs.append((m, 1)) } }
+    let whole = runs.dropFirst().dropLast()
+    try expect(whole.contains { DancerMoves.hold.contains($0.0) }, "no video step came up in 1600 beats (seed \(seed))")
+    for (m, n) in whole {
+        try expectEqual(n, DancerMoves.hold.contains(m) ? 16 : 8, "\(m), cast \(stage.cast), seed \(seed)")
+    }
+    return stage.cast
+}
+
+func dancerVideoStepsHoldTwoRuns() throws {
+    var casts = Set<String>()
+    for seed in UInt64(1)...12 { casts.insert(try holdRuns(seed: seed)) }
+    try expectEqual(casts, Set(DancerCast.keys), "the hold walked on every figure")
+}
+
+// The Swift lists are the site's lists. Tests/Fixtures/dancer-moves.json is MOVES and HOLD as
+// scripts/dancer-moves-fixture.mjs read them out of kj-scope.js; it is compared on every run, CI
+// included. Where the site is checked out (KJ_ARCHIVE), the fixture is also checked against it,
+// so a stale fixture is caught too.
+func dancerMovesMatchKjScope() throws {
+    struct Fixture: Decodable { let moves: [String]; let hold: [String] }
+    let data = try Data(contentsOf: fixtureURL.deletingLastPathComponent().appendingPathComponent("dancer-moves.json"))
+    let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+    try expectEqual(DancerMoves.all, fixture.moves, "DancerMoves.all against the site's MOVES")
+    try expectEqual(DancerMoves.hold, Set(fixture.hold), "DancerMoves.hold against the site's HOLD")
+
+    guard let raw = try? realFile("scripts/kj-scope.js") else { return }   // CI: fixture only
+    let js = String(decoding: raw, as: UTF8.self)
+    func names(after marker: String, until close: Character) throws -> [String] {
+        let start = try require(js.range(of: marker)).upperBound
+        let end = try require(js[start...].firstIndex(of: close))
+        var out: [String] = [], cur = "", inside = false
+        for ch in js[start..<end] {
+            if ch == "\"" { if inside { out.append(cur); cur = "" }; inside.toggle() } else if inside { cur.append(ch) }
+        }
+        return out
+    }
+    try expectEqual(try names(after: "var MOVES = [", until: "]"), fixture.moves, "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
+    try expectEqual(Set(try names(after: "var HOLD = {", until: "}")), Set(fixture.hold), "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
+}
+
+// Hands on hips by number: the elbow goes OUT and the forearm comes back DOWN and IN to the hip.
+// The first version bent the forearm up; this is the check that would have caught it.
+func dancerHandsOnHipsPose() throws {
+    for side in [-1.0, 1.0] {
+        for p in stride(from: 0.0, to: 2 * Double.pi, by: 0.5) {
+            let o = pose("Hands on hips", p, side, 0, 0, 0, 0)
+            let fore = o.arm + o.fore
+            try expect(cos(o.arm) * side > 0, "elbow out, side \(side)")
+            try expect(cos(fore) * side < 0 && sin(fore) > 0, "forearm down and in, side \(side), got \(fore)")
+        }
+    }
 }
 
 // MARK: - Runner
@@ -5532,6 +5608,9 @@ let tests: [(String, () throws -> Void)] = [
     ("Beat gate hysteresis and reset", beatGateHysteresis),
     ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
     ("Dancer moves follow the site", dancerMovesFollowTheSite),
+    ("Dancer video steps hold two runs", dancerVideoStepsHoldTwoRuns),
+    ("Dancer moves match the site (fixture; kj-scope.js when present)", dancerMovesMatchKjScope),
+    ("Dancer Hands on hips: elbow out, hand to the hip", dancerHandsOnHipsPose),
     ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
     ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),
     ("Screening Room: the offer line (marqueeOffer)", vodOfferLine),

@@ -109,7 +109,7 @@ final class TopNavReachUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = ["-kjfilms", origin, "-kj.filmPlaces",
-                               "<dict><key>filmfarsi-trailers-vol-1-khajistan</key><real>600</real></dict>"]
+                               "<dict><key>filmfarsi-trailers-vol-1-khajistan</key><real>600</real><key>filmfarsi-trailers-vol-2-khajistan</key><real>600</real></dict>"]
         kjLaunch(app)
         XCTAssertTrue(app.buttons["nav-rooms"].waitForExistence(timeout: 60))
         kjPause(2)
@@ -122,7 +122,20 @@ final class TopNavReachUITests: XCTestCase {
         kjPause(2)
         XCUIRemote.shared.press(.down)
         kjPause(0.8)
-        for _ in 0..<4 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        // Right still walks the first shelf: its Up handler takes Up only.
+        let firstCard = focusedId(app)
+        XCTAssertTrue(firstCard.hasPrefix("upnext-"), "Down lands on Up Next: \(firstCard)")
+        // Down may land on either card: walk to the left end, then Right must move and Left return.
+        for _ in 0..<3 { XCUIRemote.shared.press(.left); kjPause(0.5) }
+        let leftEnd = focusedId(app)
+        XCTAssertTrue(leftEnd.hasPrefix("upnext-"), "Left stays on Up Next: \(leftEnd)")
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        let second = focusedId(app)
+        XCTAssertTrue(second.hasPrefix("upnext-") && second != leftEnd, "Right moves along Up Next: \(leftEnd) → \(second)")
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertEqual(focusedId(app), leftEnd, "Left moves back")
         let (ok, trail) = upToNav(app, limit: 6)
         print("TOPNAV rooms first shelf up:", trail)
         XCTAssertTrue(ok, "Up from the first shelf reaches the top bar: \(trail)")

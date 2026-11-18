@@ -77,20 +77,23 @@ struct TVScreeningRoom: View {
     private var shelves: some View {
         let films = model.films.films
         let stopped = films.filter { places[$0.handle] != nil && FilmPlaces.position($0.handle) != nil }
-        if !stopped.isEmpty {
-            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present)
-        }
         let listed = model.saves.watchlist.compactMap { handle in films.first { $0.handle == handle } }
-        if model.auth.isSignedIn && !listed.isEmpty {
-            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present)
-        }
+        let showsList = model.auth.isSignedIn && !listed.isEmpty
         let byCountry = Dictionary(grouping: films) { ($0.country ?? "").trimmingCharacters(in: .whitespaces) }
         let countries = byCountry.keys.filter { !$0.isEmpty }.sorted { (byCountry[$0]!.count, $1) > (byCountry[$1]!.count, $0) }
+        // The shelf on top, whose Up goes to the top bar.
+        let lead = !stopped.isEmpty ? "Up Next" : showsList ? "Your watchlist" : countries.first ?? "Other films"
+        if !stopped.isEmpty {
+            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present, leadsPage: lead == "Up Next")
+        }
+        if showsList {
+            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present, leadsPage: lead == "Your watchlist")
+        }
         ForEach(countries, id: \.self) { country in
-            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present)
+            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present, leadsPage: lead == country)
         }
         if let unfiled = byCountry[""] {
-            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present)
+            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present, leadsPage: lead == "Other films")
         }
     }
 }

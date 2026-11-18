@@ -236,7 +236,9 @@ struct FilmPlayerView: View {
                 .buttonStyle(HouseButtonStyle())
                 .disabled(checking)
                 .focused($watchFocused)
-                .accessibilityIdentifier("watchFullFilm")
+                // The screen reopened from the window (FilmRestore, the one caller with `close`)
+                // sits over a cover with its own Watch button: told apart for the UI tests.
+                .accessibilityIdentifier(close == nil ? "watchFullFilm" : "watchFullFilmReopened")
             }
             if full != nil {
                 fullFilmControls

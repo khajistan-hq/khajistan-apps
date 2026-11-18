@@ -52,17 +52,16 @@ final class RecordedSubtitles {
     @discardableResult
     func handOff() -> Bool {
         guard group != nil else { return false }
-        // A stored file in a language the manifest lacks (a staged Urdu beside a Stream
-        // programme's English) is not a track AVPlayer holds and the window cannot draw it on a
-        // stream: the window takes the manifest language the viewer would get, without
-        // remembering it, so the corner shows subtitles rather than none.
-        if let current, fileCues[current] != nil {
-            let stored = choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }
-            apply(SubtitleChoice.desired(available: manifestCodes, stored: stored, preferred: Locale.preferredLanguages))
-        }
         if let output, let item { item.remove(output) }
         output = nil
         text = nil
+        // tvOS draws only the manifest's tracks: a stored file's language on (a staged Urdu beside
+        // the manifest's English) would leave the window bare under "Subtitles · Urdu". The window
+        // takes the manifest language the viewer would get; the screen they return to loads afresh.
+        let choice = SubtitleChoice.windowChoice(
+            current: current, manifest: Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: true),
+            stored: choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }, preferred: Locale.preferredLanguages)
+        if choice != current { apply(choice) }
         return true
     }
 
@@ -77,8 +76,11 @@ final class RecordedSubtitles {
         output = legible
     }
 
-    /// The manifest's languages, in order: what AVPlayer can draw itself.
-    private var manifestCodes: [String] { tracks.map(\.code).filter { options[$0] != nil } }
+    /// The languages the control steps through: once handed off, only the manifest's, since tvOS
+    /// has no track of a stored file to draw in the window.
+    static func windowCodes(_ codes: [String], manifest: Set<String>, handedOff: Bool) -> [String] {
+        handedOff ? codes.filter(manifest.contains) : codes
+    }
 
     /// True once the track is drawn by AVPlayer rather than this object (`handOff()`).
     var isHandedOff: Bool { group != nil && output == nil }
@@ -121,13 +123,16 @@ final class RecordedSubtitles {
         choiceKey = nil
     }
 
+    /// Moves on every clear: a load that sees it moved by more than its own clear was taken over
+    /// by another load (the screen's and the window's, overlapping as the screen closes).
+    var revision: Int { generation }
+
     /// True while the tracks shown are this item's.
     func follows(_ other: AVPlayerItem) -> Bool { item === other }
 
     /// The next language, then off, then the first again.
     func cycle() {
-        // Handed to AVPlayer (the PiP window over a stream), only what it can draw is offered.
-        let codes = isHandedOff ? manifestCodes : tracks.map(\.code)
+        let codes = Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: isHandedOff)
         guard !codes.isEmpty else { return }
         let next: String?
         if let current, let index = codes.firstIndex(of: current) {

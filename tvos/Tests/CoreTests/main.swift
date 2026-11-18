@@ -5242,6 +5242,39 @@ func pipFollowerLoadsEachProgrammeOnce() throws {
     try expect(follower.changed(to: "c"))
     var unloaded = ChangeFollower<String>(loaded: nil)
     try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
+    // Keyed on the programme and its signal: a rejoin of the same programme on a new signal, faster
+    // than one tick, still reloads; the same signal does not; tuning is no key at all.
+    let one = URL(string: "https://example.test/a.m3u8?t=1"), two = URL(string: "https://example.test/a.m3u8?t=2")
+    var signal = ChangeFollower<String>(loaded: PiPSubtitleKey.of(programme: "p1", signal: one))
+    try expect(!signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: one)), "same programme, same signal")
+    try expect(signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: two)), "same programme, new signal reloads")
+    try expect(PiPSubtitleKey.of(programme: nil, signal: two) == nil, "tuning has no key")
+}
+
+/// The window's subtitle follower, read ten times a second: one load per key, a track handed to tvOS
+/// once and only when loaded (a closed tv_subtitles() answer loads none), and nothing after the end.
+func pipSubtitleStepLoadsAndHandsOff() throws {
+    var step = PiPSubtitleStep(loaded: "p1")
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: false), .init(load: false, handOff: true))
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: true), .init(), "handed off once")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(load: true, handOff: false),
+                    "a handover loads; nothing loaded yet, nothing handed off")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(), "a closed answer: no load again, no hand-off")
+    try expectEqual(step.read(key: "p2", hasTracks: true, handedOff: false), .init(load: false, handOff: true), "an open one hands off")
+    step.end()
+    try expectEqual(step.read(key: "p3", hasTracks: true, handedOff: false), .init(), "the window is done: nothing")
+}
+
+/// The window's language once tvOS draws: a stored file's moves to the manifest's, the rest stay.
+func pipWindowChoiceMovesOffAStoredFile() throws {
+    let manifest = ["en", "fa"]
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["en-US"]), "en")
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["fa-IR"]), "fa",
+                    "the device's language when the manifest has it")
+    try expectEqual(SubtitleChoice.windowChoice(current: "fa", manifest: manifest, stored: "fa", preferred: ["en-US"]), "fa",
+                    "a manifest language stays")
+    try expectEqual(SubtitleChoice.windowChoice(current: nil, manifest: manifest, stored: "off", preferred: ["en-US"]), nil,
+                    "off stays off")
 }
 
 /// The window's own Play is passed on once, for the item it paused; a new item that loads paused (a
@@ -5421,6 +5454,8 @@ let tests: [(String, () throws -> Void)] = [
     ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),
     ("pipLifecycleReadsWhoClosedTheWindow", pipLifecycleReadsWhoClosedTheWindow),
     ("pipFollowerLoadsEachProgrammeOnce", pipFollowerLoadsEachProgrammeOnce),
+    ("pipSubtitleStepLoadsAndHandsOff", pipSubtitleStepLoadsAndHandsOff),
+    ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
     ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),

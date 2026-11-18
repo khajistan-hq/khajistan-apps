@@ -101,10 +101,11 @@ final class TransmissionStore {
         return StationClock.onAir(p, channel: channel, at: date)
     }
 
-    /// When the channel is next on air, for the moment nothing is.
-    func returnTime(channel: Int, at date: Date) -> String? {
+    /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
+    /// it is a day or more away (StationClock.returnLabel).
+    func returnLabel(channel: Int, at date: Date) -> String? {
         guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
-        return StationClock.returnTime(p, channelId: id, at: date)
+        return StationClock.returnLabel(p, channelId: id, at: date)
     }
 
     // MARK: - Loading the month
@@ -300,6 +301,16 @@ final class TransmissionStore {
             await tune(channel: channelNumber)
             return
         }
+        // The last file of the month ending on time: what follows is in next month's schedule.
+        // Wait for the turn (under handoverLead), then tune, which loads it. Asking this month's
+        // file played the strip's own opener out on iPhone.
+        if let wait = StationClock.monthHandoverWait(after: current, at: now) {
+            let gen = generation
+            try? await Task.sleep(for: .seconds(wait + 0.05))   // a hair past the turn
+            guard gen == generation, case .onAir = phase else { return }
+            await tune(channel: channelNumber)
+            return
+        }
         let gen = beginTune()
         if let next = StationClock.following(current, in: p, at: now) {
             player.state = .tuning
@@ -313,7 +324,7 @@ final class TransmissionStore {
 
     private func goOffAir(_ p: Programming, channelId: String?, at date: Date, generation gen: Int) {
         player.stop()
-        let returns = channelId.flatMap { StationClock.returnTime(p, channelId: $0, at: date) }
+        let returns = channelId.flatMap { StationClock.returnLabel(p, channelId: $0, at: date) }
         phase = .offAir(channelName: channelName(channelNumber), returns: returns)
         watchForReturn(generation: gen)
     }

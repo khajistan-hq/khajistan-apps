@@ -16,7 +16,7 @@ import UIKit
 @MainActor @Observable
 final class LiveStills {
     nonisolated static let maxSize = CGSize(width: 480, height: 270)
-    /// About 36 stills at 480x270, 19 MB of pixels: a still for every region and camera card.
+    /// About 36 stills at 480x270, 19 MB of pixels: a still for every card near focus on the front and its shelves.
     private static let costLimit = 480 * 270 * 4 * 36
     /// A still older than this is taken again when its card is next wanted.
     private static let maxAge: TimeInterval = 600

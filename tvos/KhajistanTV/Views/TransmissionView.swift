@@ -46,10 +46,10 @@ struct TransmissionView: View {
             }
         }
         // Full screen on the ground, as in Account: a sheet is a shadowed card.
-        .fullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+        .kjFullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
-        .fullScreenCover(item: $playing) { choice in
+        .kjFullScreenCover(item: $playing) { choice in
             TransmissionPlayerView(channel: choice.number)
         }
         // A Top Shelf link: the station page, or one channel tuned from it.
@@ -182,7 +182,9 @@ struct TransmissionView: View {
                 number: number,
                 line: store.channelLine(number),
                 onAir: store.nowOn(channel: number, at: date),
-                upcoming: store.upcoming(channel: number, at: date)
+                upcoming: store.upcoming(channel: number, at: date),
+                returns: store.returnLabel(channel: number, at: date),
+                back: store.returnStrip(channel: number, at: date)
             )
         }
         .onPlayPauseCommand { choose(number) }
@@ -224,6 +226,10 @@ private struct ChannelCardLabel: View {
     let line: String?
     let onAir: OnAir?
     let upcoming: [ScheduleStrip]
+    /// When an off-air channel is back, the clock's label (StationClock.returnLabel), and the strip
+    /// it comes back with. Not `upcoming.first`: that list stops at 24 hours.
+    let returns: String?
+    let back: ScheduleStrip?
 
     var body: some View {
         // Three to a screen at the page's inset; the rest are a scroll to the right.
@@ -252,9 +258,9 @@ private struct ChannelCardLabel: View {
                 Text("Off air")
                     .kjName(48)
                     .padding(.top, 10)
-                if let back = upcoming.first {
-                    Text(backLine(back)).kjBody()
-                    UpNextList(title: "Later", strips: Array(upcoming.dropFirst()), emphasizesFirst: false)
+                if let back, let returns {
+                    Text(backLine(returns, back)).kjBody()
+                    UpNextList(title: "Later", strips: upcoming.filter { $0 != back }, emphasizesFirst: false)
                         .padding(.top, 18)
                 }
             }
@@ -262,9 +268,10 @@ private struct ChannelCardLabel: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// The website's off-air line: "Back at 23:00 PKT with The Feature."
-    private func backLine(_ strip: ScheduleStrip) -> String {
-        var text = "Back at \(strip.startLabel) \(StationClock.tzLabel)"
+    /// The website's off-air line: "Back at 23:00 PKT with The Feature.", with the day once the
+    /// channel is a day or more from coming back.
+    private func backLine(_ returns: String, _ strip: ScheduleStrip) -> String {
+        var text = "Back at \(returns)"
         if let show = strip.show?.name, !show.isEmpty { text += " with \(show)" }
         return text + "."
     }

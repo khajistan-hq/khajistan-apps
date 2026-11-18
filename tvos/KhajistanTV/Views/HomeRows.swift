@@ -52,10 +52,10 @@ struct HomeRows: View {
             await model.bazaarSwap.load()
             await model.madrassaPosts.load()
         }
-        .fullScreenCover(item: $reading) { ReadingTitleView(title: $0) }
-        .fullScreenCover(item: $product) { TVProductScreen(item: $0) }
-        .fullScreenCover(item: $post) { TVMadrassa.reading($0, model: model) }
-        .fullScreenCover(item: $viewing) { row in
+        .kjFullScreenCover(item: $reading) { ReadingTitleView(title: $0) }
+        .kjFullScreenCover(item: $product) { TVProductScreen(item: $0) }
+        .kjFullScreenCover(item: $post) { TVMadrassa.reading($0, model: model) }
+        .kjFullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row, list: pnvRows)
         }
     }
@@ -290,7 +290,7 @@ struct HomeSections: View {
             }
         }
         .accessibilityIdentifier("home-shelf-doors")
-        .fullScreenCover(item: $room) { TVRoomScreen(room: $0) }
+        .kjFullScreenCover(item: $room) { TVRoomScreen(room: $0) }
     }
 
     private func open(_ door: Door) {

@@ -48,6 +48,9 @@ final class PlayerController {
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
+    /// The address of the last signal started, as its item's asset holds it: tells this
+    /// programme's item from the previous one still playing during a handover.
+    @ObservationIgnored private(set) var attachedURL: URL?
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now
     #endif
@@ -70,6 +73,10 @@ final class PlayerController {
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
+        attachedURL = url
+        // Muted by the PiP window while paused for a rejoin: a new item (the rejoin, or a handover
+        // that came first) is heard.
+        player.isMuted = false
         generation += 1
         let gen = generation
         #if DEBUG
@@ -213,6 +220,27 @@ final class PlayerController {
         state = .paused
     }
 
+    /// Set while the picture-in-picture window carries this player (PictureInPicture).
+    var followsWindow = false
+
+    /// The window's own Play or Pause worked AVPlayer directly: the state follows it, and nothing
+    /// is played, paused or faded again (`resume()` would fade the sound in from 0 and wait for a
+    /// change that never comes, as AVPlayer is already playing).
+    func follow(playing: Bool) {
+        // A failed or stopped signal stays as it is: an end of file or a stall is not a Pause.
+        if case .failed = state { return }
+        guard state != .idle else { return }
+        if !playing {
+            fadeTask?.cancel()
+            fadeInPending = false
+            state = .paused
+            return
+        }
+        guard state == .paused else { return }
+        // The player's own reading decides: playing, or waiting with the stall watch running.
+        syncWithPlayer()
+    }
+
     func resume() {
         volume = 0
         fadeInPending = true
@@ -284,6 +312,8 @@ final class PlayerController {
     }
 
     func stop() {
+        // Muted by the PiP window for a broadcast's rejoin: the next signal is heard.
+        player.isMuted = false
         fadeTask?.cancel()
         fadeInPending = false
         generation += 1
@@ -409,10 +439,20 @@ final class PlayerController {
     /// that arrives late cannot put back a state the viewer has already left.
     private func syncWithPlayer() {
         guard liveRadio == nil else { return }
+        // The picture-in-picture window's own Play, read here first (the observer runs before the
+        // window's 100 ms reading): a sound left low by a fade that a Pause cut short comes back up
+        // once it plays.
+        // Not while muted: a broadcast paused from the window is muted until its rejoin replaces it.
+        if PiPSound.fadesBack(paused: state == .paused, followsWindow: followsWindow, muted: player.isMuted,
+                              nowPlaying: player.timeControlStatus != .paused, volume: volume, holdsSound: holdsSound) {
+            fadeInPending = true
+        }
         switch player.timeControlStatus {
         case .playing:
-            // A queued ready/seek callback cannot override a newer explicit Pause.
-            guard state != .paused else { player.pause(); return }
+            // A queued ready/seek callback cannot override a newer explicit Pause. In the
+            // picture-in-picture window a Play read here is the window's own control, not a late
+            // callback: followed, not undone.
+            guard state != .paused || followsWindow else { player.pause(); return }
             timeoutTask?.cancel()
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }

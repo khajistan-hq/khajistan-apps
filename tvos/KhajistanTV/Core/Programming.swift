@@ -87,6 +87,9 @@ struct Programming: Decodable, Sendable {
     /// The last day of the previous month, so a strip still running after midnight on the 1st
     /// is found (the site writes it since 2026-11-08). Nil in older files.
     var prev_day: Day? = nil
+    /// The next month's first strip per channel, so Up next crosses the month end (the site
+    /// writes it since 2026-11-16, owner: "Builder carries next_day"). Nil in older files.
+    var next_day: Day? = nil
 }
 
 // The decoder lives in an extension so the memberwise initialiser stays available to previews

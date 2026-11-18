@@ -41,7 +41,7 @@ struct ChatView: View {
         .task { await store.start() }
         .task(id: model.auth.session?.userId) { await store.loadAccount() }
         .task(id: room?.slug) { await follow(room) }
-        .fullScreenCover(item: $viewing) { row in
+        .kjFullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row, region: PicsVidsStore.allRegions)
         }
     }

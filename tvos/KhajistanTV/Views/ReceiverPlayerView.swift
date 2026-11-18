@@ -85,7 +85,19 @@ struct ReceiverPlayerView: View {
     /// The signal a channel change tunes, behind the one on screen.
     private var incoming: PlayerController { aIsFront ? playerB : playerA }
 
-    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil) {
+    /// Closes the screen when UIKit presented it (TopScreen, a restore from the PiP window);
+    /// SwiftUI's dismiss otherwise.
+    private let close: (() -> Void)?
+
+    /// The channel playing in the picture-in-picture window, when this screen opens as its Full
+    /// screen: the screen takes that player over as it plays, as Apple TV hands a channel back.
+    private let resuming: PlayerController?
+
+    init(channel: Channel, list: [Channel], surfChoice: SurfChoice? = nil, regionId: String? = nil, listTitle: String? = nil,
+         close: (() -> Void)? = nil, resuming: PlayerController? = nil) {
+        self.close = close
+        self.resuming = resuming
+        _playerA = State(initialValue: resuming ?? PlayerController())
         _list = State(initialValue: list)
         self.surfChoice = surfChoice
         _listRegion = State(initialValue: regionId)
@@ -218,7 +230,7 @@ struct ReceiverPlayerView: View {
                                            listRegion: listRegion, listTitle: listTitle)
             }
             stopEverything()
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         .onChange(of: controller.state) { _, state in
             wake()
@@ -417,12 +429,18 @@ struct ReceiverPlayerView: View {
         let player = controller
         let away = RadioAway(channel: current, list: list, controller: player, surfChoice: surfChoice,
                              listRegion: listRegion, listTitle: listTitle, pip: pip)
+        pip.title = current.name
+        // Live captions are a transcription, not a track: tvOS's window cannot carry them, and
+        // they are paid by the hour, so they stop with the screen (stopEverything).
+        // The bar's and the remote's Play/Pause work the player as the screen's does.
+        pip.onSetPlaying = { playing in playing ? player.resume() : player.pause() }
+        pip.controller = player
         pip.onStart = { [pip] in
             // A channel step between Select and the window opening stopped this player.
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             model.radioAway = away
             stopEverything()
-            dismiss()
+            if let close { close() } else { dismiss() }
         }
         pip.onFail = { say($0) }
         pip.onRestore = { [model] in model.restoring = away }
@@ -742,6 +760,15 @@ struct ReceiverPlayerView: View {
     /// The screen opens on the ground with the channel's name, which fades off the picture as it
     /// arrives.
     private func open() async {
+        if let resuming, model.radioAway?.controller === resuming, resuming.state == .playing || resuming.state == .tuning {
+            // Taken over before anything else is silenced, so silenceRadio leaves it playing; its
+            // live captions, stopped while it was in the window, start again on the screen.
+            model.radioAway = nil
+            model.silenceRadio()
+            model.captions.attach(current, player: resuming)
+            wake()
+            return
+        }
         model.silenceRadio()
         model.clips.cover(caption: current.name, animated: false)
         tune(current)
@@ -1056,7 +1083,7 @@ struct RadioBar: View {
 
 /// A control on the band: onBand at rest; under focus the colours swap, the onBand plate with the
 /// band's colour as its text, at 1.03. No outline.
-private struct OnBandStyle: ButtonStyle {
+struct OnBandStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         OnBandFace(label: configuration.label, isPressed: configuration.isPressed)
     }
@@ -1075,6 +1102,6 @@ private struct OnBandFace<Face: View>: View {
             .foregroundStyle(isFocused ? palette.band : palette.onBand)
             .background(isFocused ? palette.onBand : Color.clear)
             .scaleEffect(isFocused && !isPressed ? 1.03 : 1)
-            .animation(CardMotion.spring, value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }

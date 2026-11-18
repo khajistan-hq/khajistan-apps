@@ -168,6 +168,35 @@ enum ArchiveURL {
             && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
     }
 
+    /// A file may be saved only from the archive's own hosts: an https archive URL, a blob the
+    /// archive page made (`blob:https://<archive host>/<id>`), or an object in the archive's own
+    /// storage (a buyer's files come as its signed URLs, `my-downloads`). Anything else a page
+    /// links, frames or redirects to is not saved, whatever WebKit would download.
+    static func allowsDownload(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        if url.scheme?.lowercased() == "blob" {
+            let origin = url.absoluteString.dropFirst("blob:".count)
+            return URL(string: String(origin)).map(isArchive) ?? false
+        }
+        return isArchive(url) || isArchiveStorage(url)
+    }
+
+    /// An object in the project's own Storage, signed or public, and nothing else on that host.
+    static func isArchiveStorage(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host?.lowercased() == SupabaseRoute.host
+            && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
+            && !url.path.contains("/..") && !url.path.contains("/./")
+            && (url.path.hasPrefix("/storage/v1/object/sign/") || url.path.hasPrefix("/storage/v1/object/public/"))
+    }
+
+    enum DownloadDecision: Equatable { case allow, download, refuse }
+
+    /// What the browser does with a response: show it, save it, or refuse a save from elsewhere.
+    static func decideResponse(url: URL?, canShowMIMEType: Bool, contentDisposition: String) -> DownloadDecision {
+        guard !canShowMIMEType || contentDisposition.lowercased().hasPrefix("attachment") else { return .allow }
+        return allowsDownload(url) ? .download : .refuse
+    }
+
     /// The existing preview password answers only the archive's own HTTPS Basic gate,
     /// once. It is never a credential for a linked site, a proxy or a different auth scheme.
     static func canAnswerPreviewChallenge(_ space: URLProtectionSpace, previousFailures: Int) -> Bool {

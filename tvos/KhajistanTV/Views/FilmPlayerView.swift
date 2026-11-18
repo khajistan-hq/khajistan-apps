@@ -24,6 +24,18 @@ struct FilmPlayerView: View {
     var startsFull = false
     /// Closes the screen when UIKit presented it (FilmRestore); SwiftUI's dismiss otherwise.
     var close: (() -> Void)? = nil
+    /// The film in the picture-in-picture window, when this screen opens as its Full screen: the
+    /// screen takes that player over as it plays, as Apple TV hands a film back, with no new token
+    /// and no reload.
+    private let resuming: FilmAway?
+
+    init(film: Film, startsFull: Bool = false, close: (() -> Void)? = nil, resuming: FilmAway? = nil) {
+        self.film = film
+        self.startsFull = startsFull
+        self.close = close
+        self.resuming = resuming
+        _controller = State(initialValue: resuming?.controller ?? PlayerController())
+    }
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -132,7 +144,7 @@ struct FilmPlayerView: View {
             wake()
             followTracks()
         }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { refusal = nil })
                 .environment(\.palette, palette)
         }
@@ -224,7 +236,9 @@ struct FilmPlayerView: View {
                 .buttonStyle(HouseButtonStyle())
                 .disabled(checking)
                 .focused($watchFocused)
-                .accessibilityIdentifier("watchFullFilm")
+                // The screen reopened from the window (FilmRestore, the one caller with `close`)
+                // sits over a cover with its own Watch button: told apart for the UI tests.
+                .accessibilityIdentifier(close == nil ? "watchFullFilm" : "watchFullFilmReopened")
             }
             if full != nil {
                 fullFilmControls
@@ -428,22 +442,34 @@ struct FilmPlayerView: View {
         guard pipOffered else { return }
         armed = nil
         let player = controller, film = film, model = model, pip = pip
-        let away = FilmAway(film: film, controller: player, pip: pip)
+        // The object, not the screen's state: the window reads it after the screen has closed.
+        let subtitles = subtitles
+        let away = FilmAway(film: film, controller: player, pip: pip, grant: full)
+        pip.title = Films.displayTitle(film)
+        // The film's track goes to tvOS as the window opens, which draws it in the skin's colours;
+        // the bar's control moves it to the next language.
+        pip.onHandOff = { subtitles.handOff() }
+        pip.captionLabel = { subtitles.isHandedOff ? subtitles.label : nil }
+        pip.onCaptionToggle = { subtitles.cycle() }
+        pip.captions = { subtitles.text }
+        pip.skin = { model.skin }
+        pip.onSetPlaying = { $0 ? player.resume() : player.pause() }
+        pip.controller = player
         pip.onStart = {
             guard player.state == .playing || player.state == .tuning else { pip.stop(); return }
             away.recordPlace()
-            // AVPlayer draws the chosen subtitles itself in the corner: the house caption view
-            // stays with the closed screen, and the track stays selected.
-            subtitles.handOff()
             model.filmPiP = away
             leave()
         }
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.filmPiP?.controller === player else { return }
+            // The track stays selected, so the window keeps its subtitle until it has closed; the
+            // screen that takes the film over attaches the tracks afresh, which hides tvOS's own.
             model.restoringFilm = film
         }
         pip.onEnd = {
+            subtitles.clear()
             if model.filmPiP?.controller === player { model.silenceRadio() } else { player.stop() }
         }
         if !pip.start(player.player) {
@@ -492,6 +518,21 @@ struct FilmPlayerView: View {
 
     /// The screen opens on the ground with the film's name and the preview tuning behind it.
     private func open() async {
+        if let resuming, model.filmPiP?.controller === resuming.controller {
+            // Taken over before anything else is silenced, so silenceRadio leaves the film playing.
+            model.filmPiP = nil
+            model.silenceRadio()
+            full = resuming.grant ?? (kind: nil, expiresAt: nil)
+            surfaceFocused = true
+            // Paused in the window or playing, its tracks come back to the house view once the
+            // window has closed into the screen (tvOS draws them in the window until then).
+            try? await Task.sleep(for: PictureInPicture.restoreSettle)
+            if !gone, let item = controller.player.currentItem {
+                await subtitles.attach(item, film: film.handle, listed: film.subtitle_languages ?? [], skin: model.skin)
+            }
+            wake()
+            return
+        }
         model.silenceRadio()
         // The film's own subtitle language is turned on by RecordedSubtitles. Left automatic, the
         // player can put the device's subtitle setting over it once the item is ready.
@@ -763,6 +804,8 @@ struct FilmAway {
     let film: Film
     let controller: PlayerController
     let pip: PictureInPicture
+    /// What vod-token granted, carried back to the screen that takes the film over.
+    var grant: (kind: String?, expiresAt: String?)? = nil
 
     /// Where the film has got to, kept as the screen keeps it on Back.
     @MainActor func recordPlace() {
@@ -784,32 +827,12 @@ enum FilmRestore {
     #endif
 
     static func present(_ film: Film, model: AppModel) {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        // The key window, else the app's one window: on a restore from another app the window
-        // may not be key yet when the delegate is called.
-        let windows = scenes.flatMap(\.windows)
-        guard var top = (windows.first(where: \.isKeyWindow) ?? windows.first)?.rootViewController else {
-            // No window to present on: stop the film with its place kept rather than play it unseen.
-            model.silenceRadio()
-            return
+        // No window, or a closing screen in the way: stop the film with its place kept rather
+        // than play it unseen.
+        // The film in the window is handed back, not fetched again.
+        let playing = model.filmPiP.flatMap { $0.film.handle == film.handle ? $0 : nil }
+        TopScreen.present(model: model, otherwise: { model.silenceRadio() }) { close in
+            FilmPlayerView(film: film, startsFull: true, close: close, resuming: playing)
         }
-        while let next = top.presentedViewController, !next.isBeingDismissed { top = next }
-        // A screen still closing above `top` refuses a present: wait for it to finish, and if
-        // it does not, stop the film with its place kept rather than play it unseen.
-        if let closing = top.presentedViewController {
-            if let coordinator = closing.transitionCoordinator {
-                coordinator.animate(alongsideTransition: nil) { _ in present(film, model: model) }
-            } else {
-                model.silenceRadio()
-            }
-            return
-        }
-        weak var host: UIViewController?
-        let screen = FilmPlayerView(film: film, startsFull: true, close: { host?.dismiss(animated: true) })
-            .environment(model)
-        let controller = UIHostingController(rootView: screen)
-        controller.modalPresentationStyle = .fullScreen
-        host = controller
-        top.present(controller, animated: true)
     }
 }

@@ -69,7 +69,7 @@ enum ShelfFeed {
         }
         return StationClock.channelNumbers(p).compactMap { number -> TVTopShelfCarouselItem? in
             let air = StationClock.onAir(p, channel: number, at: now)
-            let returns = StationClock.channelId(p, number: number).flatMap { StationClock.returnTime(p, channelId: $0, at: now) }
+            let returns = StationClock.channelId(p, number: number).flatMap { StationClock.returnLabel(p, channelId: $0, at: now) }
             let line = p._meta.channels.first { $0.number == number }?.line
             let item = TVTopShelfCarouselItem(identifier: "channel-\(number)")
             item.contextTitle = "Khajistan Transmission"
@@ -77,7 +77,7 @@ enum ShelfFeed {
                 let show = air.show?.name ?? ""
                 item.title = "Channel \(number): " + (show.isEmpty ? (air.programme?.title ?? "on air") : show)
             } else {
-                item.title = "Channel \(number): off air" + (returns.map { ", returns at \($0) \(StationClock.tzLabel)" } ?? "")
+                item.title = "Channel \(number): off air" + (returns.map { ", returns at \($0)" } ?? "")
             }
             let state = air.map { "\($0.programmeId)-\($0.startLabel)" } ?? "off-\(returns ?? "")"
             guard draw(item, name: "channel-\(number)-\(skin.rawValue)-\(state)", folder: folder, art: { scale in

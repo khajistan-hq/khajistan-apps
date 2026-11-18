@@ -25,7 +25,7 @@ final class RecordedSubtitles {
     /// The language on, nil for off.
     private(set) var current: String?
 
-    @ObservationIgnored private var cues: [SubtitleCue] = []
+    @ObservationIgnored private var fileCues: [String: [SubtitleCue]] = [:]
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var group: AVMediaSelectionGroup?
     @ObservationIgnored private var options: [String: AVMediaSelectionOption] = [:]
@@ -43,14 +43,55 @@ final class RecordedSubtitles {
         return "Subtitles \u{00B7} \(on)"
     }
 
-    /// Hands a film's chosen track to AVPlayer for the corner window: the house view stops
-    /// drawing, and the track stays selected, so AVPlayer draws it in the window itself.
-    func handOff() {
+    /// The track AVPlayer can draw itself, handed to it for the picture-in-picture window, where
+    /// the house view does not reach: the suppressing output comes off and the track stays
+    /// selected, so tvOS draws it, in the skin's colours (`attach`'s text style rules). The
+    /// languages stay, so the PiP bar can still move to the next one. A programme's prepared file
+    /// is not a track and stays here: the window's compositor draws it (HouseCaptionCompositor).
+    /// True when a track was handed over.
+    @discardableResult
+    func handOff() -> Bool {
+        guard group != nil else { return false }
         if let output, let item { item.remove(output) }
         output = nil
-        // clear() deselects through the group; with the group let go, the selection stays.
-        group = nil
-        clear()
+        text = nil
+        // tvOS draws only the manifest's tracks: a stored file's language on (a staged Urdu beside
+        // the manifest's English) would leave the window bare under "Subtitles · Urdu". The window
+        // takes the manifest language the viewer would get; the screen they return to loads afresh.
+        let choice = SubtitleChoice.windowChoice(
+            current: current, manifest: Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: true),
+            stored: choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }, preferred: Locale.preferredLanguages)
+        if choice != current { apply(choice) }
+        return true
+    }
+
+    /// The languages the control steps through: once handed off, only the manifest's, since tvOS
+    /// has no track of a stored file to draw in the window.
+    static func windowCodes(_ codes: [String], manifest: Set<String>, handedOff: Bool) -> [String] {
+        handedOff ? codes.filter(manifest.contains) : codes
+    }
+
+    /// True once the track is drawn by AVPlayer rather than this object (`handOff()`).
+    var isHandedOff: Bool { group != nil && output == nil }
+
+    /// True while a programme's prepared file is loaded: text the PiP window must draw into the
+    /// picture itself (HouseCaptionCompositor), as tvOS has no track of it.
+    var hasFile: Bool { !fileCues.isEmpty }
+
+    /// The skin's caption colours for the text tvOS draws itself: bold and half again as large,
+    /// since the window shows it at a third of the size (Apple TV HD, 2026-11-17: yellow on the
+    /// Grove plate in the window). Set again by the window when the skin turns.
+    /// The viewer's "Text only" choice (CaptionStyle) draws yellow text with a black edge and no plate.
+    static func styleRules(_ skin: Skin, style: CaptionStyle = .current) -> [AVTextStyleRule] {
+        let bare = style == .bare
+        return [AVTextStyleRule(textMarkupAttributes: [
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(bare ? Skin.bareCaptionHex : skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: bare ? [0, 0, 0, 0] : Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_CharacterEdgeStyle as String: bare ? kCMTextMarkupCharacterEdgeStyle_Uniform as String
+                                                                      : kCMTextMarkupCharacterEdgeStyle_None as String,
+            kCMTextMarkupAttribute_BoldStyle as String: true,
+            kCMTextMarkupAttribute_RelativeFontSize as String: 150,
+        ])].compactMap { $0 }
     }
 
     func clear() {
@@ -64,19 +105,23 @@ final class RecordedSubtitles {
         output = nil
         group = nil
         options = [:]
-        cues = []
+        fileCues = [:]
         tracks = []
         current = nil
         text = nil
         choiceKey = nil
     }
 
+    /// Moves on every clear: a load that sees it moved by more than its own clear was taken over
+    /// by another load (the screen's and the window's, overlapping as the screen closes).
+    var revision: Int { generation }
+
     /// True while the tracks shown are this item's.
     func follows(_ other: AVPlayerItem) -> Bool { item === other }
 
     /// The next language, then off, then the first again.
     func cycle() {
-        let codes = tracks.map(\.code)
+        let codes = Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: isHandedOff)
         guard !codes.isEmpty else { return }
         let next: String?
         if let current, let index = codes.firstIndex(of: current) {
@@ -92,17 +137,50 @@ final class RecordedSubtitles {
     /// Reads the file and follows `clock` (seconds into the programme's file). A file that does not
     /// parse offers nothing: there is no control for subtitles that cannot be shown.
     func load(vtt source: String, language: Track, clock: @escaping @MainActor () -> Double?) {
+        load(files: [(language, source)], first: language.code, clock: clock)
+    }
+
+    /// Several files for one programme (English, and Urdu, Persian or Arabic where made), one per
+    /// language, on in `first` when it is among them, else the first that parses. The control steps
+    /// through them and off, as with a film's tracks; a file's choice is not remembered (video.html).
+    func load(files: [(Track, String)], first: String?, clock: @escaping @MainActor () -> Double?) {
         clear()
-        guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { return }
-        cues = parsed
-        tracks = [language]
-        current = language.code
+        addFiles(files, first: first, clock: clock)
+    }
+
+    /// Stored files beside what is already offered. After `attach`, a file in a language the
+    /// manifest carries is skipped (a Stream programme's English file is its manifest's English),
+    /// and the opener is chosen again over the union by the manifest's rule (desiredSubtitle()).
+    /// Alone, files are on by default in `first`.
+    func addFiles(_ files: [(Track, String)], first: String?, clock: @escaping @MainActor () -> Double?) {
+        var added = false
+        for (track, source) in files where fileCues[track.code] == nil && options[track.code] == nil {
+            guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { continue }
+            fileCues[track.code] = parsed
+            tracks.append(track)
+            added = true
+        }
+        guard added else { return }
+        if group == nil {
+            current = tracks.contains { $0.code == first } ? first : tracks.first?.code
+        } else {
+            let stored = UserDefaults.standard.string(forKey: SubtitleChoice.storeKey)
+            let want = SubtitleChoice.desired(available: tracks.map(\.code), stored: stored, preferred: Locale.preferredLanguages)
+            // Only when the union changes the opener: re-applying the same option blanks a line.
+            if want != current { apply(want) }
+        }
+        guard ticker == nil else { return }
         let gen = generation
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, gen == self.generation else { return }
-                let showing = self.current == nil ? nil : clock().flatMap { WebVTT.text(at: $0, in: self.cues) }
-                if self.text != showing { self.text = showing }
+                // A file is on: its cues. A manifest track is on: the legible output writes the text.
+                if let code = self.current, let cues = self.fileCues[code] {
+                    let showing = clock().flatMap { WebVTT.text(at: $0, in: cues) }
+                    if self.text != showing { self.text = showing }
+                } else if self.current == nil, self.text != nil {
+                    self.text = nil
+                }
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
@@ -117,14 +195,8 @@ final class RecordedSubtitles {
         clear()
         let gen = generation
         // The house view draws the text full screen. In the picture-in-picture window AVPlayer
-        // draws it (handOff()), and these rules give it the skin's caption plate there too.
-        let bare = CaptionStyle.current == .bare
-        item.textStyleRules = [AVTextStyleRule(textMarkupAttributes: [
-            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(bare ? Skin.bareCaptionHex : skin.captionTextHex),
-            kCMTextMarkupAttribute_BackgroundColorARGB as String: bare ? [0, 0, 0, 0] : Skin.argb(skin.captionPlateHex),
-            kCMTextMarkupAttribute_CharacterEdgeStyle as String: bare ? kCMTextMarkupCharacterEdgeStyle_Uniform as String : kCMTextMarkupCharacterEdgeStyle_None as String,
-            kCMTextMarkupAttribute_BoldStyle as String: true,
-        ])].compactMap { $0 }
+        // draws it (handOff()), and these rules give it the skin's caption plate there.
+        item.textStyleRules = Self.styleRules(skin)
         guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []
@@ -143,6 +215,7 @@ final class RecordedSubtitles {
         legible.suppressesPlayerRendering = true
         relay.onText = { [weak self] text in
             guard let self, gen == self.generation else { return }
+            if let code = self.current, self.fileCues[code] != nil { return }   // a stored file is on
             self.text = self.current == nil ? nil : text
         }
         legible.setDelegate(relay, queue: .main)

@@ -41,18 +41,33 @@ struct RootView: View {
                 }
             }
         }
-        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
-        // as a radio from the small player does.
+        // The corner window's bar, over the foot of whichever section is up (PiPBar).
+        .pipBarHost(handlesPlayPause: false)
+        // Full screen from the picture-in-picture window: the channel's screen opens over whatever
+        // screen is on top (TopScreen): a cover on the root would open under a page's cover and
+        // never be seen. The screen takes the playing channel over, as Apple TV hands it back.
+        // With no screen to open on, the channel plays on in the small bar rather than stopping
+        // with nothing on screen.
         .onChange(of: model.restoring?.id) {
             guard let away = model.restoring else { return }
             model.restoring = nil
-            // Not silenced here: the player that opens silences it as it starts. If a page's cover
-            // is open and the screen cannot open over it, the channel plays on in the small bar
-            // rather than stopping with nothing on screen.
             var bar = away
             bar.pip = nil
             model.radioAway = bar
-            reopened = away
+            TopScreen.present(model: model, otherwise: {}) { close in
+                ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
+                                   regionId: away.listRegion, listTitle: away.listTitle, close: close,
+                                   resuming: away.controller)
+            }
+        }
+        // Full screen from a Transmission channel's window: its player opens over whatever is on
+        // top and takes the playing channel over, with no retune (TransmissionPlayerView.start).
+        .onChange(of: model.restoringTransmission) {
+            guard let number = model.restoringTransmission else { return }
+            model.restoringTransmission = nil
+            TopScreen.present(model: model, otherwise: { model.silenceRadio() }) { close in
+                TransmissionPlayerView(channel: number, close: close)
+            }
         }
         // Full screen from the film's corner window: the film opens again over whatever is on top
         // and asks for its token afresh; the player that opens closes the window and resumes from
@@ -62,7 +77,7 @@ struct RootView: View {
             model.restoringFilm = nil
             FilmRestore.present(film, model: model)
         }
-        .fullScreenCover(item: $reopened) { away in
+        .kjFullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)
         }
@@ -107,7 +122,12 @@ struct RootView: View {
         }
         // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
         // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
-        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
+        // With the corner window up, Play/Pause works the window's picture, wherever focus is.
+        .onPlayPauseCommand(perform: model.activePiP == nil && (model.radioAway == nil || model.radioAway?.pip != nil) ? nil : {
+            if let pip = model.activePiP {
+                pip.setPlaying(!pip.isPlaying)
+                return
+            }
             guard let away = model.radioAway else { return }
             if away.controller.state == .playing || away.controller.state == .tuning {
                 away.controller.pause()

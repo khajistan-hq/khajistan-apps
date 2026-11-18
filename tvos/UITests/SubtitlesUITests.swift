@@ -106,10 +106,7 @@ final class SubtitlesUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
-            XCUIRemote.shared.press(.right)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
         XCTAssertEqual(focusedRegion.identifier, "region-indus")
         XCUIRemote.shared.press(.select)
 
@@ -420,6 +417,12 @@ final class SubtitlesUITests: XCTestCase {
         let note = app.staticTexts["filmNote"]
         XCTAssertTrue(note.waitForExistence(timeout: 30), "the film reopens over the cover")
         kjScreenshot("film-restored-over-cover", app: app)
+        // Signed out, the note is up while the screen is still sliding in, and UIKit drops a press
+        // made during the slide (as Apple TV does). Back once the reopened screen holds focus.
+        // Its own Watch button, not the cover's underneath, which keeps focus during the slide.
+        let reopened = app.buttons["watchFullFilmReopened"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in reopened.hasFocus }, object: nil)],
+                                      timeout: 10), .completed, "the reopened screen takes focus")
         XCUIRemote.shared.press(.menu)
         kjPause(1.5)
         XCTAssertFalse(note.exists, "Back closes the reopened screen")

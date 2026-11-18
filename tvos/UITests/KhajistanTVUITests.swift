@@ -34,9 +34,8 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
         screenshot("01-receiver-map", app: app)
 
-        // Down onto the front, then right onto the strip: straight down from the sidebar now
-        // runs into the Surf settings and the Cameras shelf under them.
-        XCTAssertTrue(kjFocusStrip(app), "A region on the map must take focus")
+        // Right from the sidebar onto the A–Z list beside the map.
+        XCTAssertTrue(kjFocusRegions(app), "A region in the list must take focus")
         screenshot("02-map-focused", app: app)
         XCUIRemote.shared.press(.select)
 

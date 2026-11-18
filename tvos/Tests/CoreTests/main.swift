@@ -2418,13 +2418,13 @@ func guideGridMoves() throws {
     var g = GuideGrid(row: 3, now: now)
     try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
     try expectEqual(g.lit(in: s), 0)                      // A is on now
-    try expectEqual(g.marks.count, 6)
+    try expectEqual(g.marks.count, 4)
     g.later(on: s); try expectEqual(g.lit(in: s), 1); try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 20))
     try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
     g.later(on: s); try expectEqual(g.lit(in: s), 2)      // the dark stretch is a block too
     g.later(on: s); try expectEqual(g.lit(in: s), 3)
     // 18:00 is past the window's last half hour: the window follows in half hours.
-    try expectEqual(g.windowStart, pkt(2026, 11, 17, 16, 0))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 17, 0))
     try expect(g.cursor < g.windowEnd.addingTimeInterval(-GuideGrid.step), "the lit start is not in view")
     g.later(on: s); try expectEqual(g.lit(in: s), 3)      // nothing after C: Right stays
     g.earlier(on: s); try expectEqual(g.lit(in: s), 2); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
@@ -2453,6 +2453,78 @@ func guideGridMoves() throws {
     var e = GuideGrid(row: 0, now: now)
     try expectEqual(e.lit(in: []), nil)
     e.later(on: []); e.earlier(on: []); try expectEqual(e.cursor, now)
+}
+
+/// The guide folds a programme too short to read into a neighbour, narrowest first and into the
+/// narrower neighbour, and names the cell for what takes most of it (owner, 2026-11-18: "words are
+/// cutoff and not readable in the guide").
+func guideCellsFold() throws {
+    let g = GuideGrid(row: 0, now: pkt(2026, 11, 17, 12, 10))      // window 12:00 to 14:00
+    let s: [GuideSlot] = [
+        GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 5), title: "A"),   // 5 min on screen
+        GuideSlot(start: pkt(2026, 11, 17, 12, 5), end: pkt(2026, 11, 17, 13, 0), title: "B"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 0), end: pkt(2026, 11, 17, 13, 5), title: "C"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 5), end: pkt(2026, 11, 17, 13, 8), title: nil),   // 3 min dark
+        GuideSlot(start: pkt(2026, 11, 17, 13, 8), end: pkt(2026, 11, 17, 14, 30), title: "E"),
+        GuideSlot(start: pkt(2026, 11, 17, 14, 30), end: pkt(2026, 11, 17, 15, 0), title: "F"),  // off screen
+    ]
+    let cells = g.cells(s, minimum: 20 * 60)
+    try expectEqual(cells.count, 2)
+    // A clipped by the window's edge joins B; the dark seam joins C first, then the pair joins E.
+    try expectEqual(cells[0].first, 0); try expectEqual(cells[0].last, 1); try expectEqual(cells[0].lead, 1)
+    try expectEqual(cells[0].more(naming: 1, in: s), 1)
+    try expectEqual(cells[1].first, 2); try expectEqual(cells[1].last, 4); try expectEqual(cells[1].lead, 4)
+    try expectEqual(cells[1].programmes, 2)                         // the dark seam is not a programme
+    try expectEqual(cells[1].more(naming: 4, in: s), 1)
+    try expectEqual(cells[1].more(naming: 3, in: s), 2)             // lit on the seam, both programmes are more
+    try expect(cells[1].holds(3) && !cells[1].holds(1), "holds")
+    // No minimum: one cell per slot on screen, nothing folded.
+    let all = g.cells(s, minimum: 0)
+    try expectEqual(all.map(\.first), [0, 1, 2, 3, 4])
+    try expect(all.allSatisfy { $0.first == $0.last && $0.lead == $0.first }, "a lone slot names its own cell")
+    // A row of one-minute items folds to cells that are each wide enough, or to one cell.
+    let tiny = (0..<120).map { GuideSlot(start: pkt(2026, 11, 17, 12, $0 % 60).addingTimeInterval(Double($0 / 60) * 3600),
+                                          end: pkt(2026, 11, 17, 12, $0 % 60).addingTimeInterval(Double($0 / 60) * 3600 + 60), title: "t\($0)") }
+    let folded = g.cells(tiny, minimum: 20 * 60)
+    try expect(folded.allSatisfy { $0.end.timeIntervalSince($0.start) >= 20 * 60 }, "a folded cell narrower than the minimum")
+    try expectEqual(folded.reduce(0) { $0 + $1.programmes }, 120)
+    try expectEqual(g.cells([], minimum: 20 * 60), [])
+}
+
+/// Every row of every opening in November: no cell on screen is narrower than a readable cell, the
+/// cells hold every slot on screen once and in order, and the lit programme is in one of them.
+func guideCellsReadableRealMonth() throws {
+    let nov = try realProgramming("2026-11")
+    // ReceiverGuide's numbers on a 1920-point screen: 80 inset each side, 440 for the channels,
+    // 210 for the narrowest cell.
+    let minimum = Double(210.0 / (1920.0 - 160 - 440)) * GuideGrid.span
+    var rows = 0, cells = 0, folded = 0
+    for day in 1...30 {
+        for (hour, minute) in [(6, 10), (18, 34), (23, 50)] {
+            let now = pkt(2026, 11, day, hour, minute)
+            let grid = GuideGrid(row: 0, now: now)
+            for channel in nov._meta.channels.map(\.number) {
+                let slots = StationClock.timeline([nov], channel: channel, from: grid.windowStart, to: now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span))
+                let row = grid.cells(slots, minimum: minimum)
+                let shown = slots.indices.filter { slots[$0].end > grid.windowStart && slots[$0].start < grid.windowEnd }
+                try expectEqual(row.first?.first, shown.first)
+                try expectEqual(row.last?.last, shown.last)
+                for (a, b) in zip(row, row.dropFirst()) { try expectEqual(b.first, a.last + 1) }
+                for cell in row {
+                    let seen = min(cell.end, grid.windowEnd).timeIntervalSince(max(cell.start, grid.windowStart))
+                    try expect(row.count == 1 || seen >= minimum, "channel \(channel) at \(now): a cell \(Int(seen)) s wide")
+                    try expect(cell.holds(cell.lead), "the lead is in its cell")
+                    if cell.last > cell.first { folded += 1 }
+                }
+                if let lit = grid.lit(in: slots), shown.contains(lit) {
+                    try expect(row.contains { $0.holds(lit) }, "channel \(channel) at \(now): the lit programme is in no cell")
+                }
+                rows += 1; cells += row.count
+            }
+        }
+    }
+    print("      \(rows) rows, \(cells) cells, \(folded) folded")
+    try expect(rows > 2000 && folded > 0, "rows \(rows), folded \(folded)")
 }
 
 // MARK: - Real files
@@ -5672,6 +5744,8 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
     ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),
+    ("Guide grid: a programme too short to read is folded into a neighbour", guideCellsFold),
+    ("Guide grid: no cell too narrow to read, every day of a real month", guideCellsReadableRealMonth),
     ("Now and next: the next programme", nextProgrammeRule),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),

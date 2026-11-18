@@ -460,7 +460,7 @@ struct TransmissionPlayerView: View {
         store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
     }
 
-    /// Every channel down the side and three hours across, the tuned channel lit at now.
+    /// Every channel down the side and two hours across, the tuned channel lit at now.
     private func openGuide() {
         guard guideOffered else { return }
         hideTask?.cancel()

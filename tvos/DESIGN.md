@@ -215,10 +215,15 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   basis"; the time grid was the owner's choice of three). Left or Right on the bare picture, or
   the strip's Guide control, raises it from the bottom, on air, off air and while a channel tunes,
   so an off-air channel never leaves the viewer without it. Channels run down the side (number,
-  mark, name, ● LIVE on the one tuned while something is on it), three hours run across under
-  half-hour marks in PKT, with a short accent bar at now, and each programme is a block as long as
-  it airs: its title and its times on the lift plate, an off-air stretch with no plate and *back at*
-  its return. A run of programmes under ten minutes in one strip is one block named for its show
+  mark, name on up to two lines, ● LIVE on the one tuned while something is on it), two hours run
+  across under half-hour marks in PKT, with a short accent bar at now, and each programme is a
+  block as long as it airs: its title and its times on the lift plate, an off-air stretch with no
+  plate and *back at* its return. **No cell is drawn too narrow to read** (owner, 2026-11-18:
+  "words are cutoff and not readable in the guide", on three hours across, where a ten-minute
+  programme read "R… 1…"): a programme whose part on screen is narrower than a cell's title and
+  times is folded into its narrower neighbour, and the cell reads *+N* for the others it holds,
+  with the whole cell's times. The lit cell names the lit programme with its own times, so Right
+  inside a fold reads each one in turn. A run of programmes under ten minutes in one strip is one block named for its show
   (lit while it airs, the headline adds the programme on air, kept current every half minute:
   *now: Jugni*); anything under a minute is part of the block before it (an off-air seam joins a
   programme or an off-air stretch), except a programme after an off-air stretch, which keeps its

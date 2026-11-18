@@ -890,14 +890,15 @@ enum ServerClock {
 }
 
 /// Where the guide's time grid stands, and how the remote moves it (owner, 2026-11-17: "showing
-/// schedule on an hourly basis"). Channels run down the side and time across, three hours at a
-/// time. One programme is lit: Up and Down change the channel and keep the moment, Right lights
+/// schedule on an hourly basis"). Channels run down the side and time across, two hours at a
+/// time (owner, 2026-11-18, on three: "words are cutoff and not readable in the guide"). One programme is lit: Up and Down change the channel and keep the moment, Right lights
 /// the next programme on the channel and Left the one before, never one that has already ended.
 /// The window moves in half hours, enough to keep the lit programme's start in view, and never
 /// starts before the half hour now is in.
 struct GuideGrid: Equatable, Sendable {
-    /// Three hours across the screen.
-    static let span: TimeInterval = 3 * 3600
+    /// Two hours across the screen: at three, a ten-minute programme was 70 points wide on the
+    /// TV and read "R… 1…".
+    static let span: TimeInterval = 2 * 3600
     /// The window moves by half hours, the marks along its top.
     static let step: TimeInterval = 30 * 60
     /// How far ahead Right reaches.
@@ -907,7 +908,7 @@ struct GuideGrid: Equatable, Sendable {
     var row: Int
     /// The lit moment: now, or the start of a later programme.
     var cursor: Date
-    /// The left edge of the three hours on screen.
+    /// The left edge of the two hours on screen.
     var windowStart: Date
     /// The moment the grid is read at, moved on every half minute while the guide is open (refresh).
     private(set) var now: Date
@@ -979,5 +980,63 @@ struct GuideGrid: Equatable, Sendable {
     /// The half-hour marks along the window's top.
     var marks: [Date] {
         stride(from: 0, to: Self.span, by: Self.step).map { windowStart.addingTimeInterval($0) }
+    }
+
+    /// The cells a row draws in the window: one per programme, except that a programme whose part in
+    /// the window is shorter than `minimum` seconds (the time a readable cell takes on screen) is
+    /// folded into a neighbour, and the cell reads "+N" for the programmes it holds besides the one it
+    /// is named for. So no cell on screen is too narrow for its title and times (owner, 2026-11-18:
+    /// "words are cutoff and not readable in the guide"). The narrowest cell is folded first, into the
+    /// narrower of its two neighbours, so a short item joins other short items before a long one.
+    func cells(_ slots: [GuideSlot], minimum: TimeInterval) -> [GuideCell] {
+        let shown = slots.indices.filter { slots[$0].end > windowStart && slots[$0].start < windowEnd }
+        func seen(_ cell: GuideCell) -> TimeInterval {
+            min(cell.end, windowEnd).timeIntervalSince(max(cell.start, windowStart))
+        }
+        var cells = shown.map { GuideCell(first: $0, last: $0, start: slots[$0].start, end: slots[$0].end) }
+        while cells.count > 1 {
+            // ponytail: O(n²) over a row's cells (under a hundred in two hours); fine at this size.
+            guard let narrow = cells.indices.filter({ seen(cells[$0]) < minimum })
+                .min(by: { seen(cells[$0]) < seen(cells[$1]) }) else { break }
+            let left = narrow > 0 ? narrow - 1 : nil
+            let right = narrow + 1 < cells.count ? narrow + 1 : nil
+            let other: Int
+            switch (left, right) {
+            case let (l?, r?): other = seen(cells[l]) <= seen(cells[r]) ? l : r
+            case let (l?, nil): other = l
+            case let (nil, r?): other = r
+            default: return cells
+            }
+            let a = min(narrow, other), b = max(narrow, other)
+            cells[a] = GuideCell(first: cells[a].first, last: cells[b].last, start: cells[a].start, end: cells[b].end)
+            cells.remove(at: b)
+        }
+        return cells.map { cell in
+            var named = cell
+            let members = Array(cell.first...cell.last)
+            // Named for the slot that takes most of the cell on screen; the first one on a tie.
+            let part = { (i: Int) in min(slots[i].end, windowEnd).timeIntervalSince(max(slots[i].start, windowStart)) }
+            named.lead = members.max { part($0) < part($1) || (part($0) == part($1) && $0 > $1) } ?? cell.first
+            named.programmes = members.filter { !slots[$0].isOffAir }.count
+            return named
+        }
+    }
+}
+
+/// One cell of a guide row: the slots `first` through `last`, drawn as one block from `start` to
+/// `end`, named for slot `lead`. `programmes` counts the slots in it that are not off air.
+struct GuideCell: Equatable, Sendable {
+    let first: Int
+    let last: Int
+    let start: Date
+    let end: Date
+    var lead: Int = 0
+    var programmes = 0
+
+    func holds(_ index: Int) -> Bool { first <= index && index <= last }
+
+    /// How many programmes the cell holds besides `named`, the slot whose title it shows: "+2".
+    func more(naming named: Int, in slots: [GuideSlot]) -> Int {
+        programmes - (slots[named].isOffAir ? 0 : 1)
     }
 }

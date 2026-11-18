@@ -2115,13 +2115,14 @@ func guideTimelineSynthetic() throws {
     try expectEqual(dark.count, 1)
     try expectEqual(dark.first?.start, pkt(2026, 10, 10, 8, 0))
     try expectEqual(dark.first?.end, pkt(2026, 10, 10, 23, 0))
-    try expectEqual(dark.first?.returnLabel, nil)   // it ends inside what was asked for
+    try expectEqual(dark.first?.returnAt, nil)   // it ends inside what was asked for
     try expectEqual(dark.first?.openEnd, false)
     // A dark stretch that runs past what was asked for says when the channel is back, and its end
     // (the edge of what was read) is not a time anything happens.
     let open = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 8, 30), to: pkt(2026, 10, 10, 9, 0))
     try expectEqual(open.count, 1)
-    try expectEqual(open.first?.returnLabel, "23:00 PKT")
+    try expectEqual(open.first?.returnAt, pkt(2026, 10, 10, 23, 0))
+    try expectEqual(open.first?.back(now: pkt(2026, 10, 10, 8, 30)), "23:00 PKT")
     try expectEqual(open.first?.openEnd, true)
     // Read to 07:30, the run of one-minute programmes is finished to its strip's end, 08:00: its end
     // is the run's own, not the edge of what was read.
@@ -2220,7 +2221,7 @@ func guideTimelineOffAirAtTheEndOfTheMonthsHeld() throws {
     try expectEqual(slots.map(\.title), ["Long", nil])
     try expectEqual(slots.last?.end, pkt(2026, 12, 1, 0, 0))
     try expectEqual(slots.last?.openEnd, true)
-    try expectEqual(slots.last?.returnLabel, nil)
+    try expectEqual(slots.last?.returnAt, nil)
 }
 
 /// A channel dark across midnight on the month's last day says when it is back, read before
@@ -2242,15 +2243,43 @@ func guideTimelineDarkAcrossTheMonthsEnd() throws {
      "days":[{"date":"2026-12-01","channels":{"c":[]}},{"date":"2026-12-02","channels":{"c":[
        {"start":"10:00","start_minute":600,"minutes":60,"show":"s1","programmes":[0]}]}}]}
     """)
-    var labels: [String] = []
     for from in [pkt(2026, 11, 30, 20, 30), pkt(2026, 11, 30, 23, 30), pkt(2026, 12, 1, 0, 0)] {
         let tail = StationClock.timeline([nov, dec], channel: 1, from: from, to: pkt(2026, 12, 1, 6, 0)).last
         try expect(tail?.isOffAir == true && tail?.openEnd == true, "read from \(from): the row ends off air, open")
-        guard let label = tail?.returnLabel else { throw Failure(description: "read from \(from): no return time") }
-        labels.append(label)
+        guard let back = tail?.returnAt else { throw Failure(description: "read from \(from): no return time") }
+        try expectEqual(back, pkt(2026, 12, 2, 10, 0))
+        // Read the evening before, it is a day and more away: the day is printed with the hour.
+        try expectEqual(tail?.back(now: from), "10:00 PKT on Wednesday 2 December")
     }
-    try expectEqual(Set(labels).count, 1)
-    try expect(labels[0].hasPrefix("10:00"), "return reads \(labels[0])")
+    // A return the next day, less than 24 hours away, still carries its day (Fable, round 6: back
+    // at 23:30 on 1 December, read at 22:00 on 30 November, printed "back at 23:30 PKT").
+    let soon = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-12-01","channels":{"c":[
+       {"start":"23:30","start_minute":1410,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let tail = StationClock.timeline([nov, soon], channel: 1, from: pkt(2026, 11, 30, 22, 0), to: pkt(2026, 12, 1, 1, 0)).last
+    try expectEqual(tail?.returnAt, pkt(2026, 12, 1, 23, 30))
+    try expectEqual(tail?.back(now: pkt(2026, 11, 30, 22, 0)), "23:30 PKT on Tuesday 1 December")
+    try expectEqual(tail?.back(now: pkt(2026, 12, 1, 9, 0)), "23:30 PKT")
+    // Mid-month, one month held: dark from 22:00, back at 13:00 the next day, read at 09:30.
+    let mid = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-17","channels":{"c":[
+       {"start":"21:00","start_minute":1260,"minutes":60,"show":"s1","programmes":[0]}]}},
+             {"date":"2026-11-18","channels":{"c":[
+       {"start":"13:00","start_minute":780,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let read = pkt(2026, 11, 17, 9, 30)
+    let open = StationClock.timeline([mid], channel: 1, from: read, to: read.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)).last
+    try expectEqual(open?.openEnd, true)
+    try expectEqual(open?.back(now: read), "13:00 PKT on Wednesday 18 November")
 }
 
 /// The programme on air by its Now name, from the month that holds the moment: after midnight on

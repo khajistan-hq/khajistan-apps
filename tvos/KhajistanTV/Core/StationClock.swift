@@ -53,18 +53,36 @@ struct GuideSlot: Hashable, Sendable {
     /// The programme's title as every surface prints it (OnAir.nowName), or the show's name for a
     /// run of short programmes; nil while off air.
     let title: String?
-    /// Off air past the end of the schedule asked for: when the channel is back, as every surface
-    /// prints it after "returns at" (StationClock.returnLabel). Nil otherwise.
-    var returnLabel: String? = nil
+    /// Off air past the end of the schedule asked for: the moment the channel is back (the start
+    /// of the strip StationClock.returnStrip finds), printed by `back(now:)`. Nil otherwise.
+    var returnAt: Date? = nil
     /// A run of short programmes of one strip, drawn as one block named for its show.
     var grouped = false
     /// The block runs to the end of what the guide reads, or of the months held, not to a time the
     /// schedule gives: its end is not when anything changes. An off-air one says when the channel
-    /// is back from `returnLabel`, never from its end.
+    /// is back from `returnAt`, never from its end.
     var openEnd = false
 
     var isOffAir: Bool { title == nil }
     func contains(_ moment: Date) -> Bool { start <= moment && moment < end }
+
+    /// When an off-air stretch ends, "03:10 PKT", with its day when that is not the station day of
+    /// `now`: read at 22:00, a return at 23:30 the next day is not ninety minutes away (Fable,
+    /// round 6). An open stretch ends at `returnAt`; a closed one at its end, inside the hours the
+    /// guide reads. Nil for a programme, or when no return is known.
+    func back(now: Date) -> String? {
+        guard isOffAir else { return nil }
+        let at: Date
+        if openEnd {
+            guard let returnAt else { return nil }
+            at = returnAt
+        } else {
+            guard end < now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span) else { return nil }
+            at = end
+        }
+        let label = "\(StationClock.clockLabel(StationClock.stationNow(at).minutes)) \(StationClock.tzLabel)"
+        return StationClock.stationNow(at).iso == StationClock.stationNow(now).iso ? label : "\(label) on \(StationClock.dayName(at))"
+    }
 }
 
 /// The one answer to "what is on Khajistan TV right now", ported from kj-station-clock.js.
@@ -303,6 +321,14 @@ enum StationClock {
         let civil = civil(fromDayNumber: airs)
         let weekday = weekdays[((airs + 4) % 7 + 7) % 7]   // day 0, 1970-01-01, was a Thursday
         return "\(at) on \(weekday) \(civil.day) \(monthNames[civil.month - 1])"
+    }
+
+    /// "Tuesday 1 December": the station day a moment falls on, as returnLabel names a day.
+    static func dayName(_ date: Date) -> String {
+        let iso = stationNow(date).iso
+        guard let day = dayNumber(iso) else { return iso }
+        let civil = civil(fromDayNumber: day)
+        return "\(weekdays[((day + 4) % 7 + 7) % 7]) \(civil.day) \(monthNames[civil.month - 1])"
     }
 
     static func clockLabel(_ minutes: Int) -> String {
@@ -684,7 +710,9 @@ enum StationClock {
             // last day of the month before is not a day it can read (Fable, round 5: dark from 21:00
             // on 30 November, the return on 2 December was lost read before midnight).
             let first = last.p.days.map(\.date).min().flatMap { date(iso: $0, second: 0) } ?? tail.start
-            out[out.count - 1].returnLabel = returnLabel(last.p, channelId: last.id, at: max(tail.start, first))
+            if let strip = returnStrip(last.p, channelId: last.id, at: max(tail.start, first)), strip.slot.startSecond.isFinite {
+                out[out.count - 1].returnAt = date(iso: strip.date, second: strip.slot.startSecond)
+            }
         }
         return out
     }

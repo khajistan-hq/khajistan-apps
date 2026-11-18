@@ -182,17 +182,8 @@ struct TransmissionGuide: View {
         .accessibilityIdentifier("guideHeadline")
     }
 
-    /// When an off-air stretch ends, "03:10 PKT", with its day when that is not the day of `now`.
-    /// A stretch that runs past the hours the guide reads ends where they end, so its return is the
-    /// clock's own answer (StationClock.returnLabel), which knows the days beyond; nil when the
-    /// schedule held has no return.
-    static func back(_ slot: GuideSlot, now: Date) -> String? {
-        guard slot.isOffAir else { return nil }
-        if slot.openEnd { return slot.returnLabel }
-        guard slot.end < now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span) else { return nil }
-        let at = "\(clock(slot.end)) \(StationClock.tzLabel)"
-        return StationClock.stationNow(slot.end).iso == StationClock.stationNow(now).iso ? at : "\(at) on \(dayLabel(slot.end))"
-    }
+    /// When an off-air stretch ends, with its day when that is not today (GuideSlot.back).
+    static func back(_ slot: GuideSlot, now: Date) -> String? { slot.back(now: now) }
 
     /// Where a moment sits across the window, in points from the timeline's left edge.
     private func x(_ date: Date, width: CGFloat) -> CGFloat {
@@ -265,20 +256,7 @@ struct TransmissionGuide: View {
     }
 
     /// "Monday 17 November", the station day the window starts on.
-    static func dayLabel(_ date: Date) -> String {
-        let iso = StationClock.stationNow(date).iso
-        let parts = iso.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3 else { return iso }
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: StationClock.utcOffsetMinutes * 60) ?? .gmt
-        guard let day = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12)) else { return iso }
-        let format = DateFormatter()
-        format.calendar = calendar
-        format.timeZone = calendar.timeZone
-        format.locale = Locale(identifier: "en_GB")
-        format.dateFormat = "EEEE d MMMM"
-        return format.string(from: day)
-    }
+    static func dayLabel(_ date: Date) -> String { StationClock.dayName(date) }
 }
 
 /// A channel on the guide's side: its number, its mark and its name, LIVE on the one tuned.

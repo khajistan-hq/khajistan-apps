@@ -172,7 +172,7 @@ struct TransmissionPlayerView: View {
         case .offAir(channelName: let name, returns: let returns):
             VStack(alignment: .leading, spacing: 28) {
                 Text("Off air").kjDisplay()
-                Text(returns.map { "\(name) returns at \($0) \(StationClock.tzLabel)." } ?? "\(name) is off air.")
+                Text(returns.map { "\(name) returns at \($0)." } ?? "\(name) is off air.")
                     .kjBody()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -514,8 +514,8 @@ struct TransmissionPlayerView: View {
             let line: String
             if let air {
                 line = air.nowName ?? air.show?.name ?? ""
-            } else if let back = store.returnTime(channel: number, at: now) {
-                line = "Off air \u{00B7} returns at \(back) \(StationClock.tzLabel)"
+            } else if let back = store.returnLabel(channel: number, at: now) {
+                line = "Off air \u{00B7} returns at \(back)"
             } else {
                 line = "Off air"
             }

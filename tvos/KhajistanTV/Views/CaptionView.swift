@@ -134,6 +134,6 @@ private struct StripChip<Label: View>: View {
             .padding(.vertical, 10)
             .background(lit ? palette.onBand : Color.clear)
             .scaleEffect(isFocused ? 1.03 : 1)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }

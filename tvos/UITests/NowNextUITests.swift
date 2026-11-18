@@ -15,10 +15,10 @@ final class NowNextUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
     }
 
-    private func open(channel: Int, skin: String) -> XCUIApplication {
+    private func open(channel: Int, skin: String, now: String = "2026-11-08T12:10:00+05:00") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", now]
         kjLaunch(app)
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
@@ -116,5 +116,50 @@ final class NowNextUITests: XCTestCase {
     private func waitUntilGone(_ element: XCUIElement, _ timeout: TimeInterval) -> Bool {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
+    }
+
+    /// The channel number pops up in the top corner when the channel changes, as on a 1980s set,
+    /// and goes again by itself (owner, 2026-11-15).
+    func testChannelNumberPopsUpOnAChange() {
+        for skin in ["day", "grove", "smut"] {
+            let app = open(channel: 5, skin: skin)
+            let osd = app.descendants(matching: .any)["channelNumberOSD"]
+            XCTAssertTrue(osd.waitForExistence(timeout: 30), "the number shows once the channel is on (\(skin))")
+            XCTAssertEqual(osd.label, "Channel 5")
+            XCTAssertTrue(osd.frame.minY < app.frame.height * 0.25 && osd.frame.minX > app.frame.width * 0.5, "top right: \(osd.frame)")
+            kjScreenshot("channel-number-c5-\(skin)", app: app)
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !osd.exists }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 6), .completed, "and goes by itself")
+            XCUIRemote.shared.press(.up)
+            let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'channelNumberOSD' AND label != 'Channel 5'")).firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 30), "Channel Up shows the next number")
+            kjScreenshot("channel-number-up-\(skin)", app: app)
+            app.terminate()
+        }
+    }
+
+    /// No number over a sound-only programme, whose title sits in that corner; off air it shows.
+    /// The fixture's channel 5 plays folk-tv, a sound-only tape, at 13:30; channel 6 has no
+    /// strips, so it is off air. The off-air number is the check that the number works here at all,
+    /// and the change back to 5 checks the sound-only rule on that same path.
+    func testNoChannelNumberOverSoundOnlyButOffAir() {
+        let app = open(channel: 5, skin: "day", now: "2026-11-08T13:40:00+05:00")
+        let osd = app.descendants(matching: .any)["channelNumberOSD"]
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "the sound-only programme is on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 8), "no number over a sound-only programme")
+        XCUIRemote.shared.press(.up)
+        XCTAssertTrue(app.staticTexts["Off air"].waitForExistence(timeout: 30), "channel 6 is off air")
+        XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
+        XCTAssertEqual(osd.label, "Channel 6")
+        kjScreenshot("channel-number-off-air", app: app)
+        // Back to 5 by a channel change, the path that just showed 6: no sign-on cover or first
+        // flight is left to hold the number, so its absence here is the sound-only rule.
+        XCUIRemote.shared.press(.down)
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        let backOnFive = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in tuned.exists && tuned.label == "5" }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [backOnFive], timeout: 30), .completed, "channel 5 is tuned again")
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "channel 5 is back on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 12), "no number over a sound-only programme after a change")
     }
 }

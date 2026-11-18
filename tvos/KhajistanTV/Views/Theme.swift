@@ -223,6 +223,13 @@ struct HouseButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HouseControl(label: configuration.label, isPressed: configuration.isPressed, padding: padding, kind: solid ? .solid : .button)
     }
+
+    /// The button's face drawn without a button, lit by `selected` as focus would light it: for a
+    /// player whose picture keeps focus while the remote walks its controls (the film's panel).
+    static func face<Label: View>(_ label: Label, selected: Bool) -> some View {
+        HousePlate(label: label, isFocused: selected, isPressed: false,
+                   padding: EdgeInsets(top: 18, leading: 26, bottom: 18, trailing: 26), kind: .button)
+    }
 }
 
 /// A card in a shelf, moved as the TV app moves one: focus lifts it to 1.08 on a spring, a soft
@@ -589,58 +596,73 @@ struct PlayerStrip: View {
         }
     }
 
-    var body: some View {
-        HStack(alignment: .center, spacing: 36) {
-            VStack(alignment: .leading, spacing: 6) {
-                // The name and the detail share a line while both fit whole; a long name (a
-                // programme title, since 2026-11-08) puts the detail on a line of its own rather
-                // than crushing it to a sliver.
-                ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .firstTextBaseline, spacing: 20) {
-                        nameText(lines: 1).fixedSize()
-                        detailText.fixedSize()
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        // Stacked, a long title may take a second line rather than be cut.
-                        nameText(lines: 2)
-                        detailText
-                    }
+    /// The programme: its name and the detail beside or under it, the attribution under them.
+    private var nameColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // The name and the detail share a line while both fit whole; a long name (a
+            // programme title, since 2026-11-08) puts the detail on a line of its own rather
+            // than crushing it to a sliver.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 20) {
+                    nameText(lines: 1).fixedSize()
+                    detailText.fixedSize()
                 }
-                if let attribution, !attribution.isEmpty {
-                    Text(attribution)
-                        .font(.system(size: 24))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        // 0.85: at 0.75 the line measured 4.42:1 on day, under 4.5.
-                        .opacity(0.85)
+                VStack(alignment: .leading, spacing: 6) {
+                    // Stacked, a long title may take a second line rather than be cut.
+                    nameText(lines: 2)
+                    detailText
                 }
             }
-            .layoutPriority(1)
-            Spacer(minLength: 24)
-            ForEach(Array(trailing.enumerated()), id: \.offset) { item in
-                Kicker(item.element, color: palette.onBand)
+            if let attribution, !attribution.isEmpty {
+                Text(attribution)
+                    .font(.system(size: 24))
                     .lineLimit(1)
-                    .fixedSize()
+                    .truncationMode(.tail)
+                    // 0.85: at 0.75 the line measured 4.42:1 on day, under 4.5.
+                    .opacity(0.85)
             }
-            if let upNext {
-                VStack(alignment: .trailing, spacing: 6) {
-                    Kicker("Up next \(upNext.time) \(StationClock.tzLabel)", color: palette.onBand)
-                        .lineLimit(1)
-                        .fixedSize()
-                    Text(upNext.name)
-                        // 26: secondary to the 30pt name, and above tvOS's readable floor at three
-                        // metres (settled on that principle after reviews asked for 24 and for 28).
-                        .font(.system(size: 26, weight: .semibold))
-                        // Two lines: a programme title is longer than a show name.
-                        .lineLimit(2)
-                        .multilineTextAlignment(.trailing)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Two tiers in one band (owner's Apple TV, 2026-11-15): the channel or medium and the
+    /// controls along a thin top line, the programme across the full width under it. In one
+    /// row the channel's long name, Up next and the controls squeezed the title to "Ra n…".
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !trailing.isEmpty || accessory != nil {
+                HStack(alignment: .center, spacing: 36) {
+                    ForEach(Array(trailing.enumerated()), id: \.offset) { item in
+                        // Shortened at its end rather than taking the programme's room.
+                        Kicker(item.element, color: palette.onBand)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 24)
+                    if let accessory {
+                        accessory.fixedSize()
+                    }
                 }
-                .frame(maxWidth: 520, alignment: .trailing)
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("upNext")
             }
-            if let accessory {
-                accessory
+            HStack(alignment: .top, spacing: 48) {
+                nameColumn
+                if let upNext {
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Kicker("Up next \(upNext.time) \(StationClock.tzLabel)", color: palette.onBand)
+                            .lineLimit(1)
+                            .fixedSize()
+                        Text(upNext.name)
+                            // 26: secondary to the 30pt name, and above tvOS's readable floor at three
+                            // metres (settled on that principle after reviews asked for 24 and for 28).
+                            .font(.system(size: 26, weight: .semibold))
+                            // Two lines: a programme title is longer than a show name.
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .frame(maxWidth: 520, alignment: .trailing)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("upNext")
+                }
             }
         }
         .foregroundStyle(palette.onBand)
@@ -648,6 +670,71 @@ struct PlayerStrip: View {
         .padding(.vertical, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.band, ignoresSafeAreaEdges: [.horizontal, .bottom])
+    }
+}
+
+/// The channel's number in the top corner when the viewer changes channel, as a 1980s set put
+/// it on screen (owner, 2026-11-15: "make it exactly like a 1980s tv channel number animation",
+/// and no channel name). Two digits from a character generator: a 5x7 grid of square dots, each
+/// with a black edge so it reads on any picture, and no plate behind them. It snaps on and off;
+/// the set's generator had no fade. The house yellow, since green is a third colour on a picture.
+/// On the skin's ground (off air) there is no picture to read against: the digits take the ink
+/// and no edge, as any text on the ground does.
+struct ChannelNumberOSD: View {
+    let number: Int
+    /// True over a moving picture: yellow dots with the generator's black edge.
+    var overPicture = true
+    @Environment(\.palette) private var palette
+    /// One dot of the 5x7 grid, in points.
+    var dot: CGFloat = 17
+
+    /// The digits as the character generator drew them, five dots wide, seven tall, top first.
+    static let glyphs: [Character: [String]] = [
+        "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+        "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+        "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+        "3": ["11111", "00010", "00100", "00010", "00001", "10001", "01110"],
+        "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+        "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+        "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+        "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+        "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+        "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+    ]
+
+    /// "02" for channel 2, as the sets showed it.
+    var digits: String { String(format: "%02d", min(max(number, 0), 99)) }
+
+    var body: some View {
+        let text = Array(digits)
+        let columns = text.count * 5 + (text.count - 1)   // one dark column between digits
+        let fill = overPicture ? Color(hex: Skin.onBandHex) : palette.ink
+        let edged = overPicture
+        Canvas { context, _ in
+            let edge = dot * 0.22
+            for pass in 0..<2 {
+                for (index, character) in text.enumerated() {
+                    guard let rows = Self.glyphs[character] else { continue }
+                    for (row, line) in rows.enumerated() {
+                        for (column, bit) in line.enumerated() where bit == "1" {
+                            let x = CGFloat(index * 6 + column) * dot + edge
+                            let y = CGFloat(row) * dot + edge
+                            let cell = CGRect(x: x, y: y, width: dot, height: dot)
+                            if pass == 0 {
+                                if edged { context.fill(Path(cell.insetBy(dx: -edge, dy: -edge)), with: .color(.black)) }
+                            } else {
+                                // Solid dots: seams between them read as a lattice at this size.
+                                context.fill(Path(cell), with: .color(fill))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(width: CGFloat(columns) * dot + dot * 0.44, height: 7 * dot + dot * 0.44)
+        .accessibilityElement()
+        .accessibilityLabel("Channel \(number)")
+        .accessibilityIdentifier("channelNumberOSD")
     }
 }
 
@@ -715,6 +802,8 @@ private struct SwitchLabel: View {
 /// reach anything.
 enum OverlayTiming {
     static let idle: Duration = .seconds(2.6)
+    /// Added to `idle` while a film control is lit, so the viewer can read it and press Select.
+    static let armedIdle: Duration = .seconds(6)
     static var hidesItself: Bool { !UIAccessibility.isVoiceOverRunning && !UIAccessibility.isSwitchControlRunning }
 }
 

@@ -99,7 +99,7 @@ struct ChannelsView: View {
             // One signal at a time: the hero and the stills give way to the player.
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
         }
-        .fullScreenCover(item: $playing) { choice in
+        .kjFullScreenCover(item: $playing) { choice in
             ReceiverPlayerView(channel: choice.channel, list: choice.list, regionId: region.id)
         }
     }

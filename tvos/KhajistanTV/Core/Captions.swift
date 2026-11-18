@@ -110,6 +110,31 @@ extension Skin {
     }
 
     var captionTextHex: UInt32 { self == .day ? 0x000000 : 0xF3FB04 }
+
+    /// The text of a caption shown without its plate: the house yellow in every skin, as the
+    /// website's Screening Room draws it (kj-captions.css `data-kj-captions="bare"`).
+    static let bareCaptionHex: UInt32 = 0xF3FB04
+
+    /// A hex colour as CoreMedia's text markup takes it: alpha, red, green, blue, each 0 to 1.
+    static func argb(_ hex: UInt32) -> [Double] {
+        [1, Double((hex >> 16) & 0xFF) / 255, Double((hex >> 8) & 0xFF) / 255, Double(hex & 0xFF) / 255]
+    }
+}
+
+/// How captions and subtitles are drawn, chosen by the viewer on Account (owner, 2026-11-17: "a
+/// caption option without the background (only yellow text) that one can choose"). The plate is
+/// the house default; "Yellow text" (the website's name) is #F3FB04 with a thin black edge on the picture.
+enum CaptionStyle: String, CaseIterable {
+    case plate, bare
+    static let key = "kj-caption-style"
+
+    var label: String { self == .plate ? "Plate" : "Yellow text" }
+    var next: CaptionStyle { self == .plate ? .bare : .plate }
+
+    /// The viewer's choice; the plate until one is made.
+    static var current: CaptionStyle {
+        UserDefaults.standard.string(forKey: key).flatMap(CaptionStyle.init(rawValue:)) ?? .plate
+    }
 }
 
 enum CaptionText {
@@ -142,6 +167,11 @@ struct SubtitleLanguage: Decodable, Hashable, Sendable {
 enum SubtitleChoice {
     /// The site's stored choice, "off" or a two-letter code (open-frequencies.js SUBS_KEY).
     static let storeKey = "kj-of-subtitles"
+
+    /// Where one film's choice is kept. A choice stays with the film it was made on: Persian
+    /// picked for an Iranian film turned Persian on for Razia Phans Gayi, an Urdu film that
+    /// carries a Persian track too (owner, 2026-11-15).
+    static func filmKey(_ handle: String) -> String { "\(storeKey).\(handle)" }
 
     /// A language tag's base code: "fa-IR" and "fa_IR" are fa, "est" stays est (not "es"), "prs"
     /// stays Dari. The website's tvSubCode() reads tags the same way.
@@ -197,8 +227,16 @@ enum SubtitleChoice {
         return fallback ?? code.uppercased()
     }
 
-    /// Which language starts on when the viewer has not said (desiredSubtitle()): the remembered
-    /// choice, then the device's languages, then English, else none. Nothing else is guessed.
+    /// Which language starts on (desiredSubtitle()): the choice remembered for this film, then the
+    /// device's languages, then English, else none. Nothing else is guessed.
+    /// The language the PiP window shows once a stream's track is handed to tvOS, which draws only
+    /// the manifest's: a stored file's language on (a staged Urdu) moves to the one the viewer
+    /// would get from the manifest; a manifest language, or off, stays.
+    static func windowChoice(current: String?, manifest: [String], stored: String?, preferred: [String]) -> String? {
+        guard let current, !manifest.contains(current) else { return current }
+        return desired(available: manifest, stored: stored, preferred: preferred)
+    }
+
     static func desired(available: [String], stored: String?, preferred: [String]) -> String? {
         if stored == "off" { return nil }
         if let stored, available.contains(stored) { return stored }

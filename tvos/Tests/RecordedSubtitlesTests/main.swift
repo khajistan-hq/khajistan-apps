@@ -37,6 +37,30 @@ struct Main {
                 try expect(subs.tracks.map(\.code) == ["en"], "tracks \(subs.tracks)")
                 try expect(subs.current == "en", "opener")
             }),
+            ("handed to the window, the control steps through manifest languages only", {
+                let codes = ["en", "fa", "ur"]   // the manifest's English and Persian, a stored Urdu
+                try expect(RecordedSubtitles.windowCodes(codes, manifest: ["en", "fa"], handedOff: true) == ["en", "fa"],
+                           "the stored Urdu is not offered in the window")
+                try expect(RecordedSubtitles.windowCodes(codes, manifest: ["en", "fa"], handedOff: false) == codes,
+                           "full screen the house view draws it, so it stays")
+                try expect(RecordedSubtitles.windowCodes(["ur"], manifest: [], handedOff: false) == ["ur"],
+                           "a file programme's files, never handed off, all stay")
+            }),
+            ("a file-only programme cannot be handed off, so its files stay on for the compositor", {
+                let subs = RecordedSubtitles()
+                subs.load(files: [(.init(code: "ur", label: "Urdu"), ur)], first: "ur") { 2.0 }
+                try expect(!subs.handOff() && !subs.isHandedOff && subs.current == "ur", "no group: nothing handed off")
+                subs.cycle()
+                try expect(subs.current == nil, "off after the one file")
+            }),
+            ("revision moves once per load, so a load can tell when another took over", {
+                let subs = RecordedSubtitles()
+                let before = subs.revision
+                subs.load(files: [(.init(code: "ur", label: "Urdu"), ur)], first: "ur") { 2.0 }
+                try expect(subs.revision == before + 1, "its own load: one step")
+                subs.clear()
+                try expect(subs.revision == before + 2, "another load's clear: a second step")
+            }),
             ("nothing that parses offers no control", {
                 let subs = RecordedSubtitles()
                 subs.load(files: [(.init(code: "ur", label: "Urdu"), "not vtt")], first: "ur") { 2.0 }

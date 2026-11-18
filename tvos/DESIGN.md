@@ -187,7 +187,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Letterbox**: a picture that does not fill the screen sits on **black**, in every skin
   (owner, 2026-10-05: "background should always remain black and not house skin colors").
   It is the one black in the app, and only around a moving picture; radio, the overlay, the
-  tuning ground and every other screen keep the skin.
+  tuning ground and every other screen keep the skin. The other black is an edge, never a
+  ground: the map labels' halo, and the channel number's dot edge over a picture (Transmission).
 
 ## Khajistan Transmission
 
@@ -202,10 +203,20 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   tunes. The preview-password and sign-in steps live on this page.
 - **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
   else the show; the line under it starts with the show (left out when the show is the channel,
-  as Jordan Television is), then NOW and the slot, then the country. At right, ● CHANNEL 5 ·
-  MEHFIL, the channel's own name, so a show is never read as the channel. UP NEXT is the next
-  programme and when it starts, wrapping to two lines; hidden when it would repeat the headline.
-  A title too long to share its line with the detail takes a line, and up to two, of its own.
+  as Jordan Television is), then NOW and the slot, then the country. Above them, on the strip's
+  top line, ● CHANNEL 5 · MEHFIL, the channel's own name, so a show is never read as the channel,
+  with Subtitles · Guide · PiP at the right end of that line. UP NEXT is the next programme and
+  when it starts, wrapping to two lines; hidden when it would repeat the headline. A title too
+  long to share its line with the detail takes a line, and up to two, of its own.
+- **Channel number** (owner, 2026-11-15: "channel number should pop up on top like it does on
+  old tvs", "should not show title of channel and make it exactly like a 1980s tv channel number
+  animation"): two digits, 05, top right, drawn as a 1980s set's character generator drew them:
+  5x7 square dots, 17pt each, no plate and no name. Over a picture the dots are `#F3FB04` with the
+  generator's black edge; on the ground (off air) they take the ink and no edge. They snap on once
+  the channel changed to is on screen (after the pigeon and the sign-on cover) and off 3 s later,
+  with no fade, as the set had none. Not over a sound-only programme, whose title already sits in
+  that corner with the dancer. A channel change takes the last number off at once.
+  VoiceOver hears "Channel 5".
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
   channel's name. Up and down switch channel as under Motion. The
@@ -230,8 +241,30 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   here*), the offer line, *A film Khajistan owns and distributes.* and *Watch the full film*. A refusal
   adds the site's sentence under the button and, for a sign-in or a purchase, the film page's QR code
   (ink modules on the ground) with its address. The panel stays while that answer is on screen.
-  A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
+  A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move ten
   seconds in the full film.
+- **Controls** (owner, 2026-11-15: "why cant you stop on demand movies", no CC on Razia): the preview
+  panel carries Stop beside Watch the full film. In the full film the picture keeps focus, so the
+  panel's Subtitles · PiP · Stop are lit by the remote as the strip's are: Down lights the first
+  (it carries a ↓ while none is lit), left and right walk them, Select works the lit one, Up or
+  Back lets go, and a lit control lets go 6 s after the panel would have hidden (8.6 s with no
+  press), long enough to read it and press Select. In the full film Back closes the bottom bar, and
+  with the bar closed stops the film (owner, 2026-11-17: "a back button shoud exit the bottom bar");
+  in the preview one Back stops it.
+  Subtitles start in the language chosen for that film, else the device's, else English: a
+  choice made on one film is not carried to another (Persian chosen for an Iranian film opened
+  Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,
+  with its chosen subtitles drawn by AVPlayer in the window; full screen opens it again over
+  whatever is on top, where it had got to.
+- **Moving through the film** (owner, 2026-11-17: "all controls should work like apple tv player",
+  after trying Apple's own player and keeping ours): as Apple's player. A click left or right
+  goes back or forward ten seconds. A press held on the clickpad's edge scans, 8× and then 24×
+  after two seconds and 64× after five, and plays on from where it is let go. A swipe across the
+  touch surface pauses on the place it reaches; Select or Play/Pause plays from there, Back puts
+  the film back. While the panel is up it shows the bar: the time played, a thin bar in ink on a
+  faint track, and the time left (-1:02:03), with the scan speed or the scrub's way out between.
+  tvOS gives SwiftUI an arrow once, when it is let go, so a hold is read through GameController
+  (the clickpad is button A, the thumb's place the dpad) and the release is not also a click.
 
 ## Sign in
 
@@ -457,19 +490,32 @@ programme on a sound-only transmission) moves to the top right, smaller and at f
 and back to the centre when he stops (owner, 2026-10-06).
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
-along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
-on Transmission the show's line under them in small type, the medium at the right, and on
-Transmission UP NEXT with its time and show. It rises 40pt and fades in over 0.35 s, and goes
-the same way 2.6 s into playback. It waits while a signal tunes: the ground says so. The
-Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
+along the bottom in the band colour, in two tiers since 2026-11-15 (one row squeezed the title to
+"Ra n…" beside the channel's name and the controls on the owner's TV). The top line: the medium or
+the channel as a kicker at left, the controls at right. Under it, the full width: the name (30pt
+black), the place or the slot beside it, on Transmission the credit under them in small
+type, and on Transmission UP NEXT with its time and show at the right. It rises 40pt and fades in
+over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal tunes: the ground
+says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
 "i dont want info like 'regional broadcast by...' the apple tv").
+
+**Subtitles: Plate or Yellow text** (owner, 2026-11-17: "a caption option without the background
+(only yellow text) that one can choose"). Account carries one button, as the colours do. The
+plate below is the default. Yellow text (the website's name for it) is the house yellow `#F3FB04`
+in every skin, with a 2pt black
+edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
+The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
+sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,
+and yellow text on the day ground cannot be read. A scan is silent, as Apple's is.
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no
 outline, no shadow, each line laid out on its own direction. The plate sits 24pt above the strip
 (or the film's panel) while it is up and moves down with it. Its control is the strip's last item,
 a kicker in onBand underlined while on; reached with right, it takes the inverted plate (band text
-on onBand), which reads on the band in every skin.
+on onBand), which reads on the band in every skin. One exception: a film in the picture-in-picture
+window keeps its chosen track, which AVPlayer draws there in the skin's caption colours, bold, at
+the system's size and position, since the house plate stays with the closed screen. Transmission's corner window carries no subtitles.
 
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.

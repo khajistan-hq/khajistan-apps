@@ -118,8 +118,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
   row (Liked, or Themes) peeks under them, as the TV app lays its rows.
   **Themes** (owner, 2026-11-18) is one row of names with no pictures: News, Music, Film & drama,
-  Faith, Culture, Sport, Children, each with its live count. Focus comes into the row on News, from above or below (the shelves take the nearest card
-  instead); Back from the player returns to the theme pressed. Select plays one of the
+  Faith, Culture, Sport, Children, each with its live count. Focus comes into the row on News the first time, and after that on the theme last focused,
+  from above, from below, and back from the player (the shelves take the nearest card instead). Select plays one of the
   theme's channels at random, radio included, and up and down in the player surf every channel of that theme. Until that day each
   theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
   "Street cameras"). In the store build these stay: Liked, Themes, CCTV, the Screening Room and

@@ -82,7 +82,8 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(news.label.hasSuffix("live"), "a theme reads its name and its live count, got \(news.label)")
         let themes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'"))
         XCTAssertLessThanOrEqual(themes.count, 7, "one button a theme, not one a channel; got \(themes.count)")
-        XCTAssertEqual(themes.descendants(matching: .image).count, 0, "a theme is a name, with no picture")
+        // A theme is a name: its plate is two lines of text (67 points), where a channel card is 190 or more.
+        XCTAssertLessThan(news.frame.height, 160, "a theme is a name, with no picture; height \(news.frame.height)")
         XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
@@ -98,5 +99,12 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["genre-music"].waitForExistence(timeout: 15), "Back closes the player")
         kjPause(1.5)
         XCTAssertTrue(app.buttons["genre-music"].hasFocus, "Back from the player returns to the theme pressed")
+        // From below, focus comes back to the theme last focused, not to the one above the card left.
+        XCUIRemote.shared.press(.down)
+        kjPause(1)
+        XCTAssertFalse(app.buttons["genre-music"].hasFocus, "down leaves the themes")
+        XCUIRemote.shared.press(.up)
+        kjPause(1)
+        XCTAssertTrue(app.buttons["genre-music"].hasFocus, "up into the themes returns to the theme last focused")
     }
 }

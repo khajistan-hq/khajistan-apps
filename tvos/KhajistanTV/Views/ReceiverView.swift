@@ -556,10 +556,12 @@ private struct ThemeRow: View {
     @Environment(AppModel.self) private var model
     @State private var rows: [Row] = []
     @State private var playing: Pick?
-    /// Focus coming into the row from above or below lands on its first theme, not on whichever
-    /// sits under the control it came from. Back from the player, tvOS returns it to the theme
-    /// pressed (HomeRowsUITests).
+    /// Focus coming into the row lands on the theme last focused (Back from the player: the one
+    /// pressed), or on News the first time, not on whichever sits under the control it came from.
+    /// tvOS did not do either reliably by itself (HomeRowsUITests, 2026-11-18: the full build
+    /// lost the theme pressed, the store build came up from CCTV onto another theme).
     @FocusState private var focused: String?
+    @State private var lastFocused: String?
 
     var body: some View {
         // A stack, not a Group: with no rows yet there would be no child to carry the task.
@@ -597,7 +599,8 @@ private struct ThemeRow: View {
             }
         }
         .focusSection()
-        .defaultFocus($focused, rows.first?.id)
+        .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id)
+        .onChange(of: focused) { _, now in if let now { lastFocused = now } }
         .task(id: model.extendedAtlas) { await load() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)

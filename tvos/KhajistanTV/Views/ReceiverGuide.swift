@@ -161,7 +161,9 @@ struct TransmissionGuide: View {
         let row = rows.indices.contains(grid.row) ? rows[grid.row] : nil
         let slot = row.flatMap { r in grid.lit(in: r.slots).map { r.slots[$0] } }
         let channel = row?.name ?? ""
-        let loading = row.map { $0.slots.isEmpty } ?? true
+        // Nothing read at or after the lit moment (not read yet, or the month after not held): the
+        // row is waiting for its reading, never off air.
+        let loading = slot == nil
         var parts = [channel]
         if let slot, slot.isOffAir {
             parts.append(Self.back(slot, now: grid.now).map { "back at \($0)" } ?? "off air")
@@ -233,7 +235,7 @@ struct TransmissionGuide: View {
                         live: row.number == current && onNow, lit: lit, plate: lit && litSlot == nil)
                 .frame(width: Self.channelWidth, alignment: .leading)
             ZStack(alignment: .topLeading) {
-                if row.slots.isEmpty {
+                if shown.isEmpty {
                     Text("Loading").kjSmall(faint: true).padding(.horizontal, 14)
                         .frame(height: Self.rowHeight - 8, alignment: .leading)
                 }

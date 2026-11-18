@@ -2223,6 +2223,36 @@ func guideTimelineOffAirAtTheEndOfTheMonthsHeld() throws {
     try expectEqual(slots.last?.returnLabel, nil)
 }
 
+/// A channel dark across midnight on the month's last day says when it is back, read before
+/// midnight or after: the return is asked of the new month from its own first day.
+func guideTimelineDarkAcrossTheMonthsEnd() throws {
+    let nov = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-30","channels":{"c":[
+       {"start":"20:00","start_minute":1200,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let dec = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-12-01","channels":{"c":[]}},{"date":"2026-12-02","channels":{"c":[
+       {"start":"10:00","start_minute":600,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    var labels: [String] = []
+    for from in [pkt(2026, 11, 30, 20, 30), pkt(2026, 11, 30, 23, 30), pkt(2026, 12, 1, 0, 0)] {
+        let tail = StationClock.timeline([nov, dec], channel: 1, from: from, to: pkt(2026, 12, 1, 6, 0)).last
+        try expect(tail?.isOffAir == true && tail?.openEnd == true, "read from \(from): the row ends off air, open")
+        guard let label = tail?.returnLabel else { throw Failure(description: "read from \(from): no return time") }
+        labels.append(label)
+    }
+    try expectEqual(Set(labels).count, 1)
+    try expect(labels[0].hasPrefix("10:00"), "return reads \(labels[0])")
+}
+
 /// The programme on air by its Now name, from the month that holds the moment: after midnight on
 /// the 1st that is the second file.
 func guideNowNameAcrossTheMonth() throws {
@@ -5598,6 +5628,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide: which month to fetch", guideMonthToFetch),
     ("Guide timeline: off air never covers what follows it", guideTimelineKeepsWhatFollowsOffAir),
     ("Guide timeline: off air at the end of the months held", guideTimelineOffAirAtTheEndOfTheMonthsHeld),
+    ("Guide timeline: dark across the month's end says when it is back", guideTimelineDarkAcrossTheMonthsEnd),
     ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),

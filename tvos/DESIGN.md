@@ -224,7 +224,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   programme or an off-air stretch), except a programme after an off-air stretch, which keeps its
   own block: off air never covers something on. Near a month's end the next month's schedule is fetched; until it is held, a row ends
   where the month does rather than read the month after as off air (a programme begun before
-  midnight is drawn whole), and a row never read yet says Loading. A refill keeps the blocks on
+  midnight is drawn whole), and a row with nothing read for the hours on screen says Loading, as
+  does the headline when nothing is read at the lit moment. When the store lets go of the month
+  before at the turn, a run carried over midnight reads from 00:00 under its last programme's name
+  for its last few minutes, as the clock does. A refill keeps the blocks on
   screen until the new reading lands. Over the grid the lit programme reads in full (its title, then the channel and its
   times), since a short programme's block is too narrow for its name. One block is lit (the focus
   plate, no lift: a block can be most of the screen wide). Up and Down change channel and keep the

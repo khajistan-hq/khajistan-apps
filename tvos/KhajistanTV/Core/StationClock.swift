@@ -680,7 +680,11 @@ enum StationClock {
         // when the channel is back, never "back at" the edge of what was read.
         if let tail = out.last, tail.isOffAir, let last, tail.end >= min(to, last.end) {
             out[out.count - 1].openEnd = true
-            out[out.count - 1].returnLabel = returnLabel(last.p, channelId: last.id, at: tail.start)
+            // Asked no earlier than the first day that month's file holds: a stretch begun on the
+            // last day of the month before is not a day it can read (Fable, round 5: dark from 21:00
+            // on 30 November, the return on 2 December was lost read before midnight).
+            let first = last.p.days.map(\.date).min().flatMap { date(iso: $0, second: 0) } ?? tail.start
+            out[out.count - 1].returnLabel = returnLabel(last.p, channelId: last.id, at: max(tail.start, first))
         }
         return out
     }

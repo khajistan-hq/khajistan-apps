@@ -260,7 +260,7 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
-            if let latin = latinName(air) {
+            if let latin = air.secondTitle {
                 Text(latin).kjBody().multilineTextAlignment(.center)
             }
             if !song.isEmpty {
@@ -293,7 +293,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
-                    latinName: soundOnly ? nil : latinName(air),
+                    secondName: soundOnly ? nil : air.secondTitle,
                     detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     // The channel's own name, always: a show name in the headline read as the
@@ -359,27 +359,6 @@ struct TransmissionPlayerView: View {
         air.nowName ?? store.channelName(store.channelNumber)
     }
 
-    /// The year, unless a name on the strip already carries it ("Abadan (1971)"): the site's rule
-    /// (open-frequencies.js, a title that contains its year is not given it twice).
-    private func shownYear(_ air: OnAir) -> String? {
-        guard let year = air.programme?.year.map(String.init) else { return nil }
-        let names = [headline(air), latinName(air) ?? ""]
-        return names.contains { $0.contains(year) } ? nil : year
-    }
-
-    /// The headline's Roman form, only while the headline is the programme's own name.
-    private func latinName(_ air: OnAir) -> String? {
-        air.nowName != nil && air.nowName == nonEmpty(air.programme?.display_title) ? air.programme?.latinTitle : nil
-    }
-
-    /// The guide's one line for a channel: what is on, with its Roman form after it. The name is
-    /// isolated (U+2068 … U+2069) so a Persian title keeps the Roman form on its own side.
-    private func guideLine(_ air: OnAir) -> String {
-        let name = air.nowName ?? air.show?.name ?? ""
-        guard name == nonEmpty(air.programme?.display_title), let latin = air.programme?.latinTitle else { return name }
-        return "\u{2068}" + name + "\u{2069} \u{00B7} " + latin
-    }
-
     /// The show, where the headline is the programme: it moves to the head of the detail line.
     /// Not when the show IS the channel (Jordan Television, Home Movies): the trailing name says it.
     private func showUnderTitle(_ air: OnAir) -> String? {
@@ -396,7 +375,7 @@ struct TransmissionPlayerView: View {
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
         // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), shownYear(air), nonEmpty(air.programme?.part), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [nonEmpty(air.programme?.country), air.shownYear(headline: headline(air)), nonEmpty(air.programme?.part), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -710,7 +689,7 @@ struct TransmissionPlayerView: View {
         // this screen has closed: a stream's track drawn by tvOS, a file's drawn into the picture
         // (PictureInPicture). The object, not the screen's state.
         let follower = ProgrammeSubtitleFollower(subtitles, store: store, model: model,
-                                                 loaded: subtitles.tracks.isEmpty ? nil : windowSubtitleKey)
+                                                 loaded: subtitles.tracks.isEmpty ? nil : ProgrammeSubtitles.followKey(store))
         pip.title = store.channelName(store.channelNumber)
         pip.onHandOff = { follower.subtitles.handOff() }
         pip.captions = { follower.text() }
@@ -804,7 +783,7 @@ struct TransmissionPlayerView: View {
     private var windowSubtitleKey: String? { ProgrammeSubtitleFollower.key(store) }
 
     private func loadSubtitles() async {
-        await ProgrammeSubtitles.load(into: subtitles, store: store, model: model)
+        await ProgrammeSubtitles(subtitles, store: store, model: model).load()
     }
 
     private var isOnAir: Bool {

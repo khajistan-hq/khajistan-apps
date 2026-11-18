@@ -67,6 +67,8 @@ struct FilmPlayerView: View {
     @State private var scrub: (from: Double, wasPlaying: Bool, to: Double)?
     /// Where this swipe starts from: a second swipe carries on from the place the first reached.
     @State private var swipeBase: Double?
+    /// The pan on the touch surface, read step by step (FilmTransport.PanReader).
+    @State private var pan = FilmTransport.PanReader()
     /// A held arrow's scan: its direction and speed, while the arrow is held.
     @State private var scan: (direction: Int, speed: Int)?
     @State private var scanTask: Task<Void, Never>?
@@ -340,7 +342,8 @@ struct FilmPlayerView: View {
                         .accessibilityAction { subtitles.cycle() }
                         .accessibilityAddTraits(armed == .subtitles ? .isSelected : [])
                 case .playPause:
-                    let word = controller.state == .playing ? "Pause" : "Play"
+                    // Connecting is on its way to playing: Pause, as the film is about to play.
+                    let word = controller.state == .playing || controller.state == .tuning ? "Pause" : "Play"
                     HouseButtonStyle.face(Text(hint + word).kjKicker(), selected: armed == .playPause)
                         .accessibilityLabel(word)
                         .accessibilityAddTraits(.isButton)
@@ -454,7 +457,9 @@ struct FilmPlayerView: View {
     /// the next player to start closes the window). Full screen from the window opens the film
     /// again where it had got to; closing the window stops it.
     private func startPictureInPicture() {
-        guard pipOffered else { return }
+        // One window at a time: a second activation while the first opens would let go of its
+        // closures (VoiceOver can activate twice; the remote unlights on the first Select).
+        guard pipOffered, !pip.isOpening, !pip.isActive else { return }
         armed = nil
         let player = controller, film = film, model = model, pip = pip
         // Paused, it plays as it goes to the corner, as Apple TV's own player does; the window's
@@ -738,15 +743,16 @@ struct FilmPlayerView: View {
     /// The place is kept until Select or Play/Pause plays from it, or Back puts the film back.
     private func swipe(_ state: UIGestureRecognizer.State, _ translation: CGPoint) {
         guard full != nil, armed == nil, scan == nil, movable else { return }
-        if state == .began { swipeBase = scrub?.to }
+        if state == .began { swipeBase = scrub?.to; pan = FilmTransport.PanReader() }
         guard state == .changed else { return }
         let points = translation.x
+        let step = pan.read(x: Double(translation.x), y: Double(translation.y))
         // A slide that runs down rather than across is not a scrub: it moves no place and stamps
         // nothing, so a click Down after it is not dropped as part of a swipe. During a scrub it
         // leaves the bar for the control row, as Down does (owner, 2026-11-18: "when you touch
         // down on the apple tv remote it should go to subtitles, stop/play and pip").
-        if FilmTransport.isMostlyVertical(x: Double(translation.x), y: Double(translation.y)) {
-            if scrub != nil, FilmTransport.isSlideDown(x: Double(translation.x), y: Double(translation.y)) { vertical(1) }
+        if step.vertical {
+            if scrub != nil, step.slideDown { vertical(1) }
             return
         }
         lastSwipe = .now
@@ -811,9 +817,11 @@ struct FilmPlayerView: View {
     private func stopEverything() {
         // Only the full film's place is kept, as on the phone; a preview has none.
         // The player's own clock, not the half-second poll, which can still hold the preview's.
-        if full != nil, controller.state == .playing || controller.state == .paused {
+        if full != nil, [.playing, .paused, .tuning].contains(controller.state) {
             let now = controller.player.currentTime().seconds
-            FilmPlaces.record(film.handle, at: now.isFinite ? now : position, of: duration)
+            if (now.isFinite && now > 0) || controller.state != .tuning {
+                FilmPlaces.record(film.handle, at: now.isFinite ? now : position, of: duration)
+            }
         }
         hideTask?.cancel()
         armed = nil

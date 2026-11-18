@@ -247,12 +247,36 @@ enum FilmTransport {
         [hasSubtitles ? .subtitles : nil, .playPause, pipOffered ? .pip : nil, .stop].compactMap { $0 }
     }
 
-    /// A pan on the touch surface that runs more down than across, far enough to be meant: during
-    /// a scrub it leaves the bar for the control row, as a click Down does, and moves no place.
-    static func isSlideDown(x: Double, y: Double) -> Bool { y > 60 && y > abs(x) }
+    /// Reads a pan on the touch surface step by step, from each change since the last rather
+    /// than the total since the thumb went down: a thumb that scrubs across and then slides down
+    /// without lifting turns vertical the moment it turns (Fable, PR 104 round 2).
+    struct PanReader {
+        private var last = (x: 0.0, y: 0.0)
+        private var down = 0.0
+        private var vertical = false
+        private var fired = false
 
-    /// A pan that runs more up or down than across is not a scrub.
-    static func isMostlyVertical(x: Double, y: Double) -> Bool { abs(y) > abs(x) }
+        /// How far a slide runs down, from where it turned, to leave the track bar.
+        static let slideDown = 60.0
+
+        /// Each `.changed` with the pan's total translation. `vertical`: this step runs more up or
+        /// down than across, so it is not a scrub. `slideDown`: the slide down has gone far enough,
+        /// answered once a pan.
+        mutating func read(x: Double, y: Double) -> (vertical: Bool, slideDown: Bool) {
+            let dx = x - last.x, dy = y - last.y
+            last = (x, y)
+            guard dx != 0 || dy != 0 else { return (vertical, false) }
+            vertical = abs(dy) >= abs(dx)
+            if vertical {
+                down = max(0, down + dy)
+            } else if abs(dx) > 2 * abs(dy) {
+                down = 0              // plainly across again: the slide starts over
+            }
+            guard vertical, down > Self.slideDown, !fired else { return (vertical, false) }
+            fired = true
+            return (true, true)
+        }
+    }
 
     static let skip: Double = 10
     /// How often a held arrow moves the film.

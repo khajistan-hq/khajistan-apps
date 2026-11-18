@@ -66,6 +66,7 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: scrubLine, object: nil)], timeout: 30), .completed,
                        "the track bar is up")
         let reached = (try? bar.snapshot())?.value as? String
+        XCTAssertNotNil(reached, "the bar reports the place, so the comparison below means something")
         kjScreenshot("film-track-bar-up", app: app)
         XCUIRemote.shared.press(.down)
         kjPause(0.8)

@@ -5399,7 +5399,34 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The full film's control row (owner, 2026-11-18: Down reaches subtitles, stop/play and pip).
+func filmControlRowOffersPlayAndPiP() throws {
+    typealias C = FilmTransport.Control
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: true), [C.subtitles, .playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: false, pipOffered: true), [C.playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: false), [C.subtitles, .playPause, .stop])
+    // Read step by step: each answer is (vertical, slideDown).
+    func run(_ points: [(Double, Double)]) -> [(Bool, Bool)] {
+        var reader = FilmTransport.PanReader()
+        return points.map { let r = reader.read(x: $0.0, y: $0.1); return (r.vertical, r.slideDown) }
+    }
+    // Across 300, then down 120 without lifting: the turn is vertical at once, and the slide fires once.
+    let turned = run([(100, 0), (200, 0), (300, 0), (302, 40), (303, 80), (304, 120), (305, 160)])
+    try expect(turned.prefix(3).allSatisfy { !$0.0 }, "the scrub runs across")
+    try expect(turned[3].0 && !turned[3].1, "the turn down is vertical, not yet far enough")
+    try expectEqual(turned.filter(\.1).count, 1, "the slide down fires once")
+    try expect(turned[4].1, "fires past 60 points from the turn, not from where the thumb went down")
+    // A scrub drifting down as it runs across stays a scrub.
+    try expect(run([(100, 20), (200, 40), (300, 60), (400, 80)]).allSatisfy { !$0.0 && !$0.1 }, "drift is a scrub")
+    // A slide up, and a rest of the thumb, do not leave the bar.
+    try expect(!run([(0, -50), (0, -120), (0, -200)]).contains { $0.1 }, "a slide up")
+    try expect(!run([(2, 20), (3, 40)]).contains { $0.1 }, "a rest of the thumb")
+    // Back across after going down starts the slide over.
+    try expect(!run([(0, 40), (100, 40), (100, 80)]).contains { $0.1 }, "40 down, across, 40 down is not 60")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("filmControlRowOffersPlayAndPiP", filmControlRowOffersPlayAndPiP),
     ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
     ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
     ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),

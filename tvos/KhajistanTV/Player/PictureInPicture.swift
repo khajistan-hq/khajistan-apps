@@ -33,6 +33,9 @@ final class PictureInPicture: NSObject {
 
     /// The corner window is up.
     var isActive: Bool { lifecycle.isActive }
+
+    /// A start was asked for and the window has not opened yet.
+    var isOpening: Bool { pending != nil }
     /// The picture in the window is playing, for the bar's Play/Pause.
     private(set) var isPlaying = false
     /// What the bar names: the channel, the programme or the film.

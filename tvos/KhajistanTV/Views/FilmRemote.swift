@@ -8,7 +8,8 @@ import UIKit
 struct FilmRemote: UIViewRepresentable {
     var onSelect: () -> Void
     /// A swipe's state and its travel across, in remote points.
-    var onSwipe: (UIGestureRecognizer.State, CGFloat) -> Void
+    /// The pan's state and its translation: x scrubs, y tells a slide down from a scrub.
+    var onSwipe: (UIGestureRecognizer.State, CGPoint) -> Void
 
     func makeUIView(context: Context) -> Surface { Surface() }
 
@@ -56,7 +57,7 @@ struct FilmRemote: UIViewRepresentable {
         }
 
         @objc private func pan(_ recognizer: UIPanGestureRecognizer) {
-            remote?.onSwipe(recognizer.state, recognizer.translation(in: self).x)
+            remote?.onSwipe(recognizer.state, recognizer.translation(in: self))
         }
     }
 }

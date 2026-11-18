@@ -314,6 +314,23 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         kjPause(0.8)
         XCTAssertEqual(subtitles.label, "Subtitles · English", "Select on the lit control moves to the next choice")
+        // Right walks the row: Pause, then PiP, which is offered paused too, then Stop.
+        let playPause = app.descendants(matching: .any)["playPauseControl"]
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(playPause.isSelected, "Right lights Pause")
+        XCTAssertEqual(playPause.label, "Pause")
+        XCUIRemote.shared.press(.select)
+        kjPause(1)
+        XCTAssertEqual(playPause.label, "Play", "Select on Pause pauses the film")
+        XCTAssertTrue(playPause.isSelected, "the control stays lit")
+        let pipControl = app.descendants(matching: .any)["pipControl"]
+        if pipControl.exists {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.6)
+            XCTAssertTrue(pipControl.isSelected, "PiP is offered on a paused film, and Right lights it")
+            kjScreenshot("film-full-controls-paused-pip-lit", app: app)
+        }
         for _ in 0..<3 where !stop.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(stop.isSelected, "Right walks to Stop")
         kjScreenshot("film-full-controls-stop-lit", app: app)

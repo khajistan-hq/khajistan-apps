@@ -129,12 +129,24 @@ final class AuthStore {
         await lookUpFactor(fresh)
     }
 
-    /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
+    /// Signs out here first, then tells the server in the background. A failed request changes
+    /// nothing for the viewer. An expired token is refreshed first: the server refuses a logout with an expired token, and
+    /// the session would stay alive there. The refreshed session is never kept.
     func signOut() async {
-        let token = session?.accessToken
+        let current = session
         clearSession()
-        guard let token else { return }
-        _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
+        guard let current else { return }
+        let urlSession = urlSession
+        Task {
+            var token = current.accessToken
+            if current.isExpired(at: Date()),
+               let (data, response) = try? await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken)),
+               (response as? HTTPURLResponse)?.statusCode == 200,
+               let fresh = try? AuthAPI.session(from: data, now: Date()) {
+                token = fresh.accessToken
+            }
+            _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
+        }
     }
 
     /// A token that is good now: the stored one, or a refreshed one. When the refresh fails

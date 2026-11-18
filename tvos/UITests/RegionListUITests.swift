@@ -33,7 +33,7 @@ final class RegionListUITests: XCTestCase {
         XCTAssertTrue(kjFocus(app.buttons["region-indus"], app: app), "the remote reaches Indus in the list")
         kjScreenshot("region-list-indus", app: app)
         let map = app.descendants(matching: .any).matching(identifier: "atlasMap").firstMatch
-        XCTAssertEqual(map.value as? String, "indus", "the map lights the region the list has focused")
+        XCTAssertEqual(map.value as? String, "Indus", "the map lights the region the list has focused")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["shelf-tv"].waitForExistence(timeout: 60), "Indus opens on its television")
         XCTAssertTrue(app.descendants(matching: .any)["shelf-radio"].exists, "and its radio, on a shelf of its own")
@@ -53,6 +53,13 @@ final class RegionListUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertEqual(inList.count, rows.count, "every region control is a row of the list")
 
+        // The atlas's regions fit the list whole: no last row cut flat at its foot. The recorded
+        // dial carries twelve; with Beyond the atlas on, the list scrolls instead.
+        let list = app.descendants(matching: .any).matching(identifier: "regionList").firstMatch
+        XCTAssertLessThanOrEqual(rows.count, 12, "the recorded atlas carries twelve regions or fewer")
+        let last = rows.element(boundBy: rows.count - 1)
+        XCTAssertLessThanOrEqual(last.frame.maxY, list.frame.maxY + 1,
+                                 "the last region, \(last.label), ends inside the list (row \(last.frame), list \(list.frame))")
         let medium = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'shuffle-medium-'"))
         XCTAssertEqual(medium.allElementsBoundByIndex.map(\.label), ["All", "TV", "Radio"], "one row: All, TV, Radio")
         let genre = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'surf-genre-'"))

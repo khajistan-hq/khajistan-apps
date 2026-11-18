@@ -23,7 +23,6 @@ struct ReceiverView: View {
     @FocusState private var surfFocused: Bool
     /// The switch at the foot of the sidebar, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
-    /// Once per launch: coming back from a region keeps the focus on the region.
 
     var body: some View {
         @Bindable var model = model
@@ -421,7 +420,7 @@ private struct AtlasPanel: View {
                         // For the UI tests: the region the map lights, read as the map's value.
                         .accessibilityElement()
                         .accessibilityLabel("Map")
-                        .accessibilityValue(listedRegion ?? "")
+                        .accessibilityValue(composed.regions.first { $0.id == listedRegion }?.label ?? "")
                         .accessibilityIdentifier("atlasMap")
                     regionList(composed)
                 }
@@ -491,7 +490,9 @@ private struct AtlasPanel: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)))
+                        // 50 points a row: the atlas's twelve regions fit the map's band whole,
+                        // with no last row cut flat at its foot (2026-11-17).
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
                         .focused($listedRegion, equals: region.id)
                         .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.label)

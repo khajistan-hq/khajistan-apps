@@ -163,7 +163,13 @@ enum TopScreen {
         let controller = UIHostingController(rootView: screen)
         controller.modalPresentationStyle = .fullScreen
         host = controller
-        top.present(controller, animated: true)
+        // UIKit leaves focus where it was when a hosting controller is presented this way: the
+        // reopened screen did not answer the remote, so Back went nowhere (measured: no element
+        // had focus in 4 of 4 probes). Focus is moved into it once it is on screen.
+        top.present(controller, animated: true) {
+            controller.setNeedsFocusUpdate()
+            controller.updateFocusIfNeeded()
+        }
     }
 }
 

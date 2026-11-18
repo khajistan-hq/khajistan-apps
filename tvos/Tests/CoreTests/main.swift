@@ -5116,14 +5116,21 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(!SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .unreachable))
     try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
-    // A burst of failures shares the asking already under way; one long after it asks again.
-    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 0, lastAnswerUnreachable: false), "a second failure in the same blink starts no second probe")
-    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 3.0, lastAnswerUnreachable: false), "a probe that timed out at its 3.0 s limit is still shared")
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 3.6, lastAnswerUnreachable: false))
+    // Which failures start a new asking and which share the last one.
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    func asks(after seconds: TimeInterval, decidedAfter: TimeInterval?, _ chosen: SupabaseRoute.Path) -> Bool {
+        SupabaseRoute.asksAgain(now: t0.addingTimeInterval(seconds), started: t0,
+                                decided: decidedAfter.map { t0.addingTimeInterval($0) } ?? t0.addingTimeInterval(-60), chosen: chosen)
+    }
+    try expect(!asks(after: 0.1, decidedAfter: nil, .direct), "a second failure in the same blink shares the probe in flight")
+    try expect(!asks(after: 3.0, decidedAfter: nil, .direct), "a probe at its 3.0 s limit is still shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .direct), "a fresh answer that a way is open is shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .proxy))
+    try expect(asks(after: 3.6, decidedAfter: 0.4, .direct), "past the window, ask")
     try expect(SupabaseRoute.shareWindow > SupabaseRoute.probeLimit + 0.5, "longer than the longest probe")
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: Date().timeIntervalSince(.distantPast), lastAnswerUnreachable: false), "the first failure of a launch asks")
-    // A finished "no way open" is never reused: Wi-Fi up one second later, and Try again must ask.
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 1, lastAnswerUnreachable: true))
+    try expect(asks(after: 1, decidedAfter: 0.4, .unreachable), "a finished 'no way open' is never reused: Wi-Fi may be back")
+    try expect(!asks(after: 1, decidedAfter: nil, .unreachable), "unreachable from an EARLIER answer, new probe in flight: shared")
+    try expect(SupabaseRoute.asksAgain(now: Date(), started: .distantPast, decided: .distantPast, chosen: .direct), "the first failure of a launch asks")
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {

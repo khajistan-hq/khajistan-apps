@@ -117,18 +117,20 @@ enum SupabaseRoute {
     /// now they share the one already under way.
     private static func askAgain() {
         lock.withLock {
-            let finishedUnreachable = chosen == .unreachable && decidedAt >= settlingStarted
-            if asksAgain(sinceLastAsking: Date().timeIntervalSince(settlingStarted), lastAnswerUnreachable: finishedUnreachable) { settling = nil }
+            if asksAgain(now: Date(), started: settlingStarted, decided: decidedAt, chosen: chosen) { settling = nil }
         }
     }
 
-    /// An asking that began within `shareWindow` is still under way or just answered: share it.
-    /// The window is longer than the longest a probe can run (`probeLimit` + 0.5 s resource
-    /// timeout), so a failure can never start a second asking while the first is in flight.
-    /// An asking that has finished with no way open is never shared: the network may be back, and
-    /// a screen opening or a Try again must ask, as it did before the window existed.
-    static func asksAgain(sinceLastAsking seconds: TimeInterval, lastAnswerUnreachable: Bool) -> Bool {
-        lastAnswerUnreachable || seconds > shareWindow
+    /// Whether a failure or a screen opening starts a new asking, or shares the last one.
+    /// - An asking that began within `shareWindow` is still under way or just answered: share it.
+    ///   The window is longer than the longest a probe can run (`probeLimit` + 0.5 s resource
+    ///   timeout), so a failure can never start a second asking while the first is in flight.
+    /// - Except an asking that has FINISHED with no way open (`decided` at or after `started`):
+    ///   the network may be back, and a screen opening or a Try again must ask. While that
+    ///   asking is still in flight (`decided` is the earlier answer's time) it is shared.
+    static func asksAgain(now: Date, started: Date, decided: Date, chosen: Path) -> Bool {
+        if chosen == .unreachable && decided >= started { return true }
+        return now.timeIntervalSince(started) > shareWindow
     }
     static let shareWindow: TimeInterval = probeLimit + 1
 

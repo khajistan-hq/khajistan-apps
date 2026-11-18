@@ -41,6 +41,11 @@ final class ReceiverStore {
     /// afresh on it, so no shelf keeps a list read from the other one.
     private(set) var dialID = 0
     @ObservationIgnored private var wholeDial = false
+    /// Players open over the Receiver. A dial change found by a refresh waits until none is, so
+    /// a channel being watched is not closed by the redraw.
+    @ObservationIgnored private var playersOpen = 0
+    @ObservationIgnored private var redrawWaiting = false
+    @ObservationIgnored private var indexFailedAt: Date?
     /// The preview password the dial on hand was read for, and the one the site refused, which is
     /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
     /// on this network for ten minutes).
@@ -142,7 +147,7 @@ final class ReceiverStore {
             guard started == generation, !Task.isCancelled else { return }
             if whole != wholeDial {
                 wholeDial = whole
-                dialID += 1
+                if playersOpen > 0 { redrawWaiting = true } else { dialID += 1 }
                 controls = .empty
                 controlsFetchedAt = nil
             }
@@ -151,9 +156,11 @@ final class ReceiverStore {
             signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
+            indexFailedAt = nil
             if retry { scheduleRetry(generation: started) }
         } catch {
             if Task.isCancelled || started != generation { return }
+            indexFailedAt = Date()
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
@@ -208,6 +215,8 @@ final class ReceiverStore {
         deleteSiteCookies()
         generation += 1
         wholeDial = false
+        redrawWaiting = false
+        indexFailedAt = nil
         dialID += 1
         loading?.task.cancel()
         loading = nil
@@ -225,7 +234,18 @@ final class ReceiverStore {
     /// that read, so its own request carries the cookie (or none) the new dial was read with. A
     /// routine refresh with a dial on hand is not waited for.
     private func settleDial() async {
-        if previewPassword() != dialPassword || index == nil { await loadIndex() }
+        let failedRecently = indexFailedAt.map { Date().timeIntervalSince($0) < 30 } ?? false
+        if previewPassword() != dialPassword || (index == nil && !failedRecently) { await loadIndex() }
+    }
+
+    func playerDidOpen() { playersOpen += 1 }
+
+    func playerDidClose() {
+        playersOpen = max(0, playersOpen - 1)
+        if playersOpen == 0, redrawWaiting {
+            redrawWaiting = false
+            dialID += 1
+        }
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera

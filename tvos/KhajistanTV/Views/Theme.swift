@@ -554,6 +554,9 @@ struct StatusBand: View {
 /// it small and better"). It rises and fades in, and sinks and fades out, together.
 struct PlayerStrip: View {
     let name: String?
+    /// The name's Roman form (or, on a few records, its own-script form), on its own line under
+    /// it (OnAir.secondTitle). Two lines at most: the longest in the schedule is 142 characters.
+    var secondName: String? = nil
     let detail: String?
     let attribution: String?
     let trailing: [String]
@@ -612,6 +615,13 @@ struct PlayerStrip: View {
                     nameText(lines: 2)
                     detailText
                 }
+            }
+            if let secondName, !secondName.isEmpty, let name, !name.isEmpty {
+                Text(secondName)
+                    .font(.system(size: 26, weight: .bold))
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .accessibilityIdentifier("stripSecondName")
             }
             if let attribution, !attribution.isEmpty {
                 Text(attribution)

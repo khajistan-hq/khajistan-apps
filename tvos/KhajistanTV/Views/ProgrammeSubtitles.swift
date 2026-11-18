@@ -31,6 +31,9 @@ enum ProgrammeSubtitles {
         #endif
         let onStream: Bool
         if case .stream = air.programme?.play_url.flatMap(Transmission.route(for:)) { onStream = true } else { onStream = false }
+        // Which programmes hold a stored track is still read from subtitle_url, which the
+        // schedule writes for every prepared file although the path itself now answers 404:
+        // a schedule built without it would leave every file programme silent.
         guard air.programme?.subtitle_url != nil || onStream else { return }
         guard onStream else {
             let stored = await storedSubtitles(air, model: model)
@@ -52,12 +55,16 @@ enum ProgrammeSubtitles {
         }
     }
 
-    /// tv_subtitles() for the programme on air, asked with the viewer's session; one retry, as the
-    /// site's subtitles() does. Any failure is closed.
+    /// tv_subtitles() for the programme on air, asked with the viewer's session. A failed try
+    /// (no token, no answer, not 200) is tried again after 2, 10 and 30 seconds while this
+    /// programme is still on, so one dropped request or a token refresh caught in a network gap
+    /// does not silence a whole film; an answer, open or closed, is final for the programme.
     private static func storedSubtitles(_ air: OnAir, model: AppModel) async -> StoredSubtitles {
-        guard let token = try? await model.auth.validAccessToken(),
-              let request = StoredSubtitles.request(programme: air.programmeId, accessToken: token) else { return .closed }
-        for _ in 0..<2 where !Task.isCancelled {
+        for delay in StoredSubtitles.retryDelays where !Task.isCancelled {
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            guard !Task.isCancelled else { break }
+            guard let token = try? await model.auth.validAccessToken() else { continue }
+            guard let request = StoredSubtitles.request(programme: air.programmeId, accessToken: token) else { return .closed }
             if let (data, response) = try? await SupabaseRoute.data(for: request, session: .shared),
                (response as? HTTPURLResponse)?.statusCode == 200 {
                 return StoredSubtitles.parse(data)
@@ -209,6 +216,6 @@ final class ProgrammeSubtitleFollower {
         step.end()
         loading?.cancel()
         loading = nil
-        if clearing { subtitles.clear() }
+        if clearing { subtitles.clear() } else { subtitles.reclaim() }
     }
 }

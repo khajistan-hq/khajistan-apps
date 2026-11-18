@@ -100,7 +100,7 @@ final class ShelfUITests: XCTestCase {
             // sidebar's switch, which sits straight above the left-most card, or the list.
             press(.up, times: 2 + genres, app: app)
             let back = focusedID(app)
-            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
+            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas" || back == "shuffle", "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
         }
     }

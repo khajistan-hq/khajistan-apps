@@ -27,7 +27,15 @@ final class TopNavReachUITests: XCTestCase {
         kjLaunch(app)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'")).firstMatch.waitForExistence(timeout: 60))
         kjPause(2)
-        let (fromSurf, trail1) = upToNav(app, limit: 3)
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus starts on the front, off the top bar")
+        // The switch keeps focus when it is turned, though the map it governs is drawn again.
+        XCUIRemote.shared.press(.select)
+        kjPause(2)
+        XCTAssertTrue(app.buttons["beyondTheAtlas"].hasFocus, "the switch keeps focus when turned on")
+        XCUIRemote.shared.press(.select)
+        kjPause(2)
+        XCTAssertTrue(app.buttons["beyondTheAtlas"].hasFocus, "and when turned off")
+        let (fromSurf, trail1) = upToNav(app, limit: 6)
         print("TOPNAV from surf:", trail1)
         XCTAssertTrue(fromSurf, "Up from Surf reaches the top bar: \(trail1)")
         XCUIRemote.shared.press(.down)
@@ -42,6 +50,30 @@ final class TopNavReachUITests: XCTestCase {
         let (fromShelf, trail3) = upToNav(app, limit: 10)
         print("TOPNAV from shelf:", trail3)
         XCTAssertTrue(fromShelf, "Up from a shelf reaches the top bar: \(trail3)")
+        // Up from the shelves enters the front at Surf, never walking the A–Z list (owner,
+        // 2026-11-18: twelve rows of it read as Up going nowhere).
+        XCTAssertFalse(trail3.contains { $0.hasPrefix("region-") }, "Up does not walk the A–Z list: \(trail3)")
+        XCTAssertEqual(trail3.dropLast().last, "shuffle", "the press before the top bar is on Surf: \(trail3)")
+    }
+
+    /// From the right-hand end of the first shelf, below the A–Z list: Up still enters the front at
+    /// Surf. Before, it climbed into the list at Turkistan and walked all twelve rows.
+    func testUpFromTheRightOfTheShelvesSkipsTheList() {
+        let app = XCUIApplication()
+        kjLaunch(app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'")).firstMatch.waitForExistence(timeout: 60))
+        kjPause(2)
+        XCTAssertTrue(kjFocusFrontFoot(app))
+        XCUIRemote.shared.press(.down)
+        kjPause(0.8)
+        for _ in 0..<12 { XCUIRemote.shared.press(.right); kjPause(0.4) }
+        let start = focusedId(app)
+        XCTAssertFalse(start.hasPrefix("nav-") || start == "beyondTheAtlas", "focus is on a shelf: \(start)")
+        let (ok, trail) = upToNav(app, limit: 8)
+        print("TOPNAV from the right of the shelves:", trail)
+        XCTAssertTrue(ok, "Up reaches the top bar: \(trail)")
+        XCTAssertFalse(trail.contains { $0.hasPrefix("region-") }, "Up does not walk the A–Z list: \(trail)")
+        XCTAssertEqual(trail.dropLast().last, "shuffle", "the press before the top bar is on Surf: \(trail)")
     }
 
     /// Each section: open it from the bar, go Down into its page, and come back Up to the bar.
@@ -61,6 +93,7 @@ final class TopNavReachUITests: XCTestCase {
             kjPause(4)
             var down = [focusedId(app)]
             for _ in 0..<4 { XCUIRemote.shared.press(.down); kjPause(0.7); down.append(focusedId(app)) }
+            XCTAssertFalse(down.last!.hasPrefix("nav-"), "Down has left the top bar on \(id): \(down)")
             let (ok, trail) = upToNav(app, limit: 12)
             print("TOPNAV \(id) down:", down, "up:", trail)
             XCTAssertTrue(ok, "Up from \(id)'s page reaches the top bar: \(trail)")

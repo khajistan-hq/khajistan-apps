@@ -51,6 +51,9 @@ final class AppModel {
     var transmissionPiP: PictureInPicture?
     /// A Screening Room film playing in the picture-in-picture window, its player screen closed.
     var filmPiP: FilmAway?
+    /// Whether the PiP bar on the screen on top holds focus (PiPBarHost). While the window is up
+    /// and the bar does not, Back goes to the bar first.
+    var pipBarFocused = false
     /// The corner window that is up, whichever player put it there, for the PiP bar.
     var activePiP: PictureInPicture? {
         [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }

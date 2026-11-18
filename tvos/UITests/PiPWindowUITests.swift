@@ -79,6 +79,39 @@ final class PiPWindowUITests: XCTestCase {
         kjScreenshot("pip-restored-full-screen", app: app)
     }
 
+    /// Once focus has left the bar (Up into the page, as on a long shelf page where Down reaches
+    /// the bar only past the last row), one press of Back lights Full screen again; from the bar,
+    /// Back does what it did before (owner, 2026-11-18: "pip shows ... but no way to get to it").
+    func testBackFromThePageLightsTheBar() throws {
+        let app = XCUIApplication()
+        try openFullFilm(app)
+        openWindow(app)
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        let lit = NSPredicate { _, _ in fullScreen.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 10), .completed)
+        for _ in 0..<3 { XCUIRemote.shared.press(.up); kjPause(0.6) }
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        XCTAssertFalse(onBar.exists, "Up has taken focus off the bar")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "one Back lights Full screen")
+        XCTAssertEqual(app.state, .runningForeground, "Back went to the bar, not out of the app")
+        // On the bar but not on Full screen: Back is not taken by the bar again.
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(app.buttons["pipBarToggle"].hasFocus, "Right walks the bar to Play/Pause")
+        XCUIRemote.shared.press(.menu)
+        kjPause(1.5)
+        XCTAssertFalse(fullScreen.hasFocus, "from the bar, Back does what it did before")
+        // Select restores from the bar, still one press away by Back.
+        if !onBar.exists { XCUIRemote.shared.press(.menu); kjPause(1) }
+        if app.state == .runningForeground, fullScreen.exists {
+            for _ in 0..<4 where !fullScreen.hasFocus { XCUIRemote.shared.press(.left); kjPause(0.4) }
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.staticTexts["playerState"].waitForExistence(timeout: 30), "the film opens full screen again")
+        }
+    }
+
     /// Close ends the film; it does not reopen it (the window's restore request after a close is
     /// not the viewer asking for full screen).
     func testCloseOnTheBarEndsTheFilm() throws {

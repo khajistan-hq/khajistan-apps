@@ -598,6 +598,9 @@ struct FilmPlayerView: View {
         hideTask?.cancel()
         checking = true
         refusal = nil
+        // A new connect, with its own seek to the kept place: Pause and the skips wait for it to
+        // play again (playPause, movable), as on the first connect.
+        fullPlayed = false
         #if DEBUG
         // `-kjfilmasfull YES`: the preview plays as the full film, so a UI test reaches the full
         // film's controls without an account that holds a film. Debug builds only.

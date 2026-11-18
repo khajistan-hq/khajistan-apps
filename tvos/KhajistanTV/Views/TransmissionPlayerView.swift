@@ -37,6 +37,9 @@ struct TransmissionPlayerView: View {
     /// refill starts a new one, and an answer for an older one is dropped.
     @State private var guideFilling: Set<Int> = []
     @State private var guideFillGeneration = 0
+    /// Rows read before the half hour turned or a month came in: they keep their blocks on screen
+    /// until the new reading lands, so a refill never blanks them.
+    @State private var guideStale: Set<Int> = []
     @State private var pip = PictureInPicture()
     /// Set when the picture went to the corner window: the screen closes, the channel plays on.
     @State private var handedToPiP = false
@@ -131,6 +134,8 @@ struct TransmissionPlayerView: View {
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
         .task(id: guideGrid == nil) { if guideGrid != nil { await keepGuideCurrent() } }
+        // A month brought in, or the month turned: the guide reads its rows again.
+        .onChange(of: store.guideMonthsKey) { if guideGrid != nil { refillGuide() } }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .fullScreenCover(isPresented: $showSignIn) {
@@ -463,22 +468,21 @@ struct TransmissionPlayerView: View {
         let now = TransmissionStore.now()
         guideFillGeneration += 1
         guideFilling = []
+        guideStale = []
+        let months = store.guideMonths
         guideRows = store.channelNumbers.map { number in
-            let air = store.nowOn(channel: number, at: now)
-            return .init(number: number, name: store.channelName(number),
-                         soundOnly: air?.programme?.audio_only == true, onNow: air?.nowName, slots: [])
+            .init(number: number, name: store.channelName(number),
+                  soundOnly: store.nowOn(channel: number, at: now)?.programme?.audio_only == true,
+                  onNow: StationClock.nowName(months, channel: number, at: now), slots: [])
         }
         var grid = GuideGrid(row: guideRows.firstIndex { $0.number == store.channelNumber } ?? 0, now: now)
         fillGuide(around: grid.row, now: now)
         grid.follow()
         withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideGrid = grid }
         // The guide's hours can reach past the month held: the next month's file, then the rows
-        // again, so the hours after midnight on the 1st read what airs (it ends there until then).
+        // again (onChange of guideMonthsKey), so the hours after midnight on the 1st read what airs.
         let until = Self.guideEnd(now)
-        Task {
-            guard await store.loadNextMonth(until: until), guideGrid != nil else { return }
-            refillGuide()
-        }
+        Task { _ = await store.loadNextMonth(until: until) }
     }
 
     /// How far a guide opened at `now` reads: the horizon Right reaches plus one window.
@@ -498,7 +502,7 @@ struct TransmissionPlayerView: View {
         let shown = ReceiverGuide.window(count: count, lit: row)
         guard let first = shown.first, let last = shown.last else { return }
         let wanted = Set(shown + [(first - 1 + count) % count, (last + 1) % count])
-            .filter { guideRows[$0].slots.isEmpty && !guideFilling.contains($0) }
+            .filter { (guideRows[$0].slots.isEmpty || guideStale.contains($0)) && !guideFilling.contains($0) }
         guard !wanted.isEmpty else { return }
         guideFilling.formUnion(wanted)
         let jobs = wanted.map { ($0, guideRows[$0].number) }
@@ -513,6 +517,7 @@ struct TransmissionPlayerView: View {
             for (index, slots) in read where guideRows.indices.contains(index) {
                 guideRows[index].slots = slots
                 guideFilling.remove(index)
+                guideStale.remove(index)
             }
         }
     }
@@ -522,11 +527,18 @@ struct TransmissionPlayerView: View {
         guard let grid = guideGrid else { return }
         guideFillGeneration += 1
         guideFilling = []
-        for index in guideRows.indices {
-            guideRows[index].slots = []
-            guideRows[index].onNow = store.nowOn(channel: guideRows[index].number, at: grid.now)?.nowName
-        }
+        guideStale = Set(guideRows.indices.filter { !guideRows[$0].slots.isEmpty })
         fillGuide(around: grid.row, now: grid.now)
+    }
+
+    /// The programme on air on each row, by the strip's own name for it: read every tick, since a
+    /// run of short items changes under the headline every few minutes.
+    private func nameWhatIsOn(at now: Date) {
+        let months = store.guideMonths
+        for index in guideRows.indices {
+            let name = StationClock.nowName(months, channel: guideRows[index].number, at: now)
+            if guideRows[index].onNow != name { guideRows[index].onNow = name }
+        }
     }
 
     /// A drawn row that is empty or stops short of the hours the guide reads: the month it needs is
@@ -534,8 +546,10 @@ struct TransmissionPlayerView: View {
     private var guideRowsShort: Bool {
         guard let grid = guideGrid else { return false }
         let end = Self.guideEnd(grid.now)
+        // Half an hour of slack: rows are read to the end as it stood when they were read, and the
+        // half-hour refill moves that on.
         return ReceiverGuide.window(count: guideRows.count, lit: grid.row).contains { index in
-            (guideRows[index].slots.last?.end ?? .distantPast) < end
+            (guideRows[index].slots.last?.end ?? .distantPast) < end.addingTimeInterval(-GuideGrid.step)
         }
     }
 
@@ -550,8 +564,11 @@ struct TransmissionPlayerView: View {
             let turned = GuideGrid.halfHour(now) != GuideGrid.halfHour(grid.now)
             grid.refresh(now: now)
             guideGrid = grid
+            nameWhatIsOn(at: now)
             if turned { refillGuide() }
-            if guideRowsShort, await store.loadNextMonth(until: Self.guideEnd(now)), guideGrid != nil { refillGuide() }
+            // Not awaited here: a slow download must not hold now still. The rows are read again
+            // when the months held change (onChange of guideMonthsKey).
+            if guideRowsShort { Task { _ = await store.loadNextMonth(until: Self.guideEnd(now)) } }
         }
     }
 

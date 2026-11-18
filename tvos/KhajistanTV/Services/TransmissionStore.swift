@@ -168,6 +168,10 @@ final class TransmissionStore {
         StationClock.timeline(guideMonths, channel: channel, from: from, to: to)
     }
 
+    /// Which months the guide reads, by their ends: it changes when a month is brought in or the
+    /// month turns, and the guide reads its rows again.
+    var guideMonthsKey: [Date] { guideMonths.compactMap(StationClock.monthEnd) }
+
     /// The schedule files the guide reads, in order: the month held, and the next when it is held
     /// too. Value types, so the guide can read them off the main thread.
     var guideMonths: [Programming] {
@@ -243,6 +247,19 @@ final class TransmissionStore {
         if heldReady, let at = fetchedAt, ProcessInfo.processInfo.systemUptime - at < Self.scheduleMaxAge { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
+            return
+        }
+        // The month the clock has turned into was fetched for the guide already: it is taken as the
+        // month held rather than downloaded again.
+        if !heldReady, let next = nextProgramming,
+           StationClock.monthEnd(next).map({ StationClock.stationMonth($0.addingTimeInterval(-1)) }) == monthKey {
+            scheduleGeneration += 1
+            programming = next
+            nextProgramming = nil
+            month = monthKey
+            schedule = .ready
+            fetchedAt = ProcessInfo.processInfo.systemUptime
+            refreshing = false
             return
         }
         scheduleGeneration += 1

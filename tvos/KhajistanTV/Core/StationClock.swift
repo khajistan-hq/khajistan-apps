@@ -629,6 +629,13 @@ enum StationClock {
         return date(iso: "\(next.0)-\(next.1 < 10 ? "0" : "")\(next.1)-01", second: 0)
     }
 
+    /// The programme on air on a channel at a moment, by its Now name, from the months held: the
+    /// month that holds the moment, so after midnight on the 1st it is the second file.
+    static func nowName(_ months: [Programming], channel number: Int, at date: Date) -> String? {
+        guard let p = months.first(where: { monthEnd($0).map { date < $0 } ?? false }) else { return nil }
+        return onAir(p, channel: number, at: date)?.nowName
+    }
+
     /// The station month the guide needs fetched, "yyyy-MM", when it reads to `until` past the month
     /// held and the month after is not held too; nil otherwise.
     static func monthToFetch(held: Programming?, next: Programming?, until: Date) -> String? {
@@ -762,9 +769,11 @@ enum StationClock {
                 // strips of one show side by side are two blocks, each with its own times.
                 out.append(GuideSlot(start: item.slot.start, end: raw[runEnd].slot.end,
                                      title: item.show ?? item.slot.title, grouped: true))
-            } else if item.slot.end.timeIntervalSince(item.slot.start) < shortGap, !out.isEmpty {
-                // Under a minute, off air or a lone programme between long ones: too narrow to see
-                // or to light, so it is drawn inside the block before it.
+            } else if item.slot.end.timeIntervalSince(item.slot.start) < shortGap, let prior = out.last,
+                      item.slot.isOffAir || !prior.isOffAir {
+                // Under a minute, an off-air seam or a lone programme after a programme: too narrow
+                // to see or to light, so it is drawn inside the block before it. A programme after
+                // an off-air stretch keeps its own block: off air must never cover something on.
                 out[out.count - 1].end = item.slot.end
             } else if let prior = out.last, prior.isOffAir, item.slot.isOffAir {
                 out[out.count - 1].end = item.slot.end

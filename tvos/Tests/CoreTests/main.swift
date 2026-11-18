@@ -2123,6 +2123,10 @@ func guideTimelineSynthetic() throws {
     try expectEqual(open.count, 1)
     try expectEqual(open.first?.returnLabel, "23:00 PKT")
     try expectEqual(open.first?.openEnd, true)
+    // Read to 07:30, the run of one-minute programmes is finished to its strip's end, 08:00: its end
+    // is the run's own, not the edge of what was read.
+    try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 50), to: pkt(2026, 10, 10, 7, 30)).last,
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
     // Opened inside the run of one-minute programmes, the run still starts at 07:00.
     try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 7, 40), to: pkt(2026, 10, 10, 8, 30)).first,
                     GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
@@ -2178,6 +2182,61 @@ func guideTimelineJoinsWhatCannotBeSeen() throws {
     try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 30, 30))   // the 30 s sting is inside "Long"
     try expectEqual(slots[2], GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true))
     try expectEqual(slots[3], GuideSlot(start: pkt(2026, 11, 8, 13, 30), end: pkt(2026, 11, 8, 14, 0), title: "Show One", grouped: true))
+    // Read to 13:15, the run is finished to its strip's end, 13:30, and not on into the next strip.
+    let short = StationClock.timeline([p], channel: 1, from: pkt(2026, 11, 8, 12, 50), to: pkt(2026, 11, 8, 13, 15))
+    try expectEqual(short.last, GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true))
+}
+
+/// Off air must never cover something on: a programme under a minute right after an off-air
+/// stretch keeps its own block (an off-air seam after a programme still joins the programme).
+func guideTimelineKeepsWhatFollowsOffAir() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["S","L"],
+     "programmes":{"S":{"id":"S","title":"s","display_title":"Sting","seconds":40},
+                   "L":{"id":"L","title":"l","display_title":"Long","seconds":3560}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":60,"show":"s1","programmes":[0,1]}]}}]}
+    """)
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 11, 0), to: pkt(2026, 11, 8, 13, 0), every: 7)
+    try expectEqual(slots.map(\.title), [nil, "Sting", "Long"])
+    try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 0))
+}
+
+/// The last month held ends with the channel off air: that stretch ends at the month's end, which
+/// is the edge of what is held, not a time the channel comes back. It is an open end, and with no
+/// later month held it has no return.
+func guideTimelineOffAirAtTheEndOfTheMonthsHeld() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-30","channels":{"c":[
+       {"start":"22:00","start_minute":1320,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let slots = StationClock.timeline([p], channel: 1, from: pkt(2026, 11, 30, 22, 30), to: pkt(2026, 12, 1, 2, 0))
+    try expectEqual(slots.map(\.title), ["Long", nil])
+    try expectEqual(slots.last?.end, pkt(2026, 12, 1, 0, 0))
+    try expectEqual(slots.last?.openEnd, true)
+    try expectEqual(slots.last?.returnLabel, nil)
+}
+
+/// The programme on air by its Now name, from the month that holds the moment: after midnight on
+/// the 1st that is the second file.
+func guideNowNameAcrossTheMonth() throws {
+    let nov = try realProgramming("2026-11")
+    let dec = try realProgramming("2026-12")
+    let at = pkt(2026, 12, 1, 3, 30)
+    for channel in nov._meta.channels.map(\.number) {
+        try expectEqual(StationClock.nowName([nov, dec], channel: channel, at: at), StationClock.onAir(dec, channel: channel, at: at)?.nowName)
+        try expectEqual(StationClock.nowName([nov], channel: channel, at: at), nil)
+    }
+    let mid = pkt(2026, 11, 14, 21, 10)
+    for channel in nov._meta.channels.map(\.number) {
+        try expectEqual(StationClock.nowName([nov, dec], channel: channel, at: mid), StationClock.onAir(nov, channel: channel, at: mid)?.nowName)
+    }
 }
 
 /// The month the guide fetches: none while it reads inside the month held, the next one past its
@@ -5522,6 +5581,9 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide timeline: what is under a minute joins the block before", guideTimelineJoinsWhatCannotBeSeen),
     ("Guide timeline: the same blocks whenever it is opened", guideTimelineReadsTheSameWhenOpened),
     ("Guide: which month to fetch", guideMonthToFetch),
+    ("Guide timeline: off air never covers what follows it", guideTimelineKeepsWhatFollowsOffAir),
+    ("Guide timeline: off air at the end of the months held", guideTimelineOffAirAtTheEndOfTheMonthsHeld),
+    ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
     ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),

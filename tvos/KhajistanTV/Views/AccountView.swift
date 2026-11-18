@@ -12,6 +12,8 @@ struct AccountView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     }
 
+    @AppStorage(CaptionStyle.key) private var captionStyleRaw = CaptionStyle.plate.rawValue
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 48) {
@@ -24,6 +26,7 @@ struct AccountView: View {
                 }
                 signInBlock
                 skinBlock
+                captionBlock
                 previewBlock
                 footer
             }
@@ -33,7 +36,7 @@ struct AccountView: View {
         }
         // Full screen on the ground, not a sheet: tvOS draws a sheet as a rounded, shadowed
         // card over a dimmed page, and the house has no boxes and no shadows.
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {})
         }
     }
@@ -92,6 +95,26 @@ struct AccountView: View {
             .accessibilityLabel("\(model.skin.label) colours. Switch to \(model.skin.next.label).")
         }
     }
+
+    /// One button, as the colours have: the subtitle look on now, and a press moves to the other.
+    private var captionBlock: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Kicker("Subtitles")
+                .accessibilityIdentifier("captionStyleState")
+                .accessibilityValue(captionStyle.rawValue)
+            Text("On a plate in the house colours, or as yellow text on the picture.").kjBody()
+            Button {
+                captionStyleRaw = captionStyle.next.rawValue
+            } label: {
+                Text("Now: \(captionStyle.label)").kjKicker()
+            }
+            .buttonStyle(HouseButtonStyle())
+            .accessibilityIdentifier("caption-style-toggle")
+            .accessibilityLabel("Subtitles: \(captionStyle.label). Switch to \(captionStyle.next.label).")
+        }
+    }
+
+    private var captionStyle: CaptionStyle { CaptionStyle(rawValue: captionStyleRaw) ?? .plate }
 
     private var previewBlock: some View {
         let isSet = model.auth.previewPassword != nil

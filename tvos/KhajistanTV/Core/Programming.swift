@@ -53,6 +53,17 @@ struct Programming: Decodable, Sendable {
         var display_title: String? = nil
         /// The year the record carries; shown after the country on the strip (owner, 2026-11-15).
         var year: Int? = nil
+        /// The checked English or Roman form of a name in Arabic, Persian or Urdu script, shown on
+        /// a line of its own under it, as the Receiver does (owner, 2026-11-08: "original and
+        /// translation"; 2026-11-17 on the Apple TV: "name of film should also be in roman").
+        var display_title_en: String? = nil
+
+        /// The Roman line under the name, only where the name is the programme's own title.
+        var latinTitle: String? {
+            guard let shown = display_title, !shown.isEmpty,
+                  let en = display_title_en?.trimmingCharacters(in: .whitespacesAndNewlines), !en.isEmpty, en != shown else { return nil }
+            return en
+        }
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -98,7 +109,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title
+        case display_title, display_title_en, year
     }
 
     init(from decoder: Decoder) throws {
@@ -120,5 +131,7 @@ extension Programming.Programme {
         description = try values.decodeIfPresent(String.self, forKey: .description)
         subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
         display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
+        display_title_en = try values.decodeIfPresent(String.self, forKey: .display_title_en)
+        year = try values.decodeIfPresent(Int.self, forKey: .year)
     }
 }

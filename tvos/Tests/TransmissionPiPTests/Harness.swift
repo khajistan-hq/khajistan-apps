@@ -1,11 +1,17 @@
 import Foundation
 
-enum PlaybackState { case playing, tuning, idle }
+enum PlaybackState { case playing, tuning, idle, paused }
 enum SharedNowPlaying { static var title: String? }
 final class PlayerController {
     var state: PlaybackState = .playing
     let player = NSObject()
     func stop() { state = .idle; SharedNowPlaying.title = nil }
+    func pause() { state = .paused }
+    var settling: CheckedContinuation<Void, Never>?
+    var holdsSettle = false
+    func settled() async {
+        if holdsSettle { await withCheckedContinuation { settling = $0 } }
+    }
 }
 final class Watch {
     var cancelled = false
@@ -31,12 +37,15 @@ final class TransmissionStore {
         get { playerA }
         set { playerA = newValue }
     }
-    enum Phase { case idle, onAir, needsSignIn }
+    enum Phase { case idle, onAir, needsSignIn, tuning }
     var phase = Phase.onAir
     var offAirWatch: Watch? = Watch()
     var slotWatch: Watch? = Watch()
     var refusalWatch: Watch? = Watch()
     var channelNumber = 5
+    func channelName(_ number: Int) -> String { "Channel \(number)" }
+    var rejoined = 0
+    func rejoinLive() async { rejoined += 1 }
     var signed = ["viewer": (url: URL(string: "https://example.invalid/old")!, until: Date.distantFuture)]
     var generation = 0
     private(set) var accessRevision = 0
@@ -84,6 +93,17 @@ final class ReadingStore {
     func previewCredentialDidChange() { invalidations += 1 }
 }
 final class PictureInPicture {
+    var title = ""
+    var captions: (() -> String?)?
+    var captionLabel: (() -> String?)?
+    var onCaptionToggle: (() -> Void)?
+    var skin: (() -> Int)?
+    var onSetPlaying: ((Bool) -> Void)?
+    var controller: PlayerController?
+    var rejoinsOnPlay = false
+    var onHandOff: (() -> Void)?
+    var hasFileCaptions: (() -> Bool)?
+    var drawsIntoPicture = false
     var onStart: (() -> Void)?
     var onFail: ((String) -> Void)?
     var onRestore: (() -> Void)?
@@ -93,7 +113,35 @@ final class PictureInPicture {
     func stop() { stopped = true }
     func letGo() {}
 }
+final class RecordedSubtitles {
+    var tracks: [Int] = [1]
+    var text: String? = "a line"
+    var label = "Subtitles · English"
+    var isHandedOff = false
+    var hasFile = false
+    var cycled = 0
+    var handedOff = 0
+    func cycle() { cycled += 1 }
+    func handOff() { handedOff += 1; isHandedOff = true }
+}
+
+/// The window's subtitles: read by `captions`, ended when the window restores or closes.
+final class ProgrammeSubtitleFollower {
+    let subtitles: RecordedSubtitles
+    let loaded: String?
+    var ended = false
+    init(_ subtitles: RecordedSubtitles, store: TransmissionStore, model: AppModel, loaded: String?) {
+        self.subtitles = subtitles
+        self.loaded = loaded
+        Probe.lastFollower = self
+    }
+    func text() -> String? { subtitles.text }
+    var cleared = false
+    func end(clearing: Bool = true) { ended = true; cleared = clearing }
+}
 final class AppModel {
+    var skin = 0
+    var restoringTransmission: Int?
     enum Section { case transmission }
     enum Link { case channel(Int) }
     var transmissionPiP: PictureInPicture?
@@ -109,6 +157,11 @@ final class AppModel {
     }
 }
 final class Probe {
+    static var lastFollower: ProgrammeSubtitleFollower?
+    var subtitles = RecordedSubtitles()
+    var subtitleKey: String? = "programme-1"
+    var channel = 5
+    var close: (() -> Void)? = nil
     var model = AppModel()
     var store: TransmissionStore { model.transmission }
     var pip = PictureInPicture()
@@ -210,6 +263,63 @@ let receiverMetadataPreserved = SharedNowPlaying.title == "Public Receiver"
     && idle.store.generation == 1 && idle.store.signed.isEmpty
 print("\(receiverMetadataPreserved ? "PASS" : "FAIL") idle Transmission invalidation preserves Receiver Now Playing")
 if !receiverMetadataPreserved { failures += 1 }
+// The window carries the programme's subtitles, and lets go of them when it restores or closes.
+let carried = Probe()
+carried.startPictureInPicture()
+let follower = Probe.lastFollower!
+let windowReads = carried.pip.captions?() == "a line" && carried.pip.title == "Channel 5"
+    && follower.loaded == "programme-1"
+let windowFollows = carried.pip.controller === carried.store.player && carried.pip.rejoinsOnPlay
+print("\(windowFollows ? "PASS" : "FAIL") the window's own Play rejoins the broadcast; its Pause is followed by the channel's player")
+if !windowFollows { failures += 1 }
+print("\(windowReads ? "PASS" : "FAIL") window reads the programme's subtitles, named for the channel")
+if !windowReads { failures += 1 }
+carried.pip.onCaptionToggle?()
+let noLabelBeforeHandOff = carried.pip.captionLabel?() == nil
+carried.pip.onHandOff?()
+let barWorksSubtitles = noLabelBeforeHandOff && carried.pip.captionLabel?() == "Subtitles · English" && follower.subtitles.cycled == 1
+    && follower.subtitles.handedOff == 1
+print("\(barWorksSubtitles ? "PASS" : "FAIL") the window hands the stream's track to tvOS; the bar names and cycles it, and not before")
+if !barWorksSubtitles { failures += 1 }
+// A file is offered only once it is drawn into the picture; a stream fallen back to a file never.
+let file = Probe()
+file.subtitles.hasFile = true
+file.startPictureInPicture()
+let fileHidden = file.pip.captionLabel?() == nil && file.pip.hasFileCaptions?() == true
+file.pip.drawsIntoPicture = true
+let fileShown = file.pip.captionLabel?() == "Subtitles · English"
+print("\(fileHidden && fileShown ? "PASS" : "FAIL") a file's subtitles are offered on the bar only while drawn into the picture")
+if !(fileHidden && fileShown) { failures += 1 }
+// The window's own Play rejoins the broadcast live.
+let rejoin = Probe()
+rejoin.startPictureInPicture()
+rejoin.pip.onSetPlaying?(true)
+// Full screen asks for the channel to open over whatever is on top.
+let restoreTop = Probe()
+restoreTop.startPictureInPicture()
+restoreTop.pip.onStart?()
+restoreTop.pip.onRestore?()
+let opensOnTop = restoreTop.model.restoringTransmission == 5
+print("\(opensOnTop ? "PASS" : "FAIL") full screen opens the channel over whatever is on top")
+if !opensOnTop { failures += 1 }
+carried.pip.onStart?()
+carried.pip.onRestore?()
+let restoreKeeps = follower.ended && !follower.cleared
+print("\(restoreKeeps ? "PASS" : "FAIL") full screen stops the window's follower and leaves its subtitle up until it closes")
+if !restoreKeeps { failures += 1 }
+let unloaded = Probe()
+unloaded.subtitles.tracks = []
+unloaded.startPictureInPicture()
+let reloads = Probe.lastFollower!.loaded == nil
+print("\(reloads ? "PASS" : "FAIL") subtitles still loading are loaded again by the window")
+if !reloads { failures += 1 }
+let closed = Probe()
+closed.startPictureInPicture()
+closed.pip.onStart?()
+closed.pip.onEnd?()
+let closedEnds = Probe.lastFollower!.ended && Probe.lastFollower!.cleared && closed.model.transmissionPiP == nil
+print("\(closedEnds ? "PASS" : "FAIL") closing the window ends its subtitles and the channel")
+if !closedEnds { failures += 1 }
 func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now.advanced(by: .seconds(2))
     while !ready() {
@@ -219,6 +329,70 @@ func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     return true
 }
 Task {
+    // Pause pressed while the channel retunes, then Play before the picture comes: Play wins.
+    let retune = Probe()
+    retune.startPictureInPicture()
+    retune.store.player.state = .tuning
+    retune.store.player.holdsSettle = true
+    retune.pip.onSetPlaying?(false)
+    _ = await waitForBoundary { retune.store.player.settling != nil }
+    retune.pip.onSetPlaying?(true)
+    retune.store.player.state = .playing
+    retune.store.player.settling?.resume()
+    for _ in 0..<20 { await Task.yield() }
+    let playWins = retune.store.player.state == .playing
+    print("\(playWins ? "PASS" : "FAIL") Pause then Play while the channel retunes ends playing")
+    if !playWins { failures += 1 }
+    // A Pause pressed in the first half of a rejoin, while the player is idle (signing, loading):
+    // it waits for the new picture, then pauses it (Fable round 9).
+    let early = Probe()
+    early.startPictureInPicture()
+    early.pip.onStart?()
+    early.store.player.state = .idle
+    early.store.phase = .tuning
+    early.pip.onSetPlaying?(false)
+    for _ in 0..<5 { await Task.yield() }
+    let waitedForPicture = early.store.player.state == .idle
+    early.store.phase = .onAir
+    early.store.player.state = .playing
+    _ = await waitForBoundary { early.store.player.state == .paused }
+    let earlyPaused = waitedForPicture && early.store.player.state == .paused
+    print("\(earlyPaused ? "PASS" : "FAIL") a Pause pressed while the rejoin is still loading pauses the new picture")
+    if !earlyPaused { failures += 1 }
+    // A Pause pressed while the rejoin loads, then the window goes (a card opens the channel full
+    // screen): the screen that opens is not paused by it (Fable round 10).
+    let gone = Probe()
+    gone.startPictureInPicture()
+    gone.pip.onStart?()
+    gone.store.player.state = .idle
+    gone.store.phase = .tuning
+    gone.pip.onSetPlaying?(false)
+    gone.model.transmissionPiP = nil
+    gone.store.phase = .onAir
+    gone.store.player.state = .playing
+    for _ in 0..<20 { await Task.yield() }
+    try? await Task.sleep(for: .milliseconds(300))
+    let screenPlays = gone.store.player.state == .playing
+    print("\(screenPlays ? "PASS" : "FAIL") a Pause from a window that has gone does not pause the screen that replaced it")
+    if !screenPlays { failures += 1 }
+    // A Pause alone while it retunes pauses it once the picture has come.
+    let alone = Probe()
+    alone.startPictureInPicture()
+    alone.pip.onStart?()
+    alone.store.player.state = .tuning
+    alone.store.player.holdsSettle = true
+    alone.pip.onSetPlaying?(false)
+    _ = await waitForBoundary { alone.store.player.settling != nil }
+    alone.store.player.state = .playing
+    alone.store.player.settling?.resume()
+    _ = await waitForBoundary { alone.store.player.state == .paused }
+    let pauseKept = alone.store.player.state == .paused
+    print("\(pauseKept ? "PASS" : "FAIL") a Pause pressed while the channel retunes pauses it once it plays")
+    if !pauseKept { failures += 1 }
+    _ = await waitForBoundary { rejoin.store.rejoined == 1 }
+    let rejoined = rejoin.store.rejoined == 1
+    print("\(rejoined ? "PASS" : "FAIL") Play (the bar's, the remote's or the window's own) rejoins the channel live")
+    if !rejoined { failures += 1 }
     for stage in ["token", "reply", "valid"] {
         let store = TransmissionStore()
         store.signed.removeAll()

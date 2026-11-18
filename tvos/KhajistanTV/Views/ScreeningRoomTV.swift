@@ -65,8 +65,8 @@ struct TVScreeningRoom: View {
         }
         .task(id: model.auth.previewPassword) { await model.films.load() }
         .task(id: model.auth.email) { await model.saves.load() }
-        .fullScreenCover(item: $page) { film in TVFilmPage(film: film) }
-        .fullScreenCover(item: $direct) { film in FilmPlayerView(film: film, startsFull: true) }
+        .kjFullScreenCover(item: $page) { film in TVFilmPage(film: film) }
+        .kjFullScreenCover(item: $direct) { film in FilmPlayerView(film: film, startsFull: true) }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = FilmPlaces.all
             if now != places { places = now }
@@ -148,10 +148,10 @@ struct TVFilmPage: View {
         .defaultFocus($playFocused, true)
         .onAppear { OpenedLately.record(.film, ref: film.handle, title: Films.displayTitle(film)) }
         .task { await model.saves.load() }
-        .fullScreenCover(item: $playing) { mode in
+        .kjFullScreenCover(item: $playing) { mode in
             FilmPlayerView(film: film, startsFull: mode == .full)
         }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: {}).environment(\.palette, palette)
         }
         // In place over the page, not one more cover. (A third cover once looped SwiftUI's layout

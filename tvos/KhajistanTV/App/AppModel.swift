@@ -49,6 +49,17 @@ final class AppModel {
     /// A Transmission channel playing in the picture-in-picture window. The store keeps the
     /// channel running (handovers included) while the player screen is closed.
     var transmissionPiP: PictureInPicture?
+    /// A Screening Room film playing in the picture-in-picture window, its player screen closed.
+    var filmPiP: FilmAway?
+    /// The corner window that is up, whichever player put it there, for the PiP bar.
+    var activePiP: PictureInPicture? {
+        [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }
+    }
+    /// A Transmission channel the picture-in-picture window asked to see full screen again.
+    /// RootView opens it over whatever is on top; the player takes the playing channel over.
+    var restoringTransmission: Int?
+    /// A film the picture-in-picture window asked to see full screen again. RootView opens it.
+    var restoringFilm: Film?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -180,6 +191,13 @@ final class AppModel {
             transmissionPiP = nil
             pip.stop()
             transmission.stop()
+        }
+        if let film = filmPiP {
+            filmPiP = nil
+            // Kept first, so the film opened again from the window resumes where it had got to.
+            film.recordPlace()
+            film.pip.stop()
+            film.controller.stop()
         }
     }
 

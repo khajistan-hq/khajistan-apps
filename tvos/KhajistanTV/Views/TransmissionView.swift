@@ -46,10 +46,10 @@ struct TransmissionView: View {
             }
         }
         // Full screen on the ground, as in Account: a sheet is a shadowed card.
-        .fullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+        .kjFullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
-        .fullScreenCover(item: $playing) { choice in
+        .kjFullScreenCover(item: $playing) { choice in
             TransmissionPlayerView(channel: choice.number)
         }
         // A Top Shelf link: the station page, or one channel tuned from it.

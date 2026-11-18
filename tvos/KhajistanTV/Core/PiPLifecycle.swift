@@ -1,3 +1,5 @@
+import Foundation
+
 /// Who closed the picture-in-picture window, and so what follows when it has gone. Kept apart from
 /// AVKit so every order of events can be tested (Tests/CoreTests).
 ///
@@ -62,6 +64,16 @@ struct PiPLifecycle: Equatable {
 /// Follows a value that changes over time (the programme on air) and says when it has changed,
 /// starting from what was already loaded. Used by the PiP window to load each programme's
 /// subtitles after the screen that loaded the first has closed.
+/// What the PiP window's subtitles follow on Transmission: the programme on air and the signal the
+/// player was given for it. A rejoin of the same programme mints a new signal, whose item carries
+/// no handed-off track, so it is a change even when the programme is not. Nil while tuning.
+enum PiPSubtitleKey {
+    static func of(programme: String?, signal: URL?) -> String? {
+        guard let programme else { return nil }
+        return "\(programme) \(signal?.absoluteString ?? "")"
+    }
+}
+
 struct ChangeFollower<Key: Equatable> {
     private(set) var key: Key?
 

@@ -566,7 +566,7 @@ struct TransmissionPlayerView: View {
         // this screen has closed: a stream's track drawn by tvOS, a file's drawn into the picture
         // (PictureInPicture). The object, not the screen's state.
         let follower = ProgrammeSubtitleFollower(subtitles, store: store, model: model,
-                                                 loaded: subtitles.tracks.isEmpty ? nil : subtitleKey)
+                                                 loaded: subtitles.tracks.isEmpty ? nil : windowSubtitleKey)
         pip.title = store.channelName(store.channelNumber)
         pip.onHandOff = { follower.subtitles.handOff() }
         pip.captions = { follower.text() }
@@ -655,6 +655,8 @@ struct TransmissionPlayerView: View {
 
     /// The programme on air, so a handover loads the next programme's file.
     private var subtitleKey: String? { ProgrammeSubtitles.key(store.phase) }
+    /// What the window's subtitles follow: the programme and its signal (PiPSubtitleKey).
+    private var windowSubtitleKey: String? { ProgrammeSubtitleFollower.key(store) }
 
     private func loadSubtitles() async {
         await ProgrammeSubtitles.load(into: subtitles, store: store, model: model)

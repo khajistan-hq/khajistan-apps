@@ -160,6 +160,7 @@ final class Probe {
     static var lastFollower: ProgrammeSubtitleFollower?
     var subtitles = RecordedSubtitles()
     var subtitleKey: String? = "programme-1"
+    var windowSubtitleKey: String? = "programme-1"
     var channel = 5
     var close: (() -> Void)? = nil
     var model = AppModel()

@@ -5242,6 +5242,13 @@ func pipFollowerLoadsEachProgrammeOnce() throws {
     try expect(follower.changed(to: "c"))
     var unloaded = ChangeFollower<String>(loaded: nil)
     try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
+    // Keyed on the programme and its signal: a rejoin of the same programme on a new signal, faster
+    // than one tick, still reloads; the same signal does not; tuning is no key at all.
+    let one = URL(string: "https://example.test/a.m3u8?t=1"), two = URL(string: "https://example.test/a.m3u8?t=2")
+    var signal = ChangeFollower<String>(loaded: PiPSubtitleKey.of(programme: "p1", signal: one))
+    try expect(!signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: one)), "same programme, same signal")
+    try expect(signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: two)), "same programme, new signal reloads")
+    try expect(PiPSubtitleKey.of(programme: nil, signal: two) == nil, "tuning has no key")
 }
 
 /// The window's own Play is passed on once, for the item it paused; a new item that loads paused (a

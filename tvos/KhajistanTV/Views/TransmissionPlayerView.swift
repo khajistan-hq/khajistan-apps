@@ -247,6 +247,9 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
+            if let latin = latinName(air) {
+                Text(latin).kjBody().multilineTextAlignment(.center)
+            }
             if !song.isEmpty {
                 Text("Now playing: " + song).kjBody().multilineTextAlignment(.center)
             }
@@ -277,6 +280,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
+                    latinName: soundOnly ? nil : latinName(air),
                     detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     // The channel's own name, always: a show name in the headline read as the
@@ -340,6 +344,19 @@ struct TransmissionPlayerView: View {
     /// programme under the 2026-09-06 ruling ("no file names").
     private func headline(_ air: OnAir) -> String {
         air.nowName ?? store.channelName(store.channelNumber)
+    }
+
+    /// The headline's Roman form, only while the headline is the programme's own name.
+    private func latinName(_ air: OnAir) -> String? {
+        air.nowName != nil && air.nowName == nonEmpty(air.programme?.display_title) ? air.programme?.latinTitle : nil
+    }
+
+    /// The guide's one line for a channel: what is on, with its Roman form after it. The name is
+    /// isolated (U+2068 … U+2069) so a Persian title keeps the Roman form on its own side.
+    private func guideLine(_ air: OnAir) -> String {
+        let name = air.nowName ?? air.show?.name ?? ""
+        guard name == nonEmpty(air.programme?.display_title), let latin = air.programme?.latinTitle else { return name }
+        return "\u{2068}" + name + "\u{2069} \u{00B7} " + latin
     }
 
     /// The show, where the headline is the programme: it moves to the head of the detail line.
@@ -513,7 +530,7 @@ struct TransmissionPlayerView: View {
             let air = store.nowOn(channel: number, at: now)
             let line: String
             if let air {
-                line = air.nowName ?? air.show?.name ?? ""
+                line = guideLine(air)
             } else if let back = store.returnLabel(channel: number, at: now) {
                 line = "Off air \u{00B7} returns at \(back)"
             } else {

@@ -1,0 +1,88 @@
+{
+ "_meta": {
+  "channels": [
+   {
+    "id": "iran-film",
+    "number": 1,
+    "name": "Channel 1 · Filmfarsi",
+    "line": "Test line for channel 1."
+   },
+   {
+    "id": "state-tv",
+    "number": 2,
+    "name": "Channel 2 · State Television",
+    "line": "Test line for channel 2."
+   }
+  ]
+ },
+ "shows": {
+  "filmfarsi": {
+   "slug": "filmfarsi",
+   "name": "Filmfarsi",
+   "line": null,
+   "channel": "iran-film"
+  },
+  "show-2": {
+   "slug": "show-2",
+   "name": "Test Show 2",
+   "line": null,
+   "channel": "state-tv"
+  }
+ },
+ "programme_order": [
+  "p1",
+  "p2"
+ ],
+ "programmes": {
+  "p1": {
+   "id": "p1",
+   "title": "اول هیکل · Aval Heykal, with Naser Malek-Motiei",
+   "display_title": "اول هیکل",
+   "display_title_en": "Aval Heykal, with Naser Malek-Motiei",
+   "country": "Iran",
+   "seconds": 86400,
+   "nominal_minutes": 1440,
+   "show": "filmfarsi",
+   "channel": 1
+  },
+  "p2": {
+   "id": "p2",
+   "title": "Test Programme 2",
+   "display_title": "Test Programme 2",
+   "seconds": 86400,
+   "nominal_minutes": 1440,
+   "show": "show-2",
+   "channel": 2
+  }
+ },
+ "days": [
+  {
+   "date": "2026-11-04",
+   "weekday": "Wednesday",
+   "channels": {
+    "iran-film": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "filmfarsi",
+      "programmes": [
+       0
+      ]
+     }
+    ],
+    "state-tv": [
+     {
+      "start": "00:00",
+      "start_minute": 0,
+      "minutes": 1440,
+      "show": "show-2",
+      "programmes": [
+       1
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -554,6 +554,8 @@ struct StatusBand: View {
 /// it small and better"). It rises and fades in, and sinks and fades out, together.
 struct PlayerStrip: View {
     let name: String?
+    /// The name's Roman form, on its own line under it (Programme.latinTitle).
+    var latinName: String? = nil
     let detail: String?
     let attribution: String?
     let trailing: [String]
@@ -612,6 +614,13 @@ struct PlayerStrip: View {
                     nameText(lines: 2)
                     detailText
                 }
+            }
+            if let latinName, !latinName.isEmpty, let name, !name.isEmpty {
+                Text(latinName)
+                    .font(.system(size: 26, weight: .bold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .accessibilityIdentifier("stripLatinName")
             }
             if let attribution, !attribution.isEmpty {
                 Text(attribution)

@@ -5366,7 +5366,25 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The Roman line under a Persian programme name (owner, 2026-11-17: "name of film should also be
+/// in roman"), and the year, both decoded from the schedule the site writes.
+func programmeDecodesRomanTitleAndYear() throws {
+    func decode(_ json: String) throws -> Programming.Programme {
+        try JSONDecoder().decode(Programming.Programme.self, from: Data(json.utf8))
+    }
+    let film = try decode(#"{"id":"a","title":"x","display_title":"اول هیکل","display_title_en":" Aval Heykal ","year":1967}"#)
+    try expectEqual(film.latinTitle, "Aval Heykal")
+    try expectEqual(film.year, 1967)
+    // No Roman form, no display name, or the same name twice: no second line.
+    try expect(try decode(#"{"id":"b","title":"x","display_title":"دشمن"}"#).latinTitle == nil)
+    try expect(try decode(#"{"id":"c","title":"x","display_title_en":"Orphan"}"#).latinTitle == nil)
+    try expect(try decode(#"{"id":"d","title":"x","display_title":"Arman","display_title_en":"Arman"}"#).latinTitle == nil)
+    try expect(try decode(#"{"id":"e","title":"x","display_title":"دشمن","display_title_en":"  "}"#).latinTitle == nil)
+    try expect(try decode(#"{"id":"f","title":"x"}"#).year == nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("programmeDecodesRomanTitleAndYear", programmeDecodesRomanTitleAndYear),
     ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
     ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
     ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),

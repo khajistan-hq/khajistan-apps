@@ -62,6 +62,53 @@ final class NowNextUITests: XCTestCase {
         if let shown { XCTAssertFalse(next.label.contains(shown), "Up next repeats the headline: \(next.label)") }
     }
 
+    /// A Persian title carries its Roman form on a line of its own, on the strip and in the guide
+    /// (owner, 2026-11-17: "name of film should also be in roman"). Fixture: a real Channel 1
+    /// record (programming-2026-11.json, tv-liked-yt--6jom-bc-ga) and an English-only channel 2.
+    func testPersianTitleCarriesItsRomanForm() {
+        let app = XCUIApplication()
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-roman-title.json").path
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-04T12:00:00+05:00"]
+        kjLaunch(app)
+        let first = app.buttons["transmission-channel-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
+        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
+        kjPause(12)
+        XCUIRemote.shared.press(.select)
+        kjPause(0.8)
+        kjScreenshot("roman-title-strip-grove", app: app)
+        let name = app.staticTexts.matching(identifier: "stripName").firstMatch
+        XCTAssertTrue(name.exists, "the strip carries the name")
+        XCTAssertTrue(name.label.contains("اول هیکل"), name.label)
+        let latin = app.staticTexts.matching(identifier: "stripLatinName").firstMatch
+        XCTAssertTrue(latin.exists && app.frame.intersects(latin.frame), "the Roman form is on the strip")
+        XCTAssertEqual(latin.label, "Aval Heykal, with Naser Malek-Motiei")
+        XCTAssertGreaterThan(latin.frame.minY, name.frame.minY, "it sits under the Persian name")
+
+        // The guide: right on the bare picture opens it; channel 1's line carries both names.
+        kjPause(4)
+        XCUIRemote.shared.press(.right)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 10), "right opens the guide")
+        kjPause(0.8)
+        kjScreenshot("roman-title-guide-grove", app: app)
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Aval Heykal")).firstMatch.exists,
+                      "the guide's line for channel 1 carries the Roman form")
+
+        // Negative: an English-only programme has no second line.
+        XCUIRemote.shared.press(.menu)
+        kjPause(1)
+        XCUIRemote.shared.press(.up)   // channel up to 2
+        kjPause(12)
+        XCUIRemote.shared.press(.select)
+        kjPause(0.8)
+        XCTAssertFalse(app.staticTexts.matching(identifier: "stripLatinName").firstMatch.exists, "no Roman line under an English name")
+    }
+
     func testMehfilNamesTheChannelAndTheProgramme() {
         check(channel: 5, name: "Mehfil",
               titles: ["Saang Mahfil E Milad 16 November 2020 Part 1", "Saang Mahfil E Milad 16 November 2020 Part 2"], skin: "day")

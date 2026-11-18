@@ -82,12 +82,21 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(news.label.hasSuffix("live"), "a theme reads its name and its live count, got \(news.label)")
         let themes = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'"))
         XCTAssertLessThanOrEqual(themes.count, 7, "one button a theme, not one a channel; got \(themes.count)")
+        XCTAssertEqual(themes.descendants(matching: .image).count, 0, "a theme is a name, with no picture")
         XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
         kjScreenshot("home-themes", app: app)
         XCTAssertTrue(app.buttons["genre-news"].hasFocus, "down from the front lands on News, the first theme")
+        // Back from the player returns to the theme pressed, not to News.
+        XCUIRemote.shared.press(.right)
+        kjPause(0.7)
+        XCTAssertTrue(app.buttons["genre-music"].hasFocus, "right from News is Music")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 30), "Select on a theme opens the player")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.buttons["genre-music"].waitForExistence(timeout: 15), "Back closes the player")
+        kjPause(1.5)
+        XCTAssertTrue(app.buttons["genre-music"].hasFocus, "Back from the player returns to the theme pressed")
     }
 }

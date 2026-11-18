@@ -517,8 +517,8 @@ private struct AtlasPanel: View {
 /// Live channels by theme across the atlas, as one row of names with no pictures (owner,
 /// 2026-11-18: the News-to-Children carousels "should be shown as not carousels but simpler way no
 /// thumbnails more like themes that people can click and all channels with those themes play").
-/// Select on a theme plays one of its channels, a different one each press, so a stream that is
-/// down is never the only way in; up and down in the player surf every channel of that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
+/// Select on a theme plays one of its channels at random, so a stream that is down is never the
+/// only way in; up and down in the player surf every channel of that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
 /// is tagged for. The row follows the Beyond the atlas switch.
 private struct ThemeRow: View {
     private struct Kind: Identifiable {
@@ -556,8 +556,9 @@ private struct ThemeRow: View {
     @Environment(AppModel.self) private var model
     @State private var rows: [Row] = []
     @State private var playing: Pick?
-    /// Focus coming into the row lands on its first theme, not on whichever sits under the
-    /// control above.
+    /// Focus coming into the row from above or below lands on its first theme, not on whichever
+    /// sits under the control it came from. Back from the player, tvOS returns it to the theme
+    /// pressed (HomeRowsUITests).
     @FocusState private var focused: String?
 
     var body: some View {
@@ -586,7 +587,7 @@ private struct ThemeRow: View {
                         .accessibilityIdentifier("genre-\(row.id)")
                     }
                 }
-                // Room inside the scroll view's clip for a focused plate's lift.
+                // Room over and under the row for a focused plate's lift.
                 .padding(.vertical, 14)
                 }
                 .scrollClipDisabled()

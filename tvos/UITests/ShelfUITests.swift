@@ -115,7 +115,7 @@ final class ShelfUITests: XCTestCase {
         _ = downPastGenres("day", app)
         press(.down, app: app)   // past the parts of Khajistan, to Cameras
         let plate = focusedID(app)
-        XCTAssertTrue(plate.hasPrefix("cameras-"), "down past the genre shelves and the parts of Khajistan lands on a Cameras plate, got \(plate)")
+        XCTAssertTrue(plate.hasPrefix("cameras-"), "down past the themes and the parts of Khajistan lands on a Cameras plate, got \(plate)")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")

@@ -280,11 +280,15 @@ private struct ChannelCell: View {
         HStack(spacing: 16) {
             Text("\(number)").kjKicker().monospacedDigit().frame(width: 44, alignment: .trailing)
             MediumMark(medium: soundOnly ? "radio" : "tv", size: 40)
-            VStack(alignment: .leading, spacing: 2) {
-                // Two lines, and smaller beside LIVE, before it is ever cut: "National Iranian Radio
-                // and Television" (Fable, round 9: at 0.7 it fell to one line under LIVE and was cut).
-                Text(Self.short(name, number: number)).kjName(26).lineLimit(2).minimumScaleFactor(0.55)
-                if live { Kicker("\u{25CF} Live") }
+            // The name whole at the largest size that fits, on up to two lines, beside LIVE too:
+            // "National Iranian Radio and Television" (Fable, round 9). Only when no size fits is it
+            // cut, and the cell says so ("cut"), which the UI tests refuse.
+            ViewThatFits(in: .vertical) {
+                nameStack(size: 26)
+                nameStack(size: 22)
+                nameStack(size: 19)
+                nameStack(size: 16)
+                nameStack(size: 16, cut: true).accessibilityValue("cut")
             }
             Spacer(minLength: 8)
         }
@@ -296,6 +300,16 @@ private struct ChannelCell: View {
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guide-ch\(number)")
         .accessibilityAddTraits(lit ? .isSelected : [])
+    }
+
+    /// The name wrapped at `size`, as tall as it needs, or cut at two lines.
+    private func nameStack(size: CGFloat, cut: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Self.short(name, number: number)).kjName(size)
+                .lineLimit(cut ? 2 : nil)
+                .fixedSize(horizontal: false, vertical: !cut)
+            if live { Kicker("\u{25CF} Live") }
+        }
     }
 
     /// "Channel 5 · Mehfil" reads "Mehfil" beside its number.

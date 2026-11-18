@@ -109,6 +109,15 @@ final class NowNextUITests: XCTestCase {
         kjPause(8)   // the strip hides 2.6 s after the tune, so right meets the bare picture
         XCUIRemote.shared.press(.right)
         XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the bare picture opens the guide")
+        // Channel 8 is "National Iranian Radio and Television", tuned and on air: its name reads
+        // whole beside LIVE, never cut (Fable, round 9).
+        kjPause(0.6)
+        let longName = app.descendants(matching: .any)["guide-ch8"]
+        XCTAssertTrue(longName.label.contains("National Iranian Radio and Television") && longName.label.contains("Live"),
+                      "channel 8 is the long name, tuned: \(longName.label)")
+        // The combined cell joins its children's values ("cut, cut"), so look for the word.
+        XCTAssertFalse((longName.value as? String ?? "").contains("cut"), "channel 8's name is cut: \(String(describing: longName.value))")
+        kjScreenshot("guide-long-name-live", app: app)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
     }

@@ -246,6 +246,17 @@ enum ReceiverRules {
         return parts.user == nil && parts.password == nil
     }
 
+    /// What the site's sign-in (POST /gate, redirected to `next`) said. A right password lands on
+    /// `next` with the cookie set; a wrong one lands on the sign-in page. Anything else (a
+    /// throttle, an outage, a captive portal, a page somewhere else) is tried again later.
+    enum GateOutcome: Equatable { case signedIn, refused, tryLater }
+
+    static func gateOutcome(status: Int, landedOn path: String?, next: String, cookieSet: Bool) -> GateOutcome {
+        guard status == 200 else { return .tryLater }
+        if path == next && cookieSet { return .signedIn }
+        return path == "/gate" || path == "/gate.html" ? .refused : .tryLater
+    }
+
     /// Tiers shown before the viewer switches on the extensions.
     static let tiersOnByDefault: Set<String> = ["heartbeat", "core"]
 

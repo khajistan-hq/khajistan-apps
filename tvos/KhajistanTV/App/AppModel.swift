@@ -124,7 +124,7 @@ final class AppModel {
     init() {
         let auth = AuthStore()
         self.auth = auth
-        self.receiver = ReceiverStore()
+        self.receiver = ReceiverStore { [weak auth] in auth?.previewPassword }
         self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
         // The station clock's server reading starts now, alongside everything else launch fetches.
@@ -172,6 +172,9 @@ final class AppModel {
         }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
+            // The dial changes with the password: a region page open on the old one goes too.
+            self?.receiverPath = []
+            self?.receiver.credentialDidChange()
             self?.invalidateTransmissionAccess()
         }
         observeTransmissionAccess()

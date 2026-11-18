@@ -5402,18 +5402,15 @@ func storedSubtitlesAnswer() throws {
 /// The full film's control row (owner, 2026-11-18: Down reaches subtitles, stop/play and pip).
 func filmControlRowOffersPlayAndPiP() throws {
     typealias C = FilmTransport.Control
-    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: true, playingOrPaused: true),
-                    [C.subtitles, .playPause, .pip, .stop])
-    // Paused is playingOrPaused: PiP is offered on a paused film.
-    try expectEqual(FilmTransport.controls(hasSubtitles: false, pipSupported: true, isFull: true, playingOrPaused: true),
-                    [C.playPause, .pip, .stop])
-    // Reconnecting: no PiP, but Play/Pause stays where the remote left it.
-    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: true, playingOrPaused: false),
-                    [C.subtitles, .playPause, .stop])
-    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: false, isFull: true, playingOrPaused: true),
-                    [C.subtitles, .playPause, .stop])
-    try expect(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: false, playingOrPaused: true).isEmpty,
-               "the preview has its own panel")
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: true), [C.subtitles, .playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: false, pipOffered: true), [C.playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: false), [C.subtitles, .playPause, .stop])
+    // A slide down from a scrub reaches the row; a scrub that drifts, or a slide up, does not.
+    try expect(FilmTransport.isSlideDown(x: 20, y: 120), "a slide down")
+    try expect(!FilmTransport.isSlideDown(x: 200, y: 120), "a scrub drifting down is still a scrub")
+    try expect(!FilmTransport.isSlideDown(x: 5, y: 40), "a rest of the thumb is not a slide")
+    try expect(!FilmTransport.isSlideDown(x: 5, y: -120), "a slide up")
+    try expect(FilmTransport.isMostlyVertical(x: 5, y: -120) && !FilmTransport.isMostlyVertical(x: 200, y: 120), "vertical against across")
 }
 
 let tests: [(String, () throws -> Void)] = [

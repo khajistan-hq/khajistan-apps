@@ -13,7 +13,7 @@ import UIKit
 /// switched with a Subtitles control in the panel, beside Watch the full film.
 ///
 /// In the full film the picture (FilmRemote) keeps the remote's focus. The panel's controls
-/// (Subtitles, PiP, Stop) are lit as the Transmission strip's are: Down lights the first, left and
+/// (Subtitles, Play/Pause, PiP, Stop) are lit as the Transmission strip's are: Down lights the first, from the track bar too; left and
 /// right walk them, Select works the lit one. With none lit the remote moves the film as Apple's
 /// player does (FilmTransport). Back closes the bottom bar, and with it closed stops the film
 /// (owner, 2026-11-17); the preview's one Back stops it (owner, 2026-11-15: "why cant you stop on
@@ -322,8 +322,7 @@ struct FilmPlayerView: View {
 
     /// The controls, left to right, as the remote walks them.
     private var controls: [Control] {
-        FilmTransport.controls(hasSubtitles: !subtitles.tracks.isEmpty, pipSupported: PictureInPicture.isSupported,
-                               isFull: true, playingOrPaused: controller.state == .playing || controller.state == .paused)
+        FilmTransport.controls(hasSubtitles: !subtitles.tracks.isEmpty, pipOffered: pipOffered)
     }
 
     /// The panel's own button faces, lit by the remote rather than focused: the picture under them
@@ -443,10 +442,11 @@ struct FilmPlayerView: View {
 
     // MARK: - Picture in picture
 
-    /// The full film, playing or paused (owner, 2026-11-18: no PiP on a paused film read as no
-    /// PiP at all). A preview is not put in the corner.
+    /// The full film, playing, paused or reconnecting (owner, 2026-11-18: no PiP on a paused film
+    /// read as no PiP at all). A preview is not put in the corner.
     private var pipOffered: Bool {
-        PictureInPicture.isSupported && full != nil && (controller.state == .playing || controller.state == .paused)
+        PictureInPicture.isSupported && full != nil
+            && (controller.state == .playing || controller.state == .paused || controller.state == .tuning)
     }
 
     /// The film goes to a corner window and the screen closes behind it; the film stays in
@@ -458,8 +458,10 @@ struct FilmPlayerView: View {
         armed = nil
         let player = controller, film = film, model = model, pip = pip
         // Paused, it plays as it goes to the corner, as Apple TV's own player does; the window's
-        // start reads .tuning or .playing as a film to keep.
-        if player.state == .paused { player.resume() }
+        // start reads .tuning or .playing as a film to keep. A window that does not open leaves
+        // the film paused, where it was.
+        let wasPaused = player.state == .paused
+        if wasPaused { player.resume() }
         // The object, not the screen's state: the window reads it after the screen has closed.
         let subtitles = subtitles
         let away = FilmAway(film: film, controller: player, pip: pip, grant: full)
@@ -479,7 +481,10 @@ struct FilmPlayerView: View {
             model.filmPiP = away
             leave()
         }
-        pip.onFail = { say($0) }
+        pip.onFail = { line in
+            if wasPaused, model.filmPiP?.controller !== player { player.pause() }
+            say(line)
+        }
         pip.onRestore = {
             guard model.filmPiP?.controller === player else { return }
             // The track stays selected, so the window keeps its subtitle until it has closed; the
@@ -491,6 +496,7 @@ struct FilmPlayerView: View {
             if model.filmPiP?.controller === player { model.silenceRadio() } else { player.stop() }
         }
         if !pip.start(player.player) {
+            if wasPaused { player.pause() }
             pip.letGo()
             say("Picture in picture is not ready yet. Try again in a moment.")
         }
@@ -597,6 +603,16 @@ struct FilmPlayerView: View {
                 controller?.stop()
             }
             controller.attach(url: preview, seekTo: nil, title: Films.displayTitle(film), subtitle: "Khajistan Screening Room", isLive: false)
+            // `-kjscrubopen YES`: once the film plays, a swipe opens the track bar, so a UI test can
+            // press Down from it (XCUIRemote sends no swipes). Debug builds only.
+            if UserDefaults.standard.bool(forKey: "kjscrubopen") {
+                Task {
+                    for _ in 0..<60 where controller.state != .playing { try? await Task.sleep(for: .milliseconds(500)) }
+                    try? await Task.sleep(for: .seconds(3))
+                    swipe(.began, .zero)
+                    swipe(.changed, CGPoint(x: 400, y: 0))
+                }
+            }
             return
         }
         #endif
@@ -720,10 +736,19 @@ struct FilmPlayerView: View {
 
     /// A swipe across the touch surface scrubs: the film pauses on the place the swipe reaches.
     /// The place is kept until Select or Play/Pause plays from it, or Back puts the film back.
-    private func swipe(_ state: UIGestureRecognizer.State, _ points: CGFloat) {
+    private func swipe(_ state: UIGestureRecognizer.State, _ translation: CGPoint) {
         guard full != nil, armed == nil, scan == nil, movable else { return }
         if state == .began { swipeBase = scrub?.to }
         guard state == .changed else { return }
+        let points = translation.x
+        // A slide that runs down rather than across is not a scrub: it moves no place and stamps
+        // nothing, so a click Down after it is not dropped as part of a swipe. During a scrub it
+        // leaves the bar for the control row, as Down does (owner, 2026-11-18: "when you touch
+        // down on the apple tv remote it should go to subtitles, stop/play and pip").
+        if FilmTransport.isMostlyVertical(x: Double(translation.x), y: Double(translation.y)) {
+            if scrub != nil, FilmTransport.isSlideDown(x: Double(translation.x), y: Double(translation.y)) { vertical(1) }
+            return
+        }
         lastSwipe = .now
         if scrub == nil {
             // A small touch is a rest of the thumb, not a swipe.
@@ -836,10 +861,11 @@ struct FilmAway {
 
     /// Where the film has got to, kept as the screen keeps it on Back.
     @MainActor func recordPlace() {
-        guard controller.state == .playing || controller.state == .paused else { return }
+        // .tuning too: a paused film sent to the corner is resuming, and its place still counts.
+        guard [.playing, .paused, .tuning].contains(controller.state) else { return }
         let now = controller.player.currentTime().seconds
         let length = controller.player.currentItem?.duration.seconds
-        guard now.isFinite else { return }
+        guard now.isFinite, now > 0 else { return }
         FilmPlaces.record(film.handle, at: now, of: (length?.isFinite == true && (length ?? 0) > 0) ? length : nil)
     }
 }

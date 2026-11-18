@@ -242,12 +242,17 @@ enum FilmTransport {
     /// stop/play and pip"). PiP is offered paused as well as playing; choosing it plays the film.
     enum Control: Equatable { case subtitles, playPause, pip, stop }
 
-    static func controls(hasSubtitles: Bool, pipSupported: Bool, isFull: Bool, playingOrPaused: Bool) -> [Control] {
-        guard isFull else { return [] }
-        // Play/Pause stays through a reconnect, so a lit one is not lost while the film tunes.
-        return [hasSubtitles ? .subtitles : nil, .playPause,
-                pipSupported && playingOrPaused ? .pip : nil, .stop].compactMap { $0 }
+    static func controls(hasSubtitles: Bool, pipOffered: Bool) -> [Control] {
+        // Play/Pause and PiP stay through a reconnect, so a lit one is not lost while the film tunes.
+        [hasSubtitles ? .subtitles : nil, .playPause, pipOffered ? .pip : nil, .stop].compactMap { $0 }
     }
+
+    /// A pan on the touch surface that runs more down than across, far enough to be meant: during
+    /// a scrub it leaves the bar for the control row, as a click Down does, and moves no place.
+    static func isSlideDown(x: Double, y: Double) -> Bool { y > 60 && y > abs(x) }
+
+    /// A pan that runs more up or down than across is not a scrub.
+    static func isMostlyVertical(x: Double, y: Double) -> Bool { abs(y) > abs(x) }
 
     static let skip: Double = 10
     /// How often a held arrow moves the film.

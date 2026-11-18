@@ -14,7 +14,7 @@ final class PiPWindowUITests: XCTestCase {
 
     private static let film = "filmfarsi-trailers-vol-1-khajistan"
 
-    private func openFullFilm(_ app: XCUIApplication, onAppleTV: Bool = false) throws {
+    private func openFullFilm(_ app: XCUIApplication, onAppleTV: Bool = false, extra: [String] = []) throws {
         if onAppleTV {
             // The real window: production's vod.json, read with the preview password the Apple TV holds.
             app.launchArguments = ["-kjskin", "grove", "-kjfilmasfull", "YES", "-kj-of-subtitles.\(Self.film)", "en"]
@@ -23,7 +23,7 @@ final class PiPWindowUITests: XCTestCase {
                 throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
             }
             app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
-                                   "-kj-of-subtitles.\(Self.film)", "en"]
+                                   "-kj-of-subtitles.\(Self.film)", "en"] + extra
         }
         kjLaunch(app)
         let film = app.buttons["film-\(Self.film)"]
@@ -53,6 +53,39 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertTrue(pip.isSelected, "Right walks to PiP")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "the PiP bar comes up with the window")
+    }
+
+    /// Down from the track bar (owner, 2026-11-18: "when you touch down on the apple tv remote it
+    /// should go to subtitles, stop/play and pip right now it just stays at the track bar"): the
+    /// film stays paused where the swipe left it, the row lights, and PiP opens from a paused film.
+    func testDownFromTheTrackBarReachesTheRowAndPausedPiPOpens() throws {
+        let app = XCUIApplication()
+        try openFullFilm(app, extra: ["-kjscrubopen", "YES"])
+        let bar = app.descendants(matching: .any)["filmProgress"]
+        let scrubLine = NSPredicate { _, _ in app.staticTexts["Select plays from here \u{00B7} Back returns"].exists }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: scrubLine, object: nil)], timeout: 30), .completed,
+                       "the track bar is up")
+        let reached = (try? bar.snapshot())?.value as? String
+        kjScreenshot("film-track-bar-up", app: app)
+        XCUIRemote.shared.press(.down)
+        kjPause(0.8)
+        let subtitles = app.descendants(matching: .any)["subtitlesControl"]
+        XCTAssertTrue(subtitles.isSelected, "Down from the track bar lights the first control")
+        XCTAssertFalse(app.staticTexts["Select plays from here \u{00B7} Back returns"].exists, "the track bar has let go")
+        XCTAssertEqual(app.staticTexts["playerState"].label, "Paused", "the film stays paused")
+        XCTAssertEqual((try? bar.snapshot())?.value as? String, reached, "where the swipe left it")
+        kjScreenshot("film-down-from-track-bar", app: app)
+        let playPause = app.descendants(matching: .any)["playPauseControl"]
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(playPause.isSelected && playPause.label == "Play", "Right lights Play on a paused film")
+        let pip = app.descendants(matching: .any)["pipControl"]
+        XCTAssertTrue(pip.exists, "PiP is offered on a paused film")
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(pip.isSelected, "Right lights PiP")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "a paused film opens in the window")
     }
 
     func testBarComesUpLitAndBringsTheFilmBackInOnePress() throws {

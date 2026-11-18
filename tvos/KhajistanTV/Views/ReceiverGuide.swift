@@ -104,7 +104,11 @@ struct TransmissionGuide: View {
         let number: Int
         let name: String
         let soundOnly: Bool
+        /// The programme on air now, as the strip's headline names it: a run of short items is
+        /// named for its show, and the guide's headline adds this to it.
+        var onNow: String?
         /// What the channel airs from the half hour now is in, filled as the row comes into view.
+        /// Empty while the month it needs is not held: the row reads Loading.
         var slots: [GuideSlot]
     }
     let rows: [Row]
@@ -157,17 +161,20 @@ struct TransmissionGuide: View {
         let row = rows.indices.contains(grid.row) ? rows[grid.row] : nil
         let slot = row.flatMap { r in grid.lit(in: r.slots).map { r.slots[$0] } }
         let channel = row?.name ?? ""
-        let when: String
+        let loading = row.map { $0.slots.isEmpty } ?? true
+        var parts = [channel]
         if let slot, slot.isOffAir {
-            when = Self.back(slot, now: grid.now).map { "back at \($0)" } ?? "off air"
+            parts.append(Self.back(slot, now: grid.now).map { "back at \($0)" } ?? "off air")
         } else if let slot {
-            when = "\(Self.clock(slot.start))\u{2013}\(Self.clock(slot.end)) \(StationClock.tzLabel)"
-        } else {
-            when = "nothing scheduled"
+            parts.append("\(Self.clock(slot.start))\u{2013}\(Self.clock(slot.end)) \(StationClock.tzLabel)")
+            // A run is named for its show; the programme on air inside it is named too.
+            if slot.grouped, slot.contains(grid.now), let onNow = row?.onNow, !onNow.isEmpty, onNow != slot.title {
+                parts.append("now: \(onNow)")
+            }
         }
         return VStack(alignment: .leading, spacing: 4) {
-            Text(slot?.title ?? "Off air").kjName(32).lineLimit(1)
-            Text([channel, when].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")).kjSmall(faint: true).lineLimit(1)
+            Text(loading ? "Loading" : (slot?.title ?? "Off air")).kjName(32).lineLimit(1)
+            Text(parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")).kjSmall(faint: true).lineLimit(1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guideHeadline")
@@ -179,7 +186,7 @@ struct TransmissionGuide: View {
     /// schedule held has no return.
     static func back(_ slot: GuideSlot, now: Date) -> String? {
         guard slot.isOffAir else { return nil }
-        if let label = slot.returnLabel { return label }
+        if slot.openEnd { return slot.returnLabel }
         guard slot.end < now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span) else { return nil }
         let at = "\(clock(slot.end)) \(StationClock.tzLabel)"
         return StationClock.stationNow(slot.end).iso == StationClock.stationNow(now).iso ? at : "\(at) on \(dayLabel(slot.end))"
@@ -226,12 +233,20 @@ struct TransmissionGuide: View {
                         live: row.number == current && onNow, lit: lit, plate: lit && litSlot == nil)
                 .frame(width: Self.channelWidth, alignment: .leading)
             ZStack(alignment: .topLeading) {
-                ForEach(shown, id: \.self) { index in
-                    let slot = row.slots[index]
+                if row.slots.isEmpty {
+                    Text("Loading").kjSmall(faint: true).padding(.horizontal, 14)
+                        .frame(height: Self.rowHeight - 8, alignment: .leading)
+                }
+                // Keyed by start, so a block keeps its place and its text when the rows are read again.
+                ForEach(shown.map { (index: $0, slot: row.slots[$0]) }, id: \.slot.start) { item in
+                    let index = item.index
+                    let slot = item.slot
                     let left = max(0, x(slot.start, width: width))
                     let right = min(width, x(slot.end, width: width))
-                    GuideBlock(slot: slot, lit: index == litSlot, opensBefore: slot.start < grid.windowStart, now: grid.now)
-                        .frame(width: max(0, right - left - 6), height: Self.rowHeight - 8, alignment: .leading)
+                    let lit = index == litSlot
+                    // A lit block is never narrower than its plate can be seen.
+                    GuideBlock(slot: slot, lit: lit, opensBefore: slot.start < grid.windowStart, now: grid.now)
+                        .frame(width: max(lit ? 24 : 0, right - left - 6), height: Self.rowHeight - 8, alignment: .leading)
                         .offset(x: left)
                         .accessibilityIdentifier("guide-ch\(row.number)-\(index)")
                 }

@@ -218,10 +218,11 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   mark, name, ● LIVE on the one tuned while something is on it), three hours run across under
   half-hour marks in PKT, with a short accent bar at now, and each programme is a block as long as
   it airs: its title and its times on the lift plate, an off-air stretch with no plate and *back at*
-  its return. A run of programmes under ten minutes in one strip is one block named for the show,
-  as Up next names it; an off-air seam under a minute between two strips is part of the programme
-  before it. Near a month's end the next month's schedule is fetched; until it is held, a row ends
-  where the month does rather than read the month after as off air. Over the grid the lit programme reads in full (its title, then the channel and its
+  its return. A run of programmes under ten minutes in one strip is one block named for its show
+  (lit while it airs, the headline adds the programme on air: *now: Jugni*); anything under a
+  minute, an off-air seam between two strips or a lone item, is part of the block before it. Near a month's end the next month's schedule is fetched; until it is held, a row ends
+  where the month does rather than read the month after as off air, and a row with nothing held
+  reads Loading, asking again every half minute. Over the grid the lit programme reads in full (its title, then the channel and its
   times), since a short programme's block is too narrow for its name. One block is lit (the focus
   plate, no lift: a block can be most of the screen wide). Up and Down change channel and keep the
   moment; Right lights the next programme, as far as twelve hours ahead; Left the one before, never

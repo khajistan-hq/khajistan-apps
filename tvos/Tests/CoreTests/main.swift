@@ -2043,8 +2043,10 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
 /// says what `onAir` says (the programme's title, or for a run of short programmes the show's
 /// name, or off air). At a block's own boundary second the clock may still read the block before
 /// (the clock reads whole seconds, a programme ends inside one), so each boundary is sampled one
-/// second either side, and the boundary second itself is not. An off-air seam under a minute is
-/// drawn inside the programme before it, so off air there is accepted.
+/// second either side, and the boundary second itself is not. Anything under a minute (an off-air
+/// seam, a lone item) is drawn inside the block before it, so the last minute of a block may hold
+/// it. Inside a grouped run the clock's programme must be a short one: a long programme is never
+/// hidden in a run.
 @discardableResult
 func timelineAgreesWithTheClock(_ months: [Programming], channel: Int, from: Date, to: Date, every step: TimeInterval) throws -> [GuideSlot] {
     let slots = StationClock.timeline(months, channel: channel, from: from, to: to)
@@ -2070,12 +2072,16 @@ func timelineAgreesWithTheClock(_ months: [Programming], channel: Int, from: Dat
         let month = months.first { p in StationClock.monthEnd(p).map { moment < $0 } ?? false } ?? months[0]
         let block = try require(slots.first { $0.contains(moment) })
         let air = StationClock.onAir(month, channel: channel, at: moment)
+        let joined = block.end.timeIntervalSince(moment) <= StationClock.shortGap
         if let air {
             let expected = block.grouped ? (air.show?.name ?? air.nowName ?? "") : (air.nowName ?? air.show?.name ?? "")
-            try expect(block.title == expected, "channel \(channel) at \(moment): the grid says \(block.title ?? "off air"), the clock \(expected)")
+            try expect(block.title == expected || joined, "channel \(channel) at \(moment): the grid says \(block.title ?? "off air"), the clock \(expected)")
+            if block.grouped, !joined {
+                try expect(StationClock.runSeconds(air.programme) < StationClock.shortProgramme,
+                           "channel \(channel) at \(moment): a \(Int(StationClock.runSeconds(air.programme))) s programme inside the run \(block.title ?? "")")
+            }
         } else {
-            try expect(block.isOffAir || block.end.timeIntervalSince(moment) <= StationClock.shortGap,
-                       "channel \(channel) at \(moment) is off air, the grid says \(block.title ?? "")")
+            try expect(block.isOffAir || joined, "channel \(channel) at \(moment) is off air, the grid says \(block.title ?? "")")
         }
         checked += 1
     }
@@ -2110,10 +2116,16 @@ func guideTimelineSynthetic() throws {
     try expectEqual(dark.first?.start, pkt(2026, 10, 10, 8, 0))
     try expectEqual(dark.first?.end, pkt(2026, 10, 10, 23, 0))
     try expectEqual(dark.first?.returnLabel, nil)   // it ends inside what was asked for
-    // A dark stretch that runs past what was asked for says when the channel is back.
+    try expectEqual(dark.first?.openEnd, false)
+    // A dark stretch that runs past what was asked for says when the channel is back, and its end
+    // (the edge of what was read) is not a time anything happens.
     let open = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 8, 30), to: pkt(2026, 10, 10, 9, 0))
     try expectEqual(open.count, 1)
     try expectEqual(open.first?.returnLabel, "23:00 PKT")
+    try expectEqual(open.first?.openEnd, true)
+    // Opened inside the run of one-minute programmes, the run still starts at 07:00.
+    try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 7, 40), to: pkt(2026, 10, 10, 8, 30)).first,
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
     // Asked from inside a programme, the first block starts when the programme did.
     let mid = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 5), to: pkt(2026, 10, 10, 6, 20))
     try expectEqual(mid.first?.start, pkt(2026, 10, 10, 6, 0))
@@ -2143,6 +2155,69 @@ func guideTimelineSeamBetweenStrips() throws {
     let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 12, 0), to: pkt(2026, 11, 8, 13, 0), every: 7)
     try expectEqual(slots.map(\.title), ["Title A", "Title B"])
     try expectEqual(slots.first?.end, pkt(2026, 11, 8, 12, 30))
+}
+
+/// A lone item under a minute between long programmes is drawn inside the block before it, and
+/// two strips of short items of one show side by side stay two blocks, each with its strip's times.
+func guideTimelineJoinsWhatCannotBeSeen() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L","S","M","N"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":1800},
+                   "S":{"id":"S","title":"s","display_title":"Sting","seconds":30},
+                   "M":{"id":"M","title":"m","display_title":"Long Two","seconds":1770},
+                   "N":{"id":"N","title":"n","display_title":"Clip","seconds":300}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":60,"show":"s1","programmes":[0,1,2]},
+       {"start":"13:00","start_minute":780,"minutes":30,"show":"s1","programmes":[3]},
+       {"start":"13:30","start_minute":810,"minutes":30,"show":"s1","programmes":[3]}]}}]}
+    """)
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 12, 0), to: pkt(2026, 11, 8, 14, 0), every: 11)
+    try expectEqual(slots.map(\.title), ["Long", "Long Two", "Show One", "Show One"])
+    try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 30, 30))   // the 30 s sting is inside "Long"
+    try expectEqual(slots[2], GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true))
+    try expectEqual(slots[3], GuideSlot(start: pkt(2026, 11, 8, 13, 30), end: pkt(2026, 11, 8, 14, 0), title: "Show One", grouped: true))
+}
+
+/// The month the guide fetches: none while it reads inside the month held, the next one past its
+/// end, none once that one is held too, and the month the clock has turned into while the month
+/// before is still held.
+func guideMonthToFetch() throws {
+    let nov = try decode(Programming.self, #"{"_meta":{"channels":[]},"shows":{},"programme_order":[],"programmes":{},"days":[{"date":"2026-11-01","channels":{}},{"date":"2026-11-30","channels":{}}]}"#)
+    let dec = try decode(Programming.self, #"{"_meta":{"channels":[]},"shows":{},"programme_order":[],"programmes":{},"days":[{"date":"2026-12-01","channels":{}}]}"#)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nil, until: pkt(2026, 11, 30, 23, 59)), nil)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nil, until: pkt(2026, 12, 1, 0, 0)), "2026-12")
+    try expectEqual(StationClock.monthToFetch(held: nov, next: dec, until: pkt(2026, 12, 1, 9, 0)), nil)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nov, until: pkt(2026, 12, 1, 9, 0)), "2026-12")
+    try expectEqual(StationClock.monthToFetch(held: nil, next: nil, until: pkt(2026, 12, 1, 9, 0)), nil)
+    try expectEqual(StationClock.monthToFetch(held: dec, next: nil, until: pkt(2027, 1, 1, 0, 0)), "2027-01")
+}
+
+/// The guide opened an hour apart reads the same blocks where the two openings overlap: a run read
+/// from its middle keeps its start and its name (Fable, round 2: 10:57 for a run begun at 10:07,
+/// and a name that changed at the half hour). Every channel, every day of November.
+func guideTimelineReadsTheSameWhenOpened() throws {
+    let nov = try realProgramming("2026-11")
+    var compared = 0
+    for day in 1...29 {
+        for channel in nov._meta.channels.map(\.number) {
+            let early = pkt(2026, 11, day, 11, 10), late = pkt(2026, 11, day, 12, 10)
+            let a = StationClock.timeline([nov], channel: channel, from: early, to: early.addingTimeInterval(6 * 3600))
+            let b = StationClock.timeline([nov], channel: channel, from: late, to: late.addingTimeInterval(4 * 3600))
+            // Blocks that end inside both openings: one at an opening's far edge depends on where
+            // it was read to (whether a sub-minute item after it joins it).
+            for block in b where !block.openEnd && block.end <= late.addingTimeInterval(4 * 3600) {
+                // The same block to the second (one opening may read a start from whole seconds, the
+                // other snap it to the fractional end before it).
+                let same = a.contains { abs($0.start.timeIntervalSince(block.start)) < 1 && abs($0.end.timeIntervalSince(block.end)) < 1
+                    && $0.title == block.title && $0.grouped == block.grouped }
+                try expect(same, "channel \(channel), \(day) November: opened at 12:10 the guide reads \(block), opened at 11:10 it does not")
+                compared += 1
+            }
+        }
+    }
+    try expect(compared > 3000, "only \(compared) blocks compared")
 }
 
 /// Every day of a real month, every channel, from 06:10, 18:10 and 23:10, for as long as a guide
@@ -5444,6 +5519,9 @@ let tests: [(String, () throws -> Void)] = [
     ("runSeconds rules", runSecondsRules),
     ("Guide timeline: the clock's answer, end to end", guideTimelineSynthetic),
     ("Guide timeline: a one-second seam between strips", guideTimelineSeamBetweenStrips),
+    ("Guide timeline: what is under a minute joins the block before", guideTimelineJoinsWhatCannotBeSeen),
+    ("Guide timeline: the same blocks whenever it is opened", guideTimelineReadsTheSameWhenOpened),
+    ("Guide: which month to fetch", guideMonthToFetch),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
     ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),

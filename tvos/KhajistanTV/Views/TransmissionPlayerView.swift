@@ -33,6 +33,10 @@ struct TransmissionPlayerView: View {
     /// Where the guide's time grid stands (the lit channel and moment); nil while it is closed.
     @State private var guideGrid: GuideGrid?
     @State private var guideRows: [TransmissionGuide.Row] = []
+    /// Rows whose schedule is being read off the main thread, and the reading they belong to: a
+    /// refill starts a new one, and an answer for an older one is dropped.
+    @State private var guideFilling: Set<Int> = []
+    @State private var guideFillGeneration = 0
     @State private var pip = PictureInPicture()
     /// Set when the picture went to the corner window: the screen closes, the channel plays on.
     @State private var handedToPiP = false
@@ -457,9 +461,12 @@ struct TransmissionPlayerView: View {
         hideTask?.cancel()
         armed = nil
         let now = TransmissionStore.now()
+        guideFillGeneration += 1
+        guideFilling = []
         guideRows = store.channelNumbers.map { number in
-            .init(number: number, name: store.channelName(number),
-                  soundOnly: store.nowOn(channel: number, at: now)?.programme?.audio_only == true, slots: [])
+            let air = store.nowOn(channel: number, at: now)
+            return .init(number: number, name: store.channelName(number),
+                         soundOnly: air?.programme?.audio_only == true, onNow: air?.nowName, slots: [])
         }
         var grid = GuideGrid(row: guideRows.firstIndex { $0.number == store.channelNumber } ?? 0, now: now)
         fillGuide(around: grid.row, now: now)
@@ -480,28 +487,61 @@ struct TransmissionPlayerView: View {
     }
 
     /// The schedule of the rows the guide draws (ReceiverGuide.window, which holds against the
-    /// list's ends) and one row beyond each side, read once per opening: from the half hour now
-    /// is in to the horizon plus a window, so the last programme Right reaches is drawn.
+    /// list's ends) and one row beyond each side, for any of them not read yet: from the half hour
+    /// now is in to the horizon plus a window, so the last programme Right reaches is drawn.
+    /// The reading runs off the main thread (a busy channel's fifteen hours took 17 ms on a Mac
+    /// and the Apple TV HD is many times slower), so a press never waits for it; a row reads
+    /// Loading until its answer lands.
     private func fillGuide(around row: Int, now: Date) {
         let count = guideRows.count
         guard count > 0 else { return }
         let shown = ReceiverGuide.window(count: count, lit: row)
         guard let first = shown.first, let last = shown.last else { return }
-        let from = GuideGrid.halfHour(now)
-        for index in Set(shown + [(first - 1 + count) % count, (last + 1) % count]) where guideRows[index].slots.isEmpty {
-            guideRows[index].slots = store.timeline(channel: guideRows[index].number, from: from, to: Self.guideEnd(now))
+        let wanted = Set(shown + [(first - 1 + count) % count, (last + 1) % count])
+            .filter { guideRows[$0].slots.isEmpty && !guideFilling.contains($0) }
+        guard !wanted.isEmpty else { return }
+        guideFilling.formUnion(wanted)
+        let jobs = wanted.map { ($0, guideRows[$0].number) }
+        let months = store.guideMonths
+        let from = GuideGrid.halfHour(now), to = Self.guideEnd(now)
+        let generation = guideFillGeneration
+        Task {
+            let read = await Task.detached(priority: .userInitiated) {
+                jobs.map { ($0.0, StationClock.timeline(months, channel: $0.1, from: from, to: to)) }
+            }.value
+            guard generation == guideFillGeneration else { return }
+            for (index, slots) in read where guideRows.indices.contains(index) {
+                guideRows[index].slots = slots
+                guideFilling.remove(index)
+            }
         }
     }
 
     /// Reads every row the guide holds again, for a new half hour or a month brought in.
     private func refillGuide() {
         guard let grid = guideGrid else { return }
-        for index in guideRows.indices { guideRows[index].slots = [] }
+        guideFillGeneration += 1
+        guideFilling = []
+        for index in guideRows.indices {
+            guideRows[index].slots = []
+            guideRows[index].onNow = store.nowOn(channel: guideRows[index].number, at: grid.now)?.nowName
+        }
         fillGuide(around: grid.row, now: grid.now)
     }
 
-    /// While the guide is open the clock moves on: now, LIVE and the lit moment each minute, and
-    /// the rows again when the half hour turns, so the window and the rows start at the same place.
+    /// A drawn row that is empty or stops short of the hours the guide reads: the month it needs is
+    /// not held yet.
+    private var guideRowsShort: Bool {
+        guard let grid = guideGrid else { return false }
+        let end = Self.guideEnd(grid.now)
+        return ReceiverGuide.window(count: guideRows.count, lit: grid.row).contains { index in
+            (guideRows[index].slots.last?.end ?? .distantPast) < end
+        }
+    }
+
+    /// While the guide is open the clock moves on: now, LIVE and the lit moment every half minute,
+    /// and the rows again when the half hour turns, so the window and the rows start at the same
+    /// place. A row still short of its hours asks for the month it needs again on each tick.
     private func keepGuideCurrent() async {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(30))
@@ -511,6 +551,7 @@ struct TransmissionPlayerView: View {
             grid.refresh(now: now)
             guideGrid = grid
             if turned { refillGuide() }
+            if guideRowsShort, await store.loadNextMonth(until: Self.guideEnd(now)), guideGrid != nil { refillGuide() }
         }
     }
 

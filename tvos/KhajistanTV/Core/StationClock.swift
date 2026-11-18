@@ -58,6 +58,10 @@ struct GuideSlot: Hashable, Sendable {
     var returnLabel: String? = nil
     /// A run of short programmes of one strip, drawn as one block named for its show.
     var grouped = false
+    /// The block runs to the end of what the guide reads, or of the months held, not to a time the
+    /// schedule gives: its end is not when anything changes. An off-air one says when the channel
+    /// is back from `returnLabel`, never from its end.
+    var openEnd = false
 
     var isOffAir: Bool { title == nil }
     func contains(_ moment: Date) -> Bool { start <= moment && moment < end }
@@ -625,6 +629,14 @@ enum StationClock {
         return date(iso: "\(next.0)-\(next.1 < 10 ? "0" : "")\(next.1)-01", second: 0)
     }
 
+    /// The station month the guide needs fetched, "yyyy-MM", when it reads to `until` past the month
+    /// held and the month after is not held too; nil otherwise.
+    static func monthToFetch(held: Programming?, next: Programming?, until: Date) -> String? {
+        guard let held, let end = monthEnd(held), until >= end else { return nil }
+        if let next, let nextEnd = monthEnd(next), nextEnd > end { return nil }
+        return stationMonth(end)
+    }
+
     /// What a channel airs from `from` to `to`, programme by programme, and the stretches it is
     /// off air, end to end, for the guide's time grid (owner, 2026-11-17: "showing schedule on an
     /// hourly basis"). `months` are the schedule files held, in order; a walk that reaches the end
@@ -634,41 +646,67 @@ enum StationClock {
     /// end cutting its last programme. A run of short programmes of one strip is one block named
     /// for its show; an off-air seam under a minute joins the programme before it.
     static func timeline(_ months: [Programming], channel number: Int, from: Date, to: Date, limit: Int = 5000) -> [GuideSlot] {
-        var raw: [(slot: GuideSlot, strip: String?, show: String?)] = []
-        var at = from
-        var last: (p: Programming, id: String)?
+        var raw: [(slot: GuideSlot, strip: String?, show: String?, length: TimeInterval)] = []
+        // Read from inside a run of short programmes, the walk starts at the run's strip, so the
+        // run reads the same start and name whenever the guide is opened (Fable, round 2: opened at
+        // 11:00 a run that began at 10:07 read 10:57).
+        var at = runStart(months, channel: number, at: from) ?? from
+        var last: (p: Programming, id: String, end: Date)?
         for p in months {
             guard at < to, let end = monthEnd(p) else { continue }
             guard at < end else { continue }
             guard let id = channelId(p, number: number) else {
                 // The channel is not in this month's file: off air until the month ends.
-                raw.append((GuideSlot(start: at, end: min(to, end), title: nil), nil, nil))
+                raw.append((GuideSlot(start: at, end: min(to, end), title: nil), nil, nil, 0))
                 at = min(to, end)
                 continue
             }
-            last = (p, id)
-            at = walk(p, channelId: id, from: at, to: min(to, end), into: &raw, limit: limit)
+            last = (p, id, end)
+            at = walk(p, channelId: id, from: at, to: min(to, end), monthEnd: end, into: &raw, limit: limit)
         }
-        var out = group(raw)
-        // A stretch off air that runs to the end of what was asked for says when the channel is back.
-        if let tail = out.last, tail.isOffAir, tail.end >= to, let last {
+        var out = group(raw).filter { $0.end > from }
+        // A stretch off air that runs to the end of what was asked for, or of the months held, says
+        // when the channel is back, never "back at" the edge of what was read.
+        if let tail = out.last, tail.isOffAir, let last, tail.end >= min(to, last.end) {
+            out[out.count - 1].openEnd = true
             out[out.count - 1].returnLabel = returnLabel(last.p, channelId: last.id, at: tail.start)
         }
         return out
     }
 
+    /// Where the strip of a short programme on air at `date` starts, when there is one: the walk
+    /// begins there. Nil for a long programme, off air, or a moment no month held covers.
+    private static func runStart(_ months: [Programming], channel number: Int, at date: Date) -> Date? {
+        guard let p = months.first(where: { monthEnd($0).map { date < $0 } ?? false }),
+              let id = channelId(p, number: number), let air = onAir(p, channelId: id, at: date),
+              runSeconds(air.programme) < shortProgramme,
+              let start = Self.date(iso: air.date, second: air.slot.startSecond), start < date else { return nil }
+        return start
+    }
+
     /// One month's part of a timeline. Returns where it stopped: `to`, or later when a programme
     /// running past the month's end was read whole.
-    private static func walk(_ p: Programming, channelId: String, from: Date, to: Date,
-                             into raw: inout [(slot: GuideSlot, strip: String?, show: String?)], limit: Int) -> Date {
+    private static func walk(_ p: Programming, channelId: String, from: Date, to: Date, monthEnd: Date,
+                             into raw: inout [(slot: GuideSlot, strip: String?, show: String?, length: TimeInterval)], limit: Int) -> Date {
         var at = from
         var steps = 0
-        // Until the last block reaches `to`: a programme ending a fraction before it has the next
-        // one start before it too, though the reading rounds up to `to` or past.
-        while at < to || (raw.last.map { $0.slot.end < to } ?? false), steps < limit {
+        // Until the last block reaches `to` (a programme ending a fraction before it has the next one
+        // start before it too, though the reading rounds up to `to` or past), and on to the end of a
+        // run of short programmes it stopped inside, so the run's end is the run's own; never past
+        // the month's end, which this file cannot read beyond.
+        func insideRun() -> Bool { raw.last.map { $0.strip != nil && $0.length < shortProgramme } ?? false }
+        while at < to || (raw.last.map { $0.slot.end < to } ?? false) || (insideRun() && at < monthEnd), steps < limit {
             steps += 1
             let whole = at.timeIntervalSince1970.rounded(.down)
-            if let air = onAir(p, channelId: channelId, at: at) {
+            let finishingRun = at >= to && !(raw.last.map { $0.slot.end < to } ?? false)
+            let reading = onAir(p, channelId: channelId, at: at)
+            // Past `to` the walk only finishes a run: it stops at the first reading that is not one
+            // more short programme of the same strip.
+            if finishingRun {
+                guard let air = reading, runSeconds(air.programme) < shortProgramme,
+                      raw.last?.strip == "\(air.date) \(air.slot.startSecond)" else { break }
+            }
+            if let air = reading {
                 let began = Date(timeIntervalSince1970: whole - air.into)
                 var start = began
                 // A programme is on screen from where the one before ended: the clock places both
@@ -681,7 +719,7 @@ enum StationClock {
                 // The clock reads whole seconds: a programme ending inside this second is over.
                 end = max(end, Date(timeIntervalSince1970: whole + 1))
                 raw.append((GuideSlot(start: start, end: end, title: air.nowName ?? air.show?.name ?? ""),
-                            "\(air.date) \(air.slot.startSecond)", air.show?.name))
+                            "\(air.date) \(air.slot.startSecond)", air.show?.name, runSeconds(air.programme)))
                 at = Date(timeIntervalSince1970: end.timeIntervalSince1970.rounded(.up))
             } else {
                 let now = stationNow(at)
@@ -697,7 +735,7 @@ enum StationClock {
                     raw[raw.count - 1].slot.end = end
                 } else {
                     let start = raw.last.map { abs($0.slot.end.timeIntervalSince(at)) < 1 ? $0.slot.end : at } ?? at
-                    raw.append((GuideSlot(start: start, end: end, title: nil), nil, nil))
+                    raw.append((GuideSlot(start: start, end: end, title: nil), nil, nil, 0))
                 }
                 at = end
             }
@@ -707,22 +745,26 @@ enum StationClock {
 
     /// Runs of short programmes of one strip become one block named for the show, and off-air seams
     /// under `shortGap` join the programme before them.
-    private static func group(_ raw: [(slot: GuideSlot, strip: String?, show: String?)]) -> [GuideSlot] {
+    private static func group(_ raw: [(slot: GuideSlot, strip: String?, show: String?, length: TimeInterval)]) -> [GuideSlot] {
         var out: [GuideSlot] = []
         var index = 0
         while index < raw.count {
             let item = raw[index]
             var runEnd = index
-            if let strip = item.strip, item.slot.end.timeIntervalSince(item.slot.start) < shortProgramme {
-                while runEnd + 1 < raw.count, raw[runEnd + 1].strip == strip,
-                      raw[runEnd + 1].slot.end.timeIntervalSince(raw[runEnd + 1].slot.start) < shortProgramme {
+            // Short by the programme's own length: a long one cut short by its strip's end is not.
+            if let strip = item.strip, item.length < shortProgramme {
+                while runEnd + 1 < raw.count, raw[runEnd + 1].strip == strip, raw[runEnd + 1].length < shortProgramme {
                     runEnd += 1
                 }
             }
             if runEnd > index {
+                // One block per strip: each strip is a slot the schedule starts at its own time, so two
+                // strips of one show side by side are two blocks, each with its own times.
                 out.append(GuideSlot(start: item.slot.start, end: raw[runEnd].slot.end,
                                      title: item.show ?? item.slot.title, grouped: true))
-            } else if item.slot.isOffAir, item.slot.end.timeIntervalSince(item.slot.start) < shortGap, !out.isEmpty {
+            } else if item.slot.end.timeIntervalSince(item.slot.start) < shortGap, !out.isEmpty {
+                // Under a minute, off air or a lone programme between long ones: too narrow to see
+                // or to light, so it is drawn inside the block before it.
                 out[out.count - 1].end = item.slot.end
             } else if let prior = out.last, prior.isOffAir, item.slot.isOffAir {
                 out[out.count - 1].end = item.slot.end
@@ -819,7 +861,7 @@ struct GuideGrid: Equatable, Sendable {
     var cursor: Date
     /// The left edge of the three hours on screen.
     var windowStart: Date
-    /// The moment the grid is read at, moved on each minute while the guide is open (refresh).
+    /// The moment the grid is read at, moved on every half minute while the guide is open (refresh).
     private(set) var now: Date
 
     init(row: Int, now: Date) {

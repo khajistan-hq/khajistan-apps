@@ -33,6 +33,7 @@ final class TransmissionStore {
     /// The month after the one held, fetched only for the guide when its hours reach past the
     /// month's end (loadNextMonth); nil otherwise, or when that month is not published yet.
     private(set) var nextProgramming: Programming?
+    @ObservationIgnored private var nextMonthLoad: (month: String, task: Task<Bool, Never>)?
     /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
     /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
     /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
@@ -164,19 +165,33 @@ final class TransmissionStore {
     /// What a channel airs from `from` to `to`, programme by programme, for the guide's time grid,
     /// across the month held and the next one when it is held too. Empty when no schedule is held.
     func timeline(channel: Int, from: Date, to: Date) -> [GuideSlot] {
-        guard let p = programming else { return [] }
-        let next = nextProgramming.flatMap { n in StationClock.monthEnd(n) != StationClock.monthEnd(p) ? n : nil }
-        return StationClock.timeline([p] + (next.map { [$0] } ?? []), channel: channel, from: from, to: to)
+        StationClock.timeline(guideMonths, channel: channel, from: from, to: to)
     }
 
-    /// Fetches the next month's schedule when `until` is past the end of the month held, so the
-    /// guide's last hours of a month read what airs after midnight on the 1st. A month not
-    /// published yet, or any failure, leaves nothing: the guide's rows then end at the month's end.
-    /// Returns true when it brought one in.
+    /// The schedule files the guide reads, in order: the month held, and the next when it is held
+    /// too. Value types, so the guide can read them off the main thread.
+    var guideMonths: [Programming] {
+        guard let p = programming else { return [] }
+        let next = nextProgramming.flatMap { n in StationClock.monthEnd(n) != StationClock.monthEnd(p) ? n : nil }
+        return [p] + (next.map { [$0] } ?? [])
+    }
+
+    /// Fetches the month after the one held when the guide reads to `until` past its end, so the
+    /// hours after midnight on the 1st read what airs; also the month the clock has turned into
+    /// while the month before is still held. One fetch at a time: a second call waits for it. A
+    /// month not published yet, or any failure, leaves nothing, and the guide asks again on its
+    /// next half-minute tick. Returns true when it brought one in.
     func loadNextMonth(until: Date) async -> Bool {
-        guard let p = programming, let end = StationClock.monthEnd(p), until >= end else { return false }
-        if let held = nextProgramming, StationClock.monthEnd(held) != end { return false }
-        let key = StationClock.stationMonth(end)
+        guard let key = StationClock.monthToFetch(held: programming, next: nextProgramming, until: until) else { return false }
+        if let held = nextMonthLoad, held.month == key { return await held.task.value }
+        let task = Task { [self] in await fetchNextMonth(key) }
+        nextMonthLoad = (key, task)
+        let brought = await task.value
+        if nextMonthLoad?.month == key { nextMonthLoad = nil }
+        return brought
+    }
+
+    private func fetchNextMonth(_ key: String) async -> Bool {
         #if DEBUG
         if UserDefaults.standard.string(forKey: "kjschedulefile") != nil { return false }
         #endif
@@ -193,7 +208,7 @@ final class TransmissionStore {
         let body = reply.data
         guard let decoded = try? await Task.detached(priority: .userInitiated, operation: {
             try JSONDecoder().decode(Programming.self, from: body)
-        }).value, StationClock.monthEnd(decoded) != end else { return false }
+        }).value, StationClock.stationMonth(StationClock.monthEnd(decoded)?.addingTimeInterval(-1) ?? .distantPast) == key else { return false }
         nextProgramming = decoded
         return true
     }
@@ -305,6 +320,9 @@ final class TransmissionStore {
         }
         guard gen == scheduleGeneration else { return }
         programming = decoded
+        // The month after, fetched for the guide, is this month now: one copy is held, not two.
+        if let next = nextProgramming, let nextEnd = StationClock.monthEnd(next),
+           let end = StationClock.monthEnd(decoded), nextEnd <= end { nextProgramming = nil }
         month = monthKey
         schedule = .ready
         fetchedAt = ProcessInfo.processInfo.systemUptime

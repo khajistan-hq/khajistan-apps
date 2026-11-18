@@ -175,8 +175,8 @@ final class NowNextUITests: XCTestCase {
 
     /// Opened on the first channel, the guide holds its rows against the top of the list, and every
     /// row it draws has its schedule (Fable, round 1: the fifth row came up empty). Channel 14, Jordan
-    /// Television, is a strip of short items in the fixture: one block named for the show, not a
-    /// row of slivers.
+    /// Television, is strips of short items in the fixture: a block per strip named for the show,
+    /// not a row of slivers.
     func testGuideOnTheFirstChannelFillsEveryRow() {
         // Channel 1 is off air in the fixture, and the off-air card carries no channel number, so
         // this opens it by hand rather than through open(channel:).

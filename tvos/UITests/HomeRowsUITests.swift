@@ -68,7 +68,7 @@ final class HomeRowsUITests: XCTestCase {
             kjPause(0.6)
         }
         let back = focusedID(app)
-        XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas" || back == "shuffle", "up returns to the front, got \(back)")
+        XCTAssertEqual(back, "shuffle", "up returns to the front at Surf, not the A–Z list or the switch")
     }
 
     /// News is a shelf on the front (owner, 2026-11-04), and its first cards get live stills, which

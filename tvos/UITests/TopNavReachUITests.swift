@@ -86,7 +86,7 @@ final class TopNavReachUITests: XCTestCase {
             let (ok0, t0) = upToNav(app, limit: 12)
             XCTAssertTrue(ok0, "reach the bar before \(id): \(t0)")
             let tab = app.buttons[id]
-            guard tab.exists else { print("TOPNAV no tab", id); continue }
+            guard tab.exists else { XCTFail("no \(id) tab in the top bar"); continue }
             for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.right); kjPause(0.4) }
             for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.left); kjPause(0.4) }
             XCUIRemote.shared.press(.select)
@@ -104,6 +104,10 @@ final class TopNavReachUITests: XCTestCase {
     /// The Screening Room with films and an Up Next shelf (the owner's screen, 2026-11-18): Up from
     /// a poster in the first shelf reaches the top bar.
     func testUpReachesTheNavFromTheScreeningRoomShelves() throws {
+        #if !KJ_APP_STORE
+        // In the full build the Rooms tab opens Rooms, not the Screening Room.
+        throw XCTSkip("the Screening Room is its own section only in the store build (KJ_APP_STORE)")
+        #endif
         guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN")
         }

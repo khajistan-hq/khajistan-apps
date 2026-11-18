@@ -6,9 +6,11 @@ import SwiftUI
 /// it), so the bar is how the window is worked from inside the app (owner, 2026-11-17: "hard to
 /// navigate into small pip window and click it back up to full screen"). Full screen is lit as the
 /// window opens, so one press of Select brings the picture back. After that, one press of Back from
-/// anywhere on the page lights Full screen again, on the root and on a cover alike (PiPBarHost): on a
-/// long page Down reached the bar only past the last shelf (owner, 2026-11-18: "no way to get to
-/// it"). From the bar, Back does what it did before.
+/// anywhere on the page lights Full screen again (PiPBarHost): on a long page Down reached the bar
+/// only past the last shelf (owner, 2026-11-18: "no way to get to it"). That holds on the root and
+/// on a cover with no Back of its own, such as a film's page. A cover that handles Back itself (a
+/// Reading title, the sign-in form) closes first, and the next Back lights the bar. From the bar,
+/// Back does what it did before.
 ///
 /// It stops short of the right-hand 40% of the screen, where tvOS puts the window by default.
 struct PiPBar: View {

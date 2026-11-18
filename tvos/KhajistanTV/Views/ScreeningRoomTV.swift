@@ -41,6 +41,9 @@ enum FilmPlaces {
 /// watchlist, then a poster shelf for each country the catalogue names. A poster opens the film's
 /// page; the page holds the one Play.
 struct TVScreeningRoom: View {
+    /// Set where the room is the section itself, under the top bar (RootView). Up from its first
+    /// shelf then goes to the bar. Hosted in a cover (RoomsTVView), it has no bar above it.
+    var underTopBar = false
     @Environment(AppModel.self) private var model
     /// The places as last drawn: a film stopped or finished in the player redraws Up Next.
     @State private var places = FilmPlaces.all
@@ -73,6 +76,9 @@ struct TVScreeningRoom: View {
         }
     }
 
+    private enum Lead: Equatable { case upNext, watchlist, country(String), other }
+    private func leads(_ shelf: Lead, _ lead: Lead) -> Bool { underTopBar && shelf == lead }
+
     @ViewBuilder
     private var shelves: some View {
         let films = model.films.films
@@ -81,19 +87,20 @@ struct TVScreeningRoom: View {
         let showsList = model.auth.isSignedIn && !listed.isEmpty
         let byCountry = Dictionary(grouping: films) { ($0.country ?? "").trimmingCharacters(in: .whitespaces) }
         let countries = byCountry.keys.filter { !$0.isEmpty }.sorted { (byCountry[$0]!.count, $1) > (byCountry[$1]!.count, $0) }
-        // The shelf on top, whose Up goes to the top bar.
-        let lead = !stopped.isEmpty ? "Up Next" : showsList ? "Your watchlist" : countries.first ?? "Other films"
+        // The shelf on top, whose Up goes to the top bar: by its place, never by its title, which
+        // a country could share.
+        let lead: Lead = !stopped.isEmpty ? .upNext : showsList ? .watchlist : countries.first.map { .country($0) } ?? .other
         if !stopped.isEmpty {
-            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present, leadsPage: lead == "Up Next")
+            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present, leadsPage: leads(.upNext, lead))
         }
         if showsList {
-            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present, leadsPage: lead == "Your watchlist")
+            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present, leadsPage: leads(.watchlist, lead))
         }
         ForEach(countries, id: \.self) { country in
-            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present, leadsPage: lead == country)
+            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present, leadsPage: leads(.country(country), lead))
         }
         if let unfiled = byCountry[""] {
-            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present, leadsPage: lead == "Other films")
+            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present, leadsPage: leads(.other, lead))
         }
     }
 }

@@ -129,8 +129,14 @@ final class NowNextUITests: XCTestCase {
         let lit = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch5-' AND selected == true")).firstMatch
         XCTAssertTrue(lit.exists, "a programme on channel 5 is lit")
         let first = lit.label
-        // 12:10 PKT in the fixture: the lit block's times take in now.
-        XCTAssertTrue(first.contains("PKT"), "the block reads its times: \(first)")
+        // The lit block is the programme on air: the strip's headline names it too (12:10 PKT in
+        // the fixture), and the guide's own headline reads the same title in full.
+        let headline = app.descendants(matching: .any)["guideHeadline"]
+        XCTAssertTrue(headline.exists, "the guide reads the lit programme over the grid")
+        let title = String(first.split(separator: ",").first ?? "")
+        XCTAssertFalse(title.isEmpty)
+        XCTAssertTrue(headline.label.hasPrefix(title), "the headline names the lit block: \(headline.label) / \(first)")
+        XCTAssertTrue(first.contains("12:"), "the block on air at 12:10 has a 12 o'clock time: \(first)")
         let blocks = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch5-'"))
         XCTAssertGreaterThan(blocks.count, 1, "channel 5's row carries more than the programme on now")
         XCUIRemote.shared.press(.right)
@@ -165,6 +171,49 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["guide-ch5"].isSelected, "Up lights channel 5 again")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+    }
+
+    /// Opened on the first channel, the guide holds its rows against the top of the list, and every
+    /// row it draws has its schedule (Fable, round 1: the fifth row came up empty). Channel 14, Jordan
+    /// Television, is a strip of short items in the fixture: one block named for the show, not a
+    /// row of slivers.
+    func testGuideOnTheFirstChannelFillsEveryRow() {
+        // Channel 1 is off air in the fixture, and the off-air card carries no channel number, so
+        // this opens it by hand rather than through open(channel:).
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+        kjLaunch(app)
+        let first = app.buttons["transmission-channel-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
+        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
+        XCUIRemote.shared.press(.select)
+        let offAir = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch
+        XCTAssertTrue(offAir.waitForExistence(timeout: 30), "channel 1 opens on its off-air card")
+        kjPause(8)
+        XCUIRemote.shared.press(.right)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right opens the guide on channel 1, off air in the fixture")
+        kjPause(0.8)
+        kjScreenshot("guide-grid-first-channel", app: app)
+        for number in 1...5 {
+            XCTAssertTrue(app.descendants(matching: .any)["guide-ch\(number)-0"].exists, "channel \(number)'s row has its schedule")
+        }
+        // Up from the first channel goes round to the last; its rows are drawn too.
+        XCUIRemote.shared.press(.up)
+        kjPause(0.8)
+        XCTAssertTrue(app.descendants(matching: .any)["guide-ch15"].isSelected, "Up from channel 1 lights the last channel")
+        for number in 11...15 {
+            XCTAssertTrue(app.descendants(matching: .any)["guide-ch\(number)-0"].exists, "channel \(number)'s row has its schedule")
+        }
+        // Jordan Television, in view beside the last channel: a strip of short items, in runs named
+        // for its show.
+        let jordan = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch14-'"))
+        let names = jordan.allElementsBoundByIndex.map(\.label)
+        kjScreenshot("guide-grid-short-items", app: app)
+        print("KJGUIDE jordan \(names)")
+        XCTAssertLessThanOrEqual(names.count, 8, "Jordan Television's short items are drawn in runs, not one block each: \(names.count)")
+        XCUIRemote.shared.press(.menu)
     }
 
     private func waitUntilGone(_ element: XCUIElement, _ timeout: TimeInterval) -> Bool {

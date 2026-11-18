@@ -173,10 +173,14 @@ struct TransmissionGuide: View {
         .accessibilityIdentifier("guideHeadline")
     }
 
-    /// When an off-air stretch ends, "03:10", with its day when that is not the day of `now`; nil
-    /// when the schedule held runs out first (the stretch reaches the guide's horizon).
+    /// When an off-air stretch ends, "03:10 PKT", with its day when that is not the day of `now`.
+    /// A stretch that runs past the hours the guide reads ends where they end, so its return is the
+    /// clock's own answer (StationClock.returnLabel), which knows the days beyond; nil when the
+    /// schedule held has no return.
     static func back(_ slot: GuideSlot, now: Date) -> String? {
-        guard slot.isOffAir, slot.end < now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span) else { return nil }
+        guard slot.isOffAir else { return nil }
+        if let label = slot.returnLabel { return label }
+        guard slot.end < now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span) else { return nil }
         let at = "\(clock(slot.end)) \(StationClock.tzLabel)"
         return StationClock.stationNow(slot.end).iso == StationClock.stationNow(now).iso ? at : "\(at) on \(dayLabel(slot.end))"
     }

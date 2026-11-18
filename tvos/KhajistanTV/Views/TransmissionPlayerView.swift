@@ -126,6 +126,7 @@ struct TransmissionPlayerView: View {
         }
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
+        .task(id: guideGrid == nil) { if guideGrid != nil { await keepGuideCurrent() } }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .fullScreenCover(isPresented: $showSignIn) {
@@ -444,9 +445,10 @@ struct TransmissionPlayerView: View {
     private var isFailed: Bool { if case .failed = store.player.state { return true } else { return false } }
 
     /// Offered on air, off air and while a signal tunes, so a viewer can always find a channel
-    /// that is on; not while a change is under way, which would tune under the guide.
+    /// that is on; not while a change is under way, which would tune under the guide, and not
+    /// under the sign-on's cover, which is drawn over the guide and would hide it.
     private var guideOffered: Bool {
-        store.channelNumbers.count > 1 && !switching
+        store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
     }
 
     /// Every channel down the side and three hours across, the tuned channel lit at now.
@@ -463,18 +465,52 @@ struct TransmissionPlayerView: View {
         fillGuide(around: grid.row, now: now)
         grid.follow()
         withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideGrid = grid }
+        // The guide's hours can reach past the month held: the next month's file, then the rows
+        // again, so the hours after midnight on the 1st read what airs (it ends there until then).
+        let until = Self.guideEnd(now)
+        Task {
+            guard await store.loadNextMonth(until: until), guideGrid != nil else { return }
+            refillGuide()
+        }
     }
 
-    /// The schedule of the rows in view and their neighbours, read once per opening: from the half
-    /// hour now is in to the horizon plus a window, so the last programme Right reaches is drawn.
+    /// How far a guide opened at `now` reads: the horizon Right reaches plus one window.
+    private static func guideEnd(_ now: Date) -> Date {
+        now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)
+    }
+
+    /// The schedule of the rows the guide draws (ReceiverGuide.window, which holds against the
+    /// list's ends) and one row beyond each side, read once per opening: from the half hour now
+    /// is in to the horizon plus a window, so the last programme Right reaches is drawn.
     private func fillGuide(around row: Int, now: Date) {
-        let from = GuideGrid.halfHour(now)
-        let to = now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)
         let count = guideRows.count
-        for step in -3...3 where count > 0 {
-            let index = ((row + step) % count + count) % count
-            guard guideRows[index].slots.isEmpty else { continue }
-            guideRows[index].slots = store.timeline(channel: guideRows[index].number, from: from, to: to)
+        guard count > 0 else { return }
+        let shown = ReceiverGuide.window(count: count, lit: row)
+        guard let first = shown.first, let last = shown.last else { return }
+        let from = GuideGrid.halfHour(now)
+        for index in Set(shown + [(first - 1 + count) % count, (last + 1) % count]) where guideRows[index].slots.isEmpty {
+            guideRows[index].slots = store.timeline(channel: guideRows[index].number, from: from, to: Self.guideEnd(now))
+        }
+    }
+
+    /// Reads every row the guide holds again, for a new half hour or a month brought in.
+    private func refillGuide() {
+        guard let grid = guideGrid else { return }
+        for index in guideRows.indices { guideRows[index].slots = [] }
+        fillGuide(around: grid.row, now: grid.now)
+    }
+
+    /// While the guide is open the clock moves on: now, LIVE and the lit moment each minute, and
+    /// the rows again when the half hour turns, so the window and the rows start at the same place.
+    private func keepGuideCurrent() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled, var grid = guideGrid else { return }
+            let now = TransmissionStore.now()
+            let turned = GuideGrid.halfHour(now) != GuideGrid.halfHour(grid.now)
+            grid.refresh(now: now)
+            guideGrid = grid
+            if turned { refillGuide() }
         }
     }
 

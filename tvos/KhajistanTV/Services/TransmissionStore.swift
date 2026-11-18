@@ -30,6 +30,9 @@ final class TransmissionStore {
     private(set) var phase: Phase = .idle
     private(set) var channelNumber = 1
     private(set) var programming: Programming?
+    /// The month after the one held, fetched only for the guide when its hours reach past the
+    /// month's end (loadNextMonth); nil otherwise, or when that month is not published yet.
+    private(set) var nextProgramming: Programming?
     /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
     /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
     /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
@@ -158,11 +161,41 @@ final class TransmissionStore {
         return StationClock.upcoming(p, channelId: id, at: date, count: count)
     }
 
-    /// What a channel airs from `from` to `to`, programme by programme, for the guide's time grid.
-    /// Empty when no schedule is held or the schedule does not name the channel.
+    /// What a channel airs from `from` to `to`, programme by programme, for the guide's time grid,
+    /// across the month held and the next one when it is held too. Empty when no schedule is held.
     func timeline(channel: Int, from: Date, to: Date) -> [GuideSlot] {
-        guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return [] }
-        return StationClock.timeline(p, channelId: id, from: from, to: to)
+        guard let p = programming else { return [] }
+        let next = nextProgramming.flatMap { n in StationClock.monthEnd(n) != StationClock.monthEnd(p) ? n : nil }
+        return StationClock.timeline([p] + (next.map { [$0] } ?? []), channel: channel, from: from, to: to)
+    }
+
+    /// Fetches the next month's schedule when `until` is past the end of the month held, so the
+    /// guide's last hours of a month read what airs after midnight on the 1st. A month not
+    /// published yet, or any failure, leaves nothing: the guide's rows then end at the month's end.
+    /// Returns true when it brought one in.
+    func loadNextMonth(until: Date) async -> Bool {
+        guard let p = programming, let end = StationClock.monthEnd(p), until >= end else { return false }
+        if let held = nextProgramming, StationClock.monthEnd(held) != end { return false }
+        let key = StationClock.stationMonth(end)
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "kjschedulefile") != nil { return false }
+        #endif
+        let url = Transmission.scheduleURL(month: key)
+        guard var reply = try? await send(URLRequest(url: url)) else { return false }
+        if reply.status == 401, let password = auth.previewPassword {
+            var request = URLRequest(url: url)
+            request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: password),
+                             forHTTPHeaderField: "Authorization")
+            guard let again = try? await send(request) else { return false }
+            reply = again
+        }
+        guard reply.status == 200 else { return false }
+        let body = reply.data
+        guard let decoded = try? await Task.detached(priority: .userInitiated, operation: {
+            try JSONDecoder().decode(Programming.self, from: body)
+        }).value, StationClock.monthEnd(decoded) != end else { return false }
+        nextProgramming = decoded
+        return true
     }
 
     /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once

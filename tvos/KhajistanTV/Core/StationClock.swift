@@ -710,7 +710,10 @@ enum StationClock {
             // last day of the month before is not a day it can read (Fable, round 5: dark from 21:00
             // on 30 November, the return on 2 December was lost read before midnight).
             let first = last.p.days.map(\.date).min().flatMap { date(iso: $0, second: 0) } ?? tail.start
-            if let strip = returnStrip(last.p, channelId: last.id, at: max(tail.start, first)), strip.slot.startSecond.isFinite {
+            // Only a start the builder can write (filed up to a week past its day, as returnLabel
+            // bounds it): any other prints no time rather than an invented one (Fable, round 7).
+            if let strip = returnStrip(last.p, channelId: last.id, at: max(tail.start, first)),
+               strip.slot.startSecond >= 0, strip.slot.startSecond < 7 * daySeconds {
                 out[out.count - 1].returnAt = date(iso: strip.date, second: strip.slot.startSecond)
             }
         }

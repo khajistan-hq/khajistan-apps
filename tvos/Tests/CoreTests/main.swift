@@ -1302,6 +1302,16 @@ func returnTimeLooksPastTomorrow() throws {
     // A start the builder cannot write keeps the hour alone, and does not trap converting to Int.
     let huge = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: "47024.7", with: "1e24").replacingOccurrences(of: #""start_second":72000"#, with: #""start_second":1e24"#))
     try expectEqual(StationClock.returnLabel(huge, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0)), "13:03 PKT")
+    // The guide's open off-air stretch: the 12th's strip as its return, and no return at all for a
+    // start the builder cannot write, never an invented time (Fable, round 7).
+    let noon = pkt(2026, 11, 1, 12, 0, 0)
+    try expectEqual(StationClock.timeline([p], channel: 21, from: noon, to: noon.addingTimeInterval(3600)).last?.returnAt, pkt(2026, 11, 12, 13, 3, 44).addingTimeInterval(0.7))
+    for bad in [huge, try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: "47024.7", with: "700000").replacingOccurrences(of: #""start_second":72000"#, with: #""start_second":-5"#))] {
+        let tail = StationClock.timeline([bad], channel: 21, from: noon, to: noon.addingTimeInterval(3600)).last
+        try expectEqual(tail?.openEnd, true)
+        try expectEqual(tail?.returnAt, nil)
+        try expectEqual(tail?.back(now: noon), nil)
+    }
 }
 
 func upNextNamesOnlyAStripUnderADayAway() throws {

@@ -779,8 +779,6 @@ struct TransmissionPlayerView: View {
 
     /// The programme on air, so a handover loads the next programme's file.
     private var subtitleKey: String? { ProgrammeSubtitles.key(store.phase) }
-    /// What the window's subtitles follow: the programme and its signal (PiPSubtitleKey).
-    private var windowSubtitleKey: String? { ProgrammeSubtitleFollower.key(store) }
 
     private func loadSubtitles() async {
         await ProgrammeSubtitles(subtitles, store: store, model: model).load()

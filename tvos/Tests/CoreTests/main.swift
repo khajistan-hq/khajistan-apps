@@ -5079,6 +5079,41 @@ final class StubDropProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Counts the askings a burst starts. A class so the @Sendable closure can count.
+final class AskingCounter: @unchecked Sendable {
+    private let lock = NSLock(); private var n = 0
+    func hit() { lock.withLock { n += 1 } }
+    var count: Int { lock.withLock { n } }
+}
+
+func aBurstOfFailuresStartsOneAsking() throws {
+    let counter = AskingCounter()
+    let real = SupabaseRoute.decider
+    defer { SupabaseRoute.decider = real; SupabaseRoute.forgetAsking() }
+    SupabaseRoute.forgetAsking()
+    SupabaseRoute.decider = {
+        counter.hit()
+        try? await Task.sleep(for: .milliseconds(200))   // a probe in flight
+        return .direct
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await withTaskGroup(of: Void.self) { group in
+            // Thirty requests fail in the same blink: each forgets and asks, as reconsider() does.
+            for _ in 0..<30 { group.addTask { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle() } }
+        }
+        done.signal()
+    }
+    try expect(done.wait(timeout: .now() + 10) == .success, "the burst settled")
+    try expect(counter.count == 1, "thirty failures started \(counter.count) askings, not one")
+    // Past the window the next failure asks again.
+    SupabaseRoute.forgetAsking()
+    let again = DispatchSemaphore(value: 0)
+    Task.detached { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle(); again.signal() }
+    try expect(again.wait(timeout: .now() + 10) == .success)
+    try expect(counter.count == 2, "a later failure asks again")
+}
+
 func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubDropProtocol.self]
@@ -5131,6 +5166,7 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(asks(after: 1, decidedAfter: 0.4, .unreachable), "a finished 'no way open' is never reused: Wi-Fi may be back")
     try expect(!asks(after: 1, decidedAfter: nil, .unreachable), "unreachable from an EARLIER answer, new probe in flight: shared")
     try expect(SupabaseRoute.asksAgain(now: Date(), started: .distantPast, decided: .distantPast, chosen: .direct), "the first failure of a launch asks")
+    try expect(asks(after: -30, decidedAfter: nil, .direct), "a clock set backwards asks, and does not share until it catches up")
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
@@ -5282,6 +5318,7 @@ let tests: [(String, () throws -> Void)] = [
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
+    ("A burst of failed requests starts one network check, not one each", aBurstOfFailuresStartsOneAsking),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),

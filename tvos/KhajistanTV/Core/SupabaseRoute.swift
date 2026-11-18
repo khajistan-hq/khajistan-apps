@@ -98,12 +98,19 @@ enum SupabaseRoute {
         return await settle()
     }
 
+    /// What an asking runs. The two probes, except in the test that counts how many askings a
+    /// burst of failures starts.
+    nonisolated(unsafe) static var decider: @Sendable () async -> Path = { await decide() }
+
+    /// Forgets the asking outright, for a test to start from a known state.
+    static func forgetAsking() { lock.withLock { settling = nil; settlingStarted = .distantPast } }
+
     /// Asks both ways once per launch; a second caller waits for the same answer.
     @discardableResult
     static func settle() async -> Path {
         let task: Task<Path, Never> = lock.withLock {
             if let settling { return settling }
-            let made = Task.detached(priority: .userInitiated) { await decide() }
+            let made = Task.detached(priority: .userInitiated) { await decider() }
             settling = made
             settlingStarted = Date()
             return made
@@ -115,7 +122,7 @@ enum SupabaseRoute {
     /// within the last `shareWindow` seconds. Thirty cover loads failing in one Wi-Fi blink each
     /// called this and each began its own pair of probes, the last to finish choosing the route;
     /// now they share the one already under way.
-    private static func askAgain() {
+    static func askAgain() {
         lock.withLock {
             if asksAgain(now: Date(), started: settlingStarted, decided: decidedAt, chosen: chosen) { settling = nil }
         }
@@ -130,7 +137,10 @@ enum SupabaseRoute {
     ///   asking is still in flight (`decided` is the earlier answer's time) it is shared.
     static func asksAgain(now: Date, started: Date, decided: Date, chosen: Path) -> Bool {
         if chosen == .unreachable && decided >= started { return true }
-        return now.timeIntervalSince(started) > shareWindow
+        // A clock set backwards makes the age negative: ask, or the last answer would be shared
+        // for as long as the clock takes to catch up.
+        let age = now.timeIntervalSince(started)
+        return age < 0 || age > shareWindow
     }
     static let shareWindow: TimeInterval = probeLimit + 1
 

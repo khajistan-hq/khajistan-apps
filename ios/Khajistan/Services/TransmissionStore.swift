@@ -73,7 +73,8 @@ final class TransmissionStore {
     /// programme played on to its next handover. A change of account while a programme is up tunes
     /// the same channel again under the new account. A sign-in while the screen is asking for one
     /// changes nothing here: that screen's own sheet tunes when it closes, and a sign-in made from
-    /// another screen must not start a programme nobody asked for. Idle is left alone.
+    /// another screen must not start a programme nobody asked for. Off air, a failure and idle
+    /// are left alone for the same reason.
     func accessDidChange() {
         guard phase != .idle else { return }
         guard auth.session != nil else {
@@ -81,7 +82,12 @@ final class TransmissionStore {
             phase = .needsSignIn
             return
         }
-        guard phase != .needsSignIn else { return }
+        // Only a programme that is up, or on its way up, is tuned again. An Off air or a failed
+        // screen left open must not start sound because the viewer signed in on another screen.
+        switch phase {
+        case .onAir, .tuning: break
+        default: return
+        }
         let channel = channelNumber
         stop()
         Task { await tune(channel: channel) }

@@ -172,6 +172,8 @@ struct TransmissionPlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var overlay = OverlayClock()
     @State private var showSignIn = false
+    /// One retune for a viewer who is signed in but was still shown "Sign in"; after it the button opens the form.
+    @State private var retriedSignedIn = false
 
     private var store: TransmissionStore { model.transmission }
 
@@ -200,7 +202,10 @@ struct TransmissionPlayerView: View {
         .onAppear {
             overlay.wake(settled: store.player.state == .playing)
             // Signed in on another screen while this one was asking: opening it is the request to watch.
-            if store.phase == .needsSignIn, model.auth.session != nil { Task { await store.tune(channel: store.channelNumber) } }
+            if store.phase == .needsSignIn, model.auth.session != nil, !retriedSignedIn {
+                retriedSignedIn = true
+                Task { await store.tune(channel: store.channelNumber) }
+            }
         }
         .onDisappear { overlay.stop() }
         .sheet(isPresented: $showSignIn) {
@@ -228,7 +233,12 @@ struct TransmissionPlayerView: View {
         case .needsSignIn:
             message("Sign in to watch Khajistan Transmission.") {
                 Button(kicker: "Sign in") {
-                    if model.auth.session != nil { Task { await store.tune(channel: store.channelNumber) } } else { showSignIn = true }
+                    // Signed in already: try the channel once. If the server still asks (the session
+                    // was ended elsewhere), the next press opens the sign-in form, as it always did.
+                    if model.auth.session != nil, !retriedSignedIn {
+                        retriedSignedIn = true
+                        Task { await store.tune(channel: store.channelNumber) }
+                    } else { showSignIn = true }
                 }.buttonStyle(HouseButtonStyle(solid: true))
             }
         case .offAir(channelName: let name, returns: let returns):

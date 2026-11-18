@@ -45,6 +45,8 @@ final class ReceiverStore {
     /// a channel being watched is not closed by the redraw.
     @ObservationIgnored private var playersOpen = 0
     @ObservationIgnored private var redrawWaiting = false
+    /// Which dial the Receiver on screen was drawn from.
+    @ObservationIgnored private var drawnWhole = false
     @ObservationIgnored private var indexFailedAt: Date?
     /// The preview password the dial on hand was read for, and the one the site refused, which is
     /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
@@ -147,7 +149,7 @@ final class ReceiverStore {
             guard started == generation, !Task.isCancelled else { return }
             if whole != wholeDial {
                 wholeDial = whole
-                if playersOpen > 0 { redrawWaiting = true } else { dialID += 1 }
+                if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
                 controls = .empty
                 controlsFetchedAt = nil
             }
@@ -215,9 +217,8 @@ final class ReceiverStore {
         deleteSiteCookies()
         generation += 1
         wholeDial = false
-        redrawWaiting = false
         indexFailedAt = nil
-        dialID += 1
+        redraw()
         loading?.task.cancel()
         loading = nil
         inFlight.values.forEach { $0.cancel() }
@@ -242,10 +243,13 @@ final class ReceiverStore {
 
     func playerDidClose() {
         playersOpen = max(0, playersOpen - 1)
-        if playersOpen == 0, redrawWaiting {
-            redrawWaiting = false
-            dialID += 1
-        }
+        if playersOpen == 0, redrawWaiting { redraw() }
+    }
+
+    private func redraw() {
+        redrawWaiting = false
+        drawnWhole = wholeDial
+        dialID += 1
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera

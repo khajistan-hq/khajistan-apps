@@ -346,6 +346,14 @@ struct TransmissionPlayerView: View {
         air.nowName ?? store.channelName(store.channelNumber)
     }
 
+    /// The year, unless a name on the strip already carries it ("Abadan (1971)"): the site's rule
+    /// (open-frequencies.js, a title that contains its year is not given it twice).
+    private func shownYear(_ air: OnAir) -> String? {
+        guard let year = air.programme?.year.map(String.init) else { return nil }
+        let names = [headline(air), latinName(air) ?? ""]
+        return names.contains { $0.contains(year) } ? nil : year
+    }
+
     /// The headline's Roman form, only while the headline is the programme's own name.
     private func latinName(_ air: OnAir) -> String? {
         air.nowName != nil && air.nowName == nonEmpty(air.programme?.display_title) ? air.programme?.latinTitle : nil
@@ -375,7 +383,7 @@ struct TransmissionPlayerView: View {
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
         // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [nonEmpty(air.programme?.country), shownYear(air), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 

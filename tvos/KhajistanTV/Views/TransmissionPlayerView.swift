@@ -247,6 +247,9 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
+            if let latin = air.secondTitle {
+                Text(latin).kjBody().multilineTextAlignment(.center)
+            }
             if !song.isEmpty {
                 Text("Now playing: " + song).kjBody().multilineTextAlignment(.center)
             }
@@ -277,6 +280,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
+                    secondName: soundOnly ? nil : air.secondTitle,
                     detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     // The channel's own name, always: a show name in the headline read as the
@@ -358,7 +362,7 @@ struct TransmissionPlayerView: View {
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
         // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [nonEmpty(air.programme?.country), air.shownYear(headline: headline(air)), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -513,7 +517,7 @@ struct TransmissionPlayerView: View {
             let air = store.nowOn(channel: number, at: now)
             let line: String
             if let air {
-                line = air.nowName ?? air.show?.name ?? ""
+                line = air.guideLine
             } else if let back = store.returnLabel(channel: number, at: now) {
                 line = "Off air \u{00B7} returns at \(back)"
             } else {

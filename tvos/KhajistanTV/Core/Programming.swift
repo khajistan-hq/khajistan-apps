@@ -53,6 +53,8 @@ struct Programming: Decodable, Sendable {
         var display_title: String? = nil
         /// The year the record carries; shown after the country on the strip (owner, 2026-11-15).
         var year: Int? = nil
+        /// "Part 4 of 5": the tape or part number, moved off the title (owner, 2026-11-16).
+        var part: String? = nil
         /// The checked English or Roman form of a name in Arabic, Persian or Urdu script, shown on
         /// a line of its own under it, as the Receiver does (owner, 2026-11-08: "original and
         /// translation"; 2026-11-17 on the Apple TV: "name of film should also be in roman").
@@ -109,7 +111,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title, display_title_en, year
+        case display_title, display_title_en, year, part
     }
 
     init(from decoder: Decoder) throws {
@@ -133,5 +135,6 @@ extension Programming.Programme {
         display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
         display_title_en = try values.decodeIfPresent(String.self, forKey: .display_title_en)
         year = try values.decodeIfPresent(Int.self, forKey: .year)
+        part = try values.decodeIfPresent(String.self, forKey: .part)
     }
 }

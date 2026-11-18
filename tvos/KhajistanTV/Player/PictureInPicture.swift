@@ -178,6 +178,9 @@ final class PictureInPicture: NSObject {
     func setPlaying(_ playing: Bool) {
         guard player != nil else { return }
         playFollower.ask(playing, at: seconds)
+        // The bar's Pause on a broadcast mutes as the window's own does: its Play rejoins live, and
+        // the old place is not heard in the tick before the rejoin stops it.
+        if !playing, rejoinsOnPlay { player?.isMuted = true }
         if let onSetPlaying { onSetPlaying(playing) } else if playing { player?.play() } else { player?.pause() }
         isPlaying = playing
     }

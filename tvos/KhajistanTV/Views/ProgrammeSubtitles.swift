@@ -119,7 +119,11 @@ enum ProgrammeSubtitles {
                let asset = item.asset as? AVURLAsset, asset.url.host == KJConfig.streamHost,
                asset.url == store.player.attachedURL {
                 tried = item
+                let before = subtitles.revision
                 await subtitles.attach(item, film: nil, listed: SubtitleChoice.house, skin: model.skin)
+                // Another load cleared them while this one attached: it owns them now, and an empty
+                // list here is not a manifest without tracks, so nothing falls back over it.
+                guard subtitles.revision == before + 1 else { return }
                 // Stored files in languages the manifest does not carry (a staged Urdu beside the
                 // manifest's English and Persian), as video.html offers them.
                 if !subtitles.tracks.isEmpty, !Task.isCancelled, store.player.player.currentItem === item {
@@ -165,19 +169,23 @@ final class ProgrammeSubtitleFollower {
     let subtitles: RecordedSubtitles
     private let store: TransmissionStore
     private let model: AppModel
-    private var follower: ChangeFollower<String>
+    private var step: PiPSubtitleStep
     private var loading: Task<Void, Never>?
-    private var ended = false
 
-    /// `loaded` is the programme the screen already loaded for, nil if it had not finished.
+    /// `loaded` is the key (`key(_:)`) the screen already loaded for, nil if it had not finished.
     init(_ subtitles: RecordedSubtitles, store: TransmissionStore, model: AppModel, loaded: String?) {
         self.subtitles = subtitles
         self.store = store
         self.model = model
-        follower = ChangeFollower(loaded: loaded)
+        step = PiPSubtitleStep(loaded: loaded)
     }
 
     deinit { loading?.cancel() }
+
+    /// The programme on air and the signal it plays on (PiPSubtitleKey).
+    static func key(_ store: TransmissionStore) -> String? {
+        PiPSubtitleKey.of(programme: ProgrammeSubtitles.key(store.phase), signal: store.player.attachedURL)
+    }
 
     /// The caption on screen now, loading the next programme's first when the channel has moved on.
     /// A stream's tracks, once loaded, go straight to tvOS to draw (the window's); a file's text
@@ -185,20 +193,20 @@ final class ProgrammeSubtitleFollower {
     func text() -> String? {
         // A handover in the moment between Full screen and the window closing loads nothing more;
         // the line on screen stays until the window has gone.
-        guard !ended else { return subtitles.text }
-        if follower.changed(to: ProgrammeSubtitles.key(store.phase)) {
+        let read = step.read(key: Self.key(store), hasTracks: !subtitles.tracks.isEmpty, handedOff: subtitles.isHandedOff)
+        if read.load {
             loading?.cancel()
             let subtitles = subtitles, store = store, model = model
             loading = Task { await ProgrammeSubtitles.load(into: subtitles, store: store, model: model) }
         }
-        if !subtitles.tracks.isEmpty, !subtitles.isHandedOff { subtitles.handOff() }
+        if read.handOff { subtitles.handOff() }
         return subtitles.text
     }
 
     /// The window is done: stop loading, and clear what was shown unless a screen is taking the
     /// channel over (Full screen), whose own load replaces it.
     func end(clearing: Bool = true) {
-        ended = true
+        step.end()
         loading?.cancel()
         loading = nil
         if clearing { subtitles.clear() }

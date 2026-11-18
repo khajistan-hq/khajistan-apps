@@ -229,6 +229,14 @@ enum SubtitleChoice {
 
     /// Which language starts on (desiredSubtitle()): the choice remembered for this film, then the
     /// device's languages, then English, else none. Nothing else is guessed.
+    /// The language the PiP window shows once a stream's track is handed to tvOS, which draws only
+    /// the manifest's: a stored file's language on (a staged Urdu) moves to the one the viewer
+    /// would get from the manifest; a manifest language, or off, stays.
+    static func windowChoice(current: String?, manifest: [String], stored: String?, preferred: [String]) -> String? {
+        guard let current, !manifest.contains(current) else { return current }
+        return desired(available: manifest, stored: stored, preferred: preferred)
+    }
+
     static func desired(available: [String], stored: String?, preferred: [String]) -> String? {
         if stored == "off" { return nil }
         if let stored, available.contains(stored) { return stored }

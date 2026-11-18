@@ -1,3 +1,5 @@
+import Foundation
+
 /// Who closed the picture-in-picture window, and so what follows when it has gone. Kept apart from
 /// AVKit so every order of events can be tested (Tests/CoreTests).
 ///
@@ -62,6 +64,40 @@ struct PiPLifecycle: Equatable {
 /// Follows a value that changes over time (the programme on air) and says when it has changed,
 /// starting from what was already loaded. Used by the PiP window to load each programme's
 /// subtitles after the screen that loaded the first has closed.
+/// What the PiP window's subtitles follow on Transmission: the programme on air and the signal the
+/// player was given for it. A rejoin of the same programme mints a new signal, whose item carries
+/// no handed-off track, so it is a change even when the programme is not. Nil while tuning.
+enum PiPSubtitleKey {
+    static func of(programme: String?, signal: URL?) -> String? {
+        guard let programme else { return nil }
+        return "\(programme) \(signal?.absoluteString ?? "")"
+    }
+}
+
+/// What the window's subtitle follower does on each read, ten times a second
+/// (ProgrammeSubtitleFollower.text()): load when the key has moved on, hand a loaded track to tvOS
+/// once, and nothing at all once the window is done.
+struct PiPSubtitleStep {
+    struct Read: Equatable {
+        var load = false
+        var handOff = false
+    }
+
+    private var follower: ChangeFollower<String>
+    private(set) var ended = false
+
+    init(loaded: String?) { follower = ChangeFollower(loaded: loaded) }
+
+    /// `hasTracks`: the languages loaded so far. A closed tv_subtitles() answer loads none, so
+    /// nothing is handed off and tvOS draws nothing.
+    mutating func read(key: String?, hasTracks: Bool, handedOff: Bool) -> Read {
+        guard !ended else { return Read() }
+        return Read(load: follower.changed(to: key), handOff: hasTracks && !handedOff)
+    }
+
+    mutating func end() { ended = true }
+}
+
 struct ChangeFollower<Key: Equatable> {
     private(set) var key: Key?
 

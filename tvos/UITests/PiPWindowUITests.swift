@@ -68,6 +68,9 @@ final class PiPWindowUITests: XCTestCase {
         let reached = (try? bar.snapshot())?.value as? String
         XCTAssertNotNil(reached, "the bar reports the place, so the comparison below means something")
         kjScreenshot("film-track-bar-up", app: app)
+        // A move inside half a second of a swipe is taken as the swipe's own (FilmPlayerView's
+        // move handler): a person's Down after scrubbing comes later than that.
+        kjPause(1)
         XCUIRemote.shared.press(.down)
         kjPause(0.8)
         let subtitles = app.descendants(matching: .any)["subtitlesControl"]

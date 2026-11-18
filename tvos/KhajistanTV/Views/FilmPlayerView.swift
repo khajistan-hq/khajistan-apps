@@ -377,8 +377,9 @@ struct FilmPlayerView: View {
         if scrub != nil { return endScrub(play: true) }
         switch controller.state {
         case .playing, .paused: controller.toggle()
-        // Not while connecting: a pause then drops the seek to the place the film resumes from.
-        case .tuning: break
+        // Not while first connecting: a pause then drops the seek to the place the film resumes
+        // from. Once the film has played there is no such seek, and a lit Pause pauses.
+        case .tuning: if fullPlayed { controller.pause() }
         // After the full film ends, Play plays it again from the start.
         case .idle, .failed: if full == nil { playPreview() } else { Task { await watchFull() } }
         }
@@ -742,8 +743,11 @@ struct FilmPlayerView: View {
     /// A swipe across the touch surface scrubs: the film pauses on the place the swipe reaches.
     /// The place is kept until Select or Play/Pause plays from it, or Back puts the film back.
     private func swipe(_ state: UIGestureRecognizer.State, _ translation: CGPoint) {
+        // A new pan starts a new reading even when this one is not taken, so its first step is
+        // not measured from where the last pan ended.
+        if state == .began { pan = FilmTransport.PanReader() }
         guard full != nil, armed == nil, scan == nil, movable else { return }
-        if state == .began { swipeBase = scrub?.to; pan = FilmTransport.PanReader() }
+        if state == .began { swipeBase = scrub?.to }
         guard state == .changed else { return }
         let points = translation.x
         let step = pan.read(x: Double(translation.x), y: Double(translation.y))

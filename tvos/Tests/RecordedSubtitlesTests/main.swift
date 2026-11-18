@@ -108,10 +108,22 @@ struct Main {
                 for _ in 0..<(subs.tracks.count + 1) { subs.cycle(); seen.append(subs.current) }
                 try expect(!seen.contains("ur"), "while handed off, the control skips the file: \(seen)")
                 subs.reclaim()
-                try expect(!subs.isHandedOff, "the house view draws again")
+                let group = try await item.asset.loadMediaSelectionGroup(for: .legible)
+                try expect(group.map { item.currentMediaSelection.selectedMediaOption(in: $0) == nil } ?? false,
+                           "reclaim switches the track off, so tvOS draws nothing before the screen's load")
+                // The screen that reopens attaches its own object to the same item, and the window can
+                // open again on it: nothing the first object left may still suppress the track.
+                let again = RecordedSubtitles()
+                await again.attach(item, film: nil, listed: SubtitleChoice.house, skin: .day)
+                try expect(!again.tracks.isEmpty && again.current != nil, "the reopened screen offers and selects a track")
+                try expect(again.handOff(), "handed to AVPlayer a second time")
+                try expect(!item.outputs.contains { $0 is AVPlayerItemLegibleOutput },
+                           "no suppressing output left on the item: \(item.outputs)")
+                try expect(group.map { item.currentMediaSelection.selectedMediaOption(in: $0) != nil } ?? false,
+                           "a track is selected for tvOS to draw in the window")
                 var back: [String?] = []
-                for _ in 0..<(subs.tracks.count + 1) { subs.cycle(); back.append(subs.current) }
-                try expect(back.contains("ur"), "full screen offers the file again: \(back)")
+                for _ in 0..<(again.tracks.count + 1) { again.cycle(); back.append(again.current) }
+                try expect(!back.contains("ur"), "the reopened window still steps only through what it can draw: \(back)")
                 // A stream with no stored file hands off as before; a load with no manifest never does.
                 let files = RecordedSubtitles()
                 files.load(files: [(.init(code: "en", label: "English"), en)], first: "en") { 2.0 }

@@ -65,15 +65,14 @@ final class RecordedSubtitles {
         return true
     }
 
-    /// The window has closed and a screen takes the channel back: the suppressing output goes on
-    /// again, so tvOS stops drawing the track before the screen's own load replaces it.
+    /// The window has closed and a screen takes the channel back: the track tvOS was drawing is
+    /// switched off, so no system-drawn line shows before the screen's own load selects it again.
+    /// Nothing is added to the item: the screen attaches with its own output, and a leftover one
+    /// would keep suppressing the track the next time the window opens on the same item.
     func reclaim() {
-        guard isHandedOff, let item else { return }
-        let legible = AVPlayerItemLegibleOutput()
-        legible.suppressesPlayerRendering = true
-        legible.setDelegate(relay, queue: .main)
-        item.add(legible)
-        output = legible
+        guard isHandedOff, let group, let item else { return }
+        item.select(nil, in: group)
+        text = nil
     }
 
     /// The languages the control steps through: once handed off, only the manifest's, since tvOS

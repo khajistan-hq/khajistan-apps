@@ -2,9 +2,11 @@ import Foundation
 
 enum PlaybackState { case playing, tuning, idle, paused }
 enum SharedNowPlaying { static var title: String? }
+/// AVPlayer's mute, the one part of it the window's Pause touches.
+final class StubAVPlayer: NSObject { var isMuted = false }
 final class PlayerController {
     var state: PlaybackState = .playing
-    let player = NSObject()
+    let player = StubAVPlayer()
     func stop() { state = .idle; SharedNowPlaying.title = nil }
     func pause() { state = .paused }
     var settling: CheckedContinuation<Void, Never>?
@@ -355,10 +357,11 @@ Task {
     for _ in 0..<5 { await Task.yield() }
     let waitedForPicture = early.store.player.state == .idle
     early.store.phase = .onAir
+    early.store.player.player.isMuted = false   // the rejoin's attach unmutes
     early.store.player.state = .playing
     _ = await waitForBoundary { early.store.player.state == .paused }
-    let earlyPaused = waitedForPicture && early.store.player.state == .paused
-    print("\(earlyPaused ? "PASS" : "FAIL") a Pause pressed while the rejoin is still loading pauses the new picture")
+    let earlyPaused = waitedForPicture && early.store.player.state == .paused && early.store.player.player.isMuted
+    print("\(earlyPaused ? "PASS" : "FAIL") a Pause pressed while the rejoin is still loading pauses the new picture, muted")
     if !earlyPaused { failures += 1 }
     // A Pause pressed while the rejoin loads, then the window goes (a card opens the channel full
     // screen): the screen that opens is not paused by it (Fable round 10).

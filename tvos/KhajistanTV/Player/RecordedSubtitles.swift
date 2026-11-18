@@ -58,11 +58,10 @@ final class RecordedSubtitles {
         // tvOS draws only the manifest's tracks: a stored file's language on (a staged Urdu beside
         // the manifest's English) would leave the window bare under "Subtitles · Urdu". The window
         // takes the manifest language the viewer would get; the screen they return to loads afresh.
-        if let current, options[current] == nil {
-            let manifest = Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: true)
-            let stored = choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }
-            apply(SubtitleChoice.desired(available: manifest, stored: stored, preferred: Locale.preferredLanguages))
-        }
+        let choice = SubtitleChoice.windowChoice(
+            current: current, manifest: Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: true),
+            stored: choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }, preferred: Locale.preferredLanguages)
+        if choice != current { apply(choice) }
         return true
     }
 

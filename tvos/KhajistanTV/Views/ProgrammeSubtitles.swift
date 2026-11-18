@@ -169,16 +169,15 @@ final class ProgrammeSubtitleFollower {
     let subtitles: RecordedSubtitles
     private let store: TransmissionStore
     private let model: AppModel
-    private var follower: ChangeFollower<String>
+    private var step: PiPSubtitleStep
     private var loading: Task<Void, Never>?
-    private var ended = false
 
     /// `loaded` is the key (`key(_:)`) the screen already loaded for, nil if it had not finished.
     init(_ subtitles: RecordedSubtitles, store: TransmissionStore, model: AppModel, loaded: String?) {
         self.subtitles = subtitles
         self.store = store
         self.model = model
-        follower = ChangeFollower(loaded: loaded)
+        step = PiPSubtitleStep(loaded: loaded)
     }
 
     deinit { loading?.cancel() }
@@ -194,20 +193,20 @@ final class ProgrammeSubtitleFollower {
     func text() -> String? {
         // A handover in the moment between Full screen and the window closing loads nothing more;
         // the line on screen stays until the window has gone.
-        guard !ended else { return subtitles.text }
-        if follower.changed(to: Self.key(store)) {
+        let read = step.read(key: Self.key(store), hasTracks: !subtitles.tracks.isEmpty, handedOff: subtitles.isHandedOff)
+        if read.load {
             loading?.cancel()
             let subtitles = subtitles, store = store, model = model
             loading = Task { await ProgrammeSubtitles.load(into: subtitles, store: store, model: model) }
         }
-        if !subtitles.tracks.isEmpty, !subtitles.isHandedOff { subtitles.handOff() }
+        if read.handOff { subtitles.handOff() }
         return subtitles.text
     }
 
     /// The window is done: stop loading, and clear what was shown unless a screen is taking the
     /// channel over (Full screen), whose own load replaces it.
     func end(clearing: Bool = true) {
-        ended = true
+        step.end()
         loading?.cancel()
         loading = nil
         if clearing { subtitles.clear() }

@@ -602,8 +602,9 @@ struct TransmissionPlayerView: View {
                     await store.player.settled()
                     // Only while this window still carries the channel: a screen opened since (a
                     // card, another channel) is not paused by a Pause pressed in a window now gone.
+                    // Muted as the window's own Pause is: the rejoin's attach unmuted it.
                     if !Task.isCancelled, model.transmissionPiP === pip, store.player === player,
-                       store.player.state == .playing { store.player.pause() }
+                       store.player.state == .playing { store.player.player.isMuted = true; store.player.pause() }
                 }
             }
         }

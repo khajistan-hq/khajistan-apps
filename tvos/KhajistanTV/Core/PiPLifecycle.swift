@@ -74,6 +74,30 @@ enum PiPSubtitleKey {
     }
 }
 
+/// What the window's subtitle follower does on each read, ten times a second
+/// (ProgrammeSubtitleFollower.text()): load when the key has moved on, hand a loaded track to tvOS
+/// once, and nothing at all once the window is done.
+struct PiPSubtitleStep {
+    struct Read: Equatable {
+        var load = false
+        var handOff = false
+    }
+
+    private var follower: ChangeFollower<String>
+    private(set) var ended = false
+
+    init(loaded: String?) { follower = ChangeFollower(loaded: loaded) }
+
+    /// `hasTracks`: the languages loaded so far. A closed tv_subtitles() answer loads none, so
+    /// nothing is handed off and tvOS draws nothing.
+    mutating func read(key: String?, hasTracks: Bool, handedOff: Bool) -> Read {
+        guard !ended else { return Read() }
+        return Read(load: follower.changed(to: key), handOff: hasTracks && !handedOff)
+    }
+
+    mutating func end() { ended = true }
+}
+
 struct ChangeFollower<Key: Equatable> {
     private(set) var key: Key?
 

@@ -92,13 +92,19 @@ struct ReceiverView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     LargeTitle(title: "Receiver", line: "Live TV, radio and street cameras from the Middle World. Pick a place on the map, then a channel.")
                     figures
+                    if let note = model.receiver.signInNote {
+                        Text(note).kjSmall(faint: true)
+                            .accessibilityIdentifier("receiverSignInNote")
+                    }
                     if model.tuner.source == nil { device }
                     // A fixed mark above the section: an id on the section itself moved with the
                     // swap, and the scroll overshot the new section's first line.
                     Color.clear.frame(height: 0).id(Self.sectionAnchor)
+                    // A dial change (ReceiverStore.dialID) reloads the lists, so none keeps the other
+                    // dial's channels. Live keeps the region it is on and reloads it in place.
                     switch part {
                     case .live: LiveSection()
-                    case .cameras: CamerasSection()
+                    case .cameras: CamerasSection().id(model.receiver.dialID)
                     case .transmission: TransmissionSection()
                     }
                     // The settings come after the channels, so the first thing under the set is
@@ -128,7 +134,8 @@ struct ReceiverView: View {
             .onAppear { model.stills.beginVisit() }
             .onDisappear { model.stills.endVisit() }
             .scrollDismissesKeyboard(.interactively)
-            .task {
+            // Again on a password change, which empties the index: the figures come back from the new dial.
+            .task(id: model.receiver.dialID) {
                 await model.receiver.loadIndex()
                 await model.playIfOpening()
             }
@@ -149,14 +156,17 @@ struct ReceiverView: View {
         func value(_ n: Int?) -> String { n.map { $0.formatted() } ?? "\u{2014}" }
         let items = [("Live now", value(totals?.live)), ("Television", value(totals?.byMedium["tv"])),
                      ("Radio", value(totals?.byMedium["radio"])), ("Cameras", value(totals?.byMedium["camera"]))]
+        func figure(_ i: Int) -> some View {
+            Figure(label: items[i].0, value: items[i].1).accessibilityIdentifier("figure-\(items[i].0)")
+        }
         // One row while the four fit; two rows of two at large type.
         return ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 12) {
-                ForEach(items, id: \.0) { Figure(label: $0.0, value: $0.1).fixedSize() }
+                ForEach(0..<items.count, id: \.self) { figure($0).fixedSize() }
             }
             Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                GridRow { Figure(label: items[0].0, value: items[0].1); Figure(label: items[1].0, value: items[1].1) }
-                GridRow { Figure(label: items[2].0, value: items[2].1); Figure(label: items[3].0, value: items[3].1) }
+                GridRow { figure(0); figure(1) }
+                GridRow { figure(2); figure(3) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -180,6 +190,8 @@ private struct LiveSection: View {
     @State private var channels: [Channel] = []
     @State private var cameraChannels: [Channel] = []
     @State private var loadedRegion: String?
+    /// The dial the region's list was read from (ReceiverStore.dialID).
+    @State private var loadedDial: Int?
     @State private var camerasLoaded = false
     @State private var loading = false
     @State private var listError: String?
@@ -212,8 +224,10 @@ private struct LiveSection: View {
                 withAnimation(.kj) { proxy.scrollTo(Self.regionAnchor, anchor: .top) }
             }
         }
-        .task(id: extended) { await loadMap() }
-        .task(id: selected) { await loadRegion() }
+        // The dial is in both keys: a password change, or a refresh that finds the dial changed,
+        // redraws the map's counts and reloads the region in place.
+        .task(id: [extended ? "wide" : "core", "\(model.receiver.dialID)"]) { await loadMap() }
+        .task(id: [selected, "\(model.receiver.dialID)"]) { await loadRegion() }
         // The map marks the region of what is playing, so the green place is what you hear.
         .onChange(of: model.tuner.channel?.id, initial: true) {
             guard let ids = model.tuner.channel?.regionIds, !ids.contains(selected) else { return }
@@ -449,11 +463,14 @@ private struct LiveSection: View {
 
     /// The region's television and radio shard, and its camera shard when it opens on cameras.
     private func loadRegion(force: Bool = false) async {
-        guard force || loadedRegion != selected else { return }
-        await model.receiver.loadIndex()
+        let dial = model.receiver.dialID
+        guard force || loadedRegion != selected || loadedDial != dial else { return }
         let region = selected
+        // The loader goes up before the index is read: after a password change the list on
+        // screen is the other dial's, and must not be tapped while the new one is read.
         loading = true
         listError = nil
+        await model.receiver.loadIndex()
         filter = ""
         camerasLoaded = false
         cameraChannels = []
@@ -472,6 +489,7 @@ private struct LiveSection: View {
             }
             if medium == "camera" { await loadCameras() }
             loadedRegion = region
+            loadedDial = dial
             // The list arrives below the strip, out of VoiceOver's way: say that it did.
             UIAccessibility.post(notification: .announcement, argument: "\(regionLabel): \(list.count) channels")
         } catch {

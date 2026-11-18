@@ -120,8 +120,9 @@ struct ReceiverView: View {
             .kjTopFade()
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the list) goes to Surf first; Back from
-            // Surf leaves the app, as tvOS does from a root screen.
-            .onExitCommand(perform: surfFocused ? nil : { surfFocused = true })
+            // Surf leaves the app, as tvOS does from a root screen. With the PiP window up and
+            // its bar not lit, Back goes on to the bar (PiPBarHost).
+            .onExitCommand(perform: surfFocused || (model.activePiP != nil && !model.pipBarFocused) ? nil : { surfFocused = true })
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {

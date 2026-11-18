@@ -955,9 +955,6 @@ struct TopBar: View {
                     .accessibilityIdentifier("nav-\(section.rawValue)")
                 }
             }
-            // Up from a page lands on the section on screen, as on Apple's TV app, not on the
-            // tab nearest the item left.
-            .defaultFocus($focused, current, priority: .userInitiated)
         }
         // The launch focus is the system's first pick, top-left; place it on the current tab.
         .onAppear { focused = current }
@@ -965,6 +962,10 @@ struct TopBar: View {
         .padding(.top, 40)
         .padding(.bottom, 20)
         .focusSection()
+        // Up from a page lands on the section on screen, as on Apple's TV app, not on the tab
+        // nearest the item left. On the focus section itself: on the row of tabs inside it, focus
+        // entering from a page never asked, and Up from the Screening Room lit Receiver.
+        .defaultFocus($focused, current, priority: .userInitiated)
     }
 }
 

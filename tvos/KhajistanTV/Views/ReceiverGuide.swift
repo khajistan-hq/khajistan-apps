@@ -118,10 +118,10 @@ struct TransmissionGuide: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Room for a name such as "Old TV — Maghreb" on one line, and a long one on two.
-    static let channelWidth: CGFloat = 440
+    static let channelWidth = CGFloat(GuideGrid.channelPoints)
     /// The narrowest a cell is drawn: its title's first word and its times, never cut short.
     /// Shorter programmes are folded into a neighbour, "+N" (GuideGrid.cells).
-    static let cellWidth: CGFloat = 210
+    static let cellWidth = CGFloat(GuideGrid.cellPoints)
     static let rowHeight: CGFloat = 80
     static let markHeight: CGFloat = 40
 
@@ -281,8 +281,9 @@ private struct ChannelCell: View {
             Text("\(number)").kjKicker().monospacedDigit().frame(width: 44, alignment: .trailing)
             MediumMark(medium: soundOnly ? "radio" : "tv", size: 40)
             VStack(alignment: .leading, spacing: 2) {
-                // Two lines and a little smaller before it is ever cut: "National Iranian Radio and Television".
-                Text(Self.short(name, number: number)).kjName(26).lineLimit(2).minimumScaleFactor(0.7)
+                // Two lines, and smaller beside LIVE, before it is ever cut: "National Iranian Radio
+                // and Television" (Fable, round 9: at 0.7 it fell to one line under LIVE and was cut).
+                Text(Self.short(name, number: number)).kjName(26).lineLimit(2).minimumScaleFactor(0.55)
                 if live { Kicker("\u{25CF} Live") }
             }
             Spacer(minLength: 8)
@@ -327,7 +328,7 @@ private struct GuideBlock: View {
         // programme's own, or the whole cell's when others are folded in.
         let (from, to) = lit || more == 0 ? (slot.start, slot.end) : (start, end)
         let times = slot.isOffAir && more == 0
-            ? TransmissionGuide.back(slot, now: now).map { "back at \($0)" } ?? ""
+            ? slot.back(now: now, short: true).map { "back at \($0)" } ?? ""
             : "\(TransmissionGuide.clock(from))\u{2013}\(TransmissionGuide.clock(to))"
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {

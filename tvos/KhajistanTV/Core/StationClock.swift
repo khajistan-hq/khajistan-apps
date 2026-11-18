@@ -70,7 +70,7 @@ struct GuideSlot: Hashable, Sendable {
     /// `now`: read at 22:00, a return at 23:30 the next day is not ninety minutes away (Fable,
     /// round 6). An open stretch ends at `returnAt`; a closed one at its end, inside the hours the
     /// guide reads. Nil for a programme, or when no return is known.
-    func back(now: Date) -> String? {
+    func back(now: Date, short: Bool = false) -> String? {
         guard isOffAir else { return nil }
         let at: Date
         if openEnd {
@@ -81,7 +81,11 @@ struct GuideSlot: Hashable, Sendable {
             at = end
         }
         let label = "\(StationClock.clockLabel(StationClock.stationNow(at).minutes)) \(StationClock.tzLabel)"
-        return StationClock.stationNow(at).iso == StationClock.stationNow(now).iso ? label : "\(label) on \(StationClock.dayName(at))"
+        guard StationClock.stationNow(at).iso != StationClock.stationNow(now).iso else { return label }
+        // In a grid cell the weekday alone: "back at 00:03 on Monday" fits where the date did not
+        // (Fable, round 9). The headline over the grid carries the date.
+        if short { return "\(StationClock.clockLabel(StationClock.stationNow(at).minutes)) on \(StationClock.dayName(at).split(separator: " ").first ?? "")" }
+        return "\(label) on \(StationClock.dayName(at))"
     }
 }
 
@@ -903,6 +907,10 @@ struct GuideGrid: Equatable, Sendable {
     static let step: TimeInterval = 30 * 60
     /// How far ahead Right reaches.
     static let horizon: TimeInterval = 12 * 3600
+    /// The guide's channel column and the narrowest cell, in points (TransmissionGuide draws with
+    /// these; the core tests read them, so the readable minimum is checked on the view's geometry).
+    static let channelPoints: Double = 440
+    static let cellPoints: Double = 210
 
     /// The lit channel, an index into the guide's channel list.
     var row: Int
@@ -1014,9 +1022,18 @@ struct GuideGrid: Equatable, Sendable {
         return cells.map { cell in
             var named = cell
             let members = Array(cell.first...cell.last)
-            // Named for the slot that takes most of the cell on screen; the first one on a tie.
+            // Named for the programme on air now when the cell holds it: a short one ending soon is
+            // what a viewer tuning in gets (Fable, round 9: the cell named the next one, on 14% of
+            // rows on air). Otherwise for the programme that takes most of the cell on screen, the
+            // first on a tie, and for off air only when it holds no programme.
             let part = { (i: Int) in min(slots[i].end, windowEnd).timeIntervalSince(max(slots[i].start, windowStart)) }
-            named.lead = members.max { part($0) < part($1) || (part($0) == part($1) && $0 > $1) } ?? cell.first
+            let programmes = members.filter { !slots[$0].isOffAir }
+            if let onNow = programmes.first(where: { slots[$0].contains(now) }) {
+                named.lead = onNow
+            } else {
+                let pool = programmes.isEmpty ? members : programmes
+                named.lead = pool.max { part($0) < part($1) || (part($0) == part($1) && $0 > $1) } ?? cell.first
+            }
             named.programmes = members.filter { !slots[$0].isOffAir }.count
             return named
         }

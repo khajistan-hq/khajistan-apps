@@ -2489,15 +2489,31 @@ func guideCellsFold() throws {
     try expect(folded.allSatisfy { $0.end.timeIntervalSince($0.start) >= 20 * 60 }, "a folded cell narrower than the minimum")
     try expectEqual(folded.reduce(0) { $0 + $1.programmes }, 120)
     try expectEqual(g.cells([], minimum: 20 * 60), [])
+    // A short programme on air now names its cell, not the long one it is folded into.
+    let soon = [GuideSlot(start: pkt(2026, 11, 17, 11, 30), end: pkt(2026, 11, 17, 12, 15), title: "On now"),
+                GuideSlot(start: pkt(2026, 11, 17, 12, 15), end: pkt(2026, 11, 17, 13, 30), title: "Next")]
+    let s1 = g.cells(soon, minimum: 20 * 60)
+    try expectEqual(s1.count, 1); try expectEqual(s1[0].lead, 0); try expectEqual(s1[0].more(naming: 0, in: soon), 1)
+    // A programme folded into a long dark stretch names the cell; off air names only a cell with no programme.
+    let dark = [GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 13, 50), title: nil),
+                GuideSlot(start: pkt(2026, 11, 17, 13, 50), end: pkt(2026, 11, 17, 14, 10), title: "Late")]
+    let s2 = g.cells(dark, minimum: 20 * 60)
+    try expectEqual(s2.count, 1); try expectEqual(s2[0].lead, 1); try expectEqual(s2[0].more(naming: 1, in: dark), 0)
+    // In a cell the next day's return carries the weekday alone; the headline keeps the date.
+    let night = GuideSlot(start: pkt(2026, 11, 17, 12, 0), end: pkt(2026, 11, 18, 0, 3), title: nil)
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 12, 10), short: true), "00:03 on Wednesday")
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 12, 10)), "00:03 PKT on Wednesday 18 November")
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 23, 0), short: true), "00:03 on Wednesday")
 }
 
 /// Every row of every opening in November: no cell on screen is narrower than a readable cell, the
 /// cells hold every slot on screen once and in order, and the lit programme is in one of them.
 func guideCellsReadableRealMonth() throws {
     let nov = try realProgramming("2026-11")
-    // ReceiverGuide's numbers on a 1920-point screen: 80 inset each side, 440 for the channels,
-    // 210 for the narrowest cell.
-    let minimum = Double(210.0 / (1920.0 - 160 - 440)) * GuideGrid.span
+    // ReceiverGuide's numbers on a 1920-point screen, 80 inset each side.
+    let minimum = GuideGrid.cellPoints / (1920.0 - 160 - GuideGrid.channelPoints) * GuideGrid.span
+    try expectEqual(GuideGrid.channelPoints, 440); try expectEqual(GuideGrid.cellPoints, 210)
+    var namedLater = 0
     var rows = 0, cells = 0, folded = 0
     for day in 1...30 {
         for (hour, minute) in [(6, 10), (18, 34), (23, 50)] {
@@ -2514,6 +2530,10 @@ func guideCellsReadableRealMonth() throws {
                     let seen = min(cell.end, grid.windowEnd).timeIntervalSince(max(cell.start, grid.windowStart))
                     try expect(row.count == 1 || seen >= minimum, "channel \(channel) at \(now): a cell \(Int(seen)) s wide")
                     try expect(cell.holds(cell.lead), "the lead is in its cell")
+                    // A cell holding a programme on air now is named for it.
+                    if let on = (cell.first...cell.last).first(where: { !slots[$0].isOffAir && slots[$0].contains(now) }), cell.lead != on { namedLater += 1 }
+                    // A cell holding a programme is never named off air.
+                    if cell.programmes > 0, slots[cell.lead].isOffAir { namedLater += 1 }
                     if cell.last > cell.first { folded += 1 }
                 }
                 if let lit = grid.lit(in: slots), shown.contains(lit) {
@@ -2525,6 +2545,7 @@ func guideCellsReadableRealMonth() throws {
     }
     print("      \(rows) rows, \(cells) cells, \(folded) folded")
     try expect(rows > 2000 && folded > 0, "rows \(rows), folded \(folded)")
+    try expectEqual(namedLater, 0)
 }
 
 // MARK: - Real files

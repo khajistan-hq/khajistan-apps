@@ -657,7 +657,7 @@ struct TransmissionPlayerView: View {
     private var subtitleKey: String? { ProgrammeSubtitles.key(store.phase) }
 
     private func loadSubtitles() async {
-        await ProgrammeSubtitles(subtitles, store: store, model: model).load()
+        await ProgrammeSubtitles.load(into: subtitles, store: store, model: model)
     }
 
     private var isOnAir: Bool {

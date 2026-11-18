@@ -47,21 +47,21 @@ final class ShelfUITests: XCTestCase {
         }
     }
 
-    /// Down from the foot of the front: the genre shelves first, News leading (2026-11-04), as many as the
-    /// live lists fill, then the parts of Khajistan. Returns how many genre shelves were crossed.
+    /// Down from the foot of the front: the Themes row first, focus on News (2026-11-18), then the
+    /// parts of Khajistan. Returns how many rows of themes were crossed (one).
     private func downPastGenres(_ skin: String, _ app: XCUIApplication) -> Int {
-        // The genre shelves arrive after every region list has been read: wait for them, or the
+        // The themes arrive after every region list has been read: wait for them, or the
         // walk below would pass on a front that has none.
         let news = app.buttons.matching(NSPredicate(format: "identifier == 'genre-news'"))
         XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "\(skin): the front carries the News theme")
         press(.down, app: app)
-        XCTAssertTrue(focusedID(app).hasPrefix("genre-"), "\(skin): the themes row is first under the front, got \(focusedID(app))")
+        XCTAssertEqual(focusedID(app), "genre-news", "\(skin): down from the front lands on News, the first theme")
         var crossed = 0
         while crossed < 10, focusedID(app).hasPrefix("genre-") {
             crossed += 1
             press(.down, app: app)
         }
-        XCTAssertGreaterThan(crossed, 0, "\(skin): at least the News shelf sits between the front and the parts of Khajistan")
+        XCTAssertGreaterThan(crossed, 0, "\(skin): the Themes row sits between the front and the parts of Khajistan")
         return crossed
     }
 
@@ -78,11 +78,11 @@ final class ShelfUITests: XCTestCase {
             // The shelves start one press down from the foot of the front.
             XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
 
-            // Under the front, the genre shelves (News first), then every part of Khajistan as a
+            // Under the front, the Themes row (News first), then every part of Khajistan as a
             // tile (owner, 2026-10-29), then Cameras, a plate per region that has them (owner,
             // 2026-10-07), then the Screening Room, which loads only with the preview password.
             let genres = downPastGenres(skin, app)
-            XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the genre shelves lands on the parts of Khajistan, got \(focusedID(app))")
+            XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the themes lands on the parts of Khajistan, got \(focusedID(app))")
             kjPause(1)
             shot("\(skin)-2-receiver-doors-shelf", app)
             press(.down, app: app)
@@ -96,8 +96,8 @@ final class ShelfUITests: XCTestCase {
                 shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
             }
-            // Up through the parts of Khajistan and the genre shelves returns to the front: the
-            // sidebar's switch, which sits straight above the left-most card, or the list.
+            // Up through the parts of Khajistan and the Themes row returns to the front: the
+            // sidebar's switch, or the list.
             press(.up, times: 2 + genres, app: app)
             let back = focusedID(app)
             XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")

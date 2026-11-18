@@ -37,7 +37,7 @@ final class HomeRowsUITests: XCTestCase {
         kjPause(8)   // the shelves load a moment after the front
         XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         var reached: [String] = []
-        // The genre shelves (News, Music, Film & drama, ...) sit between the regions and the rest.
+        // The Themes row sits between the regions and the rest.
         for _ in 0..<26 {
             XCUIRemote.shared.press(.down)
             kjPause(1.2)
@@ -86,8 +86,7 @@ final class HomeRowsUITests: XCTestCase {
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
         kjScreenshot("home-themes", app: app)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-' AND hasFocus == true")).firstMatch.exists,
-                      "down from the front lands on a theme")
+        XCTAssertTrue(app.buttons["genre-news"].hasFocus, "down from the front lands on News, the first theme")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 30), "Select on a theme opens the player")
     }

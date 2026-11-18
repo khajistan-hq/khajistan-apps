@@ -97,7 +97,7 @@ struct ReceiverView: View {
                     // where the shelf would be. The shelf brings its own 12 points above it.
                     LikedShelf()
                     }
-                    GenreShelves()
+                    ThemeRow()
                     HomeSections()
                     camerasRow(index)
                     filmsRow
@@ -517,10 +517,10 @@ private struct AtlasPanel: View {
 /// Live channels by theme across the atlas, as one row of names with no pictures (owner,
 /// 2026-11-18: the News-to-Children carousels "should be shown as not carousels but simpler way no
 /// thumbnails more like themes that people can click and all channels with those themes play").
-/// Select on a theme plays its first channel, and up and down in the player surf every channel of
-/// that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
+/// Select on a theme plays one of its channels, a different one each press, so a stream that is
+/// down is never the only way in; up and down in the player surf every channel of that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
 /// is tagged for. The row follows the Beyond the atlas switch.
-private struct GenreShelves: View {
+private struct ThemeRow: View {
     private struct Kind: Identifiable {
         let id: String
         let label: String
@@ -556,6 +556,9 @@ private struct GenreShelves: View {
     @Environment(AppModel.self) private var model
     @State private var rows: [Row] = []
     @State private var playing: Pick?
+    /// Focus coming into the row lands on its first theme, not on whichever sits under the
+    /// control above.
+    @FocusState private var focused: String?
 
     var body: some View {
         // A stack, not a Group: with no rows yet there would be no child to carry the task.
@@ -563,6 +566,8 @@ private struct GenreShelves: View {
             if !rows.isEmpty {
                 Text("Themes").kjName(38)
                     .accessibilityAddTraits(.isHeader)
+                // Scrolls sideways if the themes ever outgrow the screen; today they fit.
+                ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 8) {
                     ForEach(rows) { row in
                         Button {
@@ -570,23 +575,28 @@ private struct GenreShelves: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(row.kind.label).kjName(30).lineLimit(1)
-                                Text("\(row.channels.count) live").kjSmall(faint: true).monospacedDigit()
+                                Text("\(row.channels.count.formatted()) live").kjSmall(faint: true).monospacedDigit()
                             }
                         }
                         .buttonStyle(HouseButtonStyle())
                         // Play/Pause plays it too, as on Apple's TV app.
                         .onPlayPauseCommand { play(row) }
-                        .accessibilityLabel("\(row.kind.label), \(row.channels.count) live")
+                        .focused($focused, equals: row.id)
+                        .accessibilityLabel("\(row.kind.label), \(row.channels.count.formatted()) live")
                         .accessibilityIdentifier("genre-\(row.id)")
                     }
                 }
+                // Room inside the scroll view's clip for a focused plate's lift.
+                .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
                 // The first plate's padding is pulled back so its text sits on the page margin.
                 .padding(.leading, -26)
-                // Room under the row for a focused plate's lift before the next shelf.
-                .padding(.bottom, 28)
+                .padding(.bottom, 14)
             }
         }
         .focusSection()
+        .defaultFocus($focused, rows.first?.id)
         .task(id: model.extendedAtlas) { await load() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
@@ -594,8 +604,8 @@ private struct GenreShelves: View {
     }
 
     private func play(_ row: Row) {
-        guard let first = row.channels.first else { return }
-        playing = Pick(channel: first, list: row.channels, title: row.kind.label)
+        guard let channel = row.channels.randomElement() else { return }
+        playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
     }
 
     /// Every region list in the atlas shown, read together (each is cached after its first read),

@@ -118,13 +118,13 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
   row (Liked, or Themes) peeks under them, as the TV app lays its rows.
   **Themes** (owner, 2026-11-18) is one row of names with no pictures: News, Music, Film & drama,
-  Faith, Culture, Sport, Children, each with its live count. Select plays the theme's first
-  channel, and up and down in the player surf every channel of that theme. Until that day each
+  Faith, Culture, Sport, Children, each with its live count. Focus comes into the row on News.
+  Select plays one of the theme's channels, a different one each press, and up and down in the player surf every channel of that theme. Until that day each
   theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
   "Street cameras"). In the store build these stay: Liked, Themes, CCTV, the Screening Room and
   Transmission (once the
   schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
-  Bazaar, Chat) after the genre shelves. The Khajistan Radio mixes are
+  Bazaar, Chat) after the Themes row. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
@@ -135,7 +135,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
-  filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
+  filter. The count says *live*, as the themes do: a liked channel that is off air or gone
   is not drawn; it is looked for again at the first launch six hours on, or at once when it is
   liked again (the app remembers it on the device, so a stale like costs no walk of every list at
   each launch). Likes are read again when the app comes

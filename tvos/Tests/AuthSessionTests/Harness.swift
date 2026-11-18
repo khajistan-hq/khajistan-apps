@@ -153,6 +153,21 @@ struct Failure: Error { let message: String }
             try check(URLSession.logouts == ["Bearer token-a"],"expired signout logs out with the refreshed token")
             try check(expired.session == nil && Keychain.read("session") == nil,"refreshed session is never kept")
         }
-        print("PASS fourteen actual AuthStore scenarios; no external network")
+        // Signing in again while the old sign-out is still telling the server: whichever answer
+        // comes back first, the new account stays signed in and only the old session is logged out.
+        for signInFirst in [true,false] {
+            let racing=try store()
+            await racing.signOut()
+            try await waitRequest()
+            let login=Task { try? await racing.signIn(email:"b@example.invalid",password:"fixture") }
+            while URLSession.pending.count < 2 { try await Task.sleep(for:.milliseconds(5)) }
+            if signInFirst { URLSession.pending.swapAt(0,1);URLSession.release("b");await login.value;URLSession.release("a") }
+            else { URLSession.release("a");URLSession.release("b");await login.value }
+            for _ in 0..<100 where URLSession.logouts.isEmpty { try await Task.sleep(for:.milliseconds(5)) }
+            let kept=Keychain.read("session").flatMap { try? JSONDecoder().decode(Session.self,from:$0) }
+            try check(racing.session?.userId == "b" && kept?.userId == "b","a late sign-out cannot replace a new sign-in")
+            try check(URLSession.logouts == ["Bearer token-a"],"a late sign-out logs out the old session only")
+        }
+        print("PASS sixteen actual AuthStore scenarios; no external network")
     }
 }

@@ -5117,11 +5117,13 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
     // A burst of failures shares the asking already under way; one long after it asks again.
-    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 0), "a second failure in the same blink starts no second probe")
-    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 3.0), "a probe that timed out at its 3.0 s limit is still shared")
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 3.6))
+    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 0, lastAnswerUnreachable: false), "a second failure in the same blink starts no second probe")
+    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 3.0, lastAnswerUnreachable: false), "a probe that timed out at its 3.0 s limit is still shared")
+    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 3.6, lastAnswerUnreachable: false))
     try expect(SupabaseRoute.shareWindow > SupabaseRoute.probeLimit + 0.5, "longer than the longest probe")
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: Date().timeIntervalSince(.distantPast)), "the first failure of a launch asks")
+    try expect(SupabaseRoute.asksAgain(sinceLastAsking: Date().timeIntervalSince(.distantPast), lastAnswerUnreachable: false), "the first failure of a launch asks")
+    // A finished "no way open" is never reused: Wi-Fi up one second later, and Try again must ask.
+    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 1, lastAnswerUnreachable: true))
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {

@@ -5399,7 +5399,25 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The full film's control row (owner, 2026-11-18: Down reaches subtitles, stop/play and pip).
+func filmControlRowOffersPlayAndPiP() throws {
+    typealias C = FilmTransport.Control
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: true, playingOrPaused: true),
+                    [C.subtitles, .playPause, .pip, .stop])
+    // Paused is playingOrPaused: PiP is offered on a paused film.
+    try expectEqual(FilmTransport.controls(hasSubtitles: false, pipSupported: true, isFull: true, playingOrPaused: true),
+                    [C.playPause, .pip, .stop])
+    // Reconnecting: no PiP, but Play/Pause stays where the remote left it.
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: true, playingOrPaused: false),
+                    [C.subtitles, .playPause, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipSupported: false, isFull: true, playingOrPaused: true),
+                    [C.subtitles, .playPause, .stop])
+    try expect(FilmTransport.controls(hasSubtitles: true, pipSupported: true, isFull: false, playingOrPaused: true).isEmpty,
+               "the preview has its own panel")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("filmControlRowOffersPlayAndPiP", filmControlRowOffersPlayAndPiP),
     ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
     ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
     ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),

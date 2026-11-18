@@ -237,6 +237,18 @@ enum Films {
 /// "all controls should work like apple tv player"): a click left or right skips ten seconds, a
 /// held arrow scans faster the longer it is held, and a swipe across the touch surface scrubs.
 enum FilmTransport {
+    /// The full film's control row, left to right as Down then left and right walk it (owner,
+    /// 2026-11-18: "when you touch down on the apple tv remote it should go to subtitles,
+    /// stop/play and pip"). PiP is offered paused as well as playing; choosing it plays the film.
+    enum Control: Equatable { case subtitles, playPause, pip, stop }
+
+    static func controls(hasSubtitles: Bool, pipSupported: Bool, isFull: Bool, playingOrPaused: Bool) -> [Control] {
+        guard isFull else { return [] }
+        // Play/Pause stays through a reconnect, so a lit one is not lost while the film tunes.
+        return [hasSubtitles ? .subtitles : nil, .playPause,
+                pipSupported && playingOrPaused ? .pip : nil, .stop].compactMap { $0 }
+    }
+
     static let skip: Double = 10
     /// How often a held arrow moves the film.
     static let scanTick: Double = 0.25

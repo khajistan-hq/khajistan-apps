@@ -56,7 +56,7 @@ struct FilmPlayerView: View {
     @State private var panelHeight: CGFloat = 0
     /// The full film's control the remote has lit, if any.
     @State private var armed: Control?
-    private enum Control { case subtitles, pip, stop }
+    private typealias Control = FilmTransport.Control
     @State private var pip = PictureInPicture()
     /// A short line in the panel, such as PiP not opening.
     @State private var note: String?
@@ -322,7 +322,8 @@ struct FilmPlayerView: View {
 
     /// The controls, left to right, as the remote walks them.
     private var controls: [Control] {
-        [subtitles.tracks.isEmpty ? nil : .subtitles, pipOffered ? .pip : nil, .stop].compactMap { $0 }
+        FilmTransport.controls(hasSubtitles: !subtitles.tracks.isEmpty, pipSupported: PictureInPicture.isSupported,
+                               isFull: true, playingOrPaused: controller.state == .playing || controller.state == .paused)
     }
 
     /// The panel's own button faces, lit by the remote rather than focused: the picture under them
@@ -339,6 +340,14 @@ struct FilmPlayerView: View {
                         .accessibilityIdentifier("subtitlesControl")
                         .accessibilityAction { subtitles.cycle() }
                         .accessibilityAddTraits(armed == .subtitles ? .isSelected : [])
+                case .playPause:
+                    let word = controller.state == .playing ? "Pause" : "Play"
+                    HouseButtonStyle.face(Text(hint + word).kjKicker(), selected: armed == .playPause)
+                        .accessibilityLabel(word)
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityIdentifier("playPauseControl")
+                        .accessibilityAction { playPause() }
+                        .accessibilityAddTraits(armed == .playPause ? .isSelected : [])
                 case .pip:
                     HouseButtonStyle.face(Text(hint + "PiP").kjKicker(), selected: armed == .pip)
                         .accessibilityAddTraits(.isButton)
@@ -398,11 +407,15 @@ struct FilmPlayerView: View {
         stop()
     }
 
-    /// Up lets go of a lit control; Down lights the first.
+    /// Up lets go of a lit control; Down lights the first, from the track bar too.
     private func vertical(_ direction: Int) {
         wake()
         if direction < 0, armed != nil { armed = nil }
-        if direction > 0, armed == nil, scrub == nil { armed = controls.first }
+        guard direction > 0, armed == nil else { return }
+        // Down from the track bar: the film stays, paused, at the place the swipe reached, and the
+        // controls light, as Apple's player leaves the bar for its row of options.
+        if scrub != nil { settleScrub() }
+        armed = controls.first
     }
 
     /// Select on the picture plays from a scrubbed place, works the lit control, else shows the panel.
@@ -410,6 +423,7 @@ struct FilmPlayerView: View {
         if scrub != nil { return endScrub(play: true) }
         switch armed {
         case .subtitles: subtitles.cycle()
+        case .playPause: return playPause()
         case .pip: return startPictureInPicture()
         case .stop: return stop()
         case nil: break
@@ -429,9 +443,10 @@ struct FilmPlayerView: View {
 
     // MARK: - Picture in picture
 
-    /// The full film, playing. A preview is not put in the corner.
+    /// The full film, playing or paused (owner, 2026-11-18: no PiP on a paused film read as no
+    /// PiP at all). A preview is not put in the corner.
     private var pipOffered: Bool {
-        PictureInPicture.isSupported && full != nil && controller.state == .playing
+        PictureInPicture.isSupported && full != nil && (controller.state == .playing || controller.state == .paused)
     }
 
     /// The film goes to a corner window and the screen closes behind it; the film stays in
@@ -442,6 +457,9 @@ struct FilmPlayerView: View {
         guard pipOffered else { return }
         armed = nil
         let player = controller, film = film, model = model, pip = pip
+        // Paused, it plays as it goes to the corner, as Apple TV's own player does; the window's
+        // start reads .tuning or .playing as a film to keep.
+        if player.state == .paused { player.resume() }
         // The object, not the screen's state: the window reads it after the screen has closed.
         let subtitles = subtitles
         let away = FilmAway(film: film, controller: player, pip: pip, grant: full)
@@ -719,6 +737,15 @@ struct FilmPlayerView: View {
         let to = FilmTransport.clamp(base + FilmTransport.scrubSeconds(points: Double(points), duration: duration), duration: duration)
         scrub = (current.from, current.wasPlaying, to)
         place(to, exact: false)
+        wake()
+    }
+
+    /// Leaves a scrub where it reached, paused: the place is kept and nothing plays.
+    private func settleScrub() {
+        guard let current = scrub else { return }
+        scrub = nil
+        swipeBase = nil
+        place(current.to, exact: true)
         wake()
     }
 

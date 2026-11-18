@@ -94,14 +94,10 @@ final class FilmsUITests: XCTestCase {
     func testRegionCarriesItsFilmsOnDemand() throws {
         let app = try launch()
         XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 60), "vod.json must load")
-        // Down onto the region strip, then east along it to Indus.
+        // Onto the region list beside the map, then down it to Indus.
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<20 where !(focusedRegion.exists && focusedRegion.identifier == "region-indus") {
-            XCUIRemote.shared.press(.right)
-            kjPause(0.6)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
         XCTAssertEqual(focusedRegion.identifier, "region-indus", "Indus must take focus")
         XCUIRemote.shared.press(.select)
 

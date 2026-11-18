@@ -920,6 +920,7 @@ enum Section: String, CaseIterable, Identifiable {
 struct TopBar: View {
     let current: Section
     let select: (Section) -> Void
+    @Environment(AppModel.self) private var model
     /// Focus enters the bar on the section on screen, so a first press never jumps elsewhere.
     @FocusState private var focused: Section?
 
@@ -958,6 +959,8 @@ struct TopBar: View {
         }
         // The launch focus is the system's first pick, top-left; place it on the current tab.
         .onAppear { focused = current }
+        // Up from a page's first shelf (AppModel.topBarCall).
+        .onChange(of: model.topBarCall) { focused = current }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 40)
         .padding(.bottom, 20)

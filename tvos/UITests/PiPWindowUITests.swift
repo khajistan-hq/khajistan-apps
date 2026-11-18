@@ -121,6 +121,7 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForNonExistence(timeout: 10), "Transmission replaces the atlas")
         for _ in 0..<2 { XCUIRemote.shared.press(.down); kjPause(0.6) }
         XCTAssertFalse(onBar.exists, "focus is on the Transmission page")
+        XCTAssertFalse(transmissionTab.hasFocus, "Down has left the top bar")
         XCUIRemote.shared.press(.menu)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
                        "on Transmission, one Back lights Full screen")
@@ -190,6 +191,64 @@ final class PiPWindowUITests: XCTestCase {
                        "on the front, one Back lights Full screen")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens full screen")
+    }
+
+    /// The owner's screen (2026-11-18): the store build's Screening Room with the window up. A film
+    /// played from its page leaves the viewer on the page (a cover); Back lights the bar, Back from
+    /// the bar closes the page, and on the shelves Up climbs to the Screening Room tab.
+    func testScreeningRoomWithTheWindowUp() throws {
+        #if !KJ_APP_STORE
+        throw XCTSkip("the Screening Room is its own section only in the store build (KJ_APP_STORE)")
+        #else
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
+                               "-kjtab", "rooms", "-kj.filmPlaces", "<dict><key>\(Self.film)</key><real>60</real></dict>",
+                               "-kj-of-subtitles.\(Self.film)", "en"]
+        kjLaunch(app)
+        let card = app.buttons["upnext-\(Self.film)"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "Up Next carries the film")
+        XCTAssertTrue(kjFocus(card, app: app), "the card takes focus")
+        XCUIRemote.shared.press(.select)
+        let play = app.buttons["filmPlay"]
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page opens")
+        kjPause(1)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "the film plays")
+        openWindow(app)
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "the viewer is back on the film's page")
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        let lit = NSPredicate { _, _ in fullScreen.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 10), .completed)
+        // From the bar on the page, Back closes the page as before; the window stays up.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(play.waitForNonExistence(timeout: 10), "from the bar, Back closes the film's page")
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 5), "the window and its bar stay up")
+        // On the shelves: Up from wherever focus is reaches the Screening Room tab.
+        let rooms = app.buttons["nav-rooms"]
+        let nav = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        if !onBar.exists {
+            XCUIRemote.shared.press(.menu)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                           "on the Screening Room, one Back lights Full screen")
+        }
+        var trail: [String] = []
+        for _ in 0..<10 where !nav.exists {
+            XCUIRemote.shared.press(.up)
+            kjPause(0.6)
+            let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            trail.append(f.exists ? f.identifier : "none")
+        }
+        print("PIPNAV rooms up trail:", trail)
+        XCTAssertTrue(rooms.hasFocus, "Up from the bar reaches the Screening Room tab: \(trail)")
+        // And from the tab, Back lights the bar again.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "from the top bar, one Back lights Full screen")
+        #endif
     }
 
     /// Close ends the film; it does not reopen it (the window's restore request after a close is

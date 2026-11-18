@@ -142,6 +142,10 @@ struct ReceiverView: View {
                 .kjDisplay()
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
+            if let note = model.receiver.signInNote {
+                Text(note).kjBody()
+                    .accessibilityIdentifier("receiverSignInNote")
+            }
             HouseSwitch(title: "Beyond the atlas", detail: "More places, from the Balkans to Indonesia", isOn: extendedBinding)
                 .accessibilityIdentifier("beyondTheAtlas")
                 // The plate's padding is pulled back so the switch sits on the page margin.

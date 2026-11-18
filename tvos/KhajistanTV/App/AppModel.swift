@@ -161,6 +161,8 @@ final class AppModel {
         }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
+            // The dial changes with the password: a region page open on the old one goes too.
+            self?.receiverPath = []
             self?.receiver.credentialDidChange()
             self?.invalidateTransmissionAccess()
         }

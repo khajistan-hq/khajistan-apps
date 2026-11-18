@@ -36,12 +36,17 @@ final class ReceiverStore {
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
-    /// The preview password the dial on hand was read for; whether the site took it; and the one
-    /// it refused, which is not sent again until it changes (a repeated wrong password locks the
-    /// site's sign-in for everyone on this network).
+    /// Why the whole dial is not on screen though a preview password is saved. Nil otherwise.
+    private(set) var signInNote: String?
+    /// The preview password the dial on hand was read for, and the one the site refused, which is
+    /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
+    /// on this network for ten minutes).
     @ObservationIgnored private var dialPassword: String?
-    @ObservationIgnored private var signedIn = false
     @ObservationIgnored private var refused: String?
+    /// Moves on every password change. A fetch begun under an older one does not keep its answer,
+    /// so a list read before sign-in is never kept after it, nor the other way.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var loading: (password: String?, task: Task<Void, Never>)?
     private let urlSession: URLSession
     /// The preview password, read when the index loads.
     private let previewPassword: @MainActor () -> String?
@@ -67,20 +72,47 @@ final class ReceiverStore {
         KJConfig.site.appendingPathComponent("data/open-frequencies/\(file)")
     }
 
+    /// Reads the index if the one on hand is stale or was read for another password. A second
+    /// call while one is under way for the same password waits on it.
     func loadIndex() async {
-        guard !isLoading else { return }
         let password = previewPassword()
         if password != dialPassword {
             credentialDidChange()
             dialPassword = password
         }
+        if let loading, loading.password == password {
+            await loading.task.value
+            return
+        }
         if index != nil, let at = indexFetchedAt, Date().timeIntervalSince(at) < Self.staleAfter { return }
+        let task = Task { await self.fetchIndex(password: password, generation: generation) }
+        loading = (password, task)
+        await task.value
+        if loading?.task == task { loading = nil }
+    }
+
+    /// With a password, the index is read through the site's sign-in on every refresh (at most
+    /// once in `staleAfter`), so a changed site password or an expired cookie is noticed within
+    /// minutes. The site counts only failed sign-ins against its lock.
+    private func fetchIndex(password: String?, generation started: Int) async {
         isLoading = true
         defer { isLoading = false }
         if index == nil { indexError = nil }
         do {
             var reply: (Data, URLResponse)?
-            if let password, !signedIn, password != refused { reply = await gate(password) }
+            var note: String?
+            if let password, password != refused {
+                switch await gate(password) {
+                case .signedIn(let answer): reply = answer
+                case .refused:
+                    refused = password
+                    note = "The preview password did not open every channel. Check it under Account."
+                case .tryLater:
+                    note = "Not every channel could be opened just now. They will be tried again."
+                }
+            } else if password != nil {
+                note = "The preview password did not open every channel. Check it under Account."
+            }
             if reply == nil {
                 reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
             }
@@ -96,51 +128,65 @@ final class ReceiverStore {
             } catch {
                 throw ReceiverStoreError.unreadable
             }
+            guard started == generation, !Task.isCancelled else { return }
             index = decoded
             indexError = nil
+            signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
         } catch {
-            if Task.isCancelled { return }
+            if Task.isCancelled || started != generation { return }
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
     }
 
-    /// Signs in with the preview password and answers with the index the signed-in session is
-    /// served. POST /gate redirects to `next` with the cookie set, so the redirect is the index.
-    /// Nil when the password was refused, the sign-in was throttled or did not answer: the caller
-    /// then reads the public index, and the next load tries again.
-    private func gate(_ password: String) async -> (Data, URLResponse)? {
+    private enum Gate { case signedIn((Data, URLResponse)), refused, tryLater }
+
+    /// Signs in with the preview password. POST /gate redirects to `next` with the cookie set,
+    /// so on success the redirect is the whole dial's index.
+    private func gate(_ password: String) async -> Gate {
         var request = URLRequest(url: KJConfig.site.appendingPathComponent("gate"))
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         let indexPath = Self.dataURL("receiver-index.json").path
         let field = { (value: String) in value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
         request.httpBody = Data("password=\(field(password))&next=\(field(indexPath))".utf8)
-        guard let reply = try? await urlSession.data(for: request) else { return nil }
-        let code = (reply.1 as? HTTPURLResponse)?.statusCode ?? 0
-        guard code == 200, reply.1.url?.path == indexPath, hasSiteCookie else {
-            // A refusal lands on the sign-in page; a throttle (429) or outage (503) is tried later.
-            if code == 200 { refused = password }
-            return nil
+        guard let reply = try? await urlSession.data(for: request) else { return .tryLater }
+        switch ReceiverRules.gateOutcome(status: (reply.1 as? HTTPURLResponse)?.statusCode ?? 0,
+                                         landedOn: reply.1.url?.path, next: indexPath, cookieSet: hasSiteCookie) {
+        case .signedIn: return .signedIn(reply)
+        case .refused: return .refused
+        case .tryLater: return .tryLater
         }
-        signedIn = true
-        return reply
     }
 
     private var hasSiteCookie: Bool {
         urlSession.configuration.httpCookieStorage?.cookies(for: KJConfig.site)?.contains { $0.name == "kj_gate" } == true
     }
 
-    /// A new or removed preview password: the site cookie goes, and the dial is read again.
+    /// A new or removed preview password: the site cookie goes, the dial on hand goes (so every
+    /// shelf is drawn again from the new one), and nothing fetched before this is kept.
     func credentialDidChange() {
         let storage = urlSession.configuration.httpCookieStorage
         storage?.cookies(for: KJConfig.site)?.forEach { storage?.deleteCookie($0) }
-        signedIn = false
+        generation += 1
+        loading?.task.cancel()
+        loading = nil
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        index = nil
         indexFetchedAt = nil
+        signInNote = nil
+        controls = .empty
         controlsFetchedAt = nil
         shards.removeAll()
+    }
+
+    /// A list or a tune asked for before the index was read for the current password waits for
+    /// that read, so its own request carries the cookie (or none) the new dial was read with.
+    private func settleDial() async {
+        if previewPassword() != dialPassword || loading != nil { await loadIndex() }
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera
@@ -149,7 +195,9 @@ final class ReceiverStore {
     @ObservationIgnored private var inFlight: [String: Task<[Channel], Error>] = [:]
 
     func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
+        await settleDial()
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
+        let started = generation
         let key = cameras ? regionId + "-camera" : regionId
         let raw: [Channel]
         if let cached = shards[key] {
@@ -175,8 +223,9 @@ final class ReceiverStore {
                 }
             }
             inFlight[key] = load
-            defer { inFlight[key] = nil }
+            defer { if inFlight[key] == load { inFlight[key] = nil } }
             raw = try await load.value
+            guard started == generation else { throw CancellationError() }
             shards[key] = raw
         }
         await refreshControlsIfStale()
@@ -231,6 +280,7 @@ final class ReceiverStore {
     /// The carrier URL for a channel's live stream, asked for at the moment of tuning. The
     /// feeds are looked at again first: a channel that was listed a minute ago may be withdrawn.
     func resolve(_ channel: Channel) async throws -> URL {
+        await settleDial()
         await refreshControlsIfStale()
         guard ReceiverRules.eligible([channel], controls: controls).first != nil,
               let stream = channel.activeStream else {
@@ -267,8 +317,9 @@ final class ReceiverStore {
         async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: denylistURL, using: session)
         async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
+        let started = generation
         let (denied, suspects, graded) = await (denylist, offAir, health)
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, started == generation else { return }
         // A stale health file is ignored as a missing one is: it would withdraw channels on old news.
         let fresh = graded.flatMap { $0.isFresh(at: Date()) ? $0 : nil }
         controls = Controls(denylist: denied, offAir: suspects, health: fresh)

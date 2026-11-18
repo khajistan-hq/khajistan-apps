@@ -66,6 +66,16 @@ final class TransmissionStore {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
+        _ = auth.observeAccess { [weak self] in self?.accessDidChange() }
+    }
+
+    /// Sign-out or a change of account ends the programme at once, as on Apple TV; before this the
+    /// programme played on to its next handover. Idle is left alone, so a public Receiver channel
+    /// on the shared player keeps playing.
+    func accessDidChange() {
+        guard phase != .idle else { return }
+        stop()
+        if auth.session == nil { phase = .needsSignIn }
     }
 
     // MARK: - What the schedule says

@@ -35,6 +35,7 @@ enum SupabaseRoute {
     nonisolated(unsafe) private static var chosen = Path(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .direct
     nonisolated(unsafe) private static var settling: Task<Path, Never>?
     nonisolated(unsafe) private static var decidedAt = Date.distantPast
+    nonisolated(unsafe) private static var settlingStarted = Date.distantPast
     /// While neither way answers, how often a request may ask again before it fails at once.
     private static let recheckEvery: TimeInterval = 10
 
@@ -87,7 +88,7 @@ enum SupabaseRoute {
     static func ready() async -> Path {
         // Nothing answered last time: ask again now, as the screen opens (at most `probeLimit`).
         if path == .unreachable {
-            lock.withLock { settling = nil }
+            askAgain()
             return await settle()
         }
         if UserDefaults.standard.string(forKey: key) != nil {
@@ -104,17 +105,31 @@ enum SupabaseRoute {
             if let settling { return settling }
             let made = Task.detached(priority: .userInitiated) { await decide() }
             settling = made
+            settlingStarted = Date()
             return made
         }
         return await task.value
     }
+
+    /// Forgets the last answer so the next `settle()` asks both ways again, unless that asking began
+    /// within the last `probeLimit` seconds. Thirty cover loads failing in one Wi-Fi blink each
+    /// called this and each began its own pair of probes, the last to finish choosing the route;
+    /// now they share the one already under way.
+    private static func askAgain() {
+        lock.withLock {
+            if asksAgain(sinceLastAsking: Date().timeIntervalSince(settlingStarted)) { settling = nil }
+        }
+    }
+
+    /// An asking that began within `probeLimit` is still under way or just answered: share it.
+    static func asksAgain(sinceLastAsking seconds: TimeInterval) -> Bool { seconds > probeLimit }
 
     /// A request on the project could not connect: ask both ways again, and say whether there is now
     /// a working route other than the one that failed, so the caller can try once more on it.
     static func reconsider(after error: Error) async -> Bool {
         guard isUnreachable(error) else { return false }
         let before = path
-        lock.withLock { settling = nil }
+        askAgain()
         let after = await settle()
         return after != before && after != .unreachable
     }
@@ -133,7 +148,7 @@ enum SupabaseRoute {
             // Ask again now and then, so the apps come back by themselves when the network does.
             let stale = lock.withLock { Date().timeIntervalSince(decidedAt) > recheckEvery }
             if stale {
-                lock.withLock { settling = nil }
+                askAgain()
                 _ = await settle()
             }
             if path == .unreachable { throw URLError(.cannotConnectToHost) }

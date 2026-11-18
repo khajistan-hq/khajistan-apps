@@ -5118,8 +5118,9 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
     // A burst of failures shares the asking already under way; one long after it asks again.
     try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 0), "a second failure in the same blink starts no second probe")
-    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 2.5))
-    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 2.6))
+    try expect(!SupabaseRoute.asksAgain(sinceLastAsking: 3.0), "a probe that timed out at its 3.0 s limit is still shared")
+    try expect(SupabaseRoute.asksAgain(sinceLastAsking: 3.6))
+    try expect(SupabaseRoute.shareWindow > SupabaseRoute.probeLimit + 0.5, "longer than the longest probe")
     try expect(SupabaseRoute.asksAgain(sinceLastAsking: Date().timeIntervalSince(.distantPast)), "the first failure of a launch asks")
 }
 

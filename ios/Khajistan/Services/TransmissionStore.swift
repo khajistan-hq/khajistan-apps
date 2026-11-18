@@ -69,13 +69,15 @@ final class TransmissionStore {
         _ = auth.observeAccess { [weak self] in self?.accessDidChange() }
     }
 
-    /// Sign-out or a change of account ends the programme at once, as on Apple TV; before this the
-    /// programme played on to its next handover. Idle is left alone, so a public Receiver channel
-    /// on the shared player keeps playing.
+    /// Sign-out ends the programme at once and asks for a sign-in, as on Apple TV; before this the
+    /// programme played on to its next handover. A sign-in or a change of account tunes the same
+    /// channel again under the new account, so a "Sign in to watch" or Off air screen left open
+    /// while the viewer signed in elsewhere does not stay on a loader. Idle is left alone.
     func accessDidChange() {
         guard phase != .idle else { return }
+        let channel = channelNumber
         stop()
-        if auth.session == nil { phase = .needsSignIn }
+        if auth.session == nil { phase = .needsSignIn } else { Task { await tune(channel: channel) } }
     }
 
     // MARK: - What the schedule says

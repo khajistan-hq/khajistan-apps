@@ -30,7 +30,7 @@ enum SupabaseRoute {
 
     private static let key = "kj.supabaseRoute"
     /// How long either way gets to answer before it counts as unreachable.
-    private static let probeLimit: TimeInterval = 2.5
+    static let probeLimit: TimeInterval = 2.5
     private static let lock = NSLock()
     nonisolated(unsafe) private static var chosen = Path(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .direct
     nonisolated(unsafe) private static var settling: Task<Path, Never>?
@@ -112,7 +112,7 @@ enum SupabaseRoute {
     }
 
     /// Forgets the last answer so the next `settle()` asks both ways again, unless that asking began
-    /// within the last `probeLimit` seconds. Thirty cover loads failing in one Wi-Fi blink each
+    /// within the last `shareWindow` seconds. Thirty cover loads failing in one Wi-Fi blink each
     /// called this and each began its own pair of probes, the last to finish choosing the route;
     /// now they share the one already under way.
     private static func askAgain() {
@@ -121,8 +121,11 @@ enum SupabaseRoute {
         }
     }
 
-    /// An asking that began within `probeLimit` is still under way or just answered: share it.
-    static func asksAgain(sinceLastAsking seconds: TimeInterval) -> Bool { seconds > probeLimit }
+    /// An asking that began within `shareWindow` is still under way or just answered: share it.
+    /// The window is longer than the longest a probe can run (`probeLimit` + 0.5 s resource
+    /// timeout), so a failure can never start a second asking while the first is in flight.
+    static func asksAgain(sinceLastAsking seconds: TimeInterval) -> Bool { seconds > shareWindow }
+    static let shareWindow: TimeInterval = probeLimit + 1
 
     /// A request on the project could not connect: ask both ways again, and say whether there is now
     /// a working route other than the one that failed, so the caller can try once more on it.

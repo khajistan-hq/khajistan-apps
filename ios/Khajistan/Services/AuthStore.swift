@@ -177,9 +177,8 @@ final class AuthStore {
     }
 
     func clearPreviewPassword() {
-        let changed = previewPassword != nil
         previewPassword = nil
-        if changed { onPreviewPasswordChange?() }
+        onPreviewPasswordChange?()
         Keychain.delete(Account.preview)
     }
 

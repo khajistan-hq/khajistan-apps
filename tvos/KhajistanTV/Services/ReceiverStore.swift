@@ -29,7 +29,6 @@ final class ReceiverStore {
     /// The core region shapes, kept once fetched: the map draws from them and a region page reads
     /// its native name from them. Tracked, so a page that asked before they arrived draws again.
     private(set) var coreShapes: RegionShapes?
-    var isLoading = false
 
     @ObservationIgnored private var extendedShapes: RegionShapes?
     @ObservationIgnored private var controls = Controls.empty
@@ -38,6 +37,10 @@ final class ReceiverStore {
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
     /// Why the whole dial is not on screen though a preview password is saved. Nil otherwise.
     private(set) var signInNote: String?
+    /// Moves whenever the dial on hand changes kind (whole or public). The Receiver is drawn
+    /// afresh on it, so no shelf keeps a list read from the other one.
+    private(set) var dialID = 0
+    @ObservationIgnored private var wholeDial = false
     /// The preview password the dial on hand was read for, and the one the site refused, which is
     /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
     /// on this network for ten minutes).
@@ -95,23 +98,31 @@ final class ReceiverStore {
     /// once in `staleAfter`), so a changed site password or an expired cookie is noticed within
     /// minutes. The site counts only failed sign-ins against its lock.
     private func fetchIndex(password: String?, generation started: Int) async {
-        isLoading = true
-        defer { isLoading = false }
+        // A sign-in cancelled by a sign-out may still have stored its cookie.
+        if password == nil { deleteSiteCookies() }
         if index == nil { indexError = nil }
         do {
             var reply: (Data, URLResponse)?
             var note: String?
+            var whole = false
+            var retry = false
             if let password, password != refused {
                 switch await gate(password) {
-                case .signedIn(let answer): reply = answer
+                case .signedIn(let answer):
+                    reply = answer
+                    whole = true
                 case .refused:
                     refused = password
-                    note = "The preview password did not open every channel. Check it under Account."
+                    deleteSiteCookies()
+                    note = Self.refusedNote
                 case .tryLater:
-                    note = "Not every channel could be opened just now. They will be tried again."
+                    // The cookie from an earlier sign-in, if any, still opens the whole dial.
+                    whole = wholeDial && hasSiteCookie
+                    retry = true
+                    if !whole { note = "Not every channel could be opened just now. Trying again in a minute." }
                 }
             } else if password != nil {
-                note = "The preview password did not open every channel. Check it under Account."
+                note = Self.refusedNote
             }
             if reply == nil {
                 reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
@@ -129,16 +140,42 @@ final class ReceiverStore {
                 throw ReceiverStoreError.unreadable
             }
             guard started == generation, !Task.isCancelled else { return }
+            if whole != wholeDial {
+                wholeDial = whole
+                dialID += 1
+                controls = .empty
+                controlsFetchedAt = nil
+            }
             index = decoded
             indexError = nil
             signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
+            if retry { scheduleRetry(generation: started) }
         } catch {
             if Task.isCancelled || started != generation { return }
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
+    }
+
+    private static let refusedNote = "The preview password did not open every channel. Check it under Account."
+    private static let retryAfter: Duration = .seconds(60)
+
+    /// A sign-in that was throttled or did not answer is tried again in a minute, whether or not
+    /// anything on screen asks.
+    private func scheduleRetry(generation started: Int) {
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.retryAfter)
+            guard let self, started == self.generation else { return }
+            self.indexFetchedAt = nil
+            await self.loadIndex()
+        }
+    }
+
+    private func deleteSiteCookies() {
+        let storage = urlSession.configuration.httpCookieStorage
+        storage?.cookies(for: KJConfig.site)?.forEach { storage?.deleteCookie($0) }
     }
 
     private enum Gate { case signedIn((Data, URLResponse)), refused, tryLater }
@@ -168,9 +205,10 @@ final class ReceiverStore {
     /// A new or removed preview password: the site cookie goes, the dial on hand goes (so every
     /// shelf is drawn again from the new one), and nothing fetched before this is kept.
     func credentialDidChange() {
-        let storage = urlSession.configuration.httpCookieStorage
-        storage?.cookies(for: KJConfig.site)?.forEach { storage?.deleteCookie($0) }
+        deleteSiteCookies()
         generation += 1
+        wholeDial = false
+        dialID += 1
         loading?.task.cancel()
         loading = nil
         inFlight.values.forEach { $0.cancel() }
@@ -184,9 +222,10 @@ final class ReceiverStore {
     }
 
     /// A list or a tune asked for before the index was read for the current password waits for
-    /// that read, so its own request carries the cookie (or none) the new dial was read with.
+    /// that read, so its own request carries the cookie (or none) the new dial was read with. A
+    /// routine refresh with a dial on hand is not waited for.
     private func settleDial() async {
-        if previewPassword() != dialPassword || loading != nil { await loadIndex() }
+        if previewPassword() != dialPassword || index == nil { await loadIndex() }
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera

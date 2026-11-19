@@ -68,6 +68,8 @@ struct ReceiverView: View {
             model.link = nil
         case .region(let id):
             guard let index = model.receiver.index else { return }
+            // A linked region opens on its television, and Back from it is not a CCTV return.
+            model.camerasFirst = nil
             model.receiverPath = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
             model.link = nil
         default:

@@ -130,6 +130,15 @@ final class ShelfUITests: XCTestCase {
         press(.right, times: 2, app: app)
         press(.down, app: app)
         XCTAssertEqual(focusedID(app), plate, "focus comes back into CCTV on the name last focused")
+        // Along the row, right and left move between names: the entry redirect does not hold
+        // focus on the last-focused one.
+        let names = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'cameras-'")).allElementsBoundByIndex.map(\.identifier)
+        if names.count > 1 {
+            press(.right, app: app)
+            XCTAssertEqual(focusedID(app), names[1], "right along CCTV reaches the second name")
+            press(.left, app: app)
+            XCTAssertEqual(focusedID(app), plate, "left along CCTV returns to the first name")
+        }
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")

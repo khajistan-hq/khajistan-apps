@@ -96,7 +96,8 @@ struct TransmissionView: View {
         let channels = store.channelNumbers.count
         let tail = "\(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
         guard case .ready = store.schedule, let count = store.programmeCount else { return tail }
-        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
+        let hours = store.programmeHours.map { "\($0.formatted()) hours on automatic \u{00B7} " } ?? ""
+        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(hours)\(tail)"
     }
 
     @ViewBuilder

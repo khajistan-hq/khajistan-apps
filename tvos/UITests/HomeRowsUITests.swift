@@ -61,6 +61,8 @@ final class HomeRowsUITests: XCTestCase {
         for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
         }
+        // CCTV is the foot of the page (owner, 2026-11-19).
+        XCTAssertEqual(reached.last, "cameras", "CCTV is the last shelf; reached \(reached)")
 
         // Up walks back to the front.
         for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && focusedID(app) != "beyondTheAtlas" {

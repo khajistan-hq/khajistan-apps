@@ -11,8 +11,6 @@ struct ReceiverView: View {
     @State private var composed: ComposedMap?
     @State private var mapError: String?
     /// Each camera region's cameras to take a still from, and the ones asked for now.
-    @State private var cameraPicks: [String: [Channel]] = [:]
-    @State private var cameraWanted: [Channel] = []
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
     @State private var surfTask: Task<Void, Never>?
@@ -99,9 +97,9 @@ struct ReceiverView: View {
                     }
                     ThemeRow()
                     HomeSections()
-                    camerasRow(index)
                     filmsRow
                     HomeRows()
+                    camerasRow(index)
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
@@ -263,51 +261,43 @@ struct ReceiverView: View {
     // MARK: - Cameras
 
     /// Every region with public cameras, main atlas first, each opening its page on its cameras
-    /// (owner, 2026-10-07: "make cctv show up in the reciever").
+    /// (owner, 2026-10-07: "make cctv show up in the reciever"). Names only, at the foot of the
+    /// page (owner, 2026-11-19: "cctv should go at the bottom of the main page" and "need no
+    /// cards just names is wnough that can be clicked"), set as the Themes row is set.
     @ViewBuilder
     private func camerasRow(_ index: ReceiverIndex) -> some View {
         let regions = CameraRegions.ordered(index)
         if !regions.isEmpty {
-            Shelf("CCTV", count: "\(CameraRegions.total(index).formatted()) live, by region") {
-                ForEach(regions) { region in
-                    Button {
-                        model.camerasFirst = region.id
-                        model.receiverPath.append(region)
-                    } label: {
-                        // The region's name over a still from one of its cameras, taken on this
-                        // device as the region cards' are (owner, 2026-10-29: pictures on them).
-                        PictureCard(title: region.label,
-                                    still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
-                                    width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CCTV").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(regions) { region in
+                            let count = index.regionCounts[region.id]?.byMedium["camera"] ?? 0
+                            Button {
+                                model.camerasFirst = region.id
+                                model.receiverPath.append(region)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(region.label).kjName(30).lineLimit(1)
+                                    Text("\(count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            .accessibilityLabel("\(region.label), \(count.formatted()) live")
+                            .accessibilityIdentifier("cameras-\(region.id)")
+                        }
                     }
-                    .buttonStyle(HouseCardStyle())
-                    .accessibilityIdentifier("cameras-\(region.id)")
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
                 }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
             }
+            .focusSection()
             .accessibilityIdentifier("shelf-cameras")
-            .task(id: regions.map(\.id)) { await pickCameras(regions) }
-            // Back from a region page: the stills store forgot the list when the page went.
-            .onAppear { model.stills.wantToo(cameraWanted) }
-        }
-    }
-
-    /// Up to three cameras per region, and the stills for them: the first of each, then a spare
-    /// only where the card is still a plate (a black frame or a dead stream).
-    private func pickCameras(_ regions: [ReceiverIndex.Region]) async {
-        for region in regions where cameraPicks[region.id] == nil {
-            guard !Task.isCancelled else { return }
-            let cameras = (try? await model.receiver.channels(regionId: region.id, cameras: true)) ?? []
-            cameraPicks[region.id] = Array(cameras.prefix(3))
-        }
-        for rank in 0..<3 {
-            guard !Task.isCancelled else { return }
-            let lacking = regions.filter { region in
-                !(cameraPicks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
-            }
-            cameraWanted = lacking.compactMap { cameraPicks[$0.id]?.dropFirst(rank).first }
-            if cameraWanted.isEmpty { return }
-            model.stills.wantToo(cameraWanted)
-            try? await Task.sleep(for: .seconds(Double(cameraWanted.count) * 4))
         }
     }
 

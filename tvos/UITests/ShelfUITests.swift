@@ -85,20 +85,16 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the themes lands on the parts of Khajistan, got \(focusedID(app))")
             kjPause(1)
             shot("\(skin)-2-receiver-doors-shelf", app)
-            press(.down, app: app)
-            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): the next shelf down is Cameras, got \(focusedID(app))")
+            // CCTV is the foot of the page (owner, 2026-11-19): down walks every shelf to it.
+            for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down reaches CCTV, got \(focusedID(app))")
             shot("\(skin)-2-receiver-cameras-shelf", app)
-            let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
-            if films.firstMatch.waitForExistence(timeout: 30) {
-                press(.down, app: app)
-                XCTAssertTrue(focusedID(app).hasPrefix("film-"), "\(skin): down from Cameras lands on the Screening Room shelf, got \(focusedID(app))")
-                kjPause(4)   // posters arrive
-                shot("\(skin)-2-receiver-films-shelf", app)
-                press(.up, app: app)
-            }
-            // Up through the parts of Khajistan and the Themes row returns to the front: the
-            // sidebar's switch, or the list.
-            press(.up, times: 2 + genres, app: app)
+            press(.down, app: app)
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): nothing sits below CCTV, got \(focusedID(app))")
+            // Up through the shelves and the Themes row returns to the front: the sidebar's
+            // switch, or the list.
+            _ = genres
+            for _ in 0..<16 where !(focusedID(app).hasPrefix("region-") || focusedID(app) == "beyondTheAtlas") { press(.up, app: app) }
             let back = focusedID(app)
             XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
@@ -113,9 +109,10 @@ final class ShelfUITests: XCTestCase {
         kjPause(3)
         XCTAssertTrue(kjFocusFrontFoot(app), "focus must reach the foot of the front")
         _ = downPastGenres("day", app)
-        press(.down, app: app)   // past the parts of Khajistan, to Cameras
+        // CCTV is the foot of the page: down past every shelf.
+        for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }
         let plate = focusedID(app)
-        XCTAssertTrue(plate.hasPrefix("cameras-"), "down past the themes and the parts of Khajistan lands on a Cameras plate, got \(plate)")
+        XCTAssertTrue(plate.hasPrefix("cameras-"), "down to the foot of the page lands on a CCTV name, got \(plate)")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")

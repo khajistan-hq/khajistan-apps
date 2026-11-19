@@ -122,9 +122,11 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   from above, from below, and back from the player (the shelves take the nearest card instead). Select plays one of the
   theme's channels at random, radio included, and up and down in the player surf every channel of that theme. Until that day each
   theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
-  "Street cameras"). In the store build these stay: Liked, Themes, CCTV, the Screening Room and
-  Transmission (once the
-  schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
+  "Street cameras"), and since 2026-11-19 it is a row of region names, each with its live count,
+  set as Themes is, at the foot of the page (owner: "cctv should go at the bottom of the main
+  page" and "need no cards just names is wnough that can be clicked"). Select opens the region
+  on its cameras. In the store build these stay: Liked, Themes, the Screening Room, Transmission
+  (once the schedule loads) and CCTV last. The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
   Bazaar, Chat) after the Themes row. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.

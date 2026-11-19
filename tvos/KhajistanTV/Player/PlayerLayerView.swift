@@ -13,6 +13,10 @@ struct PlayerLayerView: UIViewRepresentable {
     var soundCarriesInBackground = false
     /// Handed the layer as it is drawn: the Apple TV's picture in picture is opened on it.
     var onLayer: (@MainActor (AVPlayerLayer) -> Void)? = nil
+    /// Told whether the layer has a frame to show (`isReadyForDisplay`), and again whenever that
+    /// changes. A player reports Playing before its first frame is drawn; until this says true
+    /// the screen behind the layer is all a viewer sees.
+    var onReady: (@MainActor (Bool) -> Void)? = nil
 
     func makeUIView(context: Context) -> PlayerUIView {
         let view = PlayerUIView()
@@ -27,6 +31,7 @@ struct PlayerLayerView: UIViewRepresentable {
         let layer = uiView.layer as! AVPlayerLayer
         if layer.player !== player { layer.player = player }
         onLayer?(layer)
+        uiView.onReady = onReady
     }
 }
 
@@ -34,6 +39,11 @@ final class PlayerUIView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
     var soundCarriesInBackground = false
+    var onReady: (@MainActor (Bool) -> Void)? {
+        // Told after the update that set it, never inside it: the closure writes view state.
+        didSet { DispatchQueue.main.async { [weak self] in self?.report() } }
+    }
+    private var readyObservation: NSKeyValueObservation?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -47,7 +57,17 @@ final class PlayerUIView: UIView {
 
     private func configure() {
         backgroundColor = .clear
+        readyObservation = (layer as! AVPlayerLayer).observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.report() }
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(enteringForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+
+    /// Reads the layer when the report is delivered, so a late report can never carry an old value.
+    private func report() {
+        guard let onReady else { return }
+        let ready = (layer as! AVPlayerLayer).isReadyForDisplay
+        MainActor.assumeIsolated { onReady(ready) }
     }
 
     @objc private func enteringForeground() {

@@ -94,6 +94,10 @@ final class ReadingStore {
     var invalidations = 0
     func previewCredentialDidChange() { invalidations += 1 }
 }
+final class ReceiverStore {
+    var credentialChanges = 0
+    func credentialDidChange() { credentialChanges += 1 }
+}
 final class PictureInPicture {
     var title = ""
     var captions: (() -> String?)?
@@ -150,6 +154,8 @@ final class AppModel {
     let transmission = TransmissionStore()
     var auth: AuthStore { transmission.auth }
     let reading = ReadingStore()
+    let receiver = ReceiverStore()
+    var receiverPath: [Int] = []
     let publicReceiver = PlayerController()
     var section = Section.transmission
     var link: Link?

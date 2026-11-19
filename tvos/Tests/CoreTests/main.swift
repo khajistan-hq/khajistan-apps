@@ -563,6 +563,24 @@ func carrierURLEncodesTheStreamID() throws {
     try expect(ReceiverRules.carrierURL(streamID: "station+1&x=#fragment").absoluteString.hasSuffix("stream=station%2B1%26x%3D%23fragment"))
 }
 
+func gateOutcomes() throws {
+    let next = "/data/open-frequencies/receiver-index.json"
+    func outcome(_ status: Int, _ path: String?, _ cookie: Bool) -> ReceiverRules.GateOutcome {
+        ReceiverRules.gateOutcome(status: status, landedOn: path, next: next, cookieSet: cookie)
+    }
+    try expectEqual(outcome(200, next, true), .signedIn)
+    // Landed on the index without the cookie: not signed in, and not a refusal either.
+    try expectEqual(outcome(200, next, false), .tryLater)
+    try expectEqual(outcome(200, "/gate", false), .refused)
+    try expectEqual(outcome(200, "/gate.html", false), .refused)
+    // A throttle, an outage, a captive portal or a moved host never marks a password refused.
+    try expectEqual(outcome(429, "/gate", false), .tryLater)
+    try expectEqual(outcome(503, next, false), .tryLater)
+    try expectEqual(outcome(200, "/", true), .tryLater)
+    try expectEqual(outcome(200, "/login", false), .tryLater)
+    try expectEqual(outcome(200, nil, false), .tryLater)
+}
+
 func carrierAnswerIsValidated() throws {
     let url = try ReceiverRules.carrier(from: Data(#"{"stream":"s","url":"https://example.com/live/index.m3u8"}"#.utf8))
     try expectEqual(url.absoluteString, "https://example.com/live/index.m3u8")
@@ -5105,6 +5123,41 @@ final class StubDropProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Counts the askings a burst starts. A class so the @Sendable closure can count.
+final class AskingCounter: @unchecked Sendable {
+    private let lock = NSLock(); private var n = 0
+    func hit() { lock.withLock { n += 1 } }
+    var count: Int { lock.withLock { n } }
+}
+
+func aBurstOfFailuresStartsOneAsking() throws {
+    let counter = AskingCounter()
+    let real = SupabaseRoute.decider
+    defer { SupabaseRoute.decider = real; SupabaseRoute.forgetAsking() }
+    SupabaseRoute.forgetAsking()
+    SupabaseRoute.decider = {
+        counter.hit()
+        try? await Task.sleep(for: .milliseconds(200))   // a probe in flight
+        return .direct
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await withTaskGroup(of: Void.self) { group in
+            // Thirty requests fail in the same blink: each forgets and asks, as reconsider() does.
+            for _ in 0..<30 { group.addTask { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle() } }
+        }
+        done.signal()
+    }
+    try expect(done.wait(timeout: .now() + 10) == .success, "the burst settled")
+    try expect(counter.count == 1, "thirty failures started \(counter.count) askings, not one")
+    // Past the window the next failure asks again.
+    SupabaseRoute.forgetAsking()
+    let again = DispatchSemaphore(value: 0)
+    Task.detached { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle(); again.signal() }
+    try expect(again.wait(timeout: .now() + 10) == .success)
+    try expect(counter.count == 2, "a later failure asks again")
+}
+
 func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubDropProtocol.self]
@@ -5142,6 +5195,22 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(!SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .unreachable))
     try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
+    // Which failures start a new asking and which share the last one.
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    func asks(after seconds: TimeInterval, decidedAfter: TimeInterval?, _ chosen: SupabaseRoute.Path) -> Bool {
+        SupabaseRoute.asksAgain(now: t0.addingTimeInterval(seconds), started: t0,
+                                decided: decidedAfter.map { t0.addingTimeInterval($0) } ?? t0.addingTimeInterval(-60), chosen: chosen)
+    }
+    try expect(!asks(after: 0.1, decidedAfter: nil, .direct), "a second failure in the same blink shares the probe in flight")
+    try expect(!asks(after: 3.0, decidedAfter: nil, .direct), "a probe at its 3.0 s limit is still shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .direct), "a fresh answer that a way is open is shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .proxy))
+    try expect(asks(after: 3.6, decidedAfter: 0.4, .direct), "past the window, ask")
+    try expect(SupabaseRoute.shareWindow > SupabaseRoute.probeLimit + 0.5, "longer than the longest probe")
+    try expect(asks(after: 1, decidedAfter: 0.4, .unreachable), "a finished 'no way open' is never reused: Wi-Fi may be back")
+    try expect(!asks(after: 1, decidedAfter: nil, .unreachable), "unreachable from an EARLIER answer, new probe in flight: shared")
+    try expect(SupabaseRoute.asksAgain(now: Date(), started: .distantPast, decided: .distantPast, chosen: .direct), "the first failure of a launch asks")
+    try expect(asks(after: -30, decidedAfter: nil, .direct), "a clock set backwards asks, and does not share until it catches up")
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
@@ -5458,6 +5527,7 @@ let tests: [(String, () throws -> Void)] = [
     ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
     ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
+    ("liveChannelsShowTheirLocalTime", liveChannelsShowTheirLocalTime),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
@@ -5488,6 +5558,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Site sign-in outcomes", gateOutcomes),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
     ("Deep links parse", deepLinksParse),
@@ -5535,6 +5606,7 @@ let tests: [(String, () throws -> Void)] = [
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
+    ("A burst of failed requests starts one network check, not one each", aBurstOfFailuresStartsOneAsking),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),
@@ -5941,6 +6013,38 @@ func pnvNextLapNeverRepeatsAtTheSeam() throws {
     }
     // One object: nothing else to show, so it repeats (negative case of the swap).
     try expectEqual(PnvReel.nextLap([row("a")], after: "a").map(\.id), ["a"])
+}
+
+func liveChannelsShowTheirLocalTime() throws {
+    func channel(_ country: String?, territory: String? = nil, name: String = "X") throws -> Channel {
+        var object: [String: Any] = ["id": "c", "name": name, "mediaType": "tv", "streams": []]
+        if let country { object["country"] = country }
+        if let territory { object["territory"] = territory }
+        return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+    }
+    // 2026-11-19 12:00 UTC.
+    let noon = try require(ISO8601DateFormatter().date(from: "2026-11-19T12:00:00Z"))
+    try expectEqual(LocalTime.label(for: try channel("Iran"), at: noon), "15:30 local time")
+    try expectEqual(LocalTime.label(for: try channel("Pakistan"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Yogyakarta"), at: noon), "19:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Denpasar"), at: noon), "20:00 local time")
+    // Most Indonesian rows name their city only in the station's name (Fable, 2026-11-19).
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "RRI Pro 1 Ambon FM 105.1"), at: noon), "21:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "GS Radio Bali"), at: noon), "20:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Elshinta Surabaya FM 97.6"), at: noon), "19:00 local time")
+    // No city, no time: three clocks and nothing to choose between them.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Bass FM 96.6"), at: noon) == nil)
+    // A city word inside another word does not count.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Soloist FM"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel("DR Congo"), at: noon) == nil)
+    try expectEqual(LocalTime.label(for: try channel("Russia", name: "Bashkortostan 24"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Russia", territory: "Chechnya"), at: noon), "15:00 local time")
+    // A clock nobody can tell is left out, never guessed.
+    try expect(LocalTime.label(for: try channel("Borderland / diaspora"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel(nil), at: noon) == nil)
+    try expectEqual(try channel("Iran").placeAndTime(at: noon), "Iran \u{00B7} 15:30 local time")
+    // Every zone named in the table is one the system knows.
+    for (country, id) in LocalTime.zones { try expect(TimeZone(identifier: id) != nil, "\(country): \(id)") }
 }
 
 func pnvShuffleWalkWrapsOnce() throws {

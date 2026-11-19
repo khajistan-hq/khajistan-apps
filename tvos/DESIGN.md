@@ -77,7 +77,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (the front's camera regions, the Transmission channels) sit on a `CardPlate`:
+- **Text cards** (Rooms, the Madrassa, the home's See all) sit on a `CardPlate`:
   the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
   front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
   Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.
@@ -169,6 +169,17 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   arrives. Radio shows its Now Playing on the ground: the radio mark large, ● NOW PLAYING · LIVE
   RADIO, the station's name in display type, and its place and broadcaster. A channel change is
   described under Motion.
+- **Local time** (owner, 2026-11-19: "show local time on live channels"): wherever the place is
+  printed for a live channel (the player's strip, the radio screen, a region's hero) the time
+  there follows it: *Iran · Persian · 21:42 local time*, read again on the minute. The zone comes
+  from the channel's country (`Core/LocalTime.swift`). Indonesia runs on three clocks, so there
+  the city in the station's territory or name decides (Ambon on Jayapura time, Bali and Manado on
+  Makassar's, Java and Sumatra on Jakarta's), and Bashkortostan is on Yekaterinburg's. A channel
+  whose clock cannot be told (the diaspora, an Indonesian station that names no city, DR Congo,
+  a country the table does not list) shows no time rather than a guessed one.
+- **Top bar**: Receiver opens the Receiver's home, from a region page or from another section
+  left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it should go to home
+  page"). Back still steps back one page.
 - **Guide** (2026-10-27, after YouTube TV's live guide): Guide is the strip's third control, after
   CC and Like, reached with Right. Select raises it from the bottom over the picture, which plays on above it (owner, 2026-11-14: "make the guide come from bottom up rather than from the left"):
   every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
@@ -193,14 +204,18 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 ## Khajistan Transmission
 
 - **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · 7 scheduled channels · Pakistan
-  time (UTC+5)*, then one card per channel, as the website's channel card: CHANNEL 1 · ● ON AIR,
-  the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
-  next three strips, time then show, the first set large. Off air the headline is *Off air*,
-  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. The
-  programme by its standardized name since 2026-11-08 (owner: "add now playing and up next ...
-  names need to be standardized"); where a title cannot be cleaned (`display_title` absent) the
-  show stands in, which was the whole rule from 2026-09-06 ("programme titles are file names"). One card per channel the schedule's `_meta.channels` names (seven since 2026-11-04), text cards 560pt wide (a lift plate, band under focus), 64pt apart for their lift, in one row that scrolls sideways past the third. Channel Up and Down on the remote step through them in number order and go round: up from Channel 7 is Channel 1. The cards redraw on the minute. Select
-  tunes. The preview-password and sign-in steps live on this page.
+  time (UTC+5)*, then a TV guide: one row per channel the schedule's `_meta.channels` names, read
+  left to right as a printed guide. The number (48pt), the channel's name without its
+  "Channel N ·" (name style), the hours of what is on (*18:00–18:15*, body, tabular figures) and
+  what is on (name style): the programme by its standardized name, as the player's strip
+  heads it, else the show, and nothing when that only repeats the channel's name. Off air the hours column reads *Off air* and the show column the site's
+  line *Back at 23:00 PKT with The Feature.*, both faint. Nothing about later: no Up next, no
+  Later (owner, 2026-11-19: "removing up next from the cards and making it more like a simple
+  tv guide"). The programme by its standardized name since 2026-11-08 where the schedule gives
+  one, else the show (2026-09-06: "programme titles are file names"). Rows carry no plate at
+  rest; focus gives the band plate, as a house button. Up and down walk the rows; Channel Up and
+  Down on the remote step through them in number order and go round. The rows redraw on the
+  minute. Select tunes. The preview-password and sign-in steps live on this page.
 - **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
   else the show; the line under it starts with the show (left out when the show is the channel,
   as Jordan Television is), then NOW and the slot, then the country. Above them, on the strip's
@@ -226,7 +241,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   strips. Nothing is said twice. In the last minute of a slot, with the overlay hidden, a band
   plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
   When the slot ends the channel hands over to the next strip, as the website's tuneToNow
-  does once a minute. Off air is OFF AIR in display type with the return time.
+  does once a minute. A channel joined part-way through is Playing only once its clock has moved
+  0.3 s past where the seek landed, and the black behind a picture shows only once the layer has
+  drawn a frame (`isReadyForDisplay`); until then the tuning ground stays, and a channel change
+  cuts only on a drawn frame (owner, 2026-11-19: Channel 1 "goes black for second" as it starts). Off air is OFF AIR in display type with the return time.
 
 ## The Screening Room
 

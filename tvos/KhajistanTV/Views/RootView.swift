@@ -28,7 +28,16 @@ struct RootView: View {
 
     private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            TopBar(current: model.section, select: { model.section = $0 })
+            // Receiver in the top bar opens the Receiver's home, from a region page or from another
+            // section left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it
+            // should go to home page").
+            TopBar(current: model.section, select: { section in
+                if section == .receiver {
+                    model.receiverPath = []
+                    model.camerasFirst = nil
+                }
+                model.section = section
+            })
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
@@ -150,7 +159,8 @@ struct RootView: View {
     @ViewBuilder
     private var content: some View {
         switch model.section {
-        case .receiver: ReceiverView()
+        // Drawn afresh when the dial changes kind, so no shelf keeps the other dial's channels.
+        case .receiver: ReceiverView().id(model.receiver.dialID)
         case .transmission: TransmissionView()
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()

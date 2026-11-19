@@ -85,9 +85,8 @@ final class SkinWalkUITests: XCTestCase {
             wait(upTo: 20) { (page.value as? String) == "Ready" }
             XCTAssertEqual(page.value as? String, "Ready", "\(skin): the schedule file must load")
             let card = app.buttons["transmission-channel-1"]
-            // Down from the TRANSMISSION tab lands on the card under it, channel 2.
-            focus(app.buttons["transmission-channel-2"], by: .down, tries: 4)
-            XCTAssertTrue(focus(card, by: .left, tries: 3), "\(skin): channel 1's card must take focus")
+            // The guide is a list: down from the TRANSMISSION tab lands on its first row, channel 1.
+            XCTAssertTrue(focus(card, by: .down, tries: 4), "\(skin): channel 1's row must take focus")
             shot("\(skin)-4-transmission", app)
             XCUIRemote.shared.press(.select)
             let upNext = app.descendants(matching: .any)["upNext"]
@@ -163,8 +162,7 @@ final class SkinWalkUITests: XCTestCase {
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
         wait(upTo: 20) { (page.value as? String) == "Ready" }
-        focus(app.buttons["transmission-channel-2"], by: .down, tries: 4)
-        XCTAssertTrue(focus(app.buttons["transmission-channel-1"], by: .left, tries: 3))
+        XCTAssertTrue(focus(app.buttons["transmission-channel-1"], by: .down, tries: 4))
         XCUIRemote.shared.press(.select)
         let notice = app.descendants(matching: .any)["handoverNotice"]
         XCTAssertTrue(notice.waitForExistence(timeout: 30), "the notice comes up once the overlay hides")

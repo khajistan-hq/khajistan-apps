@@ -40,7 +40,11 @@ final class PlayerUIView: UIView {
 
     var soundCarriesInBackground = false
     var onReady: (@MainActor (Bool) -> Void)? {
-        didSet { report((layer as! AVPlayerLayer).isReadyForDisplay) }
+        // Told after the update that set it, never inside it: the closure writes view state.
+        didSet {
+            let ready = (layer as! AVPlayerLayer).isReadyForDisplay
+            DispatchQueue.main.async { [weak self] in self?.report(ready) }
+        }
     }
     private var readyObservation: NSKeyValueObservation?
 

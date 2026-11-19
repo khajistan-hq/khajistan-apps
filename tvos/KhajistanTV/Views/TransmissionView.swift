@@ -252,7 +252,8 @@ private struct ScheduleRow: View {
                     .kjBody()
                     .monospacedDigit()
                     .frame(width: 210, alignment: .leading)
-                Text(air.show?.name ?? name)
+                // A slot whose show the schedule has lost keeps its hours, as on the site.
+                Text(air.show?.name ?? "")
                     .kjName()
                     .lineLimit(1)
             } else {
@@ -269,6 +270,20 @@ private struct ScheduleRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    /// "Channel 1, Bioscope, 18:00 to 18:15 Pakistan time, Ghunghat."
+    private var spoken: String {
+        var parts = ["Channel \(number)", name]
+        if let air = onAir {
+            parts.append("\(air.startLabel) to \(air.endLabel) Pakistan time")
+            if let show = air.show?.name, !show.isEmpty { parts.append(show) }
+        } else {
+            parts.append(returns.map { backLine($0) } ?? "Off air")
+        }
+        return parts.joined(separator: ", ")
     }
 
     /// The website's off-air line: "Back at 23:00 PKT with The Feature.", with the day once the

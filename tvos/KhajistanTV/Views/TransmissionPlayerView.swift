@@ -178,6 +178,11 @@ struct TransmissionPlayerView: View {
 
     /// A picture programme playing whose first frame is not drawn yet. A schedule file (DEBUG, UI
     /// tests) plays no picture and never waits.
+    private var soundOnlyNow: Bool {
+        if case .onAir(let air) = store.phase { return air.programme?.audio_only == true }
+        return false
+    }
+
     private func waitingForFrame(_ air: OnAir) -> Bool {
         guard air.programme?.audio_only != true, !store.isScheduleFile else { return false }
         return !(store.aIsFront ? frameA : frameB)
@@ -793,7 +798,9 @@ struct TransmissionPlayerView: View {
             while !left, !Task.isCancelled {
                 // Playing with a frame drawn: Playing alone comes before the first frame, and a
                 // cut then shows black until it lands.
-                let framed = (store.aIsFront ? frameB : frameA) || store.isScheduleFile
+                // Sound with no picture draws no layers, so neither side can report a frame.
+                let layersDrawn = !soundOnlyNow && pending.air.programme?.audio_only != true
+                let framed = (store.aIsFront ? frameB : frameA) || store.isScheduleFile || !layersDrawn
                 let ready = (next.state == .playing && framed) || { if case .failed = next.state { return true }; return false }()
                 if ready {
                     #if DEBUG

@@ -172,9 +172,11 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Local time** (owner, 2026-11-19: "show local time on live channels"): wherever the place is
   printed for a live channel (the player's strip, the radio screen, a region's hero) the time
   there follows it: *Iran · Persian · 21:42 local time*, read again on the minute. The zone comes
-  from the channel's country (`Core/LocalTime.swift`), with Bali on Makassar time and Bashkortostan
-  on Yekaterinburg's. A channel whose clock cannot be told (the diaspora, a country the table
-  does not list) shows no time rather than a guessed one.
+  from the channel's country (`Core/LocalTime.swift`). Indonesia runs on three clocks, so there
+  the city in the station's territory or name decides (Ambon on Jayapura time, Bali and Manado on
+  Makassar's, Java and Sumatra on Jakarta's), and Bashkortostan is on Yekaterinburg's. A channel
+  whose clock cannot be told (the diaspora, an Indonesian station that names no city, DR Congo,
+  a country the table does not list) shows no time rather than a guessed one.
 - **Top bar**: Receiver opens the Receiver's home, from a region page or from another section
   left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it should go to home
   page"). Back still steps back one page.
@@ -227,9 +229,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   strips. Nothing is said twice. In the last minute of a slot, with the overlay hidden, a band
   plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
   When the slot ends the channel hands over to the next strip, as the website's tuneToNow
-  does once a minute. The black behind a picture shows only once the layer has drawn a frame
-  (`isReadyForDisplay`); until then the tuning ground stays, and a channel change cuts only on a
-  drawn frame (owner, 2026-11-19: Channel 1 "goes black for second" as it starts). Off air is OFF AIR in display type with the return time.
+  does once a minute. A channel joined part-way through is Playing only once its clock has moved
+  0.3 s past where the seek landed, and the black behind a picture shows only once the layer has
+  drawn a frame (`isReadyForDisplay`); until then the tuning ground stays, and a channel change
+  cuts only on a drawn frame (owner, 2026-11-19: Channel 1 "goes black for second" as it starts). Off air is OFF AIR in display type with the return time.
 
 ## The Screening Room
 

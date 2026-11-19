@@ -5760,6 +5760,15 @@ func liveChannelsShowTheirLocalTime() throws {
     try expectEqual(LocalTime.label(for: try channel("Pakistan"), at: noon), "17:00 local time")
     try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Yogyakarta"), at: noon), "19:00 local time")
     try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Denpasar"), at: noon), "20:00 local time")
+    // Most Indonesian rows name their city only in the station's name (Fable, 2026-11-19).
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "RRI Pro 1 Ambon FM 105.1"), at: noon), "21:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "GS Radio Bali"), at: noon), "20:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Elshinta Surabaya FM 97.6"), at: noon), "19:00 local time")
+    // No city, no time: three clocks and nothing to choose between them.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Bass FM 96.6"), at: noon) == nil)
+    // A city word inside another word does not count.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Soloist FM"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel("DR Congo"), at: noon) == nil)
     try expectEqual(LocalTime.label(for: try channel("Russia", name: "Bashkortostan 24"), at: noon), "17:00 local time")
     try expectEqual(LocalTime.label(for: try channel("Russia", territory: "Chechnya"), at: noon), "15:00 local time")
     // A clock nobody can tell is left out, never guessed.

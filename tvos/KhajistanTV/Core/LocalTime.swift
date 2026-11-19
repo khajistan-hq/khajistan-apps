@@ -14,11 +14,11 @@ enum LocalTime {
         "Bangladesh": "Asia/Dhaka", "Benin": "Africa/Porto-Novo", "Bosnia and Herzegovina": "Europe/Sarajevo",
         "Brunei": "Asia/Brunei", "Burkina Faso": "Africa/Ouagadougou", "Chad": "Africa/Ndjamena",
         "China": "Asia/Shanghai", "Comoros": "Indian/Comoro", "Côte d'Ivoire": "Africa/Abidjan",
-        "Cyprus": "Asia/Nicosia", "DR Congo": "Africa/Kinshasa", "Egypt": "Africa/Cairo",
+        "Cyprus": "Asia/Nicosia", "Egypt": "Africa/Cairo",
         "Eritrea": "Africa/Asmara", "Ethiopia": "Africa/Addis_Ababa", "Georgia": "Asia/Tbilisi",
         "Greece": "Europe/Athens", "Guinea": "Africa/Conakry", "Guinea-Bissau": "Africa/Bissau",
         "Guyana": "America/Guyana", "India": "Asia/Kolkata", "NW India": "Asia/Kolkata",
-        "Indonesia": "Asia/Jakarta", "Iran": "Asia/Tehran", "Iraq": "Asia/Baghdad", "Israel": "Asia/Jerusalem",
+        "Iran": "Asia/Tehran", "Iraq": "Asia/Baghdad", "Israel": "Asia/Jerusalem",
         "Italy": "Europe/Rome", "Jordan": "Asia/Amman", "Kazakhstan": "Asia/Almaty", "Kosovo": "Europe/Belgrade",
         "Kuwait": "Asia/Kuwait", "Kyrgyzstan": "Asia/Bishkek", "Lebanon": "Asia/Beirut",
         "Liberia": "Africa/Monrovia", "Libya": "Africa/Tripoli", "Malaysia": "Asia/Kuala_Lumpur",
@@ -43,15 +43,39 @@ enum LocalTime {
     static func zone(for channel: Channel) -> TimeZone? {
         let country = channel.country?.trimmingCharacters(in: .whitespaces) ?? ""
         let territory = channel.territory ?? ""
-        // Bali runs an hour ahead of Java and Sumatra, where the rest of the registry's
-        // Indonesian stations are.
-        if country == "Indonesia", territory.contains("Denpasar") { return TimeZone(identifier: "Asia/Makassar") }
+        if country == "Indonesia" { return indonesia(channel) }
         // Bashkortostan is on Yekaterinburg time; Tatarstan and the North Caucasus on Moscow's.
         if country == "Russia" {
             let words = [channel.name, channel.nativeName ?? "", channel.broadcaster ?? "", territory].joined(separator: " ")
             if ["Bashk", "Башк", "Ufa", "Уфа"].contains(where: words.contains) { return TimeZone(identifier: "Asia/Yekaterinburg") }
         }
         return zones[country].flatMap(TimeZone.init(identifier:))
+    }
+
+    /// Indonesia runs on three clocks, and most of the registry's stations name no city in their
+    /// territory, only in their name. The city decides; a station that names none gets no time
+    /// (DR Congo, two clocks and no city on either row, is left out of the table the same way).
+    // ponytail: city words, not a gazetteer; a station in an unlisted city shows no time.
+    static let indonesiaCities: [(zone: String, words: [String])] = [
+        ("Asia/Jayapura", ["Ambon", "Maluku", "Papua", "Sorong", "Jayapura", "Ternate", "Merauke", "Manokwari"]),
+        ("Asia/Makassar", ["Bali", "Denpasar", "Makassar", "Manado", "Kupang", "Gorontalo", "Kendari", "Tarakan",
+                           "Mataram", "Lombok", "Sumbawa", "Balikpapan", "Samarinda", "Banjarmasin", "Kalimantan Timur",
+                           "Kalimantan Selatan", "Kalimantan Utara", "Sulawesi", "Palu", "NTT", "NTB"]),
+        ("Asia/Jakarta", ["Jakarta", "Yogyakarta", "Bogor", "Cianjur", "Bukittinggi", "Pekalongan", "Indramayu",
+                          "Palembang", "Padang", "Serang", "Kajen", "Kediri", "Bekasi", "Bandung", "Surabaya",
+                          "Semarang", "Solo", "Surakarta", "Malang", "Medan", "Aceh", "Pekanbaru", "Jambi",
+                          "Lampung", "Bengkulu", "Pontianak", "Kalimantan Barat", "Kalimantan Tengah", "Jawa",
+                          "Java", "Sumatera", "Sumatra", "Banten", "Tangerang", "Depok", "Cirebon", "Tegal", "Purwokerto"]),
+    ]
+
+    private static func indonesia(_ channel: Channel) -> TimeZone? {
+        let words = [channel.territory ?? "", channel.name, channel.broadcaster ?? ""].joined(separator: " ")
+        // Whole words only: "Solo" must not match inside another word.
+        let tokens = " " + words.replacingOccurrences(of: "[^\\p{L}\\p{N}]+", with: " ", options: .regularExpression) + " "
+        for (zone, cities) in indonesiaCities where cities.contains(where: { tokens.localizedCaseInsensitiveContains(" \($0) ") }) {
+            return TimeZone(identifier: zone)
+        }
+        return nil
     }
 
     /// "21:42 local time", or nil.

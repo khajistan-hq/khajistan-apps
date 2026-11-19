@@ -122,9 +122,14 @@ final class ShelfUITests: XCTestCase {
         for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }
         let plate = focusedID(app)
         XCTAssertTrue(plate.hasPrefix("cameras-"), "down to the foot of the page lands on a CCTV name, got \(plate)")
-        // Focus comes into the row on its first name, wherever the shelf above left it.
+        // Focus comes into the row on its first name, then back on the one last focused, wherever
+        // the shelf above left it: up, two to the right there, and down again.
         let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'cameras-'")).firstMatch.identifier
         XCTAssertEqual(plate, first, "focus enters CCTV on its first name")
+        press(.up, app: app)
+        press(.right, times: 2, app: app)
+        press(.down, app: app)
+        XCTAssertEqual(focusedID(app), plate, "focus comes back into CCTV on the name last focused")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")

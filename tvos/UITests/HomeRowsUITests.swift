@@ -106,7 +106,7 @@ final class HomeRowsUITests: XCTestCase {
             kjPause(1.5)
         }
         XCTAssertFalse(player.exists, "Back closes the player")
-        XCTAssertTrue(app.buttons["genre-music"].waitForExistence(timeout: 15), "Back closes the player")
+        XCTAssertTrue(app.buttons["genre-music"].waitForExistence(timeout: 15), "the home page is back under the player")
         kjPause(1.5)
         XCTAssertTrue(app.buttons["genre-music"].hasFocus, "Back from the player returns to the theme pressed")
         // From below, focus comes back to the theme last focused, not to the one above the card left.

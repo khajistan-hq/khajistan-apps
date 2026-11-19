@@ -63,6 +63,8 @@ struct ReceiverView: View {
         switch link {
         case .receiver:
             model.receiverPath = []
+            // The front opens at its top, not on the CCTV name that opened the region.
+            model.camerasFirst = nil
             model.link = nil
         case .region(let id):
             guard let index = model.receiver.index else { return }
@@ -776,6 +778,8 @@ private struct CCTVRow: View {
     @State private var lastFocused: String?
     /// The name whose region page is open, focused again when the page comes back.
     @State private var pressed: String?
+    /// Where the row last sat on screen, to tell a push down from a scroll.
+    @State private var lastY: CGFloat?
 
     var body: some View {
         let regions = CameraRegions.ordered(index)
@@ -816,17 +820,34 @@ private struct CCTVRow: View {
                 .padding(.leading, -26)
             }
             .focusSection()
-            .defaultFocus($focused, regions.contains { $0.id == lastFocused } ? lastFocused : regions.first?.id)
-            .onChange(of: focused) { _, now in if let now { lastFocused = now } }
-            // Shelves loading above push the row down; a focused name stays on screen.
-            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { _ in
-                if focused != nil { keepVisible() }
+            // Entering the row, focus goes to the first name, then to the one last focused. tvOS
+            // gives the name under the card it came from and does not honour defaultFocus here
+            // (UI test, 2026-11-19), so the row moves it itself.
+            .onChange(of: focused) { old, now in
+                guard let now else { return }
+                let home = regions.contains { $0.id == lastFocused } ? lastFocused : regions.first?.id
+                if old == nil, let home, now != home {
+                    focused = home
+                } else {
+                    lastFocused = now
+                }
+            }
+            // Shelves loading above push the row down; a focused name stays on screen. Only a push
+            // down acts: the focus engine's scroll and this one move the row up. Not reproduced
+            // on the simulator, where the shelves land before a walk reaches the foot; aimed at
+            // the slower Apple TV HD.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
+                defer { lastY = y }
+                if focused != nil, let lastY, y > lastY + 1 { keepVisible() }
             }
             // Back from the region page: the name pressed takes focus again, and a later visit to
             // the same region from the list opens on its television, not its cameras.
             .onAppear {
                 guard let id = pressed else { return }
                 pressed = nil
+                // Back from the region leaves camerasFirst set; a link that opened the front
+                // cleared it, and then the front opens at its top.
+                guard model.camerasFirst == id else { return }
                 model.camerasFirst = nil
                 Task { @MainActor in
                     focused = id

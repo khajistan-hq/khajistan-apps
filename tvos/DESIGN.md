@@ -205,7 +205,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · 7 scheduled channels · Pakistan
   time (UTC+5)*, then a TV guide: one row per channel the schedule's `_meta.channels` names, read
   left to right as a printed guide. The number (48pt), the channel's name without its
-  "Channel N ·" (name style), the hours of what is on (*18:00–18:15*, body, tabular figures) and
+  "Channel N ·" as a kicker (upper case, spaced, the accent colour), so it reads as a label and
+  never as a programme, the hours of what is on (*18:00–18:15*, body, tabular figures) and
   what is on (name style): the programme by its standardized name, as the player's strip
   heads it, else the show, and nothing when that only repeats the channel's name. Off air the hours column reads *Off air* and the show column the site's
   line *Back at 23:00 PKT with The Feature.*, both faint. Nothing about later: no Up next, no

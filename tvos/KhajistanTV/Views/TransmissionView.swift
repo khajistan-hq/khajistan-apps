@@ -243,8 +243,10 @@ private struct ScheduleRow: View {
                 .kjName(48)
                 .monospacedDigit()
                 .frame(width: 80, alignment: .trailing)
-            Text(name)
-                .kjName()
+            // The channel is a label and the programme the headline, so the two never read as
+            // the same kind of thing (owner, 2026-11-19: "there needs to be a distinction between
+            // name of channel in transmission and the program playing").
+            Kicker(name)
                 .lineLimit(1)
                 .frame(width: 420, alignment: .leading)
             if let air = onAir {

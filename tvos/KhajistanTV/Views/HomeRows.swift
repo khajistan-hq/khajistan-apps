@@ -18,9 +18,6 @@ struct HomeRows: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Until launch the schedule is locked and its door in the top bar says so; a shelf of
-            // two closed cards here would be a second door to the same closed room.
-            if model.transmission.programming != nil { transmissionRow }
             // A section this build leaves out (StoreBuild: Pics/Vids, Chat, the Reading Room and
             // every room but the Screening Room in the App Store build) has no shelf on Home either.
             if StoreBuild.includes(.reading) { readingRow }
@@ -58,48 +55,6 @@ struct HomeRows: View {
         .fullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row, list: pnvRows)
         }
-    }
-
-    // MARK: - Transmission
-
-    private var transmissionRow: some View {
-        let store = model.transmission
-        let now = TransmissionStore.now()
-        return Shelf("Khajistan Transmission") {
-            // Until the schedule says which channels there are, one door to the station page.
-            if store.channelNumbers.isEmpty {
-                Button {
-                    model.open(DeepLink.transmission.url)
-                } label: {
-                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
-                        Kicker("Khajistan Transmission")
-                    }
-                }
-                .buttonStyle(HouseCardStyle())
-                .accessibilityIdentifier("home-transmission-station")
-            }
-            ForEach(store.channelNumbers, id: \.self) { number in
-                let onAir = store.nowOn(channel: number, at: now)
-                Button {
-                    model.open(DeepLink.channel(number).url)
-                } label: {
-                    CardPlate(width: ChannelCard.width, height: ChannelCard.height) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Kicker(onAir == nil ? "Channel \(number)" : "Channel \(number) \u{00B7} On air")
-                            if store.programming != nil {
-                                Text(onAir?.show?.name ?? store.channelName(number))
-                                    .kjName()
-                                    .lineLimit(2)
-                            }
-                        }
-                    }
-                }
-                .buttonStyle(HouseCardStyle())
-                .onPlayPauseCommand { model.open(DeepLink.channel(number).url) }
-                .accessibilityIdentifier("home-transmission-\(number)")
-            }
-        }
-        .accessibilityIdentifier("home-shelf-transmission")
     }
 
     // MARK: - Reading Room

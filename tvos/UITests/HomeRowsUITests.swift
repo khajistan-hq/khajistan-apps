@@ -61,7 +61,9 @@ final class HomeRowsUITests: XCTestCase {
         for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
         }
-        // CCTV is the foot of the page (owner, 2026-11-19).
+        // No Screening Room or Transmission shelf on Home; CCTV is the foot of the page (owner,
+        // 2026-11-19).
+        XCTAssertFalse(reached.contains("films") || reached.contains("transmission"), "Home carries no film or Transmission shelf; reached \(reached)")
         XCTAssertEqual(reached.last, "cameras", "CCTV is the last shelf; reached \(reached)")
 
         // Up walks back to the front.

@@ -125,8 +125,10 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   "Street cameras"), and since 2026-11-19 it is a row of region names, each with its live count,
   set as Themes is, at the foot of the page (owner: "cctv should go at the bottom of the main
   page" and "need no cards just names is wnough that can be clicked"). Select opens the region
-  on its cameras. In the store build these stay: Liked, Themes, the Screening Room, Transmission
-  (once the schedule loads) and CCTV last. The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
+  on its cameras. Khajistan Transmission and the Screening Room have no shelf on Home since the
+  same day (owner: "remov khajistan transmission and screening room from the home page of the
+  apple tv"); each has its door in the top bar. In the store build Home is Liked, Themes and
+  CCTV. The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
   Bazaar, Chat) after the Themes row. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.

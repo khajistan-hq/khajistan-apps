@@ -100,7 +100,9 @@ struct ReceiverView: View {
                     }
                     ThemeRow()
                     HomeSections()
-                    filmsRow
+                    // Transmission and the Screening Room are not shelves here: each has its own
+                    // door in the top bar (owner, 2026-11-19: "remov khajistan transmission and
+                    // screening room from the home page of the apple tv").
                     HomeRows()
                     // Shelves above it arrive on their own fetches after it is drawn, so a name
                     // focused early is kept on screen as they push it down.
@@ -263,22 +265,6 @@ struct ReceiverView: View {
         surfTask?.cancel()
         surfTask = nil
         shuffling = false
-    }
-
-    // MARK: - The Screening Room
-
-    /// The Screening Room, every film as the site's On Demand carries them, on a shelf of posters.
-    @ViewBuilder
-    private var filmsRow: some View {
-        let films = model.films.films
-        if !films.isEmpty {
-            FilmShelf(
-                title: "The Screening Room",
-                count: "\(films.count) \(films.count == 1 ? "film" : "films") on demand",
-                films: films
-            )
-            .accessibilityIdentifier("screeningRoom")
-        }
     }
 
     private func failure(_ message: String) -> some View {

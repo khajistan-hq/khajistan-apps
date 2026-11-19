@@ -141,7 +141,10 @@ struct ChannelHero: View {
                 .lineLimit(2)
                 .minimumScaleFactor(0.7)
                 .accessibilityIdentifier("heroName")
-            if !channel.place.isEmpty { Text(channel.place).kjBody().lineLimit(1) }
+            TimelineView(.everyMinute) { context in
+                let place = channel.placeAndTime(at: context.date)
+                if !place.isEmpty { Text(place).kjBody().lineLimit(1) }
+            }
             if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
                 Text(broadcaster).kjSmall(faint: true).lineLimit(1)
             }

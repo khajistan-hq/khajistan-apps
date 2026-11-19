@@ -21,6 +21,12 @@ struct TransmissionPlayerView: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var overlayVisible = true
+    /// Whether each player's layer has a frame on screen. The black behind the picture shows only
+    /// once the front one has (owner, 2026-11-19: "when i play channel 1 it goes black for second
+    /// befoe coming back on"): Playing is reported before the first frame is drawn, and the gap
+    /// read as a black flash.
+    @State private var frameA = false
+    @State private var frameB = false
     @State private var hideTask: Task<Void, Never>?
     @State private var showSignIn = false
     @State private var switching = false
@@ -170,6 +176,13 @@ struct TransmissionPlayerView: View {
         .padding(.horizontal, KJLayout.inset)
     }
 
+    /// A picture programme playing whose first frame is not drawn yet. A schedule file (DEBUG, UI
+    /// tests) plays no picture and never waits.
+    private func waitingForFrame(_ air: OnAir) -> Bool {
+        guard air.programme?.audio_only != true, !store.isScheduleFile else { return false }
+        return !(store.aIsFront ? frameA : frameB)
+    }
+
     private func onAir(_ air: OnAir) -> some View {
         ZStack {
             if air.programme?.audio_only == true {
@@ -180,14 +193,14 @@ struct TransmissionPlayerView: View {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
                 Color.black.ignoresSafeArea()
                 // Both signals keep a layer of their own; the cut is which one shows.
-                PlayerLayerView(player: store.playerA.player, onLayer: pip.bind)
+                PlayerLayerView(player: store.playerA.player, onLayer: pip.bind, onReady: { frameA = $0 })
                     .ignoresSafeArea()
                     .opacity(store.aIsFront ? 1 : 0)
-                PlayerLayerView(player: store.playerB.player, onLayer: pip.bind)
+                PlayerLayerView(player: store.playerB.player, onLayer: pip.bind, onReady: { frameB = $0 })
                     .ignoresSafeArea()
                     .opacity(store.aIsFront ? 0 : 1)
             }
-            if store.player.state == .tuning {
+            if store.player.state == .tuning || waitingForFrame(air) {
                 // The ground covers the picture while the signal is on its way; the loader itself
                 // sits in the overlay, between the band and the panel.
                 palette.ground.ignoresSafeArea()
@@ -778,7 +791,10 @@ struct TransmissionPlayerView: View {
             // The channel's own tune time, signing included, to its first frame; never the bird.
             TuneTimes.recordWhenPlaying(key, player: next, since: started) { !left }
             while !left, !Task.isCancelled {
-                let ready = next.state == .playing || { if case .failed = next.state { return true }; return false }()
+                // Playing with a frame drawn: Playing alone comes before the first frame, and a
+                // cut then shows black until it lands.
+                let framed = (store.aIsFront ? frameB : frameA) || store.isScheduleFile
+                let ready = (next.state == .playing && framed) || { if case .failed = next.state { return true }; return false }()
                 if ready {
                     #if DEBUG
                     print("KJSWITCH cut ch=\(pending.channel) state=\(next.state) after=\(ContinuousClock.now - started) bird=\(pigeon.current?.name ?? "-")")

@@ -60,8 +60,8 @@ final class DeepLinkUITests: XCTestCase {
 
         let seventh = app.buttons["transmission-channel-7"]
         for _ in 0..<4 where !app.buttons["transmission-channel-1"].hasFocus { XCUIRemote.shared.press(.down) }
-        for _ in 0..<10 where !(seventh.exists && seventh.hasFocus) { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(seventh.exists && seventh.hasFocus, "focus walks right to Channel 7's card")
+        for _ in 0..<10 where !(seventh.exists && seventh.hasFocus) { XCUIRemote.shared.press(.down); kjPause(0.6) }
+        XCTAssertTrue(seventh.exists && seventh.hasFocus, "focus walks down to Channel 7's row")
         screenshot("seven-1-channel-7-card", app: app)
         XCUIRemote.shared.press(.select)
 

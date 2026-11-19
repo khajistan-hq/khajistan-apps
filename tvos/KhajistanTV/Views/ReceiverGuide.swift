@@ -236,8 +236,12 @@ struct RadioNowPlaying: View {
                 .kjDisplay()
                 .multilineTextAlignment(.center)
             let broadcaster = channel.broadcaster == channel.name ? nil : channel.broadcaster
-            let line = [channel.place, broadcaster].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-            if !line.isEmpty { Text(line).kjBody().multilineTextAlignment(.center) }
+            // The place and the time there, read again on the minute.
+            TimelineView(.everyMinute) { context in
+                let line = [channel.placeAndTime(at: context.date), broadcaster].compactMap { $0 }.filter { !$0.isEmpty }
+                    .joined(separator: " \u{00B7} ")
+                if !line.isEmpty { Text(line).kjBody().multilineTextAlignment(.center) }
+            }
             // The kicker above already says "Now playing"; the line is the song alone.
             Text(song.isEmpty ? NowPlaying.unavailable : song)
                 .kjSmall(faint: song.isEmpty).multilineTextAlignment(.center)

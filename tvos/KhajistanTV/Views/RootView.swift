@@ -28,7 +28,13 @@ struct RootView: View {
 
     private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            TopBar(current: model.section, select: { model.section = $0 })
+            // Receiver in the top bar opens the Receiver's home, from a region page or from another
+            // section left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it
+            // should go to home page").
+            TopBar(current: model.section, select: { section in
+                if section == .receiver { model.receiverPath = [] }
+                model.section = section
+            })
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()

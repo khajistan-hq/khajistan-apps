@@ -362,7 +362,8 @@ struct ReceiverPlayerView: View {
             // writes the channel's parked reason ("No captions: …") on almost every music
             // channel, and the song never showed on television.
             if !model.captions.note.isEmpty, tvSong == nil || model.captions.isEnabled { return model.captions.note }
-            let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
+            let place = current.placeAndTime()
+            let line = [place.isEmpty ? nil : place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }
     }

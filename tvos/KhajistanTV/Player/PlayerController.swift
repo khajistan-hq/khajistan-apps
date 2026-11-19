@@ -407,7 +407,9 @@ final class PlayerController {
                 #if DEBUG
                 print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
                 #endif
-                self.landedAt = self.player.currentTime().seconds
+                // A time the player cannot read holds nothing: NaN would never compare as moved.
+                let landed = self.player.currentTime().seconds
+                self.landedAt = landed.isFinite ? landed : nil
                 self.player.play()
             }
         }

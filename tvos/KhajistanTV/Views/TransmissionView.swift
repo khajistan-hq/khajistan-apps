@@ -252,8 +252,7 @@ private struct ScheduleRow: View {
                     .kjBody()
                     .monospacedDigit()
                     .frame(width: 210, alignment: .leading)
-                // A slot whose show the schedule has lost keeps its hours, as on the site.
-                Text(air.show?.name ?? "")
+                Text(onNow(air))
                     .kjName()
                     .lineLimit(1)
             } else {
@@ -274,12 +273,21 @@ private struct ScheduleRow: View {
         .accessibilityLabel(spoken)
     }
 
+    /// What is on: the programme by its standardized name, as the player's strip heads it, else
+    /// the show. Nothing when that is only the channel's own name again (a one-show channel), and
+    /// nothing for a slot whose show the schedule has lost; the hours still show.
+    private func onNow(_ air: OnAir) -> String {
+        let now = air.nowName ?? air.show?.name ?? ""
+        return now == name ? "" : now
+    }
+
     /// "Channel 1, Bioscope, 18:00 to 18:15 Pakistan time, Ghunghat."
     private var spoken: String {
         var parts = ["Channel \(number)", name]
         if let air = onAir {
             parts.append("\(air.startLabel) to \(air.endLabel) Pakistan time")
-            if let show = air.show?.name, !show.isEmpty { parts.append(show) }
+            let now = onNow(air)
+            if !now.isEmpty { parts.append(now) }
         } else {
             parts.append(returns.map { backLine($0) } ?? "Off air")
         }

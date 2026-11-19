@@ -40,7 +40,7 @@ struct TransmissionSection: View {
         guard case .ready = store.schedule, let count = store.programmeCount, channels > 0 else {
             return "Scheduled channels \u{00B7} Pakistan time (UTC+5)"
         }
-        let hours = store.programmeHours.map { "\($0.formatted()) hours on automatic \u{00B7} " } ?? ""
+        let hours = store.programmeHours.map { "\($0.formatted()) hours \u{00B7} " } ?? ""
         return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(hours)\(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
     }
 

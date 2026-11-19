@@ -97,7 +97,15 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["genre-music"].hasFocus, "right from News is Music")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 30), "Select on a theme opens the player")
-        XCUIRemote.shared.press(.menu)
+        // A theme plays a random channel. Over a playing picture the first Back only hides the
+        // strip, as on Apple's app, and the second leaves; radio leaves on the first. One Back was
+        // a coin toss on which channel came up.
+        let player = app.staticTexts["currentChannel"]
+        for _ in 0..<3 where player.exists {
+            XCUIRemote.shared.press(.menu)
+            kjPause(1.5)
+        }
+        XCTAssertFalse(player.exists, "Back closes the player")
         XCTAssertTrue(app.buttons["genre-music"].waitForExistence(timeout: 15), "Back closes the player")
         kjPause(1.5)
         XCTAssertTrue(app.buttons["genre-music"].hasFocus, "Back from the player returns to the theme pressed")

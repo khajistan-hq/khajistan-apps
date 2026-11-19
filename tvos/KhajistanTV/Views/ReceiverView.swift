@@ -126,6 +126,8 @@ struct ReceiverView: View {
             .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
+            // Launch focus. The front's own default (above) is for focus coming back in from the
+            // shelves; this one places the first focus of the screen.
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the list) goes to Surf first; Back from
             // Surf leaves the app, as tvOS does from a root screen. With the PiP window up, Back

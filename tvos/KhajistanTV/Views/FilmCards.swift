@@ -16,8 +16,8 @@ struct FilmShelf: View {
     /// Set by a screen that holds the film's page itself (the Screening Room): a shelf that
     /// leaves (Up Next empties when a film ends) must not take the open page with it.
     var present: ((Film, _ direct: Bool) -> Void)? = nil
-    /// The first shelf on its page: Up from it goes to the top bar (AppModel.topBarCall), whatever
-    /// the page's scroll has done to the geometry.
+    /// The first shelf of the store build's Screening Room, the one page that sets it: Up from it
+    /// goes to the top bar (AppModel.topBarCall), whatever the page's scroll has done.
     var leadsPage = false
     @Environment(AppModel.self) private var model
 

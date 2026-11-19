@@ -1,8 +1,8 @@
 import XCTest
 
-/// Up reaches the top bar from the Receiver front: from Surf, from the region list and from a
-/// shelf below the front (owner, 2026-11-18: "no way to go to the nav when i touch the top on the
-/// appletv remote").
+/// Up reaches the top bar: on the Receiver front from Surf, the region list and the shelves below,
+/// from every section, and from the store build's Screening Room shelves (owner, 2026-11-18: "no
+/// way to go to the nav when i touch the top on the appletv remote").
 final class TopNavReachUITests: XCTestCase {
     private func focusedId(_ app: XCUIApplication) -> String {
         let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
@@ -145,6 +145,11 @@ final class TopNavReachUITests: XCTestCase {
         XCTAssertTrue(ok, "Up from the first shelf reaches the top bar: \(trail)")
         XCTAssertTrue(tab.hasFocus, "Up lands on Screening Room, the section on screen: \(trail)")
         for _ in 0..<3 { XCUIRemote.shared.press(.down); kjPause(0.7) }
+        // A deeper shelf is not the first: its first Up stays among the posters.
+        XCUIRemote.shared.press(.up)
+        kjPause(0.7)
+        let above = focusedId(app)
+        XCTAssertTrue(above.hasPrefix("film-") || above.hasPrefix("upnext-"), "Up from a deeper shelf moves one shelf up, not to the bar: \(above)")
         let (ok2, trail2) = upToNav(app, limit: 10)
         print("TOPNAV rooms deeper shelf up:", trail2)
         XCTAssertTrue(ok2, "Up from a deeper shelf reaches the top bar: \(trail2)")

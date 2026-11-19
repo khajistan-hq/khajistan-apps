@@ -76,9 +76,6 @@ struct TVScreeningRoom: View {
         }
     }
 
-    private enum Lead: Equatable { case upNext, watchlist, country(String), other }
-    private func leads(_ shelf: Lead, _ lead: Lead) -> Bool { underTopBar && shelf == lead }
-
     @ViewBuilder
     private var shelves: some View {
         let films = model.films.films
@@ -87,20 +84,19 @@ struct TVScreeningRoom: View {
         let showsList = model.auth.isSignedIn && !listed.isEmpty
         let byCountry = Dictionary(grouping: films) { ($0.country ?? "").trimmingCharacters(in: .whitespaces) }
         let countries = byCountry.keys.filter { !$0.isEmpty }.sorted { (byCountry[$0]!.count, $1) > (byCountry[$1]!.count, $0) }
-        // The shelf on top, whose Up goes to the top bar: by its place, never by its title, which
-        // a country could share.
-        let lead: Lead = !stopped.isEmpty ? .upNext : showsList ? .watchlist : countries.first.map { .country($0) } ?? .other
+        // The shelf on top takes Up to the top bar: each shelf asks whether those above it are empty.
+        let noneAbove = underTopBar && stopped.isEmpty && !showsList
         if !stopped.isEmpty {
-            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present, leadsPage: leads(.upNext, lead))
+            FilmShelf(title: "Up Next", count: stopped.count.formatted(), films: stopped, opensPage: true, showsPlaces: true, present: present, leadsPage: underTopBar)
         }
         if showsList {
-            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present, leadsPage: leads(.watchlist, lead))
+            FilmShelf(title: "Your watchlist", count: listed.count.formatted(), films: listed, opensPage: true, present: present, leadsPage: underTopBar && stopped.isEmpty)
         }
         ForEach(countries, id: \.self) { country in
-            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present, leadsPage: leads(.country(country), lead))
+            FilmShelf(title: country, count: byCountry[country]!.count.formatted(), films: byCountry[country]!, opensPage: true, present: present, leadsPage: noneAbove && country == countries.first)
         }
         if let unfiled = byCountry[""] {
-            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present, leadsPage: leads(.other, lead))
+            FilmShelf(title: "Other films", count: unfiled.count.formatted(), films: unfiled, opensPage: true, present: present, leadsPage: noneAbove && countries.isEmpty)
         }
     }
 }

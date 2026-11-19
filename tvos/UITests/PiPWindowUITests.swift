@@ -103,9 +103,9 @@ final class PiPWindowUITests: XCTestCase {
             return f.exists ? (f.identifier.isEmpty ? "<\(f.label)>" : f.identifier) : "none"
         }
         var trail = [focusedId()]
-        // From the bar, Up climbs the shelves (one press each, nine on this front), then lands
-        // on Surf, then the bar: never into the A–Z list, whose twelve rows read as Up going nowhere.
-        for _ in 0..<14 where !nav.exists { XCUIRemote.shared.press(.up); kjPause(0.5); trail.append(focusedId()) }
+        // From the bar, Up climbs the shelves (one press each), then lands on Surf, then the bar:
+        // never into the A–Z list, whose twelve rows read as Up going nowhere.
+        for _ in 0..<24 where !nav.exists { XCUIRemote.shared.press(.up); kjPause(0.5); trail.append(focusedId()) }
         print("PIPNAV up trail:", trail)
         XCTAssertTrue(nav.exists, "Up reaches the top bar with the PiP window up: \(trail)")
         XCTAssertFalse(trail.contains { $0.hasPrefix("region-") }, "Up does not walk the A–Z list: \(trail)")
@@ -244,6 +244,24 @@ final class PiPWindowUITests: XCTestCase {
         }
         print("PIPNAV rooms up trail:", trail)
         XCTAssertTrue(rooms.hasFocus, "Up from the bar reaches the Screening Room tab: \(trail)")
+        // The owner's screen exactly: the window up, a focused Up Next poster. One Up is the tab;
+        // without topBarCall Up stayed on the poster for ten presses.
+        // Down from the tab goes to the poster nearest under it, which with one film in Up Next
+        // (far left) is the next shelf; Up from there is the Up Next poster.
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'upnext-' AND hasFocus == true")).firstMatch
+        var walk: [String] = []
+        func step(_ d: XCUIRemote.Button) {
+            XCUIRemote.shared.press(d)
+            kjPause(0.8)
+            let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            walk.append(f.exists ? f.identifier : "none")
+        }
+        step(.down)
+        for _ in 0..<2 where !poster.exists { step(.up) }
+        XCTAssertTrue(poster.exists, "an Up Next poster takes focus: \(walk)")
+        XCUIRemote.shared.press(.up)
+        kjPause(0.8)
+        XCTAssertTrue(rooms.hasFocus, "one Up from the Up Next poster reaches the Screening Room tab")
         // And from the tab, Back lights the bar again.
         XCUIRemote.shared.press(.menu)
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,

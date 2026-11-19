@@ -63,12 +63,12 @@ final class HomeRowsUITests: XCTestCase {
         }
 
         // Up walks back to the front.
-        for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && focusedID(app) != "beyondTheAtlas" {
+        for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && !["beyondTheAtlas", "shuffle"].contains(focusedID(app)) {
             XCUIRemote.shared.press(.up)
             kjPause(0.6)
         }
         let back = focusedID(app)
-        XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "up returns to the front, got \(back)")
+        XCTAssertEqual(back, "shuffle", "up returns to the front at Surf, not the A–Z list or the switch")
     }
 
     /// News is a shelf on the front (owner, 2026-11-04), and its first cards get live stills, which

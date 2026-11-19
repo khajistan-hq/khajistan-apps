@@ -96,11 +96,11 @@ final class ShelfUITests: XCTestCase {
                 shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
             }
-            // Up through the parts of Khajistan and the genre shelves returns to the front: the
-            // sidebar's switch, which sits straight above the left-most card, or the list.
+            // Up through the parts of Khajistan and the genre shelves returns to the front at Surf,
+            // never the A–Z list or the switch (owner, 2026-11-18: "no way to go to the nav").
             press(.up, times: 2 + genres, app: app)
             let back = focusedID(app)
-            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
+            XCTAssertEqual(back, "shuffle", "\(skin): up from the first shelf returns to the front at Surf")
             app.terminate()
         }
     }

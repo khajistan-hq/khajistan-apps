@@ -21,7 +21,7 @@ struct ReceiverView: View {
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
-    /// The switch at the foot of the sidebar, where Up from the first shelf lands.
+    /// The switch at the foot of the sidebar ("Beyond the atlas").
     @FocusState private var switchFocused: Bool
 
     var body: some View {
@@ -92,6 +92,13 @@ struct ReceiverView: View {
                                // Focus in the list: the page back at its top, so the map the list
                                // lights is whole, never a sliver under the top bar.
                                listFocused: { toTop(proxy) })
+                        // Up from a shelf lands on Surf, whichever column it came from, so one
+                        // more Up reaches the top bar. From the right-hand shelves it entered the
+                        // A–Z list at Turkistan and walked all twelve rows first, which read on
+                        // the Apple TV as Up never reaching the bar (owner, 2026-11-18: "no way
+                        // to go to the nav"). Down from the bar lands on Surf as before.
+                        .focusSection()
+                        .defaultFocus($surfFocused, true, priority: .userInitiated)
                         .padding(.bottom, 12)
                     // In a stack of their own with no spacing: a front with no likes has no gap
                     // where the shelf would be. The shelf brings its own 12 points above it.
@@ -113,15 +120,20 @@ struct ReceiverView: View {
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
-            // Up from the first shelf lands on the switch, and Back lands on Surf: the page back
-            // at its top for either, as for the list, so the front is never left half under the bar.
+            // Up from the first shelf and Back both land on Surf, and Down from Surf reaches the
+            // switch: the page back at its top for either, as for the list, so the front is never
+            // left half under the bar.
             .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
+            // Launch focus. The front's own default (above) is for focus coming back in from the
+            // shelves; this one places the first focus of the screen.
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the list) goes to Surf first; Back from
-            // Surf leaves the app, as tvOS does from a root screen.
-            .onExitCommand(perform: surfFocused ? nil : { surfFocused = true })
+            // Surf leaves the app, as tvOS does from a root screen. With the PiP window up, Back
+            // goes on to the bar (PiPBarHost): this handler only hears Back while focus is on the
+            // front, so the bar is not lit then.
+            .onExitCommand(perform: surfFocused || model.activePiP != nil ? nil : { surfFocused = true })
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {

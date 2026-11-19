@@ -51,6 +51,11 @@ final class AppModel {
     var transmissionPiP: PictureInPicture?
     /// A Screening Room film playing in the picture-in-picture window, its player screen closed.
     var filmPiP: FilmAway?
+    /// Bumped to send focus to the top bar's current tab (TopBar). Up from the first shelf of the
+    /// store build's Screening Room asks for it: a poster taller than the page left by the PiP bar is scrolled up under the top bar,
+    /// and tvOS then finds nothing wholly above it to move to (owner, 2026-11-18: "no way to go to
+    /// the nav").
+    var topBarCall = 0
     /// The corner window that is up, whichever player put it there, for the PiP bar.
     var activePiP: PictureInPicture? {
         [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }

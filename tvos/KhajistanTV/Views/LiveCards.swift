@@ -145,9 +145,6 @@ struct ChannelHero: View {
             if let broadcaster = channel.broadcaster, !broadcaster.isEmpty, broadcaster != channel.name {
                 Text(broadcaster).kjSmall(faint: true).lineLimit(1)
             }
-            // What the remote does here, for anyone new to it.
-            Text("Press to watch full screen \u{00B7} Back for the map").kjSmall(faint: true).lineLimit(1)
-                .accessibilityHidden(true)
         }
     }
 
@@ -175,7 +172,7 @@ struct ChannelHero: View {
                             Kicker("Tuning\u{2026}")
                             // A preview that never arrives is no reason to stop: the full-screen
                             // player tries harder, and another channel is one press away.
-                            if slow { Text("Still tuning. Press to watch full screen, or try another channel.").kjSmall().multilineTextAlignment(.center).padding(.horizontal, 40) }
+                            if slow { Text("Still tuning.").kjSmall().multilineTextAlignment(.center).padding(.horizontal, 40) }
                         }
                     }
                 }

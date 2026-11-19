@@ -176,13 +176,14 @@ struct TransmissionPlayerView: View {
         .padding(.horizontal, KJLayout.inset)
     }
 
-    /// A picture programme playing whose first frame is not drawn yet. A schedule file (DEBUG, UI
-    /// tests) plays no picture and never waits.
+    /// The programme on air is sound with no picture, so no layers are drawn.
     private var soundOnlyNow: Bool {
         if case .onAir(let air) = store.phase { return air.programme?.audio_only == true }
         return false
     }
 
+    /// A picture programme playing whose first frame is not drawn yet. A schedule file (DEBUG, UI
+    /// tests) plays no picture and never waits.
     private func waitingForFrame(_ air: OnAir) -> Bool {
         guard air.programme?.audio_only != true, !store.isScheduleFile else { return false }
         return !(store.aIsFront ? frameA : frameB)

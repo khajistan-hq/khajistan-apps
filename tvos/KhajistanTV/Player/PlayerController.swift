@@ -425,9 +425,10 @@ final class PlayerController {
             // new place is drawn; the screen then showed the frame it held, often a film's black
             // head, for a second (owner, 2026-11-19, Channel 1). Playing waits until the clock has
             // moved on from where the seek landed, so frames from there are coming through. A
-            // signal that never moves stays tuning, and the start-up timeout ends it.
+            // signal that never moves stays tuning, and the start-up timeout ends it. Moved either
+            // way: a scrub back during the hold (a film resumed, then rewound) also ends it.
             if let landed = landedAt {
-                guard player.currentTime().seconds >= landed + 0.3 else {
+                guard abs(player.currentTime().seconds - landed) >= 0.3 else {
                     let gen = generation
                     Task { @MainActor [weak self] in
                         try? await Task.sleep(for: .milliseconds(100))

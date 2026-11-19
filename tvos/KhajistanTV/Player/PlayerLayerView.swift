@@ -41,10 +41,7 @@ final class PlayerUIView: UIView {
     var soundCarriesInBackground = false
     var onReady: (@MainActor (Bool) -> Void)? {
         // Told after the update that set it, never inside it: the closure writes view state.
-        didSet {
-            let ready = (layer as! AVPlayerLayer).isReadyForDisplay
-            DispatchQueue.main.async { [weak self] in self?.report(ready) }
-        }
+        didSet { DispatchQueue.main.async { [weak self] in self?.report() } }
     }
     private var readyObservation: NSKeyValueObservation?
 
@@ -60,15 +57,16 @@ final class PlayerUIView: UIView {
 
     private func configure() {
         backgroundColor = .clear
-        readyObservation = (layer as! AVPlayerLayer).observe(\.isReadyForDisplay, options: [.new]) { [weak self] observed, _ in
-            let ready = observed.isReadyForDisplay
-            DispatchQueue.main.async { self?.report(ready) }
+        readyObservation = (layer as! AVPlayerLayer).observe(\.isReadyForDisplay, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.report() }
         }
         NotificationCenter.default.addObserver(self, selector: #selector(enteringForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
     }
 
-    private func report(_ ready: Bool) {
+    /// Reads the layer when the report is delivered, so a late report can never carry an old value.
+    private func report() {
         guard let onReady else { return }
+        let ready = (layer as! AVPlayerLayer).isReadyForDisplay
         MainActor.assumeIsolated { onReady(ready) }
     }
 

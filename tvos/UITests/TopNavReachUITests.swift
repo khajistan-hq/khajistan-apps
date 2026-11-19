@@ -82,7 +82,11 @@ final class TopNavReachUITests: XCTestCase {
         kjLaunch(app)
         XCTAssertTrue(app.buttons["nav-receiver"].waitForExistence(timeout: 60))
         kjPause(3)
-        for id in ["nav-transmission", "nav-rooms", "nav-account"] {
+        // Every tab the build shows, after Receiver: four in the store build, more in the full one.
+        let ids = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-'")).allElementsBoundByIndex
+            .map(\.identifier).filter { $0 != "nav-receiver" }
+        XCTAssertGreaterThanOrEqual(ids.count, 3, "the top bar shows its tabs: \(ids)")
+        for id in ids {
             let (ok0, t0) = upToNav(app, limit: 12)
             XCTAssertTrue(ok0, "reach the bar before \(id): \(t0)")
             let tab = app.buttons[id]
@@ -107,7 +111,7 @@ final class TopNavReachUITests: XCTestCase {
         #if !KJ_APP_STORE
         // In the full build the Rooms tab opens Rooms, not the Screening Room.
         throw XCTSkip("the Screening Room is its own section only in the store build (KJ_APP_STORE)")
-        #endif
+        #else
         guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN")
         }
@@ -153,5 +157,6 @@ final class TopNavReachUITests: XCTestCase {
         let (ok2, trail2) = upToNav(app, limit: 10)
         print("TOPNAV rooms deeper shelf up:", trail2)
         XCTAssertTrue(ok2, "Up from a deeper shelf reaches the top bar: \(trail2)")
+        #endif
     }
 }

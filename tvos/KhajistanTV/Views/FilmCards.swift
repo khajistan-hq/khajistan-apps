@@ -35,7 +35,7 @@ struct FilmShelf: View {
                     onChoose()
                     if let present { present(film, opensPage) } else if opensPage { playingDirect = film } else { playing = film }
                 }
-                .onMoveCommand { if leadsPage, $0 == .up { model.topBarCall += 1 } }
+                .onMoveCommand(perform: leadsPage ? { if $0 == .up { model.topBarCall += 1 } } : nil)
                 .accessibilityIdentifier(showsPlaces ? "upnext-\(film.handle)" : "film-\(film.handle)")
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }

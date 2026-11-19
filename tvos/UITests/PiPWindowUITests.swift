@@ -126,6 +126,12 @@ final class PiPWindowUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
                        "on Transmission, one Back lights Full screen")
         XCTAssertFalse(regions.firstMatch.exists, "and the section did not change")
+        // Up from the bar on Transmission reaches its tab, and Back from the tab lights the bar.
+        for _ in 0..<8 where !nav.exists { XCUIRemote.shared.press(.up); kjPause(0.5) }
+        XCTAssertTrue(transmissionTab.hasFocus, "Up on Transmission with the window up reaches its tab")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "from the Transmission tab, one Back lights Full screen")
         // From the bar, Back goes back a section as before; the window stays up.
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "from the bar, Back goes back to the atlas")

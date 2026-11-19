@@ -77,7 +77,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (the front's camera regions, the Transmission channels) sit on a `CardPlate`:
+- **Text cards** (Rooms, the Madrassa, the home's See all) sit on a `CardPlate`:
   the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
   front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
   Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.

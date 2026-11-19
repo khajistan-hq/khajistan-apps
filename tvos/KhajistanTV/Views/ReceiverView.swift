@@ -10,7 +10,6 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var composed: ComposedMap?
     @State private var mapError: String?
-    /// Each camera region's cameras to take a still from, and the ones asked for now.
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
     @State private var surfTask: Task<Void, Never>?
@@ -99,7 +98,11 @@ struct ReceiverView: View {
                     HomeSections()
                     filmsRow
                     HomeRows()
-                    camerasRow(index)
+                    // Shelves above it arrive on their own fetches after it is drawn, so a name
+                    // focused early is kept on screen as they push it down.
+                    CCTVRow(index: index) {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(CCTVRow.anchor, anchor: .bottom) }
+                    }
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
@@ -256,49 +259,6 @@ struct ReceiverView: View {
         surfTask?.cancel()
         surfTask = nil
         shuffling = false
-    }
-
-    // MARK: - Cameras
-
-    /// Every region with public cameras, main atlas first, each opening its page on its cameras
-    /// (owner, 2026-10-07: "make cctv show up in the reciever"). Names only, at the foot of the
-    /// page (owner, 2026-11-19: "cctv should go at the bottom of the main page" and "need no
-    /// cards just names is wnough that can be clicked"), set as the Themes row is set.
-    @ViewBuilder
-    private func camerasRow(_ index: ReceiverIndex) -> some View {
-        let regions = CameraRegions.ordered(index)
-        if !regions.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("CCTV").kjName(38)
-                    .accessibilityAddTraits(.isHeader)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 8) {
-                        ForEach(regions) { region in
-                            let count = index.regionCounts[region.id]?.byMedium["camera"] ?? 0
-                            Button {
-                                model.camerasFirst = region.id
-                                model.receiverPath.append(region)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(region.label).kjName(30).lineLimit(1)
-                                    Text("\(count.formatted()) live").kjSmall(faint: true).monospacedDigit()
-                                }
-                            }
-                            .buttonStyle(HouseButtonStyle())
-                            .accessibilityLabel("\(region.label), \(count.formatted()) live")
-                            .accessibilityIdentifier("cameras-\(region.id)")
-                        }
-                    }
-                    // Room over and under the row for a focused plate's lift.
-                    .padding(.vertical, 14)
-                }
-                .scrollClipDisabled()
-                // The first plate's padding is pulled back so its text sits on the page margin.
-                .padding(.leading, -26)
-            }
-            .focusSection()
-            .accessibilityIdentifier("shelf-cameras")
-        }
     }
 
     // MARK: - The Screening Room
@@ -798,5 +758,83 @@ private struct LikedShelf: View {
         let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
         // Sent when empty too, so channels no longer liked stop taking stills.
         model.stills.wantNext(first, place: 0)
+    }
+}
+
+/// Every region with public cameras, main atlas first, each opening its page on its cameras
+/// (owner, 2026-10-07: "make cctv show up in the reciever"). Names only, at the foot of the page
+/// (owner, 2026-11-19: "cctv should go at the bottom of the main page" and "need no cards just
+/// names is wnough that can be clicked"), set as the Themes row is: focus comes in on the first
+/// name, then on the one last focused, and Back from a region returns to the name pressed.
+private struct CCTVRow: View {
+    static let anchor = "shelf-cameras"
+    let index: ReceiverIndex
+    /// Scrolls the page so the row is on screen.
+    let keepVisible: () -> Void
+    @Environment(AppModel.self) private var model
+    @FocusState private var focused: String?
+    @State private var lastFocused: String?
+    /// The name whose region page is open, focused again when the page comes back.
+    @State private var pressed: String?
+
+    var body: some View {
+        let regions = CameraRegions.ordered(index)
+        if !regions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CCTV").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(regions) { region in
+                            let count = index.regionCounts[region.id]?.byMedium["camera"] ?? 0
+                            Button {
+                                pressed = region.id
+                                model.camerasFirst = region.id
+                                model.receiverPath.append(region)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(region.label).kjName(30).lineLimit(1)
+                                    // A count the index does not carry is left out, never "0 live".
+                                    if count > 0 {
+                                        Text("\(count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                                    }
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            .focused($focused, equals: region.id)
+                            .accessibilityLabel(count > 0
+                                ? "\(region.label) cameras, \(count.formatted()) live"
+                                : "\(region.label) cameras")
+                            .accessibilityIdentifier("cameras-\(region.id)")
+                        }
+                    }
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+            }
+            .focusSection()
+            .defaultFocus($focused, regions.contains { $0.id == lastFocused } ? lastFocused : regions.first?.id)
+            .onChange(of: focused) { _, now in if let now { lastFocused = now } }
+            // Shelves loading above push the row down; a focused name stays on screen.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { _ in
+                if focused != nil { keepVisible() }
+            }
+            // Back from the region page: the name pressed takes focus again, and a later visit to
+            // the same region from the list opens on its television, not its cameras.
+            .onAppear {
+                guard let id = pressed else { return }
+                pressed = nil
+                model.camerasFirst = nil
+                Task { @MainActor in
+                    focused = id
+                    keepVisible()
+                }
+            }
+            .id(Self.anchor)
+            .accessibilityIdentifier(Self.anchor)
+        }
     }
 }

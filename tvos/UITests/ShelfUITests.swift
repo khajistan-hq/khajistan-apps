@@ -79,21 +79,29 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
 
             // Under the front, the Themes row (News first), then every part of Khajistan as a
-            // tile (owner, 2026-10-29), then Cameras, a plate per region that has them (owner,
-            // 2026-10-07), then the Screening Room, which loads only with the preview password.
-            let genres = downPastGenres(skin, app)
+            // tile (owner, 2026-10-29), then the Screening Room (when its catalogue loads) and the
+            // rest, and CCTV last, a name per region that has cameras (owner, 2026-11-19).
+            _ = downPastGenres(skin, app)
             XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the themes lands on the parts of Khajistan, got \(focusedID(app))")
             kjPause(1)
             shot("\(skin)-2-receiver-doors-shelf", app)
-            // CCTV is the foot of the page (owner, 2026-11-19): down walks every shelf to it.
-            for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }
+            // CCTV is the foot of the page: down walks every shelf to it, through the Screening
+            // Room when it has loaded. Each id passed on the way is kept, so the order is checked.
+            let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'")).firstMatch.waitForExistence(timeout: 30)
+            var passed: [String] = []
+            for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") {
+                press(.down, app: app)
+                passed.append(focusedID(app))
+            }
             XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down reaches CCTV, got \(focusedID(app))")
+            if films {
+                XCTAssertTrue(passed.contains { $0.hasPrefix("film-") }, "\(skin): the walk to CCTV passes the Screening Room, passed \(passed)")
+            }
             shot("\(skin)-2-receiver-cameras-shelf", app)
             press(.down, app: app)
             XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): nothing sits below CCTV, got \(focusedID(app))")
             // Up through the shelves and the Themes row returns to the front: the sidebar's
             // switch, or the list.
-            _ = genres
             for _ in 0..<16 where !(focusedID(app).hasPrefix("region-") || focusedID(app) == "beyondTheAtlas") { press(.up, app: app) }
             let back = focusedID(app)
             XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
@@ -101,7 +109,8 @@ final class ShelfUITests: XCTestCase {
         }
     }
 
-    /// A Cameras plate opens its region on its cameras: the camera shelf leads and takes focus.
+    /// A CCTV name opens its region on its cameras: the camera shelf leads and takes focus, and
+    /// Back returns to the name pressed.
     func testCamerasShelfOpensARegionOnItsCameras() {
         let app = launch("day", tab: "receiver")
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
@@ -113,6 +122,9 @@ final class ShelfUITests: XCTestCase {
         for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }
         let plate = focusedID(app)
         XCTAssertTrue(plate.hasPrefix("cameras-"), "down to the foot of the page lands on a CCTV name, got \(plate)")
+        // Focus comes into the row on its first name, wherever the shelf above left it.
+        let first = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'cameras-'")).firstMatch.identifier
+        XCTAssertEqual(plate, first, "focus enters CCTV on its first name")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")
@@ -121,6 +133,12 @@ final class ShelfUITests: XCTestCase {
         XCTAssertTrue(focusedCamera.exists, "\(plate): focus lands on a camera first, got \(focusedID(app))")
         kjPause(1)
         shot("day-3-region-cameras-first", app)
+        // Back to the home page: the name pressed has focus again.
+        XCUIRemote.shared.press(.menu)
+        let pressed = app.buttons[plate]
+        XCTAssertTrue(pressed.waitForExistence(timeout: 20), "Back returns to the home page")
+        for _ in 0..<10 where !pressed.hasFocus { kjPause(0.5) }
+        XCTAssertTrue(pressed.hasFocus, "Back from the region returns to \(plate), got \(focusedID(app))")
         app.terminate()
     }
 

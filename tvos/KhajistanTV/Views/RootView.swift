@@ -32,7 +32,10 @@ struct RootView: View {
             // section left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it
             // should go to home page").
             TopBar(current: model.section, select: { section in
-                if section == .receiver { model.receiverPath = [] }
+                if section == .receiver {
+                    model.receiverPath = []
+                    model.camerasFirst = nil
+                }
                 model.section = section
             })
             content

@@ -45,6 +45,10 @@ struct PnvReelsView: View {
     /// Broken videos skipped in a row: past two the Reel stops and says so, so a dead network does
     /// not page through everything loaded every two seconds.
     @State private var skips = 0
+    /// The page the last skip was for (a dead file can report its failure twice) and its timer,
+    /// which a swipe or a close cancels.
+    @State private var skipped: String?
+    @State private var skipTask: Task<Void, Never>?
 
     let start: PnvRow
     let source: Source
@@ -160,11 +164,11 @@ struct PnvReelsView: View {
             if store.feed(feedKey).isUntouched { await store.loadMore(region: feedKey) }
         }
         .onChange(of: items.first?.id) { reopenIfLost() }
-        .onDisappear { loadTask?.cancel(); controller.stop() }
+        .onDisappear { loadTask?.cancel(); skipTask?.cancel(); controller.stop() }
         // A video that fails inside the player (a dead file, a start that times out) never ends
         // either; one that plays resets the count of skips in a row.
         .onChange(of: controller.state) {
-            if controller.state.isFailed, let owner { skipBroken(owner) }
+            if case .failed = controller.state, let owner { skipBroken(owner) }
             if controller.state == .playing { skips = 0 }
         }
         .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { activate(force: true) }) }
@@ -301,6 +305,8 @@ struct PnvReelsView: View {
         guard force || activatedId != currentId else { return }
         activatedId = currentId
         loadTask?.cancel()
+        skipTask?.cancel()
+        skipped = nil
         controller.stop()
         owner = nil
         guard let row = current else { return }
@@ -380,11 +386,13 @@ struct PnvReelsView: View {
     /// A video that cannot play never ends: in the Reel it shows its error for a moment, then the
     /// next page plays. Only while the broken page is still on screen, and not three in a row.
     private func skipBroken(_ key: String) {
-        guard isReel, !assistiveTechRunning, skips < 2 else { return }
+        guard isReel, !assistiveTechRunning, skips < 2, skipped != key else { return }
         skips += 1
-        Task { @MainActor in
+        skipped = key
+        skipTask?.cancel()
+        skipTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if currentId == key, hasNextPage { step(1) }
+            if !Task.isCancelled, currentId == key, hasNextPage { step(1) }
         }
     }
 

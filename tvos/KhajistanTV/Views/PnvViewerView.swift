@@ -6,7 +6,9 @@ import SwiftUI
 /// (loading its next page at its end, and coming round to its first once it has given everything,
 /// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
-/// one lit, Up or Menu lets go. On a stream, Right goes on to Shuffle (deals the stream again
+/// one lit, Up or Menu lets go. The Reel moves as Transmission does instead: Up the next video,
+/// Down the one before (it stays put on the first), Right lights Save and walks the controls, Left
+/// walks back and lets go. On a stream, Right goes on to Shuffle (deals the stream again
 /// from a random place, the site's Shuffle; on the Apple TV it stays on) and Region (steps All
 /// regions, then west to east; the Reel passes over a region with no videos). Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
@@ -195,20 +197,28 @@ struct PnvViewerView: View {
     private func reelOverlay(_ palette: Palette) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Spacer(minLength: 0)
-            if armed != nil {
+            // Shown only while lit; always there for VoiceOver, whose swipes are not move commands.
+            if armed != nil || UIAccessibility.isVoiceOverRunning {
                 saveControls
             }
             Group {
-                if let state = stateText {
-                    Text(state).accessibilityIdentifier("pnvViewerState")
-                } else if phase == .needsSignIn {
-                    Text("Select to sign in")
+                if phase == .needsSignIn {
+                    Text((stateText ?? "") + "  \u{00B7}  Select to sign in")
+                        .lineLimit(2)
+                        .accessibilityIdentifier("pnvViewerState")
+                } else if let state = stateText {
+                    Text(state).lineLimit(2).accessibilityIdentifier("pnvViewerState")
                 } else if !stranded {
-                    Text(reelLine)
+                    HStack(spacing: 18) {
+                        Text(reelLine).lineLimit(1)
+                        // The cue for the controls, a hint for the eye and not content to be read.
+                        if armed == nil { Text("\u{2192} Save").accessibilityHidden(true) }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("pnvReelLine")
                 }
             }
             .kjSmall()
-            .lineLimit(1)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(palette.ground)
@@ -218,10 +228,10 @@ struct PnvViewerView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
     }
 
-    /// "@account · Region", and the cue for the controls while none is lit.
+    /// "@account · Region"; no region when the object carries none (never the filter's name).
     private var reelLine: String {
-        let place = store.regionToken(for: current).map(PnvRegions.label) ?? regionName
-        return "@" + store.accountHandle(for: current) + " \u{00B7} " + place + (armed == nil ? "   \u{2192} Save" : "")
+        let place = store.regionToken(for: current).map(PnvRegions.label)
+        return "@" + store.accountHandle(for: current) + (place.map { " \u{00B7} " + $0 } ?? "")
     }
 
     private func fullOverlay(_ palette: Palette) -> some View {
@@ -281,8 +291,9 @@ struct PnvViewerView: View {
         }
     }
 
-    /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
-    /// place while nothing is lit, as the Receiver's strip cues its controls.
+    /// Save and Collection, lit by the remote: Down lights Save, Right Collection (in the Reel Right
+    /// lights Save, and the strip shows only while one is lit). Said once in place while nothing
+    /// is lit, as the Receiver's strip cues its controls.
     private var saveControls: some View {
         // Between deals there is no object on screen to have saved.
         let saved = !stranded && model.saves.isSaved(pnvKey: current.media_key)

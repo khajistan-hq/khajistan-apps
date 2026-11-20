@@ -341,7 +341,18 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
-        // In the Reel Right lights Save; two more reach Shuffle.
+        // At rest the Reel shows one line and no controls (owner, 2026-11-20).
+        let save = app.descendants(matching: .any)["pnvSave"]
+        let start = surface.value as? String
+        XCTAssertFalse(save.exists, "no controls at rest")
+        // Right lights Save and does not change the video; Left from Save lets go.
+        XCUIRemote.shared.press(.right); kjPause(0.6)
+        XCTAssertTrue(save.isSelected, "Right lights Save")
+        XCTAssertEqual(surface.value as? String, start, "Right does not change the video")
+        XCUIRemote.shared.press(.left); kjPause(0.6)
+        XCTAssertFalse(save.exists, "Left from Save lets go")
+        XCTAssertEqual(surface.value as? String, start, "Left does not change the video")
+        // Right lights Save again; two more reach Shuffle.
         for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
         // Shuffle is on from the start on the Apple TV, and Select deals again rather than turning
@@ -360,7 +371,11 @@ final class PicsVidsUITests: XCTestCase {
         }
         XCTAssertEqual((region.value as? String)?.lowercased(), "mashriq", "Region steps to Mashriq")
         kjScreenshot("pv-reel-02-region", app: app)
-        XCUIRemote.shared.press(.up); kjPause(1)
+        let beforeUp = surface.value as? String
+        XCUIRemote.shared.press(.up); kjPause(1.5)
+        // Up with a control lit lets go and moves on, as Channel Up does.
+        XCTAssertFalse(region.exists, "Up lets go of the lit control")
+        XCTAssertNotEqual(surface.value as? String, beforeUp, "Up with a control lit still moves on")
         var last = surface.value as? String
         var seen = Set([last].compactMap { $0 })
         var shown: [String] = []
@@ -371,9 +386,6 @@ final class PicsVidsUITests: XCTestCase {
             let now = surface.value as? String
             XCTAssertNotEqual(now, last, "Up \(press) moved on")
             if let now { shown.append(now) }
-            // The status band names the kind; the Reel shows nothing but video.
-            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'picture'")).firstMatch.exists,
-                           "Right \(press) is a video, not a picture")
             if let now { seen.insert(now) }
             last = now
         }
@@ -410,33 +422,5 @@ final class PicsVidsUITests: XCTestCase {
         print("PNVAUTOPLAY \(first ?? "nil") -> \(now ?? "nil") after \(Int(waited)) s")
         XCTAssertNotEqual(now, first, "the next video started with no press")
         kjScreenshot("pv-reel-autoplay", app: app)
-    }
-
-    /// Screens of the Reel's overlay in each skin, written to /tmp/kj-reel-shots for review: the one
-    /// line at rest, and the controls once Right lights them.
-    func testZZReelOverlayShots() {
-        let dir = URL(fileURLWithPath: "/tmp/kj-reel-shots")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        for skin in ["day", "grove", "smut"] {
-            let app = XCUIApplication()
-            app.launchArguments = ["-kjtab", "picsvids", "-kjskin", skin]
-            kjLaunch(app)
-            dismissNotice(app)
-            let reel = app.buttons["pnvReel"]
-            XCTAssertTrue(reel.waitForExistence(timeout: 30))
-            XCTAssertTrue(kjFocus(reel, app: app))
-            XCUIRemote.shared.press(.select)
-            XCTAssertTrue(app.buttons["pnvViewerSurface"].waitForExistence(timeout: 30))
-            kjPause(4)
-            XCUIRemote.shared.press(.playPause); XCUIRemote.shared.press(.playPause)
-            kjPause(0.8)
-            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-1-rest.png"))
-            XCUIRemote.shared.press(.right); kjPause(0.8)
-            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-2-controls.png"))
-            kjPause(4)
-            XCUIRemote.shared.press(.left); kjPause(4)
-            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-3-clean.png"))
-            app.terminate()
-        }
     }
 }

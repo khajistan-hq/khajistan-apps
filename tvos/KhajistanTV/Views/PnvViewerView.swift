@@ -543,7 +543,8 @@ struct PnvViewerView: View {
                 // not choose.
                 // VoiceOver and Switch Control loop too, as on the iPhone.
                 if videosOnly, OverlayTiming.hidesItself, armed == nil {
-                    if current.id == key, stepping == nil { step(by: 1) }
+                    // A video that played to its end was decodable: the undecodable run is over.
+                    if current.id == key, stepping == nil { codecSkips = 0; step(by: 1) }
                     return
                 }
                 guard videosOnly || !row.isKtv, let controller else { return }

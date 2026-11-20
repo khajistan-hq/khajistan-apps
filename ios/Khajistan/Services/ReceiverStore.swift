@@ -133,9 +133,7 @@ final class ReceiverStore {
             if reply == nil {
                 // Only a read meant for the whole dial carries the site cookie. A sign-in cancelled
                 // by a sign-out can store its cookie after every delete; this read never sends it.
-                var request = URLRequest(url: Self.dataURL("receiver-index.json"))
-                request.httpShouldHandleCookies = whole
-                reply = try await urlSession.data(for: request)
+                reply = try await urlSession.data(for: dialRequest(Self.dataURL("receiver-index.json"), whole: whole))
             }
             guard let reply else { throw ReceiverStoreError.unreadable }
             let (data, response) = reply
@@ -193,6 +191,17 @@ final class ReceiverStore {
             self.indexFetchedAt = nil
             await self.loadIndex()
         }
+    }
+
+    /// Every Receiver read but the sign-in goes through here. The site splits the index, the
+    /// region shards, the withdrawal feeds and the carrier lookup by its password cookie
+    /// (_worker.js DIAL_FILES, ID_FEEDS, /api/frequency), so a read sends and stores the cookie
+    /// only while the whole dial is on hand: a sign-in cancelled by Clear can store its cookie
+    /// after every delete, and no public read then carries it.
+    private func dialRequest(_ url: URL, whole: Bool? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = whole ?? wholeDial
+        return request
     }
 
     private func deleteSiteCookies() {
@@ -285,8 +294,9 @@ final class ReceiverStore {
                 return []
             }
             let session = urlSession
+            let request = dialRequest(url)
             let load = Task { () throws -> [Channel] in
-                let (data, response) = try await session.data(from: url)
+                let (data, response) = try await session.data(for: request)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else { throw ReceiverStoreError.http(code) }
                 do {
@@ -342,7 +352,7 @@ final class ReceiverStore {
     }
 
     private func fetchShapes(_ file: String) async throws -> RegionShapes {
-        let (data, response) = try await urlSession.data(from: KJConfig.site.appendingPathComponent("data/\(file)"))
+        let (data, response) = try await urlSession.data(for: dialRequest(KJConfig.site.appendingPathComponent("data/\(file)")))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
         do {
@@ -366,7 +376,7 @@ final class ReceiverStore {
         #if DEBUG
         if let fixture = try KJFixtureProtocol.mediaURL(for: channel.mediaType) { return fixture }
         #endif
-        let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
+        let (data, response) = try await urlSession.data(for: dialRequest(ReceiverRules.carrierURL(streamID: stream.id)))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
         do {
@@ -384,9 +394,9 @@ final class ReceiverStore {
         let denylistURL = Self.dataURL("denylist.json")
         let offAirURL = Self.dataURL("off-air-suspects.json")
         let healthURL = Self.dataURL("health.json")
-        async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: denylistURL, using: session)
-        async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
-        async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
+        async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: dialRequest(denylistURL), using: session)
+        async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: dialRequest(offAirURL), using: session)
+        async let health: Health? = Self.fetchOptional(Health.self, from: dialRequest(healthURL), using: session)
         let started = generation
         let (denied, suspects, graded) = await (denylist, offAir, health)
         guard !Task.isCancelled, started == generation else { return }
@@ -397,10 +407,10 @@ final class ReceiverStore {
     }
 
     private nonisolated static func fetchOptional<T: Decodable & Sendable>(
-        _ type: T.Type, from url: URL, using session: URLSession
+        _ type: T.Type, from request: URLRequest, using session: URLSession
     ) async -> T? {
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await session.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
             return try JSONDecoder().decode(type, from: data)
         } catch {

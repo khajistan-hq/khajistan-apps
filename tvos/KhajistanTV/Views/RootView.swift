@@ -61,8 +61,9 @@ struct RootView: View {
         }
         .onChange(of: model.section) { leavePage() }
         .onChange(of: model.receiverPath.map(\.id)) { leavePage() }
-        // A new dial rebuilds the Receiver's front: a new page too.
-        .onChange(of: model.receiver.dialID) { leavePage() }
+        // A new dial rebuilds the Receiver's front: a new page too. Only there: the dial also turns
+        // when a player closes, over whatever section opened it.
+        .onChange(of: model.receiver.dialID) { if model.section == .receiver { leavePage() } }
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.
         .onChange(of: model.restoring?.id) {

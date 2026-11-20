@@ -29,39 +29,113 @@ final class ReceiverStore {
     /// The core region shapes, kept once fetched: the map draws from them and a region page reads
     /// its native name from them. Tracked, so a page that asked before they arrived draws again.
     private(set) var coreShapes: RegionShapes?
-    var isLoading = false
 
     @ObservationIgnored private var extendedShapes: RegionShapes?
     @ObservationIgnored private var controls = Controls.empty
     @ObservationIgnored private var controlsFetchedAt: Date?
     @ObservationIgnored private var indexFetchedAt: Date?
     @ObservationIgnored private var shards: [String: [Channel]] = [:]
+    /// Why the whole dial is not on screen though a preview password is saved. Nil otherwise.
+    private(set) var signInNote: String?
+    /// Moves whenever the dial on hand changes kind (whole or public). The Receiver is drawn
+    /// afresh on it, so no shelf keeps a list read from the other one.
+    private(set) var dialID = 0
+    @ObservationIgnored private var wholeDial = false
+    /// Players open over the Receiver. A dial change found by a refresh waits until none is, so
+    /// a channel being watched is not closed by the redraw.
+    @ObservationIgnored private var playersOpen = 0
+    @ObservationIgnored private var redrawWaiting = false
+    /// Which dial the Receiver on screen was drawn from.
+    @ObservationIgnored private var drawnWhole = false
+    @ObservationIgnored private var indexFailedAt: Date?
+    /// The preview password the dial on hand was read for, and the one the site refused, which is
+    /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
+    /// on this network for ten minutes).
+    @ObservationIgnored private var dialPassword: String?
+    @ObservationIgnored private var refused: String?
+    /// Moves on every password change. A fetch begun under an older one does not keep its answer,
+    /// so a list read before sign-in is never kept after it, nor the other way.
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var loading: (password: String?, task: Task<Void, Never>)?
     private let urlSession: URLSession
+    /// The preview password, read when the index loads.
+    private let previewPassword: @MainActor () -> String?
 
     /// How long a fetched index or set of feeds is trusted before the next look.
     private static let staleAfter: TimeInterval = 600
 
-    init() {
+    /// The site serves the whole dial only to a request that carries its password cookie, and
+    /// the confirmed broadcaster streams alone to every other (owner, 2026-11-16; _worker.js
+    /// holdsSitePassword). With a preview password set, the index is asked for through the site's
+    /// own sign-in, POST /gate, which sets that cookie in this session for every later request.
+    init(previewPassword: @escaping @MainActor () -> String? = { nil }) {
+        self.previewPassword = previewPassword
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 25
         config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        urlSession = URLSession(configuration: config.answeringFromFixtures())
     }
 
     private nonisolated static func dataURL(_ file: String) -> URL {
         KJConfig.site.appendingPathComponent("data/open-frequencies/\(file)")
     }
 
+    /// Reads the index if the one on hand is stale or was read for another password. A second
+    /// call while one is under way for the same password waits on it.
     func loadIndex() async {
-        guard !isLoading else { return }
+        let password = previewPassword()
+        if password != dialPassword {
+            credentialDidChange()
+            dialPassword = password
+        }
+        if let loading, loading.password == password {
+            await loading.task.value
+            return
+        }
         if index != nil, let at = indexFetchedAt, Date().timeIntervalSince(at) < Self.staleAfter { return }
-        isLoading = true
-        defer { isLoading = false }
+        let task = Task { await self.fetchIndex(password: password, generation: generation) }
+        loading = (password, task)
+        await task.value
+        if loading?.task == task { loading = nil }
+    }
+
+    /// With a password, the index is read through the site's sign-in on every refresh (at most
+    /// once in `staleAfter`), so a changed site password or an expired cookie is noticed within
+    /// minutes. The site counts only failed sign-ins against its lock.
+    private func fetchIndex(password: String?, generation started: Int) async {
+        // A sign-in cancelled by a sign-out may still have stored its cookie.
+        if password == nil { deleteSiteCookies() }
         if index == nil { indexError = nil }
         do {
-            let (data, response) = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            var reply: (Data, URLResponse)?
+            var note: String?
+            var whole = false
+            var retry = false
+            if let password, password != refused {
+                switch await gate(password) {
+                case .signedIn(let answer):
+                    reply = answer
+                    whole = true
+                case .refused:
+                    refused = password
+                    deleteSiteCookies()
+                    note = Self.refusedNote
+                case .tryLater:
+                    // The cookie from an earlier sign-in, if any, still opens the whole dial.
+                    whole = wholeDial && hasSiteCookie
+                    retry = true
+                    if !whole { note = "Not every channel could be opened just now. Trying again in a minute." }
+                }
+            } else if password != nil {
+                note = Self.refusedNote
+            }
+            if reply == nil {
+                reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            }
+            guard let reply else { throw ReceiverStoreError.unreadable }
+            let (data, response) = reply
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw ReceiverStoreError.http(code) }
             let decoded: ReceiverIndex
@@ -72,15 +146,110 @@ final class ReceiverStore {
             } catch {
                 throw ReceiverStoreError.unreadable
             }
+            guard started == generation, !Task.isCancelled else { return }
+            if whole != wholeDial {
+                wholeDial = whole
+                if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
+                controls = .empty
+                controlsFetchedAt = nil
+            }
             index = decoded
             indexError = nil
+            signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
+            indexFailedAt = nil
+            if retry { scheduleRetry(generation: started) }
         } catch {
-            if Task.isCancelled { return }
+            if Task.isCancelled || started != generation { return }
+            indexFailedAt = Date()
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
+    }
+
+    private static let refusedNote = "The preview password did not open every channel. Check it under Account."
+    private static let retryAfter: Duration = .seconds(60)
+
+    /// A sign-in that was throttled or did not answer is tried again in a minute, whether or not
+    /// anything on screen asks.
+    private func scheduleRetry(generation started: Int) {
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.retryAfter)
+            guard let self, started == self.generation else { return }
+            self.indexFetchedAt = nil
+            await self.loadIndex()
+        }
+    }
+
+    private func deleteSiteCookies() {
+        let storage = urlSession.configuration.httpCookieStorage
+        storage?.cookies(for: KJConfig.site)?.forEach { storage?.deleteCookie($0) }
+    }
+
+    private enum Gate { case signedIn((Data, URLResponse)), refused, tryLater }
+
+    /// Signs in with the preview password. POST /gate redirects to `next` with the cookie set,
+    /// so on success the redirect is the whole dial's index.
+    private func gate(_ password: String) async -> Gate {
+        var request = URLRequest(url: KJConfig.site.appendingPathComponent("gate"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let indexPath = Self.dataURL("receiver-index.json").path
+        let field = { (value: String) in value.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "" }
+        request.httpBody = Data("password=\(field(password))&next=\(field(indexPath))".utf8)
+        guard let reply = try? await urlSession.data(for: request) else { return .tryLater }
+        switch ReceiverRules.gateOutcome(status: (reply.1 as? HTTPURLResponse)?.statusCode ?? 0,
+                                         landedOn: reply.1.url?.path, next: indexPath, cookieSet: hasSiteCookie) {
+        case .signedIn: return .signedIn(reply)
+        case .refused: return .refused
+        case .tryLater: return .tryLater
+        }
+    }
+
+    private var hasSiteCookie: Bool {
+        urlSession.configuration.httpCookieStorage?.cookies(for: KJConfig.site)?.contains { $0.name == "kj_gate" } == true
+    }
+
+    /// A new or removed preview password: the site cookie goes, the dial on hand goes (so every
+    /// shelf is drawn again from the new one), and nothing fetched before this is kept.
+    func credentialDidChange() {
+        deleteSiteCookies()
+        generation += 1
+        wholeDial = false
+        indexFailedAt = nil
+        redraw()
+        loading?.task.cancel()
+        loading = nil
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        index = nil
+        indexFetchedAt = nil
+        signInNote = nil
+        controls = .empty
+        controlsFetchedAt = nil
+        shards.removeAll()
+    }
+
+    /// A list or a tune asked for before the index was read for the current password waits for
+    /// that read, so its own request carries the cookie (or none) the new dial was read with. A
+    /// routine refresh with a dial on hand is not waited for.
+    private func settleDial() async {
+        let failedRecently = indexFailedAt.map { Date().timeIntervalSince($0) < 30 } ?? false
+        if previewPassword() != dialPassword || (index == nil && !failedRecently) { await loadIndex() }
+    }
+
+    func playerDidOpen() { playersOpen += 1 }
+
+    func playerDidClose() {
+        playersOpen = max(0, playersOpen - 1)
+        if playersOpen == 0, redrawWaiting { redraw() }
+    }
+
+    private func redraw() {
+        redrawWaiting = false
+        drawnWhole = wholeDial
+        dialID += 1
     }
 
     /// The channels of one region that the receiver may offer. `cameras` picks the camera
@@ -89,7 +258,9 @@ final class ReceiverStore {
     @ObservationIgnored private var inFlight: [String: Task<[Channel], Error>] = [:]
 
     func channels(regionId: String, cameras: Bool) async throws -> [Channel] {
+        await settleDial()
         guard let index else { throw ReceiverStoreError.indexNotLoaded }
+        let started = generation
         let key = cameras ? regionId + "-camera" : regionId
         let raw: [Channel]
         if let cached = shards[key] {
@@ -115,8 +286,9 @@ final class ReceiverStore {
                 }
             }
             inFlight[key] = load
-            defer { inFlight[key] = nil }
+            defer { if inFlight[key] == load { inFlight[key] = nil } }
             raw = try await load.value
+            guard started == generation else { throw CancellationError() }
             shards[key] = raw
         }
         await refreshControlsIfStale()
@@ -171,11 +343,22 @@ final class ReceiverStore {
     /// The carrier URL for a channel's live stream, asked for at the moment of tuning. The
     /// feeds are looked at again first: a channel that was listed a minute ago may be withdrawn.
     func resolve(_ channel: Channel) async throws -> URL {
+        await settleDial()
         await refreshControlsIfStale()
         guard ReceiverRules.eligible([channel], controls: controls).first != nil,
               let stream = channel.activeStream else {
             throw ReceiverStoreError.notOnDial
         }
+        #if DEBUG
+        // `-kjdeadchannels a,b` makes those channels fail as a dead signal does, so moving on
+        // from one can be seen in the simulator, where a really dead channel is hard to find.
+        if UserDefaults.standard.string(forKey: "kjdeadchannels")?.split(separator: ",").contains(Substring(channel.id)) == true {
+            throw ReceiverStoreError.unplayable
+        }
+        #endif
+        #if DEBUG
+        if let fixture = try KJFixtureProtocol.mediaURL(for: channel.mediaType) { return fixture }
+        #endif
         let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
@@ -197,9 +380,12 @@ final class ReceiverStore {
         async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: denylistURL, using: session)
         async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
         async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
+        let started = generation
         let (denied, suspects, graded) = await (denylist, offAir, health)
-        guard !Task.isCancelled else { return }
-        controls = Controls(denylist: denied, offAir: suspects, health: graded)
+        guard !Task.isCancelled, started == generation else { return }
+        // A stale health file is ignored as a missing one is: it would withdraw channels on old news.
+        let fresh = graded.flatMap { $0.isFresh(at: Date()) ? $0 : nil }
+        controls = Controls(denylist: denied, offAir: suspects, health: fresh)
         if denied != nil || suspects != nil || graded != nil { controlsFetchedAt = Date() }
     }
 

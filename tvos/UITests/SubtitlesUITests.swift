@@ -96,17 +96,17 @@ final class SubtitlesUITests: XCTestCase {
         }
     }
 
-    func testReceiverCaptionsSignedOut() {
+    func testReceiverCaptionsSignedOut() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off"]
+        // ABN News by name, so the list is the recording (`-kjfixturesonly`): live, it left the dial
+        // on 2026-11-15 (CI 43756089230). Its stream is still live; kjTuneUntilPlaying moves past it.
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "receiver", "-kjcaptiontestsignedout", "YES", "-kj-caption-mode", "off",
+                               "-kjfixturesonly", "YES"]
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-indus" {
-            XCUIRemote.shared.press(.right)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
         XCTAssertEqual(focusedRegion.identifier, "region-indus")
         XCUIRemote.shared.press(.select)
 
@@ -117,7 +117,10 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
-        XCTAssertTrue(waitFor(45) { state.label == "Playing" }, "ABN News must be playing for the strip to offer its controls: \(state.label)")
+        // The strip offers its controls over a playing channel: ABN News, or when its carrier does
+        // not reach the runner, the next Pakistani channel down (Urdu by the country rule). DD
+        // Kashir also plays on the runner, and Kashmiri offers no captions (CI on PR 79, 2026-11-16).
+        try kjTuneUntilPlaying(app, tries: 10) { $0.hasPrefix("swept-pk-") || $0.hasPrefix("indus-") }
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)

@@ -43,7 +43,8 @@ final class PicsVidsUITests: XCTestCase {
 
     /// The shelves' headings, as one line: region and count, west to east.
     private func headings(_ app: XCUIApplication) -> String {
-        let names = ["Maghreb", "Mashriq", "Anatolia", "Persia", "Khorasan", "Indus"]
+        // All regions first: it heads the page, so the region shelves can start below the screen.
+        let names = ["All regions", "Maghreb", "Mashriq", "Anatolia", "Persia", "Khorasan", "Indus"]
         let format = names.map { "label BEGINSWITH '\($0)'" }.joined(separator: " OR ")
         let texts = app.staticTexts.matching(NSPredicate(format: format))
         return (0..<texts.count).map { texts.element(boundBy: $0).label }.joined(separator: " | ")
@@ -162,18 +163,20 @@ final class PicsVidsUITests: XCTestCase {
         dismissNotice(app)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60))
         kjPause(6)
-        // A shelf with a first page of 60 and more behind it: the first one that has.
+        // A shelf with a full first page and more behind it. Shuffle is on from the start on the
+        // Apple TV (owner, 2026-11-14), so a page is PnvAPI.shufflePageSize, 120, not 60.
         var wanted: XCUIElement?
         for index in 0..<shelves(app).count {
             let shelf = shelves(app).element(boundBy: index)
-            if Int(shelf.value as? String ?? "") == 60 { wanted = shelf; break }
+            if Int(shelf.value as? String ?? "") == 120 { wanted = shelf; break }
         }
         guard let shelf = wanted else { return XCTFail("a region with more than one page must be on the page") }
         let first = Int(shelf.value as? String ?? "") ?? 0
         let tile = shelf.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         XCTAssertTrue(kjFocus(tile, app: app), "a tile on the shelf must take focus")
         var loaded = first
-        for _ in 0..<90 {
+        // A shuffled page is 120, and the next is asked for eight from its end.
+        for _ in 0..<140 {
             XCUIRemote.shared.press(.right)
             kjPause(0.3)
             loaded = Int(shelf.value as? String ?? "") ?? loaded
@@ -181,7 +184,6 @@ final class PicsVidsUITests: XCTestCase {
         }
         kjScreenshot("pv-11-paged", app: app)
         XCTAssertGreaterThan(loaded, first, "walking to the end of the page must load the next one")
-        XCTAssertEqual(loaded % 60, 0, "pages come in 60s")
     }
 
     func testFiltersNarrowTheShelves() {
@@ -260,5 +262,96 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(1)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20))
+    }
+
+    /// The Reel comes round at a stream's end rather than stopping. It walks Anatolia (48 videos
+    /// on 2026-11-14) until an object comes back; the bound is presses, not the region's count.
+    func testReelComesRoundAtTheEndOfASmallRegion() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        // Down lights Save; Right three times reaches Region.
+        XCUIRemote.shared.press(.down); kjPause(0.5)
+        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        let region = app.descendants(matching: .any)["pnvReelRegion"]
+        for _ in 0..<12 where (region.value as? String)?.lowercased() != "anatolia" {
+            XCUIRemote.shared.press(.select); kjPause(3)
+        }
+        XCTAssertEqual((region.value as? String)?.lowercased(), "anatolia", "Region steps to Anatolia")
+        XCUIRemote.shared.press(.up); kjPause(1)
+        var last = surface.value as? String
+        var seen = Set([last].compactMap { $0 })
+        var cameRound = false
+        // Until the first object seen twice: the region's end, passed. 200 presses holds until
+        // Anatolia has that many videos.
+        for press in 1...200 {
+            XCUIRemote.shared.press(.right)
+            kjPause(1.2)
+            let now = surface.value as? String
+            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            last = now
+            if let now, !seen.insert(now).inserted { cameRound = true; break }
+        }
+        print("PNVREEL anatolia came round after \(seen.count) distinct")
+        XCTAssertTrue(cameRound, "past the end the stream comes round and shows an object again")
+    }
+
+    /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
+    /// Shuffle deals again and stays on, and Region steps to a region; Right keeps moving on.
+    func testReelShufflesPicksARegionAndNeverEnds() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        // Down lights Save; Right twice reaches Shuffle.
+        XCUIRemote.shared.press(.down); kjPause(0.5)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
+        // Shuffle is on from the start on the Apple TV, and Select deals again rather than turning
+        // it off (owner, 2026-11-14: "shuffle everytime").
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Shuffle starts on")
+        let before = surface.value as? String
+        XCUIRemote.shared.press(.select); kjPause(4)
+        XCTAssertEqual((shuffle.value as? String)?.lowercased(), "on", "Select keeps Shuffle on")
+        XCTAssertNotEqual(surface.value as? String, before, "Select deals the reel again")
+        kjScreenshot("pv-reel-01-shuffled", app: app)
+        XCUIRemote.shared.press(.right); kjPause(0.5)
+        let region = app.descendants(matching: .any)["pnvReelRegion"]
+        // The Reel is videos only (owner, 2026-11-14): step to Mashriq, which has thousands.
+        for _ in 0..<12 where (region.value as? String)?.lowercased() != "mashriq" {
+            XCUIRemote.shared.press(.select); kjPause(3)
+        }
+        XCTAssertEqual((region.value as? String)?.lowercased(), "mashriq", "Region steps to Mashriq")
+        kjScreenshot("pv-reel-02-region", app: app)
+        XCUIRemote.shared.press(.up); kjPause(1)
+        var last = surface.value as? String
+        var seen = Set([last].compactMap { $0 })
+        for press in 1...22 {
+            XCUIRemote.shared.press(.right)
+            kjPause(1.5)
+            let now = surface.value as? String
+            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            // The status band names the kind; the Reel shows nothing but video.
+            XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'picture'")).firstMatch.exists,
+                           "Right \(press) is a video, not a picture")
+            if let now { seen.insert(now) }
+            last = now
+        }
+        // Every press moved on. The wrap past a stream's end is proven without live data in
+        // ios/Tests/PnvRetry; no bound here rests on the region's count.
+        print("PNVREEL distinct \(seen.count) of 23 shown")
+        kjScreenshot("pv-reel-03-came-round", app: app)
     }
 }

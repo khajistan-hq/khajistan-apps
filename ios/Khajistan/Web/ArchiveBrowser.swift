@@ -4,7 +4,7 @@ import Observation
 
 @MainActor @Observable
 final class ArchiveBrowser: NSObject {
-    let webView: WKWebView
+    private(set) var webView: WKWebView
     var title = "Khajistan"
     var url: URL?
     var isLoading = false
@@ -22,19 +22,38 @@ final class ArchiveBrowser: NSObject {
     var dialog: WebDialog?
     private var observations: [NSKeyValueObservation] = []
     private var downloads: [ObjectIdentifier: URL] = [:]
+    /// Downloads refused at their destination: their failure keeps the refusal's message.
+    private var refusedDownloads = Set<ObjectIdentifier>()
     private var requestedURL: URL?
     private let previewPassword: () -> String?
+    private let previewQueue = PreviewNavigationQueue()
+    private var skinScript: String?
+    private let gateSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.httpCookieStorage = nil
+        config.timeoutIntervalForRequest = 30
+        return URLSession(configuration: config, delegate: GateRedirectBlocker(), delegateQueue: nil)
+    }()
 
     init(previewPassword: @escaping () -> String?) {
         self.previewPassword = previewPassword
+        webView = Self.makeWebView()
+        super.init()
+        configureWebView()
+    }
+
+    private static func makeWebView() -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsPictureInPictureMediaPlayback = true
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.applicationNameForUserAgent = "Khajistan-iOS/1.0"
-        webView = WKWebView(frame: .zero, configuration: configuration)
-        super.init()
+        return WKWebView(frame: .zero, configuration: configuration)
+    }
+
+    private func configureWebView() {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = true
@@ -57,7 +76,71 @@ final class ArchiveBrowser: NSObject {
         requestedURL = url
         error = nil
         if webView.url != url { isStale = true }
-        webView.load(URLRequest(url: url))
+        let password = previewPassword()
+        previewQueue.replace { [weak self] isCurrent in
+            guard let self else { return }
+            let request = ArchiveURL.previewRequest(url, password: password)
+            if request.httpMethod == "POST" {
+                await self.removePreviewCookies()
+                guard isCurrent() else { return }
+                do {
+                    let (_, response) = try await self.gateSession.data(for: request)
+                    guard isCurrent() else { return }
+                    guard let response = response as? HTTPURLResponse, response.statusCode == 303,
+                          let responseURL = response.url, responseURL == request.url else {
+                        self.error = "Preview access could not be opened. Try again."
+                        return
+                    }
+                    let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+                        if let key = entry.key as? String, let value = entry.value as? String { result[key] = value }
+                    }
+                    let cookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: responseURL)
+                        .filter { self.isPreviewCookie($0) && $0.isSecure }
+                    for cookie in cookies {
+                        await self.webView.configuration.websiteDataStore.httpCookieStore.setCookie(cookie)
+                    }
+                    guard isCurrent() else { return }
+                } catch {
+                    guard isCurrent() else { return }
+                    self.error = "Preview access could not be opened. Try again."
+                    return
+                }
+            }
+            guard isCurrent() else { return }
+            self.webView.load(URLRequest(url: KJURL.canonicalSitePage(url)))
+        }
+    }
+
+    /// Remove only preview access, keeping unrelated website account cookies. A fresh view
+    /// also removes protected pages from WebKit's back/forward snapshot cache.
+    func clearPreviewSession() {
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
+        observations.removeAll()
+        webView = Self.makeWebView()
+        configureWebView()
+        if let skinScript { applySkin(script: skinScript) }
+        requestedURL = nil
+        url = nil
+        title = "Khajistan"
+        error = nil
+        isLoading = false
+        isStale = false
+        canGoBack = false
+        canGoForward = false
+        previewQueue.replace(alwaysRun: true) { [weak self] _ in await self?.removePreviewCookies() }
+    }
+
+    private func isPreviewCookie(_ cookie: HTTPCookie) -> Bool {
+        cookie.name == "kj_gate" && cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")) == KJConfig.site.host
+    }
+
+    private func removePreviewCookies() async {
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        for cookie in await store.allCookies() where isPreviewCookie(cookie) {
+            await store.deleteCookie(cookie)
+        }
     }
 
     /// Starts WebKit's page process at launch, so the first page opened does not wait for it.
@@ -67,6 +150,7 @@ final class ArchiveBrowser: NSObject {
 
     /// The website's skin keys, written before any of its scripts run, on every page.
     func applySkin(script: String) {
+        skinScript = script
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -126,7 +210,13 @@ extension ArchiveBrowser: WKNavigationDelegate {
             return
         }
         let scheme = url.scheme?.lowercased() ?? ""
-        if action.shouldPerformDownload, ["https", "blob"].contains(scheme) { decisionHandler(.download); return }
+        if action.shouldPerformDownload {
+            guard ArchiveURL.allowsDownload(url) else {
+                downloadMessage = Self.foreignDownload
+                decisionHandler(.cancel); return
+            }
+            decisionHandler(.download); return
+        }
         // Subframes belong to the site's CSP. Top-level custom schemes never execute in WebKit.
         if action.targetFrame?.isMainFrame == false, ["https", "http", "about", "blob"].contains(scheme) {
             decisionHandler(.allow); return
@@ -144,7 +234,14 @@ extension ArchiveBrowser: WKNavigationDelegate {
             error = "The archive returned an error (\(http.statusCode)). Try reloading this page."
         }
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        decisionHandler(!response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment") ? .download : .allow)
+        switch ArchiveURL.decideResponse(url: response.response.url, canShowMIMEType: response.canShowMIMEType,
+                                         contentDisposition: disposition) {
+        case .allow: decisionHandler(.allow)
+        case .download: decisionHandler(.download)
+        case .refuse:
+            downloadMessage = Self.foreignDownload
+            decisionHandler(.cancel)
+        }
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
@@ -200,7 +297,14 @@ extension ArchiveBrowser: WKDownloadDelegate {
     static var downloadDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Downloads", isDirectory: true)
     }
+    static let foreignDownload = "Only files from the Khajistan archive can be saved here."
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        // The final response, after any redirect, must still come from the archive.
+        guard ArchiveURL.allowsDownload(response.url) else {
+            refusedDownloads.insert(ObjectIdentifier(download))
+            downloadMessage = Self.foreignDownload
+            completionHandler(nil); return
+        }
         do {
             // Keep a partial file outside the visible library until WebKit reports completion.
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("KhajistanDownloads/\(UUID().uuidString)")
@@ -229,10 +333,21 @@ extension ArchiveBrowser: WKDownloadDelegate {
         try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        if let temporary = downloads.removeValue(forKey: ObjectIdentifier(download)) {
-            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
-        }
+        let temporary = downloads.removeValue(forKey: ObjectIdentifier(download))
+        if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
         activeDownloads = downloads.count
+        // This download was refused before it had a file: it fails however WebKit words it, and
+        // the refusal's message stays. Any other failure says so, whatever banner is up.
+        if refusedDownloads.remove(ObjectIdentifier(download)) != nil { return }
         downloadMessage = "Download failed: \(error.localizedDescription). Return to the page to try again."
+    }
+}
+
+/// Read the form's response cookie without following a redirect or storing it elsewhere.
+private final class GateRedirectBlocker: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(nil)
     }
 }

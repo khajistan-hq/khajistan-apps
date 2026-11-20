@@ -131,7 +131,11 @@ final class ReceiverTuner {
             guard case .failed = controller.state,
                   let next = list.first(where: { !attempted.contains($0.id) }) else { return }
             attempted.insert(next.id)
+            // A failover inside a Surf pool is a visit to that pool, as a step is.
+            let pool = surfChoice
             play(next, in: list)
+            surfChoice = pool
+            if let pool { surfHistory.visit(next, for: pool) }
         }
     }
 
@@ -173,6 +177,8 @@ final class ReceiverTuner {
 
     func play(_ channel: Channel, in list: [Channel]) {
         stop()
+        // A channel chosen by hand leaves the Surf pool; surf() sets it again after this call.
+        surfChoice = nil
         self.list = list
         source = .live(channel)
         tune(channel)
@@ -195,6 +201,9 @@ final class ReceiverTuner {
             let from = destination ?? current
             guard list.count > 1, let position = list.firstIndex(where: { $0.id == from.id }) else { return }
             let target = list[(position + delta + list.count) % list.count]
+            // Next and previous inside a Surf pool count as visits, so Surf does not land on them
+            // again this cycle (the Apple TV visits each channel its guide or Surf walk reaches).
+            if let surfChoice { surfHistory.visit(target, for: surfChoice) }
             destination = target
             changeTask?.cancel()
             changeTask = Task { await change(to: target) }
@@ -253,6 +262,10 @@ final class ReceiverTuner {
     private(set) var surfing = false
     /// Why the last Surf found nothing, until the next one.
     private(set) var surfNote: String?
+    /// Which channels each Surf pool has visited this cycle.
+    @ObservationIgnored private var surfHistory = SurfHistory()
+    /// The Surf pool `list` was dealt from; nil when the channel was chosen by hand.
+    @ObservationIgnored private var surfChoice: SurfChoice?
 
     /// A live channel at random, of the medium and from the part of the atlas kept in the Surf
     /// settings (owner, 2026-10-07); next and previous then walk every channel of that setting
@@ -272,18 +285,29 @@ final class ReceiverTuner {
             return
         }
         let defaults = UserDefaults.standard
-        let pool = await ShufflePick.surf(index, medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
-                                          // Surf follows the Beyond the atlas switch, as on the Apple TV
-                                          // (owner, 2026-10-29: one control for both).
-                                          scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main) { region in
+        let choice = SurfChoice(medium: .stored(defaults.string(forKey: ShuffleMedium.key)),
+                                // Surf follows the Beyond the atlas switch, as on the Apple TV
+                                // (owner, 2026-10-29: one control for both).
+                                scope: defaults.bool(forKey: "kj.extendedAtlas") ? .everywhere : .main)
+        let catalogue = await ShufflePick.catalogue(index, medium: choice.medium, scope: choice.scope) { region in
             try? await self.receiver.channels(regionId: region, cameras: false)
         }
         guard !Task.isCancelled, allowSelection(), search == surfRevision, revision == intentRevision else { return }
-        if let channel = pool.first {
-            play(channel, in: pool)
+        // Every channel of the pool once before any repeats, as on the Apple TV.
+        let onAir = destination ?? self.channel
+        if let channel = surfHistory.press(catalogue, for: choice, onAir: onAir) {
+            // A pool of one: the channel on air is the only pick, so leave it playing.
+            guard channel.id != onAir?.id else {
+                surfNote = "This is the only channel to surf there right now."
+                return
+            }
+            if !catalogue.isComplete { surfNote = "Some atlas lists could not load. Surf will retry them next time." }
+            play(channel, in: catalogue.channels.shuffled())
+            surfChoice = choice // after play(), which clears it
             return
         }
-        surfNote = "Nothing to surf there right now."
+        surfNote = catalogue.isComplete ? "Nothing to surf there right now."
+            : "Some atlas lists could not load. Press Surf again to retry."
     }
 
     /// Turns the receiver off.

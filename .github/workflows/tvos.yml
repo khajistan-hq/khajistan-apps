@@ -4,12 +4,19 @@ on:
   push:
     branches: [main, 'app/tvos-*']
     paths: ['tvos/**', 'ios/Khajistan/Services/LiveCaptionSession.swift', '.github/workflows/tvos.yml']
+  # Every pull request, so the simulator check can be required on main; `changes` skips it
+  # when the PR touches none of the paths above, and GitHub counts a skipped check as passed.
   pull_request:
-    paths: ['tvos/**', 'ios/Khajistan/Services/LiveCaptionSession.swift', '.github/workflows/tvos.yml']
   workflow_dispatch:
+    inputs:
+      live:
+        description: 'Live channels instead of the local test video (TEST_RUNNER_KJ_LIVE_RECEIVER=1)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: tvos-${{ github.event.pull_request.head.ref || github.ref_name }}
@@ -18,7 +25,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.diff.outputs.app }}
+    steps:
+      - id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # A PR to another branch can be retargeted to main without a new run, so it runs too.
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] || [ "$GITHUB_BASE_REF" != main ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # The files API lists at most 3,000 files: a bigger PR runs the simulator.
+          n=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" -q .changed_files)
+          if [ "$n" -ge 3000 ]; then echo app=true >> "$GITHUB_OUTPUT"; exit 0; fi
+          # A move lists only its new path, so the old one is read too.
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" -q '.[] | .filename, (.previous_filename // empty)')
+          if printf '%s\n' "$files" | grep -Eq '^(tvos/|ios/Khajistan/Services/LiveCaptionSession\.swift$|\.github/workflows/tvos\.yml$)'; then echo app=true; else echo app=false; fi >> "$GITHUB_OUTPUT"
   simulator:
+    name: tvOS simulator
+    needs: changes
+    # Fails open: the check skips only on a clear "no app files". A failed `changes` job would
+    # skip it too, and GitHub counts a skipped required check as passed (Fable on PR 77).
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: macos-26
     # The UI suite outgrew 75 minutes: every tvOS run was cut at the limit from 2026-11-08 on,
     # with tests still passing (PR 48: 58 passed, 0 failed when cut). The one run allowed
@@ -43,6 +73,12 @@ jobs:
           sh tvos/scripts/test-caption-preference.sh
       - name: Account session race regressions
         run: KJ_AUTH_TEST_PLATFORMS=tvos sh tvos/scripts/test-auth-session.sh
+      - name: Reading Room cache regressions
+        run: sh tvos/scripts/test-reading-cache.sh
+      - name: Transmission picture-in-picture session regressions
+        run: sh tvos/scripts/test-transmission-pip.sh
+      - name: Transmission stored subtitles (several languages per programme)
+        run: sh tvos/scripts/test-recorded-subtitles.sh
       - name: Select an Apple TV simulator
         id: simulator
         run: |
@@ -80,6 +116,9 @@ jobs:
           xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
           xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
       - name: Build and test tvOS app
+        env:
+          # A manual run with "live" on plays live carriers; every other run plays the local video.
+          TEST_RUNNER_KJ_LIVE_RECEIVER: ${{ inputs.live && '1' || '0' }}
         run: |
           set -euo pipefail
           xcodebuild test -project tvos/KhajistanTV.xcodeproj -scheme KhajistanTV \

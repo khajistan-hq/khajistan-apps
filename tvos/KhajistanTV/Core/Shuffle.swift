@@ -110,7 +110,8 @@ extension ShufflePick {
 
     /// Wait for every requested shard's bounded request. Returning after the first fast region
     /// silently shrank Surf to that region. Failed shards are explicit and cannot start a short
-    /// repeat cycle; a later Surf request retries them through ReceiverStore.
+    /// repeat cycle (the iPhone's SurfHistory.press repeats a loaded channel at random instead);
+    /// a later Surf request retries them through ReceiverStore.
     @MainActor
     static func catalogue(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
                           genre: SurfGenre = .any,
@@ -131,12 +132,6 @@ extension ShufflePick {
         let read = ids.compactMap { id in lists[id].map { (region: id, channels: $0) } }
         return SurfCatalogue(channels: pool(read, index: index, medium: medium, scope: scope, genre: genre),
                              missingRegions: failed.sorted())
-    }
-
-    @MainActor
-    static func surf(_ index: ReceiverIndex, medium: ShuffleMedium, scope: ShuffleScope,
-                     load: @escaping @MainActor (String) async -> [Channel]?) async -> [Channel] {
-        await catalogue(index, medium: medium, scope: scope, load: load).channels.shuffled()
     }
 }
 
@@ -183,7 +178,7 @@ struct SurfCycle {
     }
 }
 
-/// Held by the TV app, so closing and reopening Surf does not reshuffle already visited channels.
+/// Held by each app, so closing and reopening Surf does not reshuffle already visited channels.
 struct SurfHistory {
     private var cycles: [SurfChoice: SurfCycle] = [:]
     private var catalogues: [SurfChoice: SurfCatalogue] = [:]
@@ -199,6 +194,38 @@ struct SurfHistory {
 
     mutating func visit(_ channel: Channel, for choice: SurfChoice) {
         cycles[choice, default: SurfCycle()].visit(channel.id)
+    }
+
+    /// One Surf press: the catalogue as loaded now, the channel on air counted as seen (so it is
+    /// never the pick), then the next unvisited channel of `choice`'s own cycle.
+    mutating func press(_ catalogue: SurfCatalogue, for choice: SurfChoice, onAir: Channel?) -> Channel? {
+        update(catalogue, for: choice)
+        if let onAir { visit(onAir, for: choice) }
+        if let channel = next(for: choice) { return channel }
+        // A list that keeps failing holds the cycle open, so a spent pool would leave Surf dead
+        // until relaunch. Play a loaded channel again instead; the caller notes the missing lists.
+        // ponytail: random repeat; the cycle resumes on its own once every list loads.
+        guard !catalogue.isComplete else { return nil }
+        return catalogue.channels.filter { $0.id != onAir?.id }.randomElement()
+    }
+
+    /// The next channel not in `skipping`, and the walk as it would stand once it is visited,
+    /// asked without changing this walk. Skipped channels are spent in the plan, and a new cycle
+    /// the plan starts is in it. Nil when no channel is left, even after a new cycle.
+    func plan(for choice: SurfChoice, skipping: Set<String>) -> (channel: Channel, cycle: SurfCycle)? {
+        guard let catalogue = catalogues[choice] else { return nil }
+        var cycle = cycles[choice, default: SurfCycle()]
+        // Two passes: the rest of this cycle, then a whole new one, which reaches every channel.
+        for _ in 0..<(2 * catalogue.channels.count) {
+            guard let channel = cycle.next(in: catalogue.channels, allowNewCycle: catalogue.isComplete) else { return nil }
+            if !skipping.contains(channel.id) { return (channel, cycle) }
+        }
+        return nil
+    }
+
+    /// Carries out a plan: the walk becomes the one the plan left.
+    mutating func take(_ cycle: SurfCycle, for choice: SurfChoice) {
+        cycles[choice] = cycle
     }
 }
 

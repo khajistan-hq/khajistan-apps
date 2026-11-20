@@ -46,6 +46,9 @@ final class AppModel {
     var surfFocusedOnce = false
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
+    /// A Transmission channel playing in the picture-in-picture window. The store keeps the
+    /// channel running (handovers included) while the player screen is closed.
+    var transmissionPiP: PictureInPicture?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -110,7 +113,7 @@ final class AppModel {
     init() {
         let auth = AuthStore()
         self.auth = auth
-        self.receiver = ReceiverStore()
+        self.receiver = ReceiverStore { [weak auth] in auth?.previewPassword }
         self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
         // The station clock's server reading starts now, alongside everything else launch fetches.
@@ -156,6 +159,14 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
+        auth.onPreviewPasswordChange = { [weak self] in
+            self?.reading.previewCredentialDidChange()
+            // The dial changes with the password: a region page open on the old one goes too.
+            self?.receiverPath = []
+            self?.receiver.credentialDidChange()
+            self?.invalidateTransmissionAccess()
+        }
+        observeTransmissionAccess()
         watchTheSky()
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
@@ -168,6 +179,23 @@ final class AppModel {
         radioAway = nil
         away?.pip?.stop()
         away?.controller.stop()
+        if let pip = transmissionPiP {
+            transmissionPiP = nil
+            pip.stop()
+            transmission.stop()
+        }
+    }
+
+    /// Access changes revoke Transmission without interrupting public Receiver playback.
+    private func observeTransmissionAccess() {
+        _ = auth.observeAccess { [weak self] in self?.invalidateTransmissionAccess() }
+    }
+
+    private func invalidateTransmissionAccess() {
+        let pip = transmissionPiP
+        transmissionPiP = nil
+        pip?.stop()
+        transmission.accessDidChange()
     }
 
     /// A `khajistan://` link from the Top Shelf. Anything that does not parse is ignored.

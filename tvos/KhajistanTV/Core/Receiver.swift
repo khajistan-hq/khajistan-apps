@@ -94,18 +94,6 @@ struct Channel: Decodable, Identifiable, Hashable, Sendable {
     /// The receiver payload carries explicit transcription/translation rights refusals.
     var captionsDenied: Bool? = nil
 
-    /// The attribution's first clause, "Direct broadcast by …", which is what a player prints
-    /// (owner, 2026-10-08). The rest of the record's sentence stays in the data and on the website.
-    var sourceLine: String? {
-        guard let attributionText else { return nil }
-        var first = attributionText.split(separator: ";", maxSplits: 1).first.map(String.init) ?? attributionText
-        // Most records close the clause with a full stop before the third-party notice (owner,
-        // 2026-11-09: "redundant"). Cut at the notice, not at a full stop: names carry them (98.5).
-        if let notice = first.range(of: ". Playback uses") { first = String(first[..<notice.lowerBound]) }
-        let line = first.trimmingCharacters(in: .whitespaces)
-        return line.isEmpty ? nil : line
-    }
-
     /// The stream the channel says is live. Nil when none is named or the name matches nothing.
     var activeStream: Stream? {
         guard let activeStreamId else { return nil }
@@ -143,6 +131,24 @@ struct Health: Decodable, Sendable {
     }
 
     let results: [Result]
+    /// When the sweep wrote the file, ISO 8601 ("2026-11-01T13:23:05.398418Z").
+    let generatedAt: String?
+
+    /// The health pipeline sweeps every 30 minutes and publishes a row older than 2 hours as
+    /// `unknown` (khajistan-machinery scripts/ops/OF_HEALTH_DROPLET.md). A file older than that
+    /// has missed several sweeps and says nothing about now.
+    static let maximumAge: TimeInterval = 2 * 60 * 60
+
+    /// Written within `maximumAge` of `now`. A file with no readable time is not fresh.
+    func isFresh(at now: Date) -> Bool {
+        guard let generatedAt else { return false }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let written = fractional.date(from: generatedAt) ?? ISO8601DateFormatter().date(from: generatedAt) else {
+            return false
+        }
+        return now.timeIntervalSince(written) <= Self.maximumAge
+    }
 }
 
 /// The three withdrawal feeds folded into what the eligibility rules look up. Any of them may
@@ -199,6 +205,21 @@ enum ReceiverRules {
         return kept.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
+    /// The channel after `currentID` in `list`, wrapping, that has not already failed on this
+    /// screen (`dead`). Nil when every other channel has. A current channel not in the list
+    /// starts the search at the top.
+    static func nextLive(after currentID: String, in list: [Channel], dead: Set<String>) -> Channel? {
+        guard !list.isEmpty else { return nil }
+        let start = (list.firstIndex { $0.id == currentID } ?? -1) + 1
+        return (0..<list.count)
+            .map { list[(start + $0) % list.count] }
+            .first { $0.id != currentID && !dead.contains($0.id) }
+    }
+
+    /// A refusal that asks for an account. Playback never moves past one on its own: the viewer
+    /// signs in or chooses.
+    static func isAccountGate(httpStatus: Int) -> Bool { httpStatus == 401 || httpStatus == 403 }
+
     /// GET site/api/frequency?stream=<streamId>. The id is opaque, so it is encoded as one.
     static func carrierURL(streamID: String) -> URL {
         var parts = URLComponents(url: KJConfig.site.appendingPathComponent("api/frequency"),
@@ -223,6 +244,17 @@ enum ReceiverRules {
               parts.scheme?.lowercased() == "https",
               let host = parts.host, !host.isEmpty else { return false }
         return parts.user == nil && parts.password == nil
+    }
+
+    /// What the site's sign-in (POST /gate, redirected to `next`) said. A right password lands on
+    /// `next` with the cookie set; a wrong one lands on the sign-in page. Anything else (a
+    /// throttle, an outage, a captive portal, a page somewhere else) is tried again later.
+    enum GateOutcome: Equatable { case signedIn, refused, tryLater }
+
+    static func gateOutcome(status: Int, landedOn path: String?, next: String, cookieSet: Bool) -> GateOutcome {
+        guard status == 200 else { return .tryLater }
+        if path == next && cookieSet { return .signedIn }
+        return path == "/gate" || path == "/gate.html" ? .refused : .tryLater
     }
 
     /// Tiers shown before the viewer switches on the extensions.

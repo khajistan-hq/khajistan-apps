@@ -24,7 +24,7 @@ final class ChatStore {
         self.auth = auth
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 15
-        session = URLSession(configuration: config)
+        session = URLSession(configuration: config.answeringFromFixtures())
     }
 
     func start() async {

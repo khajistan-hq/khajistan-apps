@@ -139,9 +139,62 @@ enum ArchiveURL {
     static let base = URL(string: "https://khajistan-archive.pages.dev")!
     static let hosts: Set<String> = ["khajistan-archive.pages.dev", "archive.khajistan.com"]
 
+    /// HTML navigation uses the site's form gate, which mints its HttpOnly cookie. Basic
+    /// challenges only cover non-HTML requests. The browser exchanges this form without
+    /// following its redirect, then installs the returned cookie before loading the page.
+    /// The password stays in the POST body and is sent only to the configured HTTPS origin.
+    static func previewRequest(_ url: URL, password: String?) -> URLRequest {
+        let target = KJURL.canonicalSitePage(url)
+        guard target.scheme == KJConfig.site.scheme, target.host == KJConfig.site.host,
+              target.port == nil || target.port == 443, target.user == nil, target.password == nil,
+              let password, !password.isEmpty,
+              var parts = URLComponents(url: target, resolvingAgainstBaseURL: false) else {
+            return URLRequest(url: target)
+        }
+        parts.scheme = nil
+        parts.host = nil
+        parts.port = nil
+        let next = parts.string?.isEmpty == false ? parts.string! : "/"
+        var request = URLRequest(url: KJConfig.site.appendingPathComponent("gate"))
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(("password=" + KJURL.encodeQueryValue(password)
+            + "&next=" + KJURL.encodeQueryValue(next)).utf8)
+        return request
+    }
+
     static func isArchive(_ url: URL) -> Bool {
         url.scheme?.lowercased() == "https" && hosts.contains(url.host?.lowercased() ?? "")
             && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
+    }
+
+    /// A file may be saved only from the archive's own hosts: an https archive URL, a blob the
+    /// archive page made (`blob:https://<archive host>/<id>`), or an object in the archive's own
+    /// storage (a buyer's files come as its signed URLs, `my-downloads`). Anything else a page
+    /// links, frames or redirects to is not saved, whatever WebKit would download.
+    static func allowsDownload(_ url: URL?) -> Bool {
+        guard let url else { return false }
+        if url.scheme?.lowercased() == "blob" {
+            let origin = url.absoluteString.dropFirst("blob:".count)
+            return URL(string: String(origin)).map(isArchive) ?? false
+        }
+        return isArchive(url) || isArchiveStorage(url)
+    }
+
+    /// An object in the project's own Storage, signed or public, and nothing else on that host.
+    static func isArchiveStorage(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && url.host?.lowercased() == SupabaseRoute.host
+            && url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
+            && !url.path.contains("/..") && !url.path.contains("/./")
+            && (url.path.hasPrefix("/storage/v1/object/sign/") || url.path.hasPrefix("/storage/v1/object/public/"))
+    }
+
+    enum DownloadDecision: Equatable { case allow, download, refuse }
+
+    /// What the browser does with a response: show it, save it, or refuse a save from elsewhere.
+    static func decideResponse(url: URL?, canShowMIMEType: Bool, contentDisposition: String) -> DownloadDecision {
+        guard !canShowMIMEType || contentDisposition.lowercased().hasPrefix("attachment") else { return .allow }
+        return allowsDownload(url) ? .download : .refuse
     }
 
     /// The existing preview password answers only the archive's own HTTPS Basic gate,
@@ -209,4 +262,26 @@ enum ArchiveURL {
                 && !sensitive.contains(where: { value.contains($0) })
         }
     }
+}
+
+/// Serializes browser credential changes. A cancelled network operation may still finish;
+/// its generation check prevents it from restoring access after Clear or a newer navigation.
+@MainActor
+final class PreviewNavigationQueue {
+    private var generation = 0
+    private var pending: Task<Void, Never>?
+
+    func replace(alwaysRun: Bool = false, _ operation: @escaping (@escaping () -> Bool) async -> Void) {
+        generation += 1
+        let expected = generation
+        let previous = pending
+        previous?.cancel()
+        pending = Task { [weak self] in
+            await previous?.value
+            guard let self, alwaysRun || self.generation == expected else { return }
+            await operation { [weak self] in self?.generation == expected }
+        }
+    }
+
+    func wait() async { await pending?.value }
 }

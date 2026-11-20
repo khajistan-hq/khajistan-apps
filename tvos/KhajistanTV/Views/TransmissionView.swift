@@ -280,7 +280,9 @@ private struct ScheduleRow: View {
     /// the show. Nothing when that is only the channel's own name again (a one-show channel), and
     /// nothing for a slot whose show the schedule has lost; the hours still show.
     private func onNow(_ air: OnAir) -> String {
-        let now = air.nowName ?? air.show?.name ?? ""
+        // The name with its Roman form after it, as the player's guide writes it (owner,
+        // 2026-11-19: "all shows should show names in roman as well").
+        let now = air.guideLine
         return now == name ? "" : now
     }
 

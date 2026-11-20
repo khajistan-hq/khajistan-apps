@@ -41,6 +41,9 @@ final class AppModel {
     /// A radio channel left playing when its player closed: Sonos's small player, under every
     /// screen, until it is turned off or another signal starts.
     var radioAway: RadioAway?
+    /// The small player shows under the sections (in picture-in-picture it has its own window).
+    /// Pages shrink their tallest parts while it does, so Down can still reach its Off.
+    var radioBarUp: Bool { radioAway.map { $0.pip == nil } ?? false }
     /// Moves when a page asks the small radio bar to take focus: Down from a shelf whose cards are
     /// taller than the room left above the bar finds nothing below them on its own.
     var radioBarFocusRequests = 0

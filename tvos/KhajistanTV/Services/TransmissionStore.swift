@@ -828,7 +828,8 @@ final class TransmissionStore {
 
     /// Five vinyl transfers carry no title; the show name stands in for it.
     private func nowPlayingTitle(_ air: OnAir) -> String {
-        let title = air.programme?.title ?? ""
+        // The standardised name, with its year (owner, 2026-11-20), where the build wrote one.
+        let title = air.programme?.display_title ?? air.programme?.title ?? ""
         if !title.isEmpty { return title }
         return air.show?.name ?? "Khajistan TV"
     }

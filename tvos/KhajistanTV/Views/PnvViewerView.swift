@@ -1,4 +1,6 @@
+import AVFoundation
 import SwiftUI
+import VideoToolbox
 
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
@@ -7,7 +9,7 @@ import SwiftUI
 /// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
 /// one lit, Up or Menu lets go. The Reel moves as Transmission does instead: Up the next video,
-/// Down the one before (it stays put on the first), Right lights Save and walks the controls, Left
+/// Down the one before (from the first it comes round to the last loaded), Right lights Save and walks the controls, Left
 /// walks back and lets go. On a stream, Right goes on to Shuffle (deals the stream again
 /// from a random place, the site's Shuffle; on the Apple TV it stays on) and Region (steps All
 /// regions, then west to east; the Reel passes over a region with no videos). Lit by the remote, never focused, as the Receiver's strip is.
@@ -36,6 +38,9 @@ struct PnvViewerView: View {
     /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
     /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
     @State private var skips = 0
+    /// Undecodable videos skipped in a row. Apart from `skips`, because a VP9 file starts playing
+    /// (sound over black) before its codec is read, and play resets `skips`.
+    @State private var codecSkips = 0
     /// The way the last step went, so a broken video is skipped in that direction: Down onto one
     /// goes on back, not forward to the video just left.
     @State private var lastDelta = 1
@@ -319,6 +324,7 @@ struct PnvViewerView: View {
         switch direction {
         case .up, .down:
             armed = nil
+            codecSkips = 0
             step(by: direction == .up ? 1 : -1)
         case .right:
             if let lit = armed, let index = controls.firstIndex(of: lit) {
@@ -395,6 +401,7 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         // A new hand or region starts the count of broken videos skipped in a row again.
         skips = 0
+        codecSkips = 0
         lastDelta = 1
         skipped = nil
         // The object on screen stops now, not when the new deal arrives.
@@ -535,7 +542,8 @@ struct PnvViewerView: View {
                 // not choose.
                 // VoiceOver and Switch Control loop too, as on the iPhone.
                 if videosOnly, OverlayTiming.hidesItself, armed == nil {
-                    if current.id == key, stepping == nil { step(by: 1) }
+                    // A video that played to its end was decodable: the undecodable run is over.
+                    if current.id == key, stepping == nil { codecSkips = 0; step(by: 1) }
                     return
                 }
                 guard videosOnly || !row.isKtv, let controller else { return }
@@ -543,6 +551,7 @@ struct PnvViewerView: View {
                 controller.resume()
             }
             controller.attach(url: url, seekTo: nil, title: "@" + store.accountHandle(for: row), subtitle: "Khajistan", isLive: false)
+            let asset = controller.player.currentItem?.asset
             #if DEBUG
             // `-kjfakeend N`: the video "ends" every N s of play, so a test can see what an end
             // does under a lit control without waiting on a real clip's length. Debug only.
@@ -557,6 +566,15 @@ struct PnvViewerView: View {
             }
             #endif
             phase = .ready
+            // A VP9 or AV1 file loads and plays its sound over a black picture on a device with no
+            // decoder for it (the Apple TV HD has neither): say so, and in the Reel skip it. Read
+            // after `.ready`, so a slow or empty track list never holds the viewer on Loading.
+            guard let asset, await Self.cannotDecode(asset) else { return }
+            guard !Task.isCancelled, current.id == key else { return }
+            controller.stop()
+            phase = .failed("This video cannot play on this Apple TV.")
+            // VP9 files sit together by account, so these do not stop the Reel after two.
+            skipBroken(key, codec: true)
         } catch PnvPlaybackError.needsSignIn {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .needsSignIn
@@ -567,11 +585,36 @@ struct PnvViewerView: View {
         }
     }
 
+    /// Whether the asset's picture is in a codec this device has no decoder for. Only VP9 and AV1
+    /// are asked about: every Apple device decodes H.264 and HEVC, and VideoToolbox answers for
+    /// the hardware. Read off the player's own asset, so nothing extra is downloaded.
+    nonisolated static func cannotDecode(_ asset: AVAsset) async -> Bool {
+        #if DEBUG
+        // `-kjundecodable YES`: every video reads as undecodable, so a test can see the message
+        // and the skip without a VP9 file or an Apple TV HD. Debug only.
+        if UserDefaults.standard.string(forKey: "kjundecodable") == "YES" { return true }
+        #endif
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let formats = try? await track.load(.formatDescriptions) else { return false }
+        let vp9: FourCharCode = 0x7670_3039, av1: FourCharCode = 0x6176_3031 // 'vp09', 'av01'
+        return formats.contains { format in
+            let codec = CMFormatDescriptionGetMediaSubType(format)
+            return (codec == vp9 || codec == av1) && !VTIsHardwareDecodeSupported(codec)
+        }
+    }
+
     /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
     /// Only while it is still on screen, once per object, and not three in a row.
-    private func skipBroken(_ key: String) {
-        guard videosOnly, OverlayTiming.hidesItself, skips < 2, skipped != key else { return }
-        skips += 1
+    private func skipBroken(_ key: String, codec: Bool = false) {
+        guard videosOnly, OverlayTiming.hidesItself, skipped != key else { return }
+        // VP9 files sit together by account: eight undecodable ones in a row before the Reel stops.
+        if codec {
+            guard codecSkips < 8 else { return }
+            codecSkips += 1
+        } else {
+            guard skips < 2 else { return }
+            skips += 1
+        }
         skipped = key
         skipTask?.cancel()
         skipTask = Task { @MainActor in
@@ -579,8 +622,7 @@ struct PnvViewerView: View {
             // A lit control holds the skip as it holds autoplay; it goes on once the control lets go.
             while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
             if !Task.isCancelled, current.id == key {
-                let isFirst = store.feed(feedKey).items.first?.id == key
-                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta, isFirst: isFirst))
+                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta))
             }
         }
     }
@@ -592,8 +634,11 @@ struct PnvViewerView: View {
         // A deal that came back empty or failed: a step (Left or Right; Up or Down in the Reel)
         // asks for it again.
         if stranded { restart {}; return }
-        // Down on the Reel's first video has nowhere to go: leave its pending skip alone.
-        if videosOnly, delta < 0, store.feed(feedKey).items.first?.id == current.id { return }
+        // Down on the Reel's first video comes round to the last one loaded (owner, 2026-11-20:
+        // "it should work both ways"), as Channel Down does on channel 1. With nothing else
+        // loaded there is nowhere to go: leave its pending skip alone.
+        if videosOnly, delta < 0, store.feed(feedKey).items.count < 2,
+           store.feed(feedKey).items.first?.id == current.id { return }
         stepTask?.cancel()
         skipTask?.cancel()
         skipped = nil
@@ -623,7 +668,9 @@ struct PnvViewerView: View {
             let items = store.feed(feedKey).items
             guard !Task.isCancelled, !items.isEmpty else { return }
             // The stream never ends: past its last object it comes round to its first, once the
-            // feed has given everything; Left (Down in the Reel) from the first stays put.
+            // feed has given everything. Left from the first stays put on a shelf; Down in the
+            // Reel comes round to the last loaded.
+            if index < 0, videosOnly { index = items.count - 1 }
             if index >= items.count {
                 guard store.feed(feedKey).isDone else { return }
                 index = 0

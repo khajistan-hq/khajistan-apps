@@ -311,6 +311,40 @@ final class PicsVidsUITests: XCTestCase {
     /// The same, for a video that fails inside the player (a dead address), not before it.
     func testReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
 
+    /// Down onto a broken video skips on back, not forward to the video just left (Fable round 5):
+    /// with only the deal's second video broken, Up, Up (skipped on to the third), then Down onto
+    /// the broken second, which must skip back to the first.
+    func testReelSkipsBackwardAfterDown() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        let first = surface.value as? String
+        XCTAssertFalse((first ?? "").isEmpty, "the Reel shows its first video")
+        // Up onto the broken second: within a few seconds it is skipped forward to the third.
+        XCUIRemote.shared.press(.up)
+        kjPause(6)
+        let onThird = surface.value as? String
+        XCTAssertNotEqual(onThird, first, "Up moved on")
+        // Down onto the broken second must skip back to the first, not forward again.
+        XCUIRemote.shared.press(.down)
+        var landed: String?
+        for _ in 0..<16 {
+            kjPause(0.5)
+            landed = surface.value as? String
+            if landed == first { break }
+        }
+        print("PNVBACK first=\(first ?? "nil") third=\(onThird ?? "nil") landed=\(landed ?? "nil")")
+        XCTAssertEqual(landed, first, "Down onto a broken video skips on back to the one before it")
+    }
+
     private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", broken]

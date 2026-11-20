@@ -340,6 +340,10 @@ final class PicsVidsStore {
         switch UserDefaults.standard.string(forKey: "kjbrokenvideos") {
         case "YES": throw PnvPlaybackError.unavailable
         case "dead" where row.isVideo: return URL(string: "http://127.0.0.1:9/kj-dead.mp4")!
+        // `second`: only the second video of a Reel deal fails, so a test can step onto it from
+        // either side and see which way it is skipped.
+        case "second" where feeds.contains { $0.key.hasPrefix(Self.videosPrefix) && $0.value.items.dropFirst().first?.id == row.id }:
+            throw PnvPlaybackError.unavailable
         default: break
         }
         #endif

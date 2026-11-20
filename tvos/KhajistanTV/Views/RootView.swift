@@ -10,6 +10,10 @@ struct RootView: View {
     @State private var visited: [Section] = []
     /// Set while Back changes the section, so the change is not recorded as a visit.
     @State private var goingBack = false
+    /// The sections are laid out for the radio bar under them (`underRadioBar`). Set as the bar
+    /// comes; cleared once it has gone and no full-screen page covers the sections.
+    @State private var underBar = false
+    private static let coverCheck: Duration = .milliseconds(300)
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -26,13 +30,20 @@ struct RootView: View {
         #endif
     }
 
+    /// A full-screen page is up over the sections.
+    private static var coverUp: Bool {
+        UIApplication.shared.connectedScenes.contains { scene in
+            (scene as? UIWindowScene)?.windows.contains { $0.rootViewController?.presentedViewController != nil } ?? false
+        }
+    }
+
     private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             TopBar(current: model.section, select: { model.section = $0 })
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
-                .environment(\.underRadioBar, model.radioBarUp)
+                .environment(\.underRadioBar, underBar)
             // The radio left playing, under every section (owner gap: "while browsing other tabs"),
             // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
             if model.radioBarUp, let away = model.radioAway {
@@ -41,6 +52,17 @@ struct RootView: View {
                     reopened = away
                 }
             }
+        }
+        // A film or channel opened from a shelf stops the radio, so the bar goes behind its page.
+        // The section keeps its shape until it is back on screen: a shelf that regrew out of sight
+        // moved the card focus had left, and focus was lost when the page closed (2026-11-20).
+        .task(id: model.radioBarUp) {
+            guard !model.radioBarUp else { underBar = true; return }
+            while Self.coverUp {
+                try? await Task.sleep(for: Self.coverCheck)
+                if Task.isCancelled { return }
+            }
+            underBar = false
         }
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.

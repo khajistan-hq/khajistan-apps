@@ -307,7 +307,7 @@ final class ReceiverGuideUITests: XCTestCase {
         kjPause(2)
         let focus = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         // Television is the first shelf and radio the next.
-        for _ in 0..<8 where !focus.identifier.hasPrefix("channel-") { XCUIRemote.shared.press(.down); kjPause(0.5) }
+        for _ in 0..<8 where !(focus.exists && focus.identifier.hasPrefix("channel-")) { XCUIRemote.shared.press(.down); kjPause(0.5) }
         XCUIRemote.shared.press(.down)
         kjPause(1)
         XCUIRemote.shared.press(.select)
@@ -315,8 +315,8 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(app.descendants(matching: .any)["radioBar"].waitForExistence(timeout: 10), "the radio plays on in the small player")
         kjPause(1)
-        for _ in 0..<4 where !focus.identifier.hasPrefix("film-") { XCUIRemote.shared.press(.down); kjPause(0.7) }
-        XCTAssertTrue(focus.identifier.hasPrefix("film-"), "Down reaches the films: \(focus.identifier)")
+        for _ in 0..<4 where !(focus.exists && focus.identifier.hasPrefix("film-")) { XCUIRemote.shared.press(.down); kjPause(0.7) }
+        XCTAssertTrue(focus.exists && focus.identifier.hasPrefix("film-"), "Down reaches the films")
         // Well along the shelf, where a sideways slide would carry the card off screen.
         for _ in 0..<7 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let chosen = focus.identifier

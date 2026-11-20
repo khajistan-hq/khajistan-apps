@@ -53,7 +53,8 @@ struct FilmCard: View {
     /// the shortest page above the bar, the region page under its crumb, so Down can reach the
     /// bar's Off. The poster keeps its size, so the cards keep their width and place on the shelf
     /// when the bar comes or goes (a film opened from the shelf stops the radio behind it, and a
-    /// shelf that moved sideways lost focus when the film closed).
+    /// shelf that moved sideways lost focus when the film closed). RootView holds the bar's
+    /// shape while a page covers the sections, so nothing regrows out of sight either.
     static let textHeightUnderBar: CGFloat = 90
 
     let film: Film
@@ -80,13 +81,14 @@ struct FilmCard: View {
                         Text(Films.displayTitle(film))
                             .kjName(28)
                             .lineLimit(2)
-                        if underRadioBar {
-                            // The title alone; the button's label still reads the offer.
-                        } else if let place {
-                            Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
-                        } else if let offer = Films.offer(film) {
-                            Kicker(offer)
-                                .lineLimit(3)
+                        // Under the bar the title alone; the button's label still reads the offer.
+                        if !underRadioBar {
+                            if let place {
+                                Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
+                            } else if let offer = Films.offer(film) {
+                                Kicker(offer)
+                                    .lineLimit(3)
+                            }
                         }
                         let detail = Films.detail(film)
                         if !underRadioBar, !detail.isEmpty {

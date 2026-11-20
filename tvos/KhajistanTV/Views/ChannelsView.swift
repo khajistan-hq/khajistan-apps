@@ -194,6 +194,9 @@ struct ChannelsView: View {
             // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
             FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films)
                 .accessibilityIdentifier("shelf-vod")
+                // The last shelf: Down from it goes to the small radio bar. Its cards shrink to fit
+                // above the bar (underRadioBar); this sends focus there even if a card still reaches it.
+                .onMoveCommand { if $0 == .down, model.radioBarUp { model.radioBarFocusRequests += 1 } }
         case "camera":
             cameraShelf
         default:

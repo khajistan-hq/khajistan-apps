@@ -268,7 +268,7 @@ final class ReceiverGuideUITests: XCTestCase {
         // where focus got stuck (2026-11-19: a focused film card under the full hero ran past it).
         let card = app.buttons.matching(NSPredicate(format: "hasFocus == true AND NOT (identifier BEGINSWITH 'radioBar')")).firstMatch
         var passedFilm = false
-        for _ in 0..<6 where !inBar.exists {
+        for _ in 0..<8 where !inBar.exists {
             if card.exists {
                 if card.identifier.hasPrefix("film-") { passedFilm = true }
                 XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY, "\(card.identifier) ends above the bar")

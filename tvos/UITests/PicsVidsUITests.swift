@@ -477,15 +477,26 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'cannot play on this Apple TV'")).firstMatch
-        XCTAssertTrue(said.waitForExistence(timeout: 15), "an undecodable video says so")
+        // Watched from the moment the viewer opens, so the first video is counted too.
         var seen: [String] = []
-        let end = Date().addingTimeInterval(25)
+        var saidIt = false
+        let end = Date().addingTimeInterval(45)
         while Date() < end {
             if let now = surface.value as? String, !now.isEmpty, seen.last != now { seen.append(now) }
+            if !saidIt { saidIt = said.exists }
             kjPause(0.3)
         }
         print("PNVCODEC \(seen.count) \(seen)")
-        XCTAssertGreaterThan(seen.count, 3, "undecodable videos are skipped past the two-in-a-row cap")
+        XCTAssertTrue(saidIt, "an undecodable video says so")
+        // Live data: a Khajistan TV row in the deal asks a signed-out viewer to sign in, and the
+        // Reel waits there (as before this change). Otherwise eight are skipped, and it stops on
+        // the ninth.
+        if let stop = seen.firstIndex(where: { $0.hasPrefix("ktv-") }) {
+            XCTAssertEqual(stop, seen.count - 1, "the Reel stops at the Khajistan TV row's sign-in")
+            XCTAssertLessThanOrEqual(seen.count, 9)
+        } else {
+            XCTAssertEqual(seen.count, 9, "eight undecodable videos skipped in a row, then the Reel stops on the ninth")
+        }
     }
 
     /// On a shelf (not the Reel) Left from the first object stays put: only the Reel comes round.

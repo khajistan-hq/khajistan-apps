@@ -38,6 +38,9 @@ struct PnvViewerView: View {
     /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
     /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
     @State private var skips = 0
+    /// Undecodable videos skipped in a row. Apart from `skips`, because a VP9 file starts playing
+    /// (sound over black) before its codec is read, and play resets `skips`.
+    @State private var codecSkips = 0
     /// The way the last step went, so a broken video is skipped in that direction: Down onto one
     /// goes on back, not forward to the video just left.
     @State private var lastDelta = 1
@@ -322,6 +325,7 @@ struct PnvViewerView: View {
         switch direction {
         case .up, .down:
             armed = nil
+            codecSkips = 0
             step(by: direction == .up ? 1 : -1)
         case .right:
             if let lit = armed, let index = controls.firstIndex(of: lit) {
@@ -398,6 +402,7 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         // A new hand or region starts the count of broken videos skipped in a row again.
         skips = 0
+        codecSkips = 0
         lastDelta = 1
         skipped = nil
         // The object on screen stops now, not when the new deal arrives.
@@ -569,7 +574,7 @@ struct PnvViewerView: View {
             controller.stop()
             phase = .failed("This video cannot play on this Apple TV.")
             // VP9 files sit together by account, so these do not stop the Reel after two.
-            skipBroken(key, limit: 8)
+            skipBroken(key, codec: true)
         } catch PnvPlaybackError.needsSignIn {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .needsSignIn
@@ -600,9 +605,16 @@ struct PnvViewerView: View {
 
     /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
     /// Only while it is still on screen, once per object, and not three in a row.
-    private func skipBroken(_ key: String, limit: Int = 2) {
-        guard videosOnly, OverlayTiming.hidesItself, skips < limit, skipped != key else { return }
-        skips += 1
+    private func skipBroken(_ key: String, codec: Bool = false) {
+        guard videosOnly, OverlayTiming.hidesItself, skipped != key else { return }
+        // VP9 files sit together by account: eight undecodable ones in a row before the Reel stops.
+        if codec {
+            guard codecSkips < 8 else { return }
+            codecSkips += 1
+        } else {
+            guard skips < 2 else { return }
+            skips += 1
+        }
         skipped = key
         skipTask?.cancel()
         skipTask = Task { @MainActor in

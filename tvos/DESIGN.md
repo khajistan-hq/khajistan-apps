@@ -216,6 +216,37 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
   When the slot ends the channel hands over to the next strip, as the website's tuneToNow
   does once a minute. Off air is OFF AIR in display type with the return time.
+- **Guide: a time grid** (owner, 2026-11-17: "it needs to be showing schedule on an hourly
+  basis"; the time grid was the owner's choice of three). Left or Right on the bare picture, or
+  the strip's Guide control, raises it from the bottom, on air, off air and while a channel tunes,
+  so an off-air channel never leaves the viewer without it. Channels run down the side (number,
+  mark, name on up to two lines, ● LIVE on the one tuned while something is on it), two hours run
+  across under half-hour marks in PKT, with a short accent bar at now, and each programme is a
+  block as long as it airs: its title and its times on the lift plate, an off-air stretch with no
+  plate and *back at* its return. **No cell is drawn too narrow to read** (owner, 2026-11-18:
+  "words are cutoff and not readable in the guide", on three hours across, where a ten-minute
+  programme read "R… 1…"): a programme whose part on screen is narrower than a cell's title and
+  times is folded into its narrower neighbour, and the cell reads *+N* for the others it holds,
+  with the whole cell's times. The lit cell names the lit programme with its own times, so Right
+  inside a fold reads each one in turn. A run of programmes under ten minutes in one strip is one block named for its show
+  (lit while it airs, the headline adds the programme on air, kept current every half minute:
+  *now: Jugni*); anything under a minute is part of the block before it (an off-air seam joins a
+  programme or an off-air stretch), except a programme after an off-air stretch, which keeps its
+  own block: off air never covers something on. Near a month's end the next month's schedule is fetched; until it is held, a row ends
+  where the month does rather than read the month after as off air (a programme begun before
+  midnight is drawn whole), and a row with nothing read for the hours on screen says Loading, as
+  does the headline when nothing is read at the lit moment. When the store lets go of the month
+  before at the turn, a run carried over midnight reads from 00:00 under its last programme's name
+  for its last few minutes, as the clock does. A refill keeps the blocks on
+  screen until the new reading lands. Over the grid the lit programme reads in full (its title, then the channel and its
+  times), since a short programme's block is too narrow for its name. One block is lit (the focus
+  plate, no lift: a block can be most of the screen wide). Up and Down change channel and keep the
+  moment; Right lights the next programme, as far as twelve hours ahead; Left the one before, never
+  one that has ended. The window moves in half hours to keep the lit programme in view. Select
+  tunes the lit channel, whatever the lit programme's time; Menu closes it. While it is open, now
+  moves on each half minute and the rows are read again when the half hour turns. The times come
+  from the station clock itself, asked at each programme's start (StationClock.timeline), so the
+  grid agrees with what airs to the second. It does not open under the sign-on's cover.
 
 ## The Screening Room
 

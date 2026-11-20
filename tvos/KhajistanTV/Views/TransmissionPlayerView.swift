@@ -30,9 +30,16 @@ struct TransmissionPlayerView: View {
     /// The strip control the remote has lit, if any.
     @State private var armed: Chip?
     private enum Chip { case subtitles, guide, pip }
-    /// The guide's lit row, as an index into `guideRows`; nil while it is closed.
-    @State private var guideRow: Int?
+    /// Where the guide's time grid stands (the lit channel and moment); nil while it is closed.
+    @State private var guideGrid: GuideGrid?
     @State private var guideRows: [TransmissionGuide.Row] = []
+    /// Rows whose schedule is being read off the main thread, and the reading they belong to: a
+    /// refill starts a new one, and an answer for an older one is dropped.
+    @State private var guideFilling: Set<Int> = []
+    @State private var guideFillGeneration = 0
+    /// Rows read before the half hour turned or a month came in: they keep their blocks on screen
+    /// until the new reading lands, so a refill never blanks them.
+    @State private var guideStale: Set<Int> = []
     @State private var pip = PictureInPicture()
     /// Set when the picture went to the corner window: the screen closes, the channel plays on.
     @State private var handedToPiP = false
@@ -54,6 +61,13 @@ struct TransmissionPlayerView: View {
             if holdsFocus && !isOnAir {
                 focusTarget
             }
+            // Over every phase, off air and tuning too: the guide is how a viewer finds a channel
+            // that is on (since #79 it opened only over a picture, and an off-air channel picked
+            // from it left no way back to it).
+            if let guideGrid {
+                TransmissionGuide(rows: guideRows, current: store.channelNumber, grid: guideGrid)
+                    .transition(.move(edge: .bottom))
+            }
             StationClipLayer(clips: model.clips)
         }
         .foregroundStyle(palette.ink)
@@ -65,7 +79,7 @@ struct TransmissionPlayerView: View {
         }
         .onExitCommand {
             // Back closes the guide, then lets go of a lit control, as the Receiver does.
-            if guideRow != nil {
+            if guideGrid != nil {
                 closeGuide()
                 return
             }
@@ -91,8 +105,8 @@ struct TransmissionPlayerView: View {
         // A control cannot stay lit once it is gone from the strip.
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
-        // Off air or re-tuning: the guide and the strip's controls go with the picture.
-        .onChange(of: isOnAir) { _, onAir in if !onAir { guideRow = nil; armed = nil } }
+        // Off air or re-tuning: the strip's controls go with the picture. The guide stays.
+        .onChange(of: isOnAir) { _, onAir in if !onAir { armed = nil } }
         .onChange(of: store.player.state) { wake() }
         // A schedule that now needs the preview password, or is not published, is answered on
         // the station page, which carries the password step. The player goes back to it.
@@ -119,6 +133,9 @@ struct TransmissionPlayerView: View {
         }
         #endif
         .task(id: subtitleKey) { await loadSubtitles() }
+        .task(id: guideGrid == nil) { if guideGrid != nil { await keepGuideCurrent() } }
+        // A month brought in, or the month turned: the guide reads its rows again.
+        .onChange(of: store.guideMonthsKey) { if guideGrid != nil { refillGuide() } }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .fullScreenCover(isPresented: $showSignIn) {
@@ -194,13 +211,9 @@ struct TransmissionPlayerView: View {
             }
             focusTarget
             overlay(air)
-            if let guideRow {
-                TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
-                    .transition(.move(edge: .bottom))
-            }
             CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
-                .opacity(guideRow == nil ? 1 : 0)
+                .opacity(guideGrid == nil ? 1 : 0)
             HandoverNotice(
                 air: air,
                 next: store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(), count: 1).first,
@@ -403,7 +416,7 @@ struct TransmissionPlayerView: View {
         HStack(spacing: 14) {
             if !subtitles.tracks.isEmpty { subtitlesControl }
             if guideOffered {
-                StripChipStyle.face(Text("Guide"), isOn: guideRow != nil, selected: armed == .guide)
+                StripChipStyle.face(Text("Guide"), isOn: guideGrid != nil, selected: armed == .guide)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Guide")
                     .accessibilityIdentifier("guideControl")
@@ -424,8 +437,8 @@ struct TransmissionPlayerView: View {
     /// Select on the picture: tunes the lit guide row, works the lit control, or, with the strip
     /// up, lights its first control (the Receiver's rule).
     private func selectOnSurface() {
-        if let guideRow {
-            if guideRows.indices.contains(guideRow) { pick(guideRows[guideRow].number) }
+        if let guideGrid {
+            if guideRows.indices.contains(guideGrid.row) { pick(guideRows[guideGrid.row].number) }
             return
         }
         switch armed {
@@ -440,37 +453,143 @@ struct TransmissionPlayerView: View {
 
     private var isFailed: Bool { if case .failed = store.player.state { return true } else { return false } }
 
-    /// Not while a change, a handover or the sign-on tunes: the control shows only when it works.
+    /// Offered on air, off air and while a signal tunes, so a viewer can always find a channel
+    /// that is on; not while a change is under way, which would tune under the guide, and not
+    /// under the sign-on's cover, which is drawn over the guide and would hide it.
     private var guideOffered: Bool {
-        isOnAir && store.channelNumbers.count > 1 && !switching && store.player.state != .tuning
+        store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
     }
 
-    /// Every channel, with what the clock has on it now, the tuned one lit.
+    /// Every channel down the side and two hours across, the tuned channel lit at now.
     private func openGuide() {
         guard guideOffered else { return }
         hideTask?.cancel()
         armed = nil
         let now = TransmissionStore.now()
+        guideFillGeneration += 1
+        guideFilling = []
+        guideStale = []
+        let months = store.guideMonths
         guideRows = store.channelNumbers.map { number in
-            let air = store.nowOn(channel: number, at: now)
-            let line: String
-            if let air {
-                line = air.nowName ?? air.show?.name ?? ""
-            } else if let back = store.returnLabel(channel: number, at: now) {
-                line = "Off air \u{00B7} returns at \(back)"
-            } else {
-                line = "Off air"
-            }
-            return .init(number: number, name: store.channelName(number), now: line,
-                         soundOnly: air?.programme?.audio_only == true)
+            .init(number: number, name: store.channelName(number),
+                  soundOnly: store.nowOn(channel: number, at: now)?.programme?.audio_only == true,
+                  onNow: StationClock.nowName(months, channel: number, at: now), slots: [])
         }
-        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) {
-            guideRow = guideRows.firstIndex { $0.number == store.channelNumber } ?? 0
+        var grid = GuideGrid(row: guideRows.firstIndex { $0.number == store.channelNumber } ?? 0, now: now)
+        fillGuide(around: grid.row, now: now)
+        grid.follow()
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideGrid = grid }
+        // The guide's hours can reach past the month held: the next month's file, then the rows
+        // again (onChange of guideMonthsKey), so the hours after midnight on the 1st read what airs.
+        let until = Self.guideEnd(now)
+        Task { _ = await store.loadNextMonth(until: until) }
+    }
+
+    /// How far a guide opened at `now` reads: the horizon Right reaches plus one window.
+    private static func guideEnd(_ now: Date) -> Date {
+        now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)
+    }
+
+    /// The schedule of the rows the guide draws (ReceiverGuide.window, which holds against the
+    /// list's ends) and one row beyond each side, for any of them not read yet: from the half hour
+    /// now is in to the horizon plus a window, so the last programme Right reaches is drawn.
+    /// The reading runs off the main thread (a busy channel's fifteen hours took 17 ms on a Mac
+    /// and the Apple TV HD is many times slower), so a press never waits for it; a row reads
+    /// Loading until its answer lands.
+    private func fillGuide(around row: Int, now: Date) {
+        let count = guideRows.count
+        guard count > 0 else { return }
+        let shown = ReceiverGuide.window(count: count, lit: row)
+        guard let first = shown.first, let last = shown.last else { return }
+        let wanted = Set(shown + [(first - 1 + count) % count, (last + 1) % count])
+            .filter { (guideRows[$0].slots.isEmpty || guideStale.contains($0)) && !guideFilling.contains($0) }
+        guard !wanted.isEmpty else { return }
+        guideFilling.formUnion(wanted)
+        let jobs = wanted.map { ($0, guideRows[$0].number) }
+        let months = store.guideMonths
+        let from = GuideGrid.halfHour(now), to = Self.guideEnd(now)
+        let generation = guideFillGeneration
+        Task {
+            let read = await Task.detached(priority: .userInitiated) {
+                jobs.map { ($0.0, StationClock.timeline(months, channel: $0.1, from: from, to: to)) }
+            }.value
+            guard generation == guideFillGeneration else { return }
+            for (index, slots) in read where guideRows.indices.contains(index) {
+                guideFilling.remove(index)
+                // An empty reading (the schedule dropped meanwhile) never blanks a row on screen.
+                if slots.isEmpty, !guideRows[index].slots.isEmpty { continue }
+                guideRows[index].slots = slots
+                guideStale.remove(index)
+            }
         }
     }
 
+    /// Reads every row the guide holds again, for a new half hour or a month brought in.
+    private func refillGuide() {
+        guard let grid = guideGrid else { return }
+        guideFillGeneration += 1
+        guideFilling = []
+        guideStale = Set(guideRows.indices.filter { !guideRows[$0].slots.isEmpty })
+        fillGuide(around: grid.row, now: grid.now)
+    }
+
+    /// The programme on air on each row, by the strip's own name for it: read every tick, since a
+    /// run of short items changes under the headline every few minutes.
+    private func nameWhatIsOn(at now: Date) {
+        let months = store.guideMonths
+        for index in guideRows.indices {
+            let name = StationClock.nowName(months, channel: guideRows[index].number, at: now)
+            if guideRows[index].onNow != name { guideRows[index].onNow = name }
+        }
+    }
+
+    /// A drawn row that is empty or stops short of the hours the guide reads: the month it needs is
+    /// not held yet.
+    private var guideRowsShort: Bool {
+        guard let grid = guideGrid else { return false }
+        let end = Self.guideEnd(grid.now)
+        // Half an hour of slack: rows are read to the end as it stood when they were read, and the
+        // half-hour refill moves that on.
+        return ReceiverGuide.window(count: guideRows.count, lit: grid.row).contains { index in
+            (guideRows[index].slots.last?.end ?? .distantPast) < end.addingTimeInterval(-GuideGrid.step)
+        }
+    }
+
+    /// While the guide is open the clock moves on: now, LIVE and the lit moment every half minute,
+    /// and the rows again when the half hour turns, so the window and the rows start at the same
+    /// place. A row still short of its hours asks for the month it needs again on each tick.
+    private func keepGuideCurrent() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(30))
+            guard !Task.isCancelled, var grid = guideGrid else { return }
+            let now = TransmissionStore.now()
+            let turned = GuideGrid.halfHour(now) != GuideGrid.halfHour(grid.now)
+            grid.refresh(now: now)
+            guideGrid = grid
+            nameWhatIsOn(at: now)
+            if turned { refillGuide() }
+            // Not awaited here: a slow download must not hold now still. The rows are read again
+            // when the months held change (onChange of guideMonthsKey).
+            if guideRowsShort { Task { _ = await store.loadNextMonth(until: Self.guideEnd(now)) } }
+        }
+    }
+
+    /// The remote inside the guide: Up and Down the channel, Left and Right the programme.
+    private func moveInGuide(_ direction: MoveCommandDirection, grid: GuideGrid) {
+        var grid = grid
+        switch direction {
+        case .up: grid.move(rows: -1, count: guideRows.count)
+        case .down: grid.move(rows: 1, count: guideRows.count)
+        case .left: if guideRows.indices.contains(grid.row) { grid.earlier(on: guideRows[grid.row].slots) }
+        case .right: if guideRows.indices.contains(grid.row) { grid.later(on: guideRows[grid.row].slots) }
+        default: return
+        }
+        fillGuide(around: grid.row, now: grid.now)
+        guideGrid = grid
+    }
+
     private func closeGuide() {
-        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
+        withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideGrid = nil }
         wake()
     }
 
@@ -714,11 +833,9 @@ struct TransmissionPlayerView: View {
         // with the strip up walks its controls (the Receiver's rule, owner 2026-11-08).
         let stripWasUp = stripShown
         wake()
-        // Inside the guide up and down walk the rows.
-        if let row = guideRow {
-            let count = guideRows.count
-            if count > 0, direction == .up { guideRow = (row - 1 + count) % count }
-            if count > 0, direction == .down { guideRow = (row + 1) % count }
+        // Inside the guide the remote walks the grid: channels up and down, programmes across.
+        if let guideGrid {
+            moveInGuide(direction, grid: guideGrid)
             return
         }
         switch direction {
@@ -867,7 +984,7 @@ struct TransmissionPlayerView: View {
         hideTask = Task {
             try? await Task.sleep(for: OverlayTiming.idle)
             // The strip stays while a control is lit or the guide is open.
-            if !Task.isCancelled, armed == nil, guideRow == nil {
+            if !Task.isCancelled, armed == nil, guideGrid == nil {
                 overlayVisible = false
             }
         }

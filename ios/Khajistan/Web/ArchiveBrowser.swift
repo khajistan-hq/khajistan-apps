@@ -22,6 +22,8 @@ final class ArchiveBrowser: NSObject {
     var dialog: WebDialog?
     private var observations: [NSKeyValueObservation] = []
     private var downloads: [ObjectIdentifier: URL] = [:]
+    /// Downloads refused at their destination: their failure keeps the refusal's message.
+    private var refusedDownloads = Set<ObjectIdentifier>()
     private var requestedURL: URL?
     private let previewPassword: () -> String?
     private let previewQueue = PreviewNavigationQueue()
@@ -208,7 +210,13 @@ extension ArchiveBrowser: WKNavigationDelegate {
             return
         }
         let scheme = url.scheme?.lowercased() ?? ""
-        if action.shouldPerformDownload, ["https", "blob"].contains(scheme) { decisionHandler(.download); return }
+        if action.shouldPerformDownload {
+            guard ArchiveURL.allowsDownload(url) else {
+                downloadMessage = Self.foreignDownload
+                decisionHandler(.cancel); return
+            }
+            decisionHandler(.download); return
+        }
         // Subframes belong to the site's CSP. Top-level custom schemes never execute in WebKit.
         if action.targetFrame?.isMainFrame == false, ["https", "http", "about", "blob"].contains(scheme) {
             decisionHandler(.allow); return
@@ -226,7 +234,14 @@ extension ArchiveBrowser: WKNavigationDelegate {
             error = "The archive returned an error (\(http.statusCode)). Try reloading this page."
         }
         let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
-        decisionHandler(!response.canShowMIMEType || disposition.lowercased().hasPrefix("attachment") ? .download : .allow)
+        switch ArchiveURL.decideResponse(url: response.response.url, canShowMIMEType: response.canShowMIMEType,
+                                         contentDisposition: disposition) {
+        case .allow: decisionHandler(.allow)
+        case .download: decisionHandler(.download)
+        case .refuse:
+            downloadMessage = Self.foreignDownload
+            decisionHandler(.cancel)
+        }
     }
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
@@ -282,7 +297,14 @@ extension ArchiveBrowser: WKDownloadDelegate {
     static var downloadDirectory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Downloads", isDirectory: true)
     }
+    static let foreignDownload = "Only files from the Khajistan archive can be saved here."
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+        // The final response, after any redirect, must still come from the archive.
+        guard ArchiveURL.allowsDownload(response.url) else {
+            refusedDownloads.insert(ObjectIdentifier(download))
+            downloadMessage = Self.foreignDownload
+            completionHandler(nil); return
+        }
         do {
             // Keep a partial file outside the visible library until WebKit reports completion.
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("KhajistanDownloads/\(UUID().uuidString)")
@@ -311,10 +333,12 @@ extension ArchiveBrowser: WKDownloadDelegate {
         try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
     }
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        if let temporary = downloads.removeValue(forKey: ObjectIdentifier(download)) {
-            try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent())
-        }
+        let temporary = downloads.removeValue(forKey: ObjectIdentifier(download))
+        if let temporary { try? FileManager.default.removeItem(at: temporary.deletingLastPathComponent()) }
         activeDownloads = downloads.count
+        // This download was refused before it had a file: it fails however WebKit words it, and
+        // the refusal's message stays. Any other failure says so, whatever banner is up.
+        if refusedDownloads.remove(ObjectIdentifier(download)) != nil { return }
         downloadMessage = "Download failed: \(error.localizedDescription). Return to the page to try again."
     }
 }

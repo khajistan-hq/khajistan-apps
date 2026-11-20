@@ -14,8 +14,9 @@ extension XCTestCase {
     }
 
     /// Waits for the channel just opened to play. When it does not, Down tunes the next channel,
-    /// as the player's own line says, up to `tries` channels; then the test is skipped, naming what
-    /// each said. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
+    /// as the player's own line says, up to `tries` channels; then a live run is skipped, naming what
+    /// each said. It fails instead on the local test video, and when every channel played and
+    /// `accept` turned each down. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
     /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
     /// `accept` narrows which channel counts, by id: a captions test needs a language the
     /// recogniser takes, and Down can bring up DD Kashir, which plays but is Kashmiri.
@@ -23,6 +24,7 @@ extension XCTestCase {
         let state = app.staticTexts["playerState"]
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
+        var turnedDown = 0
         for attempt in 0..<tries {
             // After Down, only the next channel playing counts: the one being left can still
             // reach Playing before the cut (Bugbot on PR 66).
@@ -33,13 +35,21 @@ extension XCTestCase {
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
             }, object: nil)
             // A channel that plays but fails `accept` moves on at once, not after the timeout.
-            if XCTWaiter.wait(for: [playing], timeout: 30) == .completed,
-               accept(current.exists ? current.label : "") { return }
-            tried.append("\(current.exists ? current.label : "?"): \(state.label)")
+            let played = XCTWaiter.wait(for: [playing], timeout: 30) == .completed
+            let id = current.exists ? current.label : "?"
+            if played {
+                if accept(current.exists ? current.label : "") { return }
+                turnedDown += 1
+                tried.append("\(id): played, not accepted")
+            } else {
+                tried.append("\(id): \(state.label)")
+            }
         }
-        let why = "No channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
-        // The local test video always plays: if it did not, the test media is broken.
-        guard kjLiveMedia else { XCTFail(why); return }
+        let why = "No accepted channel played on this runner in \(tries) tries: \(tried.joined(separator: "; "))"
+        // The local test video always plays: if it did not, the test media is broken. When every
+        // channel played and `accept` turned each down, no carrier was dead: the filter or the
+        // list is wrong, and that fails too, rather than reading as a dead network.
+        guard kjLiveMedia, turnedDown < tries else { XCTFail(why); return }
         throw XCTSkip(why)
     }
 
@@ -58,21 +68,52 @@ extension XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// Reach the Receiver's region strip with remote presses, including when focus has moved
-    /// into a channel shelf below it. Never selects or changes the highlighted channel.
-    @discardableResult
-    func kjFocusStrip(_ app: XCUIApplication) -> Bool {
+    /// Reach the Receiver's region list (the A–Z list beside the map, the front's one way to a
+    /// region since 2026-11-17) with remote presses, including when focus has moved into a shelf
+    /// below the front. Never selects. Its rows carry `region-<id>`.
+    func kjFocusRegions(_ app: XCUIApplication) -> Bool {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focused = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        for _ in 0..<10 {
+        for _ in 0..<14 {
             if focused.exists { return true }
             let current = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            let belowStrip = current.exists && !current.identifier.hasPrefix("nav-") && regions.firstMatch.exists
-                && current.frame.midY > regions.firstMatch.frame.midY
-            XCUIRemote.shared.press(belowStrip ? .up : .down)
+            let list = app.descendants(matching: .any).matching(identifier: "regionList").firstMatch
+            if current.exists, current.identifier.hasPrefix("nav-") {
+                XCUIRemote.shared.press(.down)
+            } else if current.exists, list.exists, current.frame.minY > list.frame.maxY {
+                XCUIRemote.shared.press(.up)
+            } else {
+                XCUIRemote.shared.press(.right)
+            }
             kjPause(0.35)
         }
         return focused.exists
+    }
+
+    /// Reach the foot of the front: the Beyond the atlas switch, at the bottom of the sidebar. One
+    /// press down from it lands on the first shelf under the front (Liked, or News).
+    @discardableResult
+    func kjFocusFrontFoot(_ app: XCUIApplication) -> Bool {
+        let toggle = app.buttons["beyondTheAtlas"]
+        guard toggle.waitForExistence(timeout: 30) else { return false }
+        return kjFocus(toggle, app: app)
+    }
+
+    /// Reach one region's row in the list (`indus` for `region-indus`), walking up or down it.
+    @discardableResult
+    func kjFocusRegion(_ app: XCUIApplication, _ id: String) -> Bool {
+        guard kjFocusRegions(app) else { return false }
+        let target = app.buttons["region-\(id)"]
+        let focused = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-' AND hasFocus == true")).firstMatch
+        for _ in 0..<60 {
+            guard target.exists else { return false }
+            if target.hasFocus { return true }
+            // Focus may be mid-move after a press: wait for it to land rather than give up.
+            guard focused.exists else { kjPause(0.3); continue }
+            XCUIRemote.shared.press(target.frame.midY > focused.frame.midY ? .down : .up)
+            kjPause(0.3)
+        }
+        return target.exists && target.hasFocus
     }
 
     /// Presses toward `element` until it has focus, steering by where it sits against the focused

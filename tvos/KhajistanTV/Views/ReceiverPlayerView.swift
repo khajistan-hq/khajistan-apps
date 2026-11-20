@@ -250,7 +250,12 @@ struct ReceiverPlayerView: View {
             guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
             await NowPlaying.watch(current.id, active: { controller.state == .playing }) { song = $0 }
         }
-        .onDisappear { stopEverything() }
+        // The Receiver is not redrawn under an open player (ReceiverStore.playerDidOpen).
+        .onAppear { model.receiver.playerDidOpen() }
+        .onDisappear {
+            stopEverything()
+            model.receiver.playerDidClose()
+        }
     }
 
     // MARK: - Overlay
@@ -1077,6 +1082,6 @@ private struct OnBandFace<Face: View>: View {
             .foregroundStyle(isFocused ? palette.band : palette.onBand)
             .background(isFocused ? palette.onBand : Color.clear)
             .scaleEffect(isFocused && !isPressed ? 1.03 : 1)
-            .animation(CardMotion.spring, value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }

@@ -72,8 +72,10 @@ enum ShelfArt {
             c.text("OFF AIR", size: 150, weight: .black, em: -0.075, hex: skin.inkHex, x: margin - 8, top: 260)
             var y: CGFloat = 470
             if let returns, !returns.isEmpty {
-                y = c.text("Returns at \(returns) \(StationClock.tzLabel)", size: 40, weight: .black, em: -0.03,
-                           hex: skin.inkHex, x: margin, top: y, maxWidth: width).maxY + 36
+                // Two lines: a return a day or more off carries its day ("00:00 PKT on Wednesday
+                // 30 September"), which one line cut to "Septemb…".
+                y = c.paragraph("Returns at \(returns)", size: 40, weight: .black, em: -0.03,
+                                hex: skin.inkHex, x: margin, top: y, width: width, leading: 1.15, maxLines: 2) + 36
             }
             if let line, !line.isEmpty {
                 c.paragraph(line, size: 30, weight: .regular, hex: skin.inkHex, alpha: faint(skin), x: margin, top: y,

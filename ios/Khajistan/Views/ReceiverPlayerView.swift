@@ -424,7 +424,7 @@ struct ReceiverDevice: View {
             case .idle, .tuning: return "\(store.channelName(store.channelNumber)) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in to watch"
             case .offAir(_, let returns):
-                return returns.map { "Off air \u{00B7} returns at \($0) \(StationClock.tzLabel)" } ?? "Off air"
+                return returns.map { "Off air \u{00B7} returns at \($0)" } ?? "Off air"
             case .failed(let message): return message
             case .onAir: return "\(store.channelName(store.channelNumber)) \u{00B7} \(playerText)"
             }

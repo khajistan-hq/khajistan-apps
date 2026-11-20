@@ -66,6 +66,31 @@ final class TransmissionStore {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
+        _ = auth.observeAccess { [weak self] in self?.accessDidChange() }
+    }
+
+    /// Sign-out ends the programme at once and asks for a sign-in, as on Apple TV; before this the
+    /// programme played on to its next handover. A change of account while a programme is up tunes
+    /// the same channel again under the new account. A sign-in while the screen is asking for one
+    /// changes nothing here: that screen's own sheet tunes when it closes, and a sign-in made from
+    /// another screen must not start a programme nobody asked for. Off air, a failure and idle
+    /// are left alone for the same reason.
+    func accessDidChange() {
+        guard phase != .idle else { return }
+        guard auth.session != nil else {
+            stop()
+            phase = .needsSignIn
+            return
+        }
+        // Only a programme that is up, or on its way up, is tuned again. An Off air or a failed
+        // screen left open must not start sound because the viewer signed in on another screen.
+        switch phase {
+        case .onAir, .tuning: break
+        default: return
+        }
+        let channel = channelNumber
+        stop()
+        Task { await tune(channel: channel) }
     }
 
     // MARK: - What the schedule says
@@ -101,10 +126,11 @@ final class TransmissionStore {
         return StationClock.onAir(p, channel: channel, at: date)
     }
 
-    /// When the channel is next on air, for the moment nothing is.
-    func returnTime(channel: Int, at date: Date) -> String? {
+    /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
+    /// it is a day or more away (StationClock.returnLabel).
+    func returnLabel(channel: Int, at date: Date) -> String? {
         guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
-        return StationClock.returnTime(p, channelId: id, at: date)
+        return StationClock.returnLabel(p, channelId: id, at: date)
     }
 
     // MARK: - Loading the month
@@ -300,6 +326,16 @@ final class TransmissionStore {
             await tune(channel: channelNumber)
             return
         }
+        // The last file of the month ending on time: what follows is in next month's schedule.
+        // Wait for the turn (under handoverLead), then tune, which loads it. Asking this month's
+        // file played the strip's own opener out on iPhone.
+        if let wait = StationClock.monthHandoverWait(after: current, at: now) {
+            let gen = generation
+            try? await Task.sleep(for: .seconds(wait + 0.05))   // a hair past the turn
+            guard gen == generation, case .onAir = phase else { return }
+            await tune(channel: channelNumber)
+            return
+        }
         let gen = beginTune()
         if let next = StationClock.following(current, in: p, at: now) {
             player.state = .tuning
@@ -313,7 +349,7 @@ final class TransmissionStore {
 
     private func goOffAir(_ p: Programming, channelId: String?, at date: Date, generation gen: Int) {
         player.stop()
-        let returns = channelId.flatMap { StationClock.returnTime(p, channelId: $0, at: date) }
+        let returns = channelId.flatMap { StationClock.returnLabel(p, channelId: $0, at: date) }
         phase = .offAir(channelName: channelName(channelNumber), returns: returns)
         watchForReturn(generation: gen)
     }

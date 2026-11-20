@@ -362,9 +362,11 @@ private struct RegionMapPainter {
         let resolved = context.resolve(label.face.text(label.text))
         if label.region.isPeople {
             // A people's region is a facet, not a place to tune: its name is dimmed, no halo. The
-            // skin's own label colour, so it reads on the Grove and Smut grounds as well as the yellow.
+            // skin's own label colour on Grove and Smut; on Day, whose page is that yellow, the band's
+            // green, as the plate swaps there (a name that runs off the map lands on the page).
+            let onDay = palette.ground == palette.onBand
             var dimmed = resolved
-            dimmed.shading = .color(palette.onBand.opacity(0.7))
+            dimmed.shading = .color((onDay ? palette.band : palette.onBand).opacity(0.7))
             context.draw(dimmed, at: label.center, anchor: .center)
             return
         }

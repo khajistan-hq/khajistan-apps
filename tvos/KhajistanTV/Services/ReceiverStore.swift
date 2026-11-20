@@ -136,7 +136,11 @@ final class ReceiverStore {
                 note = Self.refusedNote
             }
             if reply == nil {
-                reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+                // Only a read meant for the whole dial carries the site cookie. A sign-in cancelled
+                // by a sign-out can store its cookie after every delete; this read never sends it.
+                var request = URLRequest(url: Self.dataURL("receiver-index.json"))
+                request.httpShouldHandleCookies = whole
+                reply = try await urlSession.data(for: request)
             }
             guard let reply else { throw ReceiverStoreError.unreadable }
             let (data, response) = reply
@@ -225,6 +229,9 @@ final class ReceiverStore {
     func credentialDidChange() -> Bool {
         let wasWhole = servedWhole
         servedWhole = false
+        // A new password is sent once; one the site refused before is tried again only when
+        // entered again.
+        refused = nil
         deleteSiteCookies()
         generation += 1
         wholeDial = false

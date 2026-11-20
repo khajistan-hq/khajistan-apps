@@ -282,6 +282,8 @@ struct PnvReelsView: View {
         activatedId = nil
         laps = []
         home = ""
+        // A new hand or region starts the count of broken videos skipped in a row again.
+        skips = 0
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.

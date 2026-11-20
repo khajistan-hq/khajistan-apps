@@ -855,6 +855,50 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(moved, "the next video started by itself")
     }
 
+    /// A video that cannot play is skipped after a moment, and after two in a row the Reel stops on
+    /// the third and shows its error (owner, 2026-11-19: the Reel plays on by itself).
+    func testPicsVidsReelSkipsTwoBrokenVideosThenStops() {
+        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", "YES"])
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        func onScreen() -> String? {
+            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+        }
+        var seen: [String] = []
+        // Each skip waits 2 s after the failure; 20 s is room for both and then some.
+        let end = Date().addingTimeInterval(20)
+        while Date() < end {
+            if let now = onScreen(), seen.last != now { seen.append(now) }
+            usleep(300_000)
+        }
+        print("PNVSKIP \(seen)")
+        XCTAssertEqual(seen.count, 3, "two skips, then the Reel stays on the third broken video")
+    }
+
+    /// The Reel is videos only: a region with none says so, and another region still plays.
+    /// Horn of Africa had 0 videos on 2026-11-19; if it gains some, pick another empty region.
+    func testPicsVidsReelSaysWhenARegionHasNoVideos() {
+        let app = launch(skin: "grove", tab: "picsVids")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        waitFor(app.buttons["pnvReelRegion"], 10, "the Reel opens")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        waitFor(app.staticTexts["No videos from here yet."], 30, "an empty region says it has no videos")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Mashriq' AND identifier != 'pnvregion-arabia'")).firstMatch.tap()
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        XCTAssertTrue(reels.firstMatch.waitForExistence(timeout: 30), "a region with videos plays again")
+        XCTAssertFalse(app.staticTexts["No videos from here yet."].exists)
+    }
+
     /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
     /// moves on every swipe, because the reel deals its objects again once the feed has given
     /// them all. The region and Shuffle are changed from inside the reel.

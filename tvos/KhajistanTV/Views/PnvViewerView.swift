@@ -23,6 +23,13 @@ struct PnvViewerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    /// The step running now, if any: an end notice does not cancel a press still waiting on a page.
+    @State private var stepping: UUID?
+    /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
+    /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
+    @State private var skips = 0
+    @State private var skipped: String?
+    @State private var skipTask: Task<Void, Never>?
     /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
     @State private var restartTask: Task<Void, Never>?
     /// True from a restart until the new deal's first object is shown: the object in `current`
@@ -144,7 +151,12 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) {
+            wake()
+            // A video that fails in the player (a dead file, a start that times out) never ends.
+            if controller.state.isFailed { skipBroken(current.id) }
+            if controller.state == .playing { skips = 0 }
+        }
         .task { show(current) }
         .onDisappear { stopEverything() }
         .fullScreenCover(isPresented: $showSignIn) {
@@ -260,6 +272,10 @@ struct PnvViewerView: View {
     private func restart(_ change: () -> Void) {
         stepTask?.cancel()
         restartTask?.cancel()
+        skipTask?.cancel()
+        // A new hand or region starts the count of broken videos skipped in a row again.
+        skips = 0
+        skipped = nil
         // The object on screen stops now, not when the new deal arrives.
         loadTask?.cancel()
         controller.stop()
@@ -389,8 +405,13 @@ struct PnvViewerView: View {
             // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
             controller.onEnded = { [weak controller] in
                 // A late end notice for a video already left behind does not step a second time.
-                if videosOnly { if current.id == key { step(by: 1) }; return }
-                guard !row.isKtv, let controller else { return }
+                // VoiceOver loops the video instead, so the object does not change under the reader;
+                // a press still waiting on the next page is left to finish.
+                if videosOnly, !UIAccessibility.isVoiceOverRunning {
+                    if current.id == key, stepping == nil { step(by: 1) }
+                    return
+                }
+                guard videosOnly || !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()
             }
@@ -402,6 +423,20 @@ struct PnvViewerView: View {
         } catch {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .failed(error.localizedDescription)
+            skipBroken(key)
+        }
+    }
+
+    /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
+    /// Only while it is still on screen, once per object, and not three in a row.
+    private func skipBroken(_ key: String) {
+        guard videosOnly, !UIAccessibility.isVoiceOverRunning, skips < 2, skipped != key else { return }
+        skips += 1
+        skipped = key
+        skipTask?.cancel()
+        skipTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if !Task.isCancelled, current.id == key { step(by: 1) }
         }
     }
 
@@ -412,7 +447,12 @@ struct PnvViewerView: View {
         // A deal that came back empty or failed: Left or Right asks for it again.
         if stranded { restart {}; return }
         stepTask?.cancel()
+        skipTask?.cancel()
+        skipped = nil
+        let mine = UUID()
+        stepping = mine
         stepTask = Task {
+            defer { if stepping == mine { stepping = nil } }
             if let list {
                 guard let index = list.firstIndex(where: { $0.id == current.id }), list.indices.contains(index + delta) else { return }
                 saveNote = nil
@@ -447,6 +487,7 @@ struct PnvViewerView: View {
     private func stopEverything() {
         loadTask?.cancel()
         stepTask?.cancel()
+        skipTask?.cancel()
         restartTask?.cancel()
         hideTask?.cancel()
         controller.stop()

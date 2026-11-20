@@ -333,6 +333,11 @@ final class PicsVidsStore {
     /// The address to play. A Khajistan TV row goes through tv-play with the viewer's session, as
     /// the Transmission page does; every other row is a plain file.
     func playableURL(for row: PnvRow) async throws -> URL {
+        #if DEBUG
+        // `-kjbrokenvideos YES`: every video fails as a dead file does, so a test can prove the Reel
+        // skips a broken video, and stops after two in a row. Debug builds only.
+        if UserDefaults.standard.bool(forKey: "kjbrokenvideos") { throw PnvPlaybackError.unavailable }
+        #endif
         guard let full = PnvMedia.full(row) else { throw PnvPlaybackError.unavailable }
         guard row.isKtv else { return full }
         guard auth.isSignedIn else { throw PnvPlaybackError.needsSignIn }

@@ -304,6 +304,29 @@ final class PicsVidsUITests: XCTestCase {
 
     /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
     /// Shuffle deals again and stays on, and Region steps to a region; Right keeps moving on.
+    /// A video that cannot play is skipped after a moment; after two in a row the Reel stays on the
+    /// third (owner, 2026-11-19: the Reel plays on by itself).
+    func testReelSkipsTwoBrokenVideosThenStops() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "YES"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        var seen: [String] = []
+        let end = Date().addingTimeInterval(20)
+        while Date() < end {
+            if let now = surface.value as? String, !now.isEmpty, seen.last != now { seen.append(now) }
+            kjPause(0.3)
+        }
+        print("PNVSKIP \(seen)")
+        XCTAssertEqual(seen.count, 3, "two skips, then the Reel stays on the third broken video")
+    }
+
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)

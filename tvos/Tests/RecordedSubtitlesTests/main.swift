@@ -8,6 +8,12 @@ import Foundation
 struct Failure: Error, CustomStringConvertible { let description: String }
 struct Skip: Error { let reason: String }
 func expect(_ ok: Bool, _ note: String, line: Int = #line) throws { if !ok { throw Failure(description: "line \(line): \(note)") } }
+/// Waits for the 100 ms ticker rather than a fixed sleep: a busy CI runner can miss a single 250 ms window.
+@MainActor func eventually(_ ok: @MainActor () -> Bool, _ note: String, line: Int = #line) async throws {
+    let deadline = ContinuousClock.now + .seconds(3)
+    while !ok() && ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(50)) }
+    try expect(ok(), note, line: line)
+}
 
 let en = "WEBVTT\n\n00:00:01.000 --> 00:00:05.000\nEnglish line\n"
 let ur = "WEBVTT\n\nNOTE machine subtitles\n\n00:00:01.000 --> 00:00:05.000\nاردو سطر\n"
@@ -22,15 +28,12 @@ struct Main {
                 subs.load(files: [(.init(code: "en", label: "English"), en), (.init(code: "ur", label: "Urdu"), ur)], first: "ur") { 2.0 }
                 try expect(subs.tracks.map(\.code) == ["en", "ur"], "tracks \(subs.tracks)")
                 try expect(subs.current == "ur", "opener \(String(describing: subs.current))")
-                try await Task.sleep(for: .milliseconds(250))
-                try expect(subs.text == "اردو سطر", "text \(String(describing: subs.text))")
+                try await eventually({ subs.text == "اردو سطر" }, "text \(String(describing: subs.text))")
                 subs.cycle()
                 try expect(subs.current == nil, "off after the last")
-                try await Task.sleep(for: .milliseconds(250))
-                try expect(subs.text == nil, "no text when off")
+                try await eventually({ subs.text == nil }, "no text when off")
                 subs.cycle()
-                try await Task.sleep(for: .milliseconds(250))
-                try expect(subs.current == "en" && subs.text == "English line", "back to the first")
+                try await eventually({ subs.current == "en" && subs.text == "English line" }, "back to the first")
             }),
             ("an opener not offered falls to the first file; a repeat language and a bad file are skipped", {
                 let subs = RecordedSubtitles()

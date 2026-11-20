@@ -327,9 +327,16 @@ struct TransmissionPlayerView: View {
         if case .failed = store.player.state { return stateText(air) }
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
-        // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        // Country first, then year (owner, 2026-11-15: "country is imp"). The year is left out
+        // where the title already carries it in parentheses (owner, 2026-11-20), so it shows once.
+        return [nonEmpty(air.programme?.country), yearOffTitle(air.programme), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    /// The record's year, unless the title already says it ("Badla (1987)").
+    private func yearOffTitle(_ programme: Programming.Programme?) -> String? {
+        guard let year = programme?.year else { return nil }
+        return (programme?.display_title ?? "").contains(String(year)) ? nil : String(year)
     }
 
     /// The song at the player's position, checked each second (the website reads `timeupdate`).

@@ -355,6 +355,9 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        // Read while the first is still failing: a `first` that is really the second (read late)
+        // would let short clips pass every later check with no skip run.
+        XCTAssertTrue(app.descendants(matching: .any)["pnvViewerState"].exists, "the first video shows its failure")
         let second = waitForValue(surface, notIn: [first, nil, ""], seconds: 8)
         XCTAssertNotNil(second, "the broken first was skipped on to the second")
         // Down onto the broken first: it must show, then be skipped forward to the second again.

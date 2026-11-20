@@ -504,7 +504,9 @@ struct PnvViewerView: View {
                 // A late end notice for a video already left behind does not step a second time.
                 // VoiceOver loops the video instead, so the object does not change under the reader;
                 // a press still waiting on the next page is left to finish.
-                if videosOnly, !UIAccessibility.isVoiceOverRunning {
+                // A lit control loops the video too, so Select never acts on one the viewer did
+                // not choose.
+                if videosOnly, !UIAccessibility.isVoiceOverRunning, armed == nil {
                     if current.id == key, stepping == nil { step(by: 1) }
                     return
                 }

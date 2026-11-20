@@ -3,7 +3,8 @@ import XCTest
 /// The preview password opens the whole Receiver dial, and clearing it closes it, with the
 /// Receiver already loaded and no relaunch (owner, 2026-11-17: "bring all channels back on apple
 /// tv"). The site serves the whole dial only to a session that signed in with its password, so
-/// this reads the live site: set TEST_RUNNER_KJ_PREVIEW_PASSWORD to run it.
+/// this reads the live site: set TEST_RUNNER_KJ_PREVIEW_PASSWORD to run it. XCUITest logs typed
+/// text, so the password is written into the result bundle: delete the bundle after a run.
 final class StaffDialUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -42,11 +43,14 @@ final class StaffDialUITests: XCTestCase {
 
         let wholeCount = try liveNow(app, otherThan: publicCount)
         XCTAssertGreaterThan(wholeCount, publicCount, "the password opens the whole dial")
+        let wholeRegions = regionTotal(app)
         kjScreenshot("staff-dial-2-whole", app: app)
 
         clearPassword(app)
         let afterClear = try liveNow(app, otherThan: wholeCount)
         XCTAssertEqual(afterClear, publicCount, "clearing the password closes the whole dial again")
+        // The region rows are a shelf of their own: they must be drawn again from the new dial too.
+        XCTAssertGreaterThan(wholeRegions, regionTotal(app), "the region list is drawn again from the public dial")
         kjScreenshot("staff-dial-3-public-again", app: app)
     }
 
@@ -65,6 +69,21 @@ final class StaffDialUITests: XCTestCase {
         XCTAssertTrue(kjFocus(clear, app: app), "the remote reaches Clear")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.buttons["Set"].waitForExistence(timeout: 10), "the password is cleared")
+    }
+
+    /// The live counts on the Receiver's region rows, added up once the rows are on screen.
+    private func regionTotal(_ app: XCUIApplication) -> Int {
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            let total = rows.allElementsBoundByIndex.reduce(0) { sum, row in
+                sum + (Int(((row.value as? String) ?? "").filter(\.isNumber)) ?? 0)
+            }
+            if total > 0 { return total }
+            kjPause(1)
+        }
+        XCTFail("no region row showed a live count")
+        return 0
     }
 
     /// The Receiver's "Live now" count, read once it differs from `otherThan`.

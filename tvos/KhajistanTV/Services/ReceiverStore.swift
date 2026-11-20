@@ -41,6 +41,9 @@ final class ReceiverStore {
     /// afresh on it, so no shelf keeps a list read from the other one.
     private(set) var dialID = 0
     @ObservationIgnored private var wholeDial = false
+    /// The whole dial was on hand at some point since the last password change, so a channel
+    /// still playing may be one the public dial does not carry, even after a refresh fell back.
+    @ObservationIgnored private var servedWhole = false
     /// Players open over the Receiver. A dial change found by a refresh waits until none is, so
     /// a channel being watched is not closed by the redraw.
     @ObservationIgnored private var playersOpen = 0
@@ -57,6 +60,7 @@ final class ReceiverStore {
     /// so a list read before sign-in is never kept after it, nor the other way.
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var loading: (password: String?, task: Task<Void, Never>)?
+    @ObservationIgnored private var retry: Task<Void, Never>?
     private let urlSession: URLSession
     /// The preview password, read when the index loads.
     private let previewPassword: @MainActor () -> String?
@@ -147,6 +151,7 @@ final class ReceiverStore {
                 throw ReceiverStoreError.unreadable
             }
             guard started == generation, !Task.isCancelled else { return }
+            if whole { servedWhole = true }
             if whole != wholeDial {
                 wholeDial = whole
                 if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
@@ -172,9 +177,10 @@ final class ReceiverStore {
     private static let retryAfter: Duration = .seconds(60)
 
     /// A sign-in that was throttled or did not answer is tried again in a minute, whether or not
-    /// anything on screen asks.
+    /// anything on screen asks. One retry waits at a time.
     private func scheduleRetry(generation started: Int) {
-        Task { [weak self] in
+        retry?.cancel()
+        retry = Task { [weak self] in
             try? await Task.sleep(for: Self.retryAfter)
             guard let self, started == self.generation else { return }
             self.indexFetchedAt = nil
@@ -213,14 +219,24 @@ final class ReceiverStore {
 
     /// A new or removed preview password: the site cookie goes, the dial on hand goes (so every
     /// shelf is drawn again from the new one), and nothing fetched before this is kept.
-    func credentialDidChange() {
+    /// Returns whether the whole dial was on hand since the last change, so a channel still
+    /// playing from it can be turned off.
+    @discardableResult
+    func credentialDidChange() -> Bool {
+        let wasWhole = servedWhole
+        servedWhole = false
         deleteSiteCookies()
         generation += 1
         wholeDial = false
         indexFailedAt = nil
+        // Nothing is open over the Receiver while the password changes; a count a player never
+        // gave back must not hold a later redraw.
+        playersOpen = 0
         redraw()
         loading?.task.cancel()
         loading = nil
+        retry?.cancel()
+        retry = nil
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()
         index = nil
@@ -229,6 +245,7 @@ final class ReceiverStore {
         controls = .empty
         controlsFetchedAt = nil
         shards.removeAll()
+        return wasWhole
     }
 
     /// A list or a tune asked for before the index was read for the current password waits for

@@ -163,7 +163,13 @@ final class AppModel {
             self?.reading.previewCredentialDidChange()
             // The dial changes with the password: a region page open on the old one goes too.
             self?.receiverPath = []
-            self?.receiver.credentialDidChange()
+            // A radio left playing from the whole dial may be one the public dial does not
+            // carry, so it is turned off, as on the iPhone.
+            if self?.receiver.credentialDidChange() == true, let away = self?.radioAway {
+                self?.radioAway = nil
+                away.pip?.stop()
+                away.controller.stop()
+            }
             self?.invalidateTransmissionAccess()
         }
         observeTransmissionAccess()

@@ -430,6 +430,10 @@ final class TransmissionStore {
         accessRevision += 1
         signed.removeAll()
         stop()
+        // A schedule a cleared preview password opened is not kept on the device without it.
+        if auth.previewPassword == nil {
+            Task.detached(priority: .utility) { ScheduleCache.shared.clear() }
+        }
         // A refused refresh clears the session from inside `carrier`, whose answer the
         // generation bump above then drops: say so here, or the screen waits on a loader.
         if watching, auth.session == nil { phase = .needsSignIn }

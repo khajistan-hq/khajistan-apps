@@ -3493,6 +3493,8 @@ func pnvSummaryLine() throws {
     let facets = try decode(PnvFacets.self, #"{"totals":{"media":99474},"accounts":[{"slug":"a1","media":5},{"slug":"a2","media":0}]}"#)
     // a2 has no media; a3 is not in the counts at all and stays.
     try expectEqual(PnvAPI.summary(roster: roster, facets: facets), "99,474 pictures and videos \u{00B7} 2 accounts \u{00B7} 2 regions")
+    // A build held to videos must not state the mixed count of pictures and videos.
+    try expectEqual(PnvAPI.summary(roster: roster, facets: facets, withCount: false), "2 accounts \u{00B7} 2 regions")
     try expectEqual(PnvAPI.summary(roster: roster, facets: nil), "3 accounts")
     try expectEqual(PnvAPI.summary(roster: roster, facets: try decode(PnvFacets.self, #"{"accounts":[]}"#)), "3 accounts")
 }

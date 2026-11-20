@@ -820,7 +820,8 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dealt, object: nil)], timeout: 30), .completed,
                        "the shuffled deal opens on a page")
         shuffle.press(forDuration: 1.2)
-        XCTAssertFalse(app.buttons["Stream order"].waitForExistence(timeout: 2), "the Reel has no stream order")
+        app.buttons["Stream order"].tap()
+        XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
         let first = app.descendants(matching: .any)["reel-\(firstKey)"]
         let landed = NSPredicate { _, _ in first.exists && abs(first.frame.minY) < 20 }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: landed, object: nil)], timeout: 30), .completed,
@@ -831,9 +832,6 @@ final class KhajistanUITests: XCTestCase {
                        "the first page on screen has its rail")
     }
 
-    /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
-    /// moves on every swipe, because the reel deals its objects again once the feed has given
-    /// them all. The region and Shuffle are changed from inside the reel.
     /// The Reel plays the next video by itself when one ends (owner, 2026-11-19: "reel should auto
     /// play the next video"). Live data: clips run seconds to minutes, so the wait is long.
     func testPicsVidsReelPlaysTheNextVideoByItself() {
@@ -857,6 +855,9 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(moved, "the next video started by itself")
     }
 
+    /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
+    /// moves on every swipe, because the reel deals its objects again once the feed has given
+    /// them all. The region and Shuffle are changed from inside the reel.
     func testPicsVidsReelIsEndless() {
         let app = launch(skin: "grove", tab: "picsVids")
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
@@ -882,7 +883,6 @@ final class KhajistanUITests: XCTestCase {
         reelOpens("a new deal opens on a page")
         shuffle.press(forDuration: 1.2)
         XCTAssertFalse(app.buttons["Stream order"].waitForExistence(timeout: 2), "the Reel has no stream order")
-        if app.buttons["Stream order"].exists == false { app.tap() }
         // The Reel is videos only; Horn of Africa has none (measured 2026-11-19), Mashriq thousands.
         app.buttons["pnvReelRegion"].tap()
         // The menu's item, not the grid's chip of the same name under the reel.

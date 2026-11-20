@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Pics/Vids as reels (owner, 2026-11-08: "they need to be like reels and grid to make the
 /// interaction better"). One object a screen, a swipe up for the next and down for the one
-/// before, as a phone's short-video feed moves. A video plays when its page settles and loops; a
+/// before, as a phone's short-video feed moves. A video plays when its page settles and loops (in the
+/// Reel the next video plays instead, owner 2026-11-19); a
 /// tap pauses it. Save and Collection stay on the right rail, the account and the caption at the
 /// bottom left, so nothing waits behind a tap. A picture is fitted whole, never cropped.
 ///
@@ -138,8 +139,9 @@ struct PnvReelsView: View {
         .foregroundStyle(palette.ink)
         .statusBarHidden()
         .onAppear {
-            // The Reel is always shuffled, and each opening deals a new hand.
-            if isReel { if store.shuffled { store.discard(feedKey) } else { store.setShuffled(true) } }
+            // Each opening of the Reel deals a new hand of its own feed; the grid is untouched.
+            // A hand already on the store (its page still in flight) opens on its first page.
+            if isReel { redeal(); reopenIfLost() }
             activate()
         }
         .task { await model.saves.load() }
@@ -178,12 +180,12 @@ struct PnvReelsView: View {
                 regionMenu
                 // A tap shuffles, and while on deals again, as the grid's button and the website's
                 // "Shuffle again" do; a long press goes back to the stream's own order.
-                Button { deal(shuffled: true) } label: {
+                Button { if isReel { restart { redeal() } } else { deal(shuffled: true) } } label: {
                     Image(systemName: "shuffle").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
                 }
-                .buttonStyle(ReelRailStyle(isOn: store.shuffled))
+                .buttonStyle(ReelRailStyle(isOn: isReel || store.shuffled))
                 .accessibilityLabel("Shuffle")
-                .accessibilityValue(store.shuffled ? "On" : "Off")
+                .accessibilityValue(isReel || store.shuffled ? "On" : "Off")
                 .accessibilityHint(isReel ? "Deals the reel again." : store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
                 .accessibilityActions {
                     if store.shuffled && !isReel { Button("Stream order") { deal(shuffled: false) } }
@@ -239,6 +241,13 @@ struct PnvReelsView: View {
         } else {
             TuningLoader("Loading\u{2026}")
         }
+    }
+
+    /// The Reel's own new hand: its videos feed dropped and asked for again (the grid keeps its own).
+    private func redeal() {
+        let key = feedKey
+        store.discard(key)
+        Task { await store.loadMore(region: key) }
     }
 
     private func change(region: String) {
@@ -331,7 +340,7 @@ struct PnvReelsView: View {
                     // The next page plays by itself, as a short-video feed does (owner, 2026-11-19:
                     // "reel should auto play the next video"). Only the page that ended moves on, so
                     // a late notice after a swipe cannot skip a second page.
-                    if currentId == key, hasNextPage { step(1); return }
+                    if isReel, currentId == key, hasNextPage, !assistiveTechRunning { step(1); return }
                     // A Khajistan TV programme ends rather than looping, and says it is stopped.
                     guard !row.isKtv else { controller.pause(); return }
                     // Loops in place: resume() would tune again, flashing the still and fading in.
@@ -352,10 +361,20 @@ struct PnvReelsView: View {
             } catch PnvPlaybackError.needsSignIn {
                 if !Task.isCancelled { phase = .needsSignIn }
             } catch {
-                if !Task.isCancelled { phase = .failed(error.localizedDescription) }
+                guard !Task.isCancelled else { return }
+                phase = .failed(error.localizedDescription)
+                // A video that cannot play never ends: the Reel says so for a moment, then moves on.
+                if isReel, !assistiveTechRunning {
+                    try? await Task.sleep(for: .seconds(2))
+                    if !Task.isCancelled, currentId == key, hasNextPage { step(1) }
+                }
             }
         }
     }
+
+    /// VoiceOver and Switch Control loop the video instead of moving on, so the page under the
+    /// cursor is not taken away while it is being read.
+    private var assistiveTechRunning: Bool { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning }
 
     /// A page after the one on screen: on a stream there always is one in the end (a new lap); a
     /// fixed list stops at its last object, which then loops.

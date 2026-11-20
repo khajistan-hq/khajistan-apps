@@ -227,6 +227,9 @@ final class PicsVidsStore {
         let videosOnly = region.hasPrefix(Self.videosPrefix)
         let place = videosOnly ? String(region.dropFirst(Self.videosPrefix.count)) : region
         let kind = videosOnly ? PnvKind.video : self.kind
+        // The Reel's feed is always shuffled (owner, 2026-11-19: "only shuffle the reel"), whatever the
+        // grid's Shuffle says, so opening the Reel never re-deals the grid.
+        let shuffled = self.shuffled || videosOnly
         // No roster, or a region nobody is filed under: nothing to ask for.
         guard let keys = PnvAPI.accountKeys(roster: roster, region: place == Self.allRegions ? nil : place) else {
             feed.isDone = true

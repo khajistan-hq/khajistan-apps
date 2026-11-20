@@ -42,8 +42,7 @@ final class ReceiverStore {
     /// How long a fetched index or set of feeds is trusted before the next look.
     private static let staleAfter: TimeInterval = 600
 
-    init() {
-        let config = URLSessionConfiguration.ephemeral
+    init(configuration config: URLSessionConfiguration = .ephemeral) {
         config.timeoutIntervalForRequest = 25
         config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -75,7 +74,9 @@ final class ReceiverStore {
         defer { isLoading = false }
         if index == nil { indexError = nil }
         do {
-            let (data, response) = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+            // SupabaseRoute.data sends a GET once more after a dropped connection or a cut-off TLS
+            // handshake (CI, 2026-11-03: one dropped handshake left "has not loaded" up for good).
+            let (data, response) = try await SupabaseRoute.data(for: URLRequest(url: Self.dataURL("receiver-index.json")), session: urlSession)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard code == 200 else { throw ReceiverStoreError.http(code) }
             let decoded: ReceiverIndex

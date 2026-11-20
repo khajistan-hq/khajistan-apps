@@ -354,4 +354,30 @@ final class PicsVidsUITests: XCTestCase {
         print("PNVREEL distinct \(seen.count) of 23 shown")
         kjScreenshot("pv-reel-03-came-round", app: app)
     }
+
+    /// The reel plays on by itself (owner, 2026-11-19: reel should auto play the next video): with
+    /// no press at all, the video on screen gives way to the next one when it ends.
+    func testReelPlaysTheNextVideoByItself() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        let first = surface.value as? String
+        XCTAssertFalse((first ?? "").isEmpty, "the Reel shows a video")
+        // Live data: clips run from seconds to minutes, so poll every 2 s for up to 120 s.
+        var now = first
+        var waited = 0.0
+        while now == first, waited < 120 {
+            kjPause(2); waited += 2
+            now = surface.value as? String
+        }
+        print("PNVAUTOPLAY \(first ?? "nil") -> \(now ?? "nil") after \(Int(waited)) s")
+        XCTAssertNotEqual(now, first, "the next video started with no press")
+        kjScreenshot("pv-reel-autoplay", app: app)
+    }
 }

@@ -5330,6 +5330,7 @@ func scheduleCacheKeepsOneMonthWithItsTag() throws {
 let tests: [(String, () throws -> Void)] = [
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
+    ("liveChannelsShowTheirLocalTime", liveChannelsShowTheirLocalTime),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
@@ -5816,6 +5817,38 @@ func pnvNextLapNeverRepeatsAtTheSeam() throws {
     }
     // One object: nothing else to show, so it repeats (negative case of the swap).
     try expectEqual(PnvReel.nextLap([row("a")], after: "a").map(\.id), ["a"])
+}
+
+func liveChannelsShowTheirLocalTime() throws {
+    func channel(_ country: String?, territory: String? = nil, name: String = "X") throws -> Channel {
+        var object: [String: Any] = ["id": "c", "name": name, "mediaType": "tv", "streams": []]
+        if let country { object["country"] = country }
+        if let territory { object["territory"] = territory }
+        return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+    }
+    // 2026-11-19 12:00 UTC.
+    let noon = try require(ISO8601DateFormatter().date(from: "2026-11-19T12:00:00Z"))
+    try expectEqual(LocalTime.label(for: try channel("Iran"), at: noon), "15:30 local time")
+    try expectEqual(LocalTime.label(for: try channel("Pakistan"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Yogyakarta"), at: noon), "19:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Denpasar"), at: noon), "20:00 local time")
+    // Most Indonesian rows name their city only in the station's name (Fable, 2026-11-19).
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "RRI Pro 1 Ambon FM 105.1"), at: noon), "21:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "GS Radio Bali"), at: noon), "20:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Elshinta Surabaya FM 97.6"), at: noon), "19:00 local time")
+    // No city, no time: three clocks and nothing to choose between them.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Bass FM 96.6"), at: noon) == nil)
+    // A city word inside another word does not count.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Soloist FM"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel("DR Congo"), at: noon) == nil)
+    try expectEqual(LocalTime.label(for: try channel("Russia", name: "Bashkortostan 24"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Russia", territory: "Chechnya"), at: noon), "15:00 local time")
+    // A clock nobody can tell is left out, never guessed.
+    try expect(LocalTime.label(for: try channel("Borderland / diaspora"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel(nil), at: noon) == nil)
+    try expectEqual(try channel("Iran").placeAndTime(at: noon), "Iran \u{00B7} 15:30 local time")
+    // Every zone named in the table is one the system knows.
+    for (country, id) in LocalTime.zones { try expect(TimeZone(identifier: id) != nil, "\(country): \(id)") }
 }
 
 func pnvShuffleWalkWrapsOnce() throws {

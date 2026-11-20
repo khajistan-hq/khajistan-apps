@@ -45,6 +45,8 @@ final class PlayerController {
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
     /// A new signal starts silent and its sound comes up once it is actually playing.
     @ObservationIgnored private var fadeInPending = false
+    /// Where a part-way join's seek landed, until the picture has moved on from it.
+    @ObservationIgnored private var landedAt: Double?
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
@@ -99,6 +101,7 @@ final class PlayerController {
         #endif
         state = .tuning
         signal = nil
+        landedAt = nil
         timeoutTask?.cancel()
         removeItemObservers()
         stopLive()
@@ -423,6 +426,9 @@ final class PlayerController {
                 #if DEBUG
                 print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
                 #endif
+                // A time the player cannot read holds nothing: NaN would never compare as moved.
+                let landed = self.player.currentTime().seconds
+                self.landedAt = landed.isFinite ? landed : nil
                 self.player.play()
             }
         }
@@ -436,6 +442,24 @@ final class PlayerController {
         case .playing:
             // A queued ready/seek callback cannot override a newer explicit Pause.
             guard state != .paused else { player.pause(); return }
+            // A join part-way through reports Playing as the seek lands, before a frame from the
+            // new place is drawn; the screen then showed the frame it held, often a film's black
+            // head, for a second (owner, 2026-11-19, Channel 1). Playing waits until the clock has
+            // moved on from where the seek landed, so frames from there are coming through. A
+            // signal that never moves stays tuning, and the start-up timeout ends it. Moved either
+            // way: a scrub back during the hold (a film resumed, then rewound) also ends it.
+            if let landed = landedAt {
+                guard abs(player.currentTime().seconds - landed) >= 0.3 else {
+                    let gen = generation
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard let self, gen == self.generation else { return }
+                        self.syncWithPlayer()
+                    }
+                    return
+                }
+                landedAt = nil
+            }
             timeoutTask?.cancel()
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }

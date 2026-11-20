@@ -383,9 +383,13 @@ struct PnvViewerView: View {
             let url = try await store.playableURL(for: row)
             try Task.checkCancellation()
             guard current.id == key else { return }
-            // A clip loops, as a reel does; a Khajistan TV programme plays once.
+            // In the Reel the next video starts by itself when one ends (owner, 2026-11-19: reel
+            // should auto play the next video), Khajistan TV programmes included. Opened from a
+            // shelf, a clip loops and a Khajistan TV programme plays once, as before.
             // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
             controller.onEnded = { [weak controller] in
+                // A late end notice for a video already left behind does not step a second time.
+                if videosOnly { if current.id == key { step(by: 1) }; return }
                 guard !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()

@@ -365,7 +365,7 @@ struct ReceiverPlayerView: View {
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
-        case .failed(let message): return moveOnNote ?? likeNote ?? message + " Click down for the next channel."
+        case .failed(let message): return moveOnNote ?? likeNote ?? message
         case .paused: return "Paused"
         default:
             if let likeNote { return likeNote }

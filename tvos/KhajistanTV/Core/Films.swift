@@ -186,10 +186,10 @@ enum Films {
     static func denyText(_ film: Film, status: Int) -> String {
         switch status {
         case 401:
-            return "Sign in to the Khajistan account that holds this film, then press Watch the full film again."
+            return "Sign in to the Khajistan account that holds this film."
         case 403:
-            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it here, then press Watch the full film again." }
-            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it here, then press Watch the full film again." }
+            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it here." }
+            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it here." }
             if film.licence_price != nil { return "This film is licensed rather than sold. Screening and institutional terms are by inquiry." }
             return "This film is not on your Khajistan account yet."
         default:

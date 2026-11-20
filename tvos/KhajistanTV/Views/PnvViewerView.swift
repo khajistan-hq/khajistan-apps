@@ -194,8 +194,7 @@ struct PnvViewerView: View {
                     .lineLimit(3)
             }
             if phase == .needsSignIn {
-                // Select opens the sign-in sheet; the line says so.
-                Kicker("Select to sign in")
+                Kicker("Sign in")
             }
             saveControls
         }

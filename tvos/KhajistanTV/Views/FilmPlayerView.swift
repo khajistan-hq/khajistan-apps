@@ -214,7 +214,7 @@ struct FilmPlayerView: View {
             if let refusal {
                 // A staff account that still owes its authenticator code is refused like a buyer.
                 Text(refusal == 403 && model.auth.pendingFactorId != nil
-                     ? "Finish two-step sign-in, then press Watch the full film again."
+                     ? "Finish two-step sign-in."
                      : Films.denyText(film, status: refusal))
                     .kjBody()
                     .fixedSize(horizontal: false, vertical: true)

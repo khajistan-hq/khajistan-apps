@@ -91,6 +91,11 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 ## Chrome
 
+- **No remote instructions on screen** (owner, 2026-11-19: "remove subtitles like press to watch
+  full screen, back for the map, they are too AI sounding and unnecessary"). No line tells the
+  viewer which button to press: not under a channel, not in a status band, not after an error,
+  not as a field's placeholder. A control names its action; VoiceOver hints stay, as they are
+  not drawn.
 - **Top bar**, on every root screen: the animated pigeon (72pt) and **KHAJISTAN** (40pt black,
   −0.03 em) with *Media of the Middle World* (small, faint) at left; RECEIVER · TRANSMISSION ·
   READING ROOM · PICS/VIDS · ACCOUNT as kickers at right (READING ROOM and PICS/VIDS are the website's own nav labels). Select moves between sections. No system tab bar: tvOS paints

@@ -4118,10 +4118,10 @@ func vodTokenRequestAndAnswer() throws {
 /// denyText(): the site's words, by status and by what a SKU can actually charge.
 func vodDenyText() throws {
     let rentable = try film(#"{"handle":"a","title":"A","rent":6,"licence_price":1200}"#)
-    try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film, then press Watch the full film again.")
-    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it here, then press Watch the full film again.")
+    try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film.")
+    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it here.")
     let buyOnly = try film(#"{"handle":"a","title":"A","rent":7,"buy":20}"#)
-    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it here, then press Watch the full film again.",
+    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it here.",
                     "a rent with no SKU at its price does not say rent")
     let licensed = try film(#"{"handle":"a","title":"A","licence_price":1200}"#)
     try expectEqual(Films.denyText(licensed, status: 403), "This film is licensed rather than sold. Screening and institutional terms are by inquiry.")

@@ -263,8 +263,6 @@ struct ChatView: View {
                 }
                 .disabled(sending)
                 .accessibilityIdentifier("chatWrite")
-                Text("Hold the microphone button on the remote to speak instead of typing.")
-                    .kjSmall(faint: true)
             }
         }
     }

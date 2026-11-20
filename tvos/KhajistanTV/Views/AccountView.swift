@@ -75,7 +75,7 @@ struct AccountView: View {
             Kicker("Colours")
                 .accessibilityIdentifier("skinState")
                 .accessibilityValue(model.skin.rawValue)
-            Text("Yellow by day, green by night and pink at dawn and dusk. Press to choose one yourself.").kjBody()
+            Text("Yellow by day, green by night and pink at dawn and dusk.").kjBody()
             Button {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
                     model.skinChoice = model.skin.next

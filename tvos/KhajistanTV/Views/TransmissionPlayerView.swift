@@ -299,7 +299,7 @@ struct TransmissionPlayerView: View {
 
     /// Up next carries the country too, as Now does.
     private func upNextName(_ name: String, _ air: OnAir) -> String {
-        guard let id = air.nextProgrammeId,
+        guard let id = air.nextNameId,
               let country = nonEmpty(store.programming?.programmes[id]?.country) else { return name }
         return name + " \u{00B7} " + country
     }
@@ -328,7 +328,7 @@ struct TransmissionPlayerView: View {
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
         // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), nonEmpty(air.programme?.part), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 

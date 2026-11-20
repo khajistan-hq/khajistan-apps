@@ -67,7 +67,7 @@ struct PicsVidsView: View {
             // The page is on screen here, so the deal is made at once.
             if old == .background, new != .background, viewing == nil { store.setShuffled(true) }
         }
-        .fullScreenCover(item: $viewing) { choice in
+        .kjFullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
                 PnvViewerView(row: choice.row, list: list)
             } else {

@@ -3728,6 +3728,32 @@ func filmSubtitleChoice() throws {
     try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: nil, preferred: ["de"]), "en")
     try expect(SubtitleChoice.desired(available: ["fa", "ur"], stored: nil, preferred: ["de"]) == nil, "nothing else is guessed")
     try expect(SubtitleChoice.desired(available: [], stored: "en", preferred: ["en"]) == nil)
+    // A choice stays with its film: Persian picked on one film is not read for another.
+    let iranian = SubtitleChoice.filmKey("gav-1969"), razia = SubtitleChoice.filmKey("razia-phas-gayi-ghundon-main-2015-khajistan")
+    try expect(iranian != razia, "each film keeps its own choice")
+    try expect(iranian != SubtitleChoice.storeKey && razia != SubtitleChoice.storeKey, "the old shared choice is not read")
+    // The viewer's subtitle look: the plate until one is chosen, and one press moves to the other.
+    try expectEqual(CaptionStyle.plate.next, .bare)
+    try expectEqual(CaptionStyle.bare.next, .plate)
+    try expectEqual(CaptionStyle.bare.label, "Yellow text")
+    try expectEqual(Skin.argb(Skin.bareCaptionHex), Skin.argb(0xF3FB04))
+    // The full film moves under the remote as Apple's player moves it.
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 0.5), 8)
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 3), 24)
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 6), 64)
+    try expectEqual(FilmTransport.scanStep(heldFor: 0), 2)
+    try expectEqual(FilmTransport.scrubSeconds(points: 1000, duration: 7200), 720)
+    try expectEqual(FilmTransport.scrubSeconds(points: -500, duration: 300), -30)
+    try expectEqual(FilmTransport.scrubSeconds(points: 1000, duration: nil), 60)
+    try expectEqual(FilmTransport.clamp(-5, duration: 100), 0)
+    try expectEqual(FilmTransport.clamp(150, duration: 100), 99)
+    try expectEqual(FilmTransport.clamp(50, duration: nil), 50)
+    try expectEqual(FilmTransport.remaining(30, of: 3725), "-1:01:35")
+    try expectEqual(FilmTransport.remaining(200, of: 100), "-0:00")
+    // A film's subtitles in the picture-in-picture window take the skin's caption colours, as ARGB 0 to 1.
+    try expectEqual(Skin.argb(Skin.day.captionTextHex), [1, 0, 0, 0])
+    try expectEqual(Skin.argb(Skin.grove.captionPlateHex), [1, 0, 40.0 / 255, 0])
+    try expectEqual(Skin.argb(0xF3FB04), [1, 243.0 / 255, 251.0 / 255, 4.0 / 255])
     let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
     try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
     try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")
@@ -5271,6 +5297,191 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 }
 
 
+/// The caption plate in the picture-in-picture window is sized for the window, not the screen.
+func pipCaptionIsSizedForTheWindow() throws {
+    // 6% of the frame: 115 px on a 1920 frame, over twice full screen's 2.7% (52 px), so it reads in the corner.
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920), 115)
+    try expect(PiPCaptionLayout.fontSize(frameWidth: 1920) > 52, "bigger than full screen's type")
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 640), 38)
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 0), 0)
+    // The plate: centred, its foot 5% above the bottom, padded 0.4 em by 0.12 em.
+    let frame = CGSize(width: 1920, height: 1080)
+    let (plate, text) = PiPCaptionLayout.plate(text: CGSize(width: 800, height: 100), fontSize: 100, frame: frame)
+    try expectEqual(plate, CGRect(x: 520, y: 902, width: 880, height: 124))
+    try expectEqual(plate.maxY, frame.height * 0.95)
+    try expectEqual(text.minX, 560)
+    try expectEqual(text.minY, plate.minY + 12)
+    // A line wider than the frame keeps the plate inside it.
+    let wide = PiPCaptionLayout.plate(text: CGSize(width: 1900, height: 100), fontSize: 100, frame: frame).plate
+    try expect(wide.minX >= 0 && wide.maxX <= frame.width, "plate stays in the frame")
+}
+
+/// Who closed the PiP window decides what follows: full screen reopens, Close ends, Stop does
+/// neither, and AVKit's restore request after Close or Stop is not the viewer asking.
+func pipLifecycleReadsWhoClosedTheWindow() throws {
+    // The window's own full-screen control: AVKit asks to restore, then stops.
+    var life = PiPLifecycle()
+    life.started()
+    try expect(life.systemRestoreAsked(), "the window's control opens the screen")
+    try expect(!life.stopped(), "a restore does not end the signal")
+    try expect(!life.isActive)
+    // The bar's Full screen: the screen opens once; AVKit's own restore request after it does not open it again.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.systemRestoreAsked(), "the bar already opened the screen")
+    try expect(!life.restoreAsked(), "a second press does nothing")
+    try expect(!life.stopped())
+    // The bar's Close: AVKit still asks to restore, which must not open the screen; the signal ends.
+    life.started()
+    try expect(life.closeAsked())
+    try expect(!life.systemRestoreAsked(), "Close is not a restore")
+    try expect(life.stopped(), "Close ends the signal")
+    // The window's own close: no restore request at all; the signal ends.
+    life.started()
+    try expect(life.stopped(), "the window's close ends the signal")
+    // Stop (another signal started): no restore, no end.
+    life.started()
+    try expect(life.stopAsked())
+    try expect(!life.stopAsked(), "stop is asked once")
+    try expect(!life.systemRestoreAsked(), "Stop is not a restore")
+    try expect(!life.stopped(), "Stop does not end what the next signal replaced")
+    // Stop during a restore leaves the restore alone.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.stopAsked(), "the screen opening is not stopped")
+    try expect(!life.stopped())
+    // Nothing is asked of a window that is not up.
+    try expect(!life.restoreAsked() && !life.closeAsked() && !life.stopAsked(), "a closed window takes no asks")
+}
+
+/// The PiP window loads each programme's subtitles once, as the channel moves on.
+func pipFollowerLoadsEachProgrammeOnce() throws {
+    var follower = ChangeFollower<String>(loaded: "a")
+    try expect(!follower.changed(to: "a"), "what the screen loaded is not loaded again")
+    try expect(follower.changed(to: "b"), "a handover loads the next programme")
+    try expect(!follower.changed(to: "b"), "once")
+    try expect(follower.changed(to: nil), "off air clears")
+    try expect(follower.changed(to: "c"))
+    var unloaded = ChangeFollower<String>(loaded: nil)
+    try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
+    // Keyed on the programme and its signal: a rejoin of the same programme on a new signal, faster
+    // than one tick, still reloads; the same signal does not; tuning is no key at all.
+    let one = URL(string: "https://example.test/a.m3u8?t=1"), two = URL(string: "https://example.test/a.m3u8?t=2")
+    var signal = ChangeFollower<String>(loaded: PiPSubtitleKey.of(programme: "p1", signal: one))
+    try expect(!signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: one)), "same programme, same signal")
+    try expect(signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: two)), "same programme, new signal reloads")
+    try expect(PiPSubtitleKey.of(programme: nil, signal: two) == nil, "tuning has no key")
+}
+
+/// The window's subtitle follower, read ten times a second: one load per key, a track handed to tvOS
+/// once and only when loaded (a closed tv_subtitles() answer loads none), and nothing after the end.
+func pipSubtitleStepLoadsAndHandsOff() throws {
+    var step = PiPSubtitleStep(loaded: "p1")
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: false), .init(load: false, handOff: true))
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: true), .init(), "handed off once")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(load: true, handOff: false),
+                    "a handover loads; nothing loaded yet, nothing handed off")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(), "a closed answer: no load again, no hand-off")
+    try expectEqual(step.read(key: "p2", hasTracks: true, handedOff: false), .init(load: false, handOff: true), "an open one hands off")
+    step.end()
+    try expectEqual(step.read(key: "p3", hasTracks: true, handedOff: false), .init(), "the window is done: nothing")
+}
+
+/// The window's language once tvOS draws: a stored file's moves to the manifest's, the rest stay.
+func pipWindowChoiceMovesOffAStoredFile() throws {
+    let manifest = ["en", "fa"]
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["en-US"]), "en")
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["fa-IR"]), "fa",
+                    "the device's language when the manifest has it")
+    try expectEqual(SubtitleChoice.windowChoice(current: "fa", manifest: manifest, stored: "fa", preferred: ["en-US"]), "fa",
+                    "a manifest language stays")
+    try expectEqual(SubtitleChoice.windowChoice(current: nil, manifest: manifest, stored: "off", preferred: ["en-US"]), nil,
+                    "off stays off")
+}
+
+/// The window's own Play is passed on once, for the item it paused; a new item that loads paused (a
+/// rejoin, a handover) never is, so a rejoin cannot set off another; the bar holds what was asked.
+func pipPlayFollowerPassesOnTheWindowsOwnPlayOnce() throws {
+    let itemA = NSObject(), itemB = NSObject(), itemC = NSObject()   // held, so the identifiers differ
+    let a = ObjectIdentifier(itemA), b = ObjectIdentifier(itemB), c = ObjectIdentifier(itemC)
+    var follow = PiPPlayFollower(playing: true)
+    try expectEqual(follow.read(playing: true, item: a, at: 0), .none)
+    // The window's own Pause, then Play on the same item: each passed on once.
+    try expectEqual(follow.read(playing: false, item: a, at: 1), .windowPause)
+    try expect(!follow.shown, "the bar shows Paused")
+    try expectEqual(follow.read(playing: false, item: a, at: 1.1), .none, "once")
+    try expectEqual(follow.read(playing: true, item: a, at: 5), .windowPlay)
+    try expectEqual(follow.read(playing: true, item: a, at: 5.1), .none, "once")
+    // The rejoin it sets off: stop, the new item loads paused (a seek before play), then plays.
+    // None of it is the window's: no loop (Fable round 4 ran exactly this order).
+    try expectEqual(follow.read(playing: false, item: nil, at: 6), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 7), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 8), .none)
+    try expectEqual(follow.read(playing: true, item: b, at: 9), .none, "a rejoin's new item is not the window's Play")
+    // A handover: the next item loads paused, then plays. Nothing.
+    try expectEqual(follow.read(playing: false, item: c, at: 10), .none)
+    try expectEqual(follow.read(playing: true, item: c, at: 11), .none, "a handover is not the window's Play")
+    // The bar's Play: shown at once, held while the player catches up, never passed on.
+    var bar = PiPPlayFollower(playing: true)
+    _ = bar.read(playing: true, item: a, at: 0)
+    bar.ask(false, at: 0.5)
+    try expectEqual(bar.read(playing: false, item: a, at: 0.6), .none, "the bar's own Pause is not passed on again")
+    bar.ask(true, at: 1)
+    try expect(bar.shown, "the bar shows Playing at once")
+    try expectEqual(bar.read(playing: false, item: nil, at: 1.5), .none)
+    try expect(bar.shown, "held while the retune runs")
+    try expectEqual(bar.read(playing: false, item: b, at: 2), .none)
+    try expectEqual(bar.read(playing: true, item: b, at: 3), .none, "the bar's own Play is not passed on again")
+    // The bar's Pause, then the window's own Play of the same item: the window's (Fable round 5).
+    var mixed = PiPPlayFollower(playing: true)
+    _ = mixed.read(playing: true, item: a, at: 0)
+    mixed.ask(false, at: 1)
+    try expectEqual(mixed.read(playing: false, item: a, at: 1.2), .none)
+    try expectEqual(mixed.read(playing: true, item: a, at: 4), .windowPlay, "the window's Play after the bar's Pause")
+    // The window's Play on a broadcast: the bar asks for Playing and holds it through the rejoin's
+    // stop and the new item loading paused; nothing more is passed on (Fable round 7).
+    var rejoin = PiPPlayFollower(playing: true)
+    _ = rejoin.read(playing: true, item: a, at: 0)
+    try expectEqual(rejoin.read(playing: false, item: a, at: 1), .windowPause)
+    try expectEqual(rejoin.read(playing: true, item: a, at: 3), .windowPlay)
+    rejoin.ask(true, at: 3)
+    try expectEqual(rejoin.read(playing: false, item: nil, at: 3.2), .none)
+    try expect(rejoin.shown, "Playing held through the rejoin's stop")
+    try expectEqual(rejoin.read(playing: false, item: b, at: 4), .none)
+    try expect(rejoin.shown, "and through the new item loading")
+    try expectEqual(rejoin.read(playing: true, item: b, at: 5), .none, "the rejoin's own Play is not passed on")
+    try expect(rejoin.shown)
+    // A Play the player never follows lets go after the hold.
+    var stuck = PiPPlayFollower(playing: false)
+    stuck.ask(true, at: 0)
+    _ = stuck.read(playing: false, item: a, at: PiPPlayFollower.hold + 1)
+    try expect(!stuck.shown, "after the hold the bar shows what the player does")
+    withExtendedLifetime((itemA, itemB, itemC)) {}
+}
+
+/// The window reads its caption source on every tick, drawn or not: reading follows a handover.
+func pipCaptionFeedReadsEveryTick() throws {
+    var reads = 0
+    try expect(PiPCaptionFeed.drawn(read: { reads += 1; return "a line" }, intoPicture: false) == nil, "a stream's picture gets no plate")
+    try expectEqual(reads, 1, "but the source is read, so a handover is followed")
+    try expectEqual(PiPCaptionFeed.drawn(read: { reads += 1; return "a line" }, intoPicture: true), "a line")
+    try expect(PiPCaptionFeed.drawn(read: { "" }, intoPicture: true) == nil, "an empty line draws nothing")
+    try expectEqual(reads, 2)
+}
+
+/// The window's own Play brings a low sound back up, but not a muted broadcast awaiting its rejoin.
+func pipSoundFadesBackOnlyWhereItShould() throws {
+    try expect(PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "a film paused mid-fade comes back up")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: true, nowPlaying: true, volume: 0, holdsSound: false),
+               "a muted broadcast is not heard at its old place before the rejoin")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: false, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "outside the window a Play read on Paused is a late callback")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 1, holdsSound: false))
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: true))
+    try expect(!PiPSound.fadesBack(paused: false, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false))
+}
+
 /// Screen & Signal (owner, 2026-11-17): tv_subtitles() answers, read as subtitles() in kj-transmission-auth.js reads them.
 func storedSubtitlesAnswer() throws {
     func need<T>(_ value: T?, line: Int = #line) throws -> T {
@@ -5311,6 +5522,14 @@ func storedSubtitlesAnswer() throws {
 }
 
 let tests: [(String, () throws -> Void)] = [
+    ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
+    ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
+    ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),
+    ("pipLifecycleReadsWhoClosedTheWindow", pipLifecycleReadsWhoClosedTheWindow),
+    ("pipFollowerLoadsEachProgrammeOnce", pipFollowerLoadsEachProgrammeOnce),
+    ("pipSubtitleStepLoadsAndHandsOff", pipSubtitleStepLoadsAndHandsOff),
+    ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
+    ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),

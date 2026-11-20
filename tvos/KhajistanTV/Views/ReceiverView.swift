@@ -37,7 +37,7 @@ struct ReceiverView: View {
         }
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
-        .fullScreenCover(item: $shuffled) { pick in
+        .kjFullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, surfChoice: pick.surfChoice)
         }
         .onDisappear { cancelSurf() }
@@ -596,7 +596,7 @@ private struct GenreShelves: View {
         .task(id: model.extendedAtlas) { await load() }
         // Back from a player: the visit ended, and with it the wanted lists.
         .onAppear { wantStills() }
-        .fullScreenCover(item: $playing) { pick in
+        .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
     }
@@ -746,7 +746,7 @@ private struct LikedShelf: View {
         // Again when the app comes forward: a list that failed to load at launch is read again
         // (the store caches the ones that loaded, so a walk that found everything costs nothing).
         .task(id: "\(refs.joined(separator: ","))|\(scenePhase)") { await resolve() }
-        .fullScreenCover(item: $playing) { pick in
+        .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
         }
     }

@@ -168,7 +168,7 @@ struct ReadingReaderView: View {
         .onChange(of: phase == .page ? position : 0) { _, shown in
             if shown > 0 { ReadingPlaces.record(title: title.slug, name: title.name, issue: issue, page: shown) }
         }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { retryAfterSignIn() })
         }
     }

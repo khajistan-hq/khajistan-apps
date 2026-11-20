@@ -21,6 +21,7 @@ final class StaffDialUITests: XCTestCase {
         clearPassword(app)
 
         let publicCount = liveNow(app)
+        let publicList = listTotal(app)
         shot("staff-dial-1-public", app)
 
         app.buttons["tab-library"].tap()
@@ -34,11 +35,14 @@ final class StaffDialUITests: XCTestCase {
 
         let wholeCount = liveNow(app, otherThan: publicCount)
         XCTAssertGreaterThan(wholeCount, publicCount, "the password opens the whole dial")
+        let wholeList = listTotal(app, otherThan: publicList)
+        XCTAssertGreaterThan(wholeList, publicList, "the Live list is read again from the whole dial")
         shot("staff-dial-2-whole", app)
 
         clearPassword(app)
         let afterClear = liveNow(app, otherThan: wholeCount)
         XCTAssertEqual(afterClear, publicCount, "clearing the password closes the whole dial again")
+        XCTAssertEqual(listTotal(app, otherThan: wholeList), publicList, "the Live list is read again from the public dial")
         shot("staff-dial-3-public-again", app)
         let counts = XCTAttachment(string: "Live now: \(publicCount) public, \(wholeCount) with the password, \(afterClear) after clearing it")
         counts.name = "staff-dial-counts"
@@ -80,6 +84,23 @@ final class StaffDialUITests: XCTestCase {
         }
         XCTFail("the Live now count did not change from \(previous.map(String.init) ?? "nothing"): \(figure.exists ? figure.label : "not on screen")")
         return previous ?? 0
+    }
+
+    /// The channels in the Live list of the region on screen (its Television and Radio switches
+    /// count the list itself, not the index), read once the total differs from `otherThan`.
+    private func listTotal(_ app: XCUIApplication, otherThan previous: Int? = nil) -> Int {
+        let deadline = Date().addingTimeInterval(60)
+        var total = 0
+        while Date() < deadline {
+            total = ["medium-tv", "medium-radio"].reduce(0) { sum, id in
+                let chip = app.buttons[id]
+                return sum + (chip.exists ? Int(chip.label.filter(\.isNumber)) ?? 0 : 0)
+            }
+            if total > 0, total != previous { return total }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        XCTFail("the Live list did not change from \(previous.map(String.init) ?? "nothing"): \(total)")
+        return total
     }
 
     /// The page's top, where the figures are: a channel on air docks the set above it.

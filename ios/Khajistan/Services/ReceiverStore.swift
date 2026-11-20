@@ -42,6 +42,9 @@ final class ReceiverStore {
     /// Cameras sections are drawn afresh on it. The docked player sits outside them and plays on.
     private(set) var dialID = 0
     @ObservationIgnored private var wholeDial = false
+    /// The whole dial was on hand at some point since the last password change, so a channel
+    /// still playing may be one the public dial does not carry, even after a refresh fell back.
+    @ObservationIgnored private var servedWhole = false
     @ObservationIgnored private var indexFailedAt: Date?
     /// The preview password the dial on hand was read for, and the one the site refused, which is
     /// not sent again until it changes (ten wrong passwords lock the site's sign-in for everyone
@@ -128,7 +131,11 @@ final class ReceiverStore {
             }
             guard started == generation, !Task.isCancelled else { return }
             if reply == nil {
-                reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+                // Only a read meant for the whole dial carries the site cookie. A sign-in cancelled
+                // by a sign-out can store its cookie after every delete; this read never sends it.
+                var request = URLRequest(url: Self.dataURL("receiver-index.json"))
+                request.httpShouldHandleCookies = whole
+                reply = try await urlSession.data(for: request)
             }
             guard let reply else { throw ReceiverStoreError.unreadable }
             let (data, response) = reply
@@ -143,6 +150,7 @@ final class ReceiverStore {
                 throw ReceiverStoreError.unreadable
             }
             guard started == generation, !Task.isCancelled else { return }
+            if whole { servedWhole = true }
             if whole != wholeDial {
                 wholeDial = whole
                 // Lists on screen, and region downloads under way, came from the other dial. With
@@ -218,11 +226,15 @@ final class ReceiverStore {
 
     /// A new or removed preview password: the site cookie goes, the dial on hand goes (so the
     /// region lists are drawn again from the new one), and nothing fetched before this is kept.
-    /// Returns whether the dial on hand was the whole one, so a held channel playing from it can
-    /// be turned off.
+    /// Returns whether the whole dial was on hand since the last change, so a held channel playing
+    /// from it can be turned off.
     @discardableResult
     func credentialDidChange() -> Bool {
-        let wasWhole = wholeDial
+        let wasWhole = servedWhole
+        servedWhole = false
+        // A new password is sent once; one the site refused before is tried again only when
+        // entered again.
+        refused = nil
         dialPassword = previewPassword()
         deleteSiteCookies()
         generation += 1

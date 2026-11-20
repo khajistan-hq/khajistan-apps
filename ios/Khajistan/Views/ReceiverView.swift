@@ -493,10 +493,11 @@ private struct LiveSection: View {
             // The list arrives below the strip, out of VoiceOver's way: say that it did.
             UIAccessibility.post(notification: .announcement, argument: "\(regionLabel): \(list.count) channels")
         } catch {
-            if Task.isCancelled || region != selected { return }
+            // A dial change cancels the region download under way; the run it started shows its own.
+            if Task.isCancelled || region != selected || dial != model.receiver.dialID { return }
             listError = error.localizedDescription
         }
-        if region == selected { loading = false }
+        if region == selected, dial == model.receiver.dialID { loading = false }
     }
 
     private func loadCameras() async {

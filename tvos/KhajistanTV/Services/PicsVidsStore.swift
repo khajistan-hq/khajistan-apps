@@ -344,6 +344,9 @@ final class PicsVidsStore {
         // either side and see which way it is skipped.
         case "second" where feeds.contains { $0.key.hasPrefix(Self.videosPrefix) && $0.value.items.dropFirst().first?.id == row.id }:
             throw PnvPlaybackError.unavailable
+        // `first`: only the first video of a Reel deal fails, for the skip forward from it.
+        case "first" where feeds.contains { $0.key.hasPrefix(Self.videosPrefix) && $0.value.items.first?.id == row.id }:
+            throw PnvPlaybackError.unavailable
         default: break
         }
         #endif

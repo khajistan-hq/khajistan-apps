@@ -328,21 +328,53 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(2)
         let first = surface.value as? String
         XCTAssertFalse((first ?? "").isEmpty, "the Reel shows its first video")
-        // Up onto the broken second: within a few seconds it is skipped forward to the third.
+        // Up onto the broken second. It must show, then be skipped on: a second that played would
+        // make the rest of this test pass with no skip run at all.
         XCUIRemote.shared.press(.up)
-        kjPause(6)
-        let onThird = surface.value as? String
-        XCTAssertNotEqual(onThird, first, "Up moved on")
-        // Down onto the broken second must skip back to the first, not forward again.
+        let second = waitForValue(surface, notIn: [first], seconds: 5)
+        XCTAssertNotNil(second, "Up moved onto the second video")
+        let third = waitForValue(surface, notIn: [first, second], seconds: 8)
+        XCTAssertNotNil(third, "the broken second was skipped on to the third")
+        // Down at once onto the broken second must skip back to the first, not forward again.
         XCUIRemote.shared.press(.down)
-        var landed: String?
-        for _ in 0..<16 {
-            kjPause(0.5)
-            landed = surface.value as? String
-            if landed == first { break }
-        }
-        print("PNVBACK first=\(first ?? "nil") third=\(onThird ?? "nil") landed=\(landed ?? "nil")")
+        let landed = waitForValue(surface, notIn: [third, second], seconds: 8)
+        print("PNVBACK first=\(first ?? "nil") second=\(second ?? "nil") third=\(third ?? "nil") landed=\(landed ?? "nil")")
         XCTAssertEqual(landed, first, "Down onto a broken video skips on back to the one before it")
+    }
+
+    /// A broken first video is skipped forward even after a Down, since nothing is behind it.
+    func testReelSkipsForwardFromABrokenFirstVideo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "first"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        let second = waitForValue(surface, notIn: [first, nil, ""], seconds: 8)
+        XCTAssertNotNil(second, "the broken first was skipped on to the second")
+        // Down onto the broken first: it must show, then be skipped forward to the second again.
+        XCUIRemote.shared.press(.down)
+        let back = waitForValue(surface, notIn: [second], seconds: 5)
+        XCTAssertEqual(back, first, "Down went back onto the first video")
+        let landed = waitForValue(surface, notIn: [first], seconds: 8)
+        print("PNVFWD first=\(first ?? "nil") second=\(second ?? "nil") landed=\(landed ?? "nil")")
+        XCTAssertEqual(landed, second, "a broken first video is skipped forward")
+    }
+
+    /// The surface's value once it is none of `values`, polled every 0.25 s; nil if it never is.
+    private func waitForValue(_ element: XCUIElement, notIn values: [String?], seconds: TimeInterval) -> String? {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            let now = element.value as? String
+            if !values.contains(now) { return now }
+            kjPause(0.25)
+        }
+        return nil
     }
 
     private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {

@@ -342,6 +342,37 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(landed, first, "Down onto a broken video skips on back to the one before it")
     }
 
+    /// A lit control holds the skip of a broken video, and a control left alone lets go after
+    /// 10 s, so the Reel plays on (Fable round 8).
+    func testReelLitControlHoldsTheSkipThenLetsGo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        // Up onto the broken second, and light Save at once.
+        XCUIRemote.shared.press(.up)
+        let second = waitForValue(surface, notIn: [first], seconds: 5)
+        XCTAssertNotNil(second, "Up moved onto the second video")
+        XCUIRemote.shared.press(.right)
+        let save = app.descendants(matching: .any)["pnvSave"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2) && save.isSelected, "Right lights Save")
+        // Well past the 2 s skip: still on the broken second while Save is lit.
+        kjPause(5)
+        XCTAssertEqual(surface.value as? String, second, "a lit control holds the skip")
+        // Left alone, Save lets go after 10 s and the skip goes on.
+        let moved = waitForValue(surface, notIn: [second], seconds: 12)
+        print("PNVHOLD first=\(first ?? "nil") second=\(second ?? "nil") moved=\(moved ?? "nil")")
+        XCTAssertNotNil(moved, "the idle control let go and the Reel went on")
+        XCTAssertFalse(save.exists, "Save let go")
+    }
+
     /// A broken first video is skipped forward even after a Down, since nothing is behind it.
     func testReelSkipsForwardFromABrokenFirstVideo() {
         let app = XCUIApplication()
@@ -357,7 +388,8 @@ final class PicsVidsUITests: XCTestCase {
         let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
         // Read while the first is still failing: a `first` that is really the second (read late)
         // would let short clips pass every later check with no skip run.
-        XCTAssertTrue(app.descendants(matching: .any)["pnvViewerState"].exists, "the first video shows its failure")
+        let state = app.descendants(matching: .any)["pnvViewerState"]
+        XCTAssertTrue(state.exists && !state.label.contains("Loading"), "the first video shows its failure: \(state.label)")
         let second = waitForValue(surface, notIn: [first, nil, ""], seconds: 8)
         XCTAssertNotNil(second, "the broken first was skipped on to the second")
         // Down onto the broken first: it must show, then be skipped forward to the second again.
@@ -431,8 +463,15 @@ final class PicsVidsUITests: XCTestCase {
             XCUIRemote.shared.press(button); kjPause(0.6)
             XCTAssertEqual(surface.value as? String, before, note)
         }
-        // Down on the first video of a deal stays put; Left with nothing lit does nothing.
-        keeps(.down, "Down on the first video stays put")
+        // Down on the first video of a deal stays put; Left with nothing lit does nothing. Live
+        // data: a first video that is really broken is skipped on after 2 s, and then Down rightly
+        // goes back, so the stay-put check runs only when the Reel is still on the video it opened.
+        kjPause(3)
+        if surface.value as? String == start {
+            keeps(.down, "Down on the first video stays put")
+        } else {
+            print("PNVREEL first video was skipped; stay-put check not run")
+        }
         keeps(.left, "Left with nothing lit does not change the video")
         XCTAssertFalse(save.exists, "Left with nothing lit lights nothing")
         // Right lights Save and does not change the video; Left from Save lets go.

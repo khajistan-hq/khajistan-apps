@@ -23,6 +23,10 @@ struct PnvViewerView: View {
     @State private var overlayVisible = true
     @State private var showSignIn = false
     @State private var hideTask: Task<Void, Never>?
+    /// In the Reel, lets go of a lit control left alone for `reelArmIdle`, so a remote put down
+    /// after one Right does not hold the Reel on one video for good.
+    @State private var releaseTask: Task<Void, Never>?
+    private static let reelArmIdle: Duration = .seconds(10)
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
     /// The step running now, if any: an end notice does not cancel a press still waiting on a page.
@@ -160,6 +164,8 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
+        // Lighting a control starts its idle timer (wake runs before the press lights it).
+        .onChange(of: armed) { if videosOnly, armed != nil { wake() } }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in
             voiceOver = UIAccessibility.isVoiceOverRunning
             wake()
@@ -535,6 +541,8 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         skipTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
+            // A lit control holds the skip as it holds autoplay; it goes on once the control lets go.
+            while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
             if !Task.isCancelled, current.id == key {
                 let isFirst = store.feed(feedKey).items.first?.id == key
                 step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta, isFirst: isFirst))
@@ -605,6 +613,15 @@ struct PnvViewerView: View {
     private func wake() {
         overlayVisible = true
         hideTask?.cancel()
+        releaseTask?.cancel()
+        if videosOnly, armed != nil {
+            releaseTask = Task {
+                try? await Task.sleep(for: Self.reelArmIdle)
+                guard !Task.isCancelled, !showCollections, !showSignIn else { return }
+                armed = nil
+                wake()
+            }
+        }
         let settled = phase == .ready && (!current.isVideo || controller.state == .playing)
         guard settled else { return }
         guard OverlayTiming.hidesItself else { return }

@@ -190,6 +190,9 @@ struct ChannelsView: View {
             // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
             FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films)
                 .accessibilityIdentifier("shelf-vod")
+                // The last shelf, and its posters are taller than the room above the small radio
+                // bar, so Down finds nothing below them: it goes to the bar here.
+                .onMoveCommand { if $0 == .down, model.radioAway != nil { model.radioBarFocusRequests += 1 } }
         case "camera":
             cameraShelf
         default:

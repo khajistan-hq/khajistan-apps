@@ -41,6 +41,9 @@ final class AppModel {
     /// A radio channel left playing when its player closed: Sonos's small player, under every
     /// screen, until it is turned off or another signal starts.
     var radioAway: RadioAway?
+    /// Moves when a page asks the small radio bar to take focus: Down from a shelf whose cards are
+    /// taller than the room left above the bar finds nothing below them on its own.
+    var radioBarFocusRequests = 0
     /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
     /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
     var surfFocusedOnce = false

@@ -13,6 +13,7 @@ struct ChannelsView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    @Environment(\.underRadioBar) private var underRadioBar
     @State private var channels: [Channel] = []
     @State private var cameraChannels: [Channel] = []
     @State private var mainLoaded = false
@@ -65,7 +66,7 @@ struct ChannelsView: View {
                 preview: preview,
                 still: heroChannel.flatMap { model.stills.image(for: $0.id) },
                 countries: countries,
-                compact: model.radioBarUp
+                compact: underRadioBar
             )
             .padding(.horizontal, KJLayout.inset)
             .padding(.top, 24)
@@ -96,7 +97,7 @@ struct ChannelsView: View {
             if let id { heroId = id }
             follow()
         }
-        .onChange(of: model.radioBarUp) { _, _ in follow() }
+        .onChange(of: underRadioBar) { _, _ in follow() }
         .onChange(of: playing == nil) { _, free in
             // One signal at a time: the hero and the stills give way to the player.
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
@@ -135,7 +136,7 @@ struct ChannelsView: View {
     private func follow() {
         guard playing == nil else { return }
         // No picture plays where the shrunk hero has none to show it in.
-        let onCard = (focusedId != nil || heroId == nil) && !model.radioBarUp
+        let onCard = (focusedId != nil || heroId == nil) && !underRadioBar
         preview.show(onCard ? heroChannel : nil, receiver: model.receiver, stills: model.stills)
         model.stills.want(nearFocus)
     }

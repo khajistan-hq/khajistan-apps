@@ -104,6 +104,10 @@ struct Palette: Equatable {
     }
 }
 
+private struct UnderRadioBarKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
 private struct PaletteKey: EnvironmentKey {
     static let defaultValue = Palette(.day)
 }
@@ -114,6 +118,14 @@ extension EnvironmentValues {
     var palette: Palette {
         get { self[PaletteKey.self] }
         set { self[PaletteKey.self] = newValue }
+    }
+
+    /// The small radio player shows under this page. RootView sets it on the sections; a full-screen
+    /// page covers the bar and sets it back. The page's tallest parts shrink while it is set, so
+    /// Down can still reach the bar's Off.
+    var underRadioBar: Bool {
+        get { self[UnderRadioBarKey.self] }
+        set { self[UnderRadioBarKey.self] = newValue }
     }
 }
 

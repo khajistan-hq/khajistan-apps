@@ -265,14 +265,18 @@ final class ReceiverGuideUITests: XCTestCase {
         // to the right instead (CI 2026-11-19, run 44633692006).
         let inBar = app.buttons.matching(NSPredicate(format: "hasFocus == true AND identifier BEGINSWITH 'radioBar'")).firstMatch
         // Every card Down passes on the way must end above the bar: one that runs under it is
-        // where focus got stuck (a focused film card, 695 pt, under the full hero).
+        // where focus got stuck (2026-11-19: a focused film card under the full hero ran past it).
         let card = app.buttons.matching(NSPredicate(format: "hasFocus == true AND NOT (identifier BEGINSWITH 'radioBar')")).firstMatch
+        var passedFilm = false
         for _ in 0..<6 where !inBar.exists {
             if card.exists {
+                if card.identifier.hasPrefix("film-") { passedFilm = true }
                 XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY, "\(card.identifier) ends above the bar")
             }
             XCUIRemote.shared.press(.down); kjPause(0.6)
         }
+        // Indus's films come from the live On Demand list; without them this walk proves less.
+        if !passedFilm { print("KJGUIDE Down passed no film card: the region has no On Demand shelf today") }
         let held = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         XCTAssertTrue(inBar.exists, "Down reaches the small player; focus held on "
                       + (held.exists ? "\(held.identifier) at \(held.frame)" : "nothing") + ", bar at \(bar.frame)")
@@ -282,5 +286,46 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
         XCTAssertTrue(awakeIs("off"), "with nothing playing the Apple TV may sleep again")
+    }
+
+    /// A film opened from a shelf under the radio bar stops the radio, so the bar goes and the
+    /// shelf's cards grow back behind the player. Closing the film must find focus on it again
+    /// (2026-11-20: posters shrunk under the bar narrowed every card, the shelf slid sideways, and
+    /// focus was lost; Menu then left the region).
+    func testAFilmOpenedUnderTheRadioBarGetsFocusBack() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-kjskin", "day"]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["shelf-radio"].waitForExistence(timeout: 60), "Indus has a radio shelf")
+        // The films are the site's live On Demand list: no shelf today, nothing to test.
+        try XCTSkipUnless(app.descendants(matching: .any)["shelf-vod"].waitForExistence(timeout: 20),
+                          "Indus has no On Demand shelf today")
+        kjPause(2)
+        let focus = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        // Television is the first shelf and radio the next.
+        for _ in 0..<8 where !focus.identifier.hasPrefix("channel-") { XCUIRemote.shared.press(.down); kjPause(0.5) }
+        XCUIRemote.shared.press(.down)
+        kjPause(1)
+        XCUIRemote.shared.press(.select)
+        try kjTuneUntilPlaying(app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.descendants(matching: .any)["radioBar"].waitForExistence(timeout: 10), "the radio plays on in the small player")
+        kjPause(1)
+        for _ in 0..<4 where !focus.identifier.hasPrefix("film-") { XCUIRemote.shared.press(.down); kjPause(0.7) }
+        XCTAssertTrue(focus.identifier.hasPrefix("film-"), "Down reaches the films: \(focus.identifier)")
+        // Well along the shelf, where a sideways slide would carry the card off screen.
+        for _ in 0..<7 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        let chosen = focus.identifier
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["radioBar"].waitForNonExistence(timeout: 15), "the film stops the radio")
+        kjPause(4)
+        XCUIRemote.shared.press(.menu)
+        let back = NSPredicate { _, _ in focus.exists && focus.identifier == chosen }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: back, object: nil)], timeout: 8), .completed,
+                       "focus comes back to the film just closed, \(chosen); it is on \(focus.exists ? focus.identifier : "nothing")")
     }
 }

@@ -48,20 +48,23 @@ struct FilmShelf: View {
 /// fixed box too, so the cards line up whatever the record carries.
 struct FilmCard: View {
     static let posterHeight: CGFloat = 420
-    /// While the radio bar shows: a focused card (poster, text, lift) fits the shortest page above
-    /// the bar, the region page under its crumb, so Down can reach the bar's Off.
-    static let posterHeightUnderBar: CGFloat = 300
     static let textHeight: CGFloat = 210
+    /// While the radio bar shows, the title alone: a focused card (poster, title, lift) then fits
+    /// the shortest page above the bar, the region page under its crumb, so Down can reach the
+    /// bar's Off. The poster keeps its size, so the cards keep their width and place on the shelf
+    /// when the bar comes or goes (a film opened from the shelf stops the radio behind it, and a
+    /// shelf that moved sideways lost focus when the film closed).
+    static let textHeightUnderBar: CGFloat = 90
 
     let film: Film
     /// Seconds in, where this device stopped the full film: a progress line and the time take the
     /// offer line's place.
     var place: Double? = nil
-    @Environment(AppModel.self) private var model
+    @Environment(\.underRadioBar) private var underRadioBar
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            FilmPoster(film: film, height: model.radioBarUp ? Self.posterHeightUnderBar : Self.posterHeight, maxPixel: 900)
+            FilmPoster(film: film, height: Self.posterHeight, maxPixel: 900)
                 // How far in, on the artwork, as the Apple TV app draws Up Next.
                 .overlay(alignment: .bottom) {
                     if let place, let minutes = film.runtime_minutes, minutes > 0 {
@@ -71,20 +74,22 @@ struct FilmCard: View {
                 .kjCardArt()
             // The text takes the poster's width, so a long title wraps under its own poster.
             Color.clear
-                .frame(height: Self.textHeight)
+                .frame(height: underRadioBar ? Self.textHeightUnderBar : Self.textHeight)
                 .overlay(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(Films.displayTitle(film))
                             .kjName(28)
                             .lineLimit(2)
-                        if let place {
+                        if underRadioBar {
+                            // The title alone; the button's label still reads the offer.
+                        } else if let place {
                             Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
                         } else if let offer = Films.offer(film) {
                             Kicker(offer)
                                 .lineLimit(3)
                         }
                         let detail = Films.detail(film)
-                        if !detail.isEmpty {
+                        if !underRadioBar, !detail.isEmpty {
                             Text(detail)
                                 .kjSmall(faint: true)
                                 .lineLimit(1)

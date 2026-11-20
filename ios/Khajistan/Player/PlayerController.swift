@@ -311,6 +311,9 @@ final class PlayerController {
     private func fail(_ message: String, error: Error?, stalled: Bool = false) {
         // A late error from the item a retune is about to replace must not call the retune off.
         guard !retunePending else { return }
+        // A signal already failed (the 30 s start-up timeout) is finished: a late error from its
+        // still-loading item must not bring "Connecting…" back over the failure.
+        if case .failed = state { return }
         let events = player.currentItem?.errorLog()?.events ?? []
         let logged = events.map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
         let lastAge = events.last?.date.map { -$0.timeIntervalSinceNow }

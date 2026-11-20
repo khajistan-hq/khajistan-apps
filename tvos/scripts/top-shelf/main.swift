@@ -58,7 +58,7 @@ if args[2] == "--slides", args.count == 5 {
         for number in StationClock.channelNumbers(p) {
             let id = StationClock.channelId(p, number: number)
             write(ShelfArt.channel(skin: skin, scale: 1, number: number, air: StationClock.onAir(p, channel: number, at: now),
-                                   returns: id.flatMap { StationClock.returnTime(p, channelId: $0, at: now) },
+                                   returns: id.flatMap { StationClock.returnLabel(p, channelId: $0, at: now) },
                                    line: p._meta.channels.first { $0.number == number }?.line, pigeon: pigeon),
                   to: out.appendingPathComponent("channel-\(number)-\(skin.rawValue).png"))
         }

@@ -47,9 +47,7 @@ final class LiveCardsUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the receiver must load")
         kjPause(3)
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<20 where focusedID(app) != "region-\(region)" { press(.left) }
-        for _ in 0..<40 where focusedID(app) != "region-\(region)" { press(.right) }
+        XCTAssertTrue(kjFocusRegion(app, "\(region)"), "focus must reach \(region) in the region list")
         XCTAssertEqual(focusedID(app), "region-\(region)")
         XCUIRemote.shared.press(.select)
         let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))

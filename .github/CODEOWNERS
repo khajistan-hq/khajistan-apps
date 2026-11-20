@@ -1,0 +1,4 @@
+# Changes to CI workflows need the owner's approval, so a pull request cannot
+# turn off its own required checks (Fable on PR 77, round 7). Branch protection
+# on main requires code-owner review.
+/.github/workflows/ @khajistan

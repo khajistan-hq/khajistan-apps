@@ -63,6 +63,9 @@ final class PlayerController {
         let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, listen: Bool, live: Bool
         let at = ContinuousClock.now
     }
+    /// The address of the last signal started, as its item's asset holds it: tells this
+    /// programme's item from the previous one still playing during a handover.
+    @ObservationIgnored private(set) var attachedURL: URL?
     #if DEBUG
     @ObservationIgnored private var attachedAt = ContinuousClock.now
     #endif
@@ -88,6 +91,7 @@ final class PlayerController {
         retunePending = false
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
+        attachedURL = url
         generation += 1
         let gen = generation
         #if DEBUG
@@ -481,6 +485,9 @@ final class PlayerController {
     private func fail(error: Error?, stalled: Bool = false) {
         // A late error from the item a retune is about to replace must not call the retune off.
         guard !retunePending else { return }
+        // A signal already failed (the 30 s start-up timeout) is finished: a late error from its
+        // still-loading item must not bring "Connecting…" back over the failure.
+        guard !state.isFailed else { return }
         let events = player.currentItem?.errorLog()?.events ?? []
         let logged = events.map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
         let lastAge = events.last?.date.map { -$0.timeIntervalSinceNow }

@@ -957,8 +957,11 @@ func nextSlotRollsOverEveryKindOfDayEnd() throws {
         let next = try require(StationClock.nextSlot(p, channel: "transfers", iso: r.from, minute: 1439), r.from)
         try expectEqual(next.date, r.to, r.from)
     }
+    // Past a gap of more than a day: the next day the schedule holds (2026-11-16, Fable).
+    let overGap = try require(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439))
+    try expectEqual(overGap.date, "2028-02-28")
     // Nothing after the last day, an unknown day, an unknown channel, and a date that is not a date.
-    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2027-01-01", minute: 1439) == nil, true)
+    try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2028-03-01", minute: 1439) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2031-01-01", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "nope", iso: "2026-10-10", minute: 0) == nil, true)
     try expectEqual(StationClock.nextSlot(p, channel: "transfers", iso: "2026-02-30", minute: 1439) == nil, true)
@@ -1162,14 +1165,29 @@ func stationClockEdgesAndTheEndOfTheGrid() throws {
 func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
     let f = try fixture()
     let p = f.programming
-    var checked = 0, wrapped = 0, afterEnd = 0
+    var checked = 0, wrapped = 0, afterEnd = 0, nearEnd = 0
     for c in f.cases {
         guard c.expect != nil else { continue }
         let date = Date(timeIntervalSince1970: c.nowMs / 1000)
         let air = try require(StationClock.onAir(p, channel: c.channel, at: date))
         let count = air.slot.programmes.count
-        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         let index = (air.rosterIndex + 1) % count
+        // The roster's last entry, under two seconds from the strip's end: the clock a second past
+        // the end answers instead (lastFileEndingOnTimeTunesTheNextStrip has the detail).
+        let whole = date.timeIntervalSince1970.rounded(.down)
+        let at = try require(StationClock.slotSecond(air.date, now: StationClock.stationNow(date)))
+        let then = Date(timeIntervalSince1970: whole + air.slot.endSecond.rounded(.up) - at)
+        if air.rosterIndex == count - 1, air.slot.endSecond - (at + date.timeIntervalSince1970 - whole) <= 2,
+           StationClock.stationMonth(then) == StationClock.stationMonth(date) {
+            let handed = StationClock.following(air, in: p, at: date)
+            let clock = StationClock.onAir(p, channelId: air.channelId, at: then)
+            try expectEqual(handed?.programmeId, clock?.programmeId, "case \(Int(c.nowMs))")
+            try expectEqual(handed?.slot, clock?.slot)
+            try expect(handed?.slot != air.slot || handed?.date != air.date, "case \(Int(c.nowMs)): same strip")
+            nearEnd += 1
+            continue
+        }
+        let next = try require(StationClock.following(air, in: p, at: date), "case \(Int(c.nowMs))")
         if index == 0 { wrapped += 1 }
         let id = p.programme_order[air.slot.programmes[index]]
         try expectEqual(next.rosterIndex, index)
@@ -1193,7 +1211,7 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
             afterEnd += 1
         }
     }
-    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock")
+    print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock, \(nearEnd) at a strip's end")
     try expect(checked >= 400, "only \(checked) checked")
     try expect(wrapped >= 1, "no roster wrapped")
 }
@@ -2256,6 +2274,24 @@ func realMixesDecodeAndAllPlay() throws {
     try expectEqual(byID["mix_pia"]?.program_block, "Prime Signal")
 }
 
+func readingPageCacheIsProtectedAndNotBackedUp() throws {
+    // The page cache must not be readable before first unlock, nor copied into a backup.
+    try expect(RRPrivateFiles.writeOptions.contains(.completeFileProtectionUntilFirstUserAuthentication))
+    try expect(RRPrivateFiles.writeOptions.contains(.atomic))
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("rr-private-\(UUID())", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    RRPrivateFiles.prepare(folder)
+    let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isExcludedFromBackupKey])
+    try expect(values.isDirectory == true)
+    try expect(values.isExcludedFromBackup == true, "the page folder is excluded from backup")
+    // A purged folder is made and marked again by the next write (RRPageDisk.write goes through it).
+    try FileManager.default.removeItem(at: folder)
+    let page = folder.appendingPathComponent("p.jpg")
+    RRPrivateFiles.write(Data([1, 2, 3]), to: page)
+    try expect((try? Data(contentsOf: page)) == Data([1, 2, 3]), "the write lands after a purge")
+    try expect(try folder.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+}
+
 func readingPageCountsClamp() throws {
     // A count out of range clamps; Int(1e30) and a sum near Int.max used to trap.
     let wild = try require(RRAPI.titles(fromFeed: Data("""
@@ -2386,6 +2422,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Adult notice: the wording is the site's own", adultNoticeWordingIsTheSitesOwn),
     ("Real mixtapes.json decodes and every mix plays", realMixesDecodeAndAllPlay),
     ("Reading Room: a page count out of range clamps", readingPageCountsClamp),
+    ("Reading Room: the page cache is protected and not backed up", readingPageCacheIsProtectedAndNotBackedUp),
     ("Mix presentation rules", mixPresentationRules),
     ("Mixes refuse what must not play", mixesRefuseWhatMustNotPlay),
     ("Mix clock format", mixClockFormat),

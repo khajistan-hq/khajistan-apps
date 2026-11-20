@@ -182,10 +182,10 @@ struct YoursView: View {
         let isSet = model.auth.previewPassword != nil
         VStack(alignment: .leading, spacing: 8) {
             ShelfHeader(title: "Preview password")
-            Text(isSet ? "Set on this phone. Transmission, the Screening Room and the Reading Room are open." : "For testers, until Khajistan launches. It opens Transmission, the Screening Room and the Reading Room.")
+            Text(isSet ? "Set on this phone. Transmission, the Screening Room, the Reading Room and every Receiver channel are open." : "For testers, until Khajistan launches. It opens Transmission, the Screening Room, the Reading Room and every Receiver channel.")
                 .kjSmall(faint: true)
             if editingPassword {
-                HouseInputField("Password") { SecureField("", text: $draft) }
+                HouseInputField("Password") { SecureField("", text: $draft).accessibilityIdentifier("previewPasswordField") }
                 HStack(spacing: 16) {
                     Button(kicker: "Save") {
                         model.auth.setPreviewPassword(draft)
@@ -193,13 +193,18 @@ struct YoursView: View {
                         editingPassword = false
                     }
                     .buttonStyle(HouseButtonStyle(solid: true))
+                    .accessibilityIdentifier("previewPasswordSave")
                     Button(kicker: "Cancel") { draft = ""; editingPassword = false }
                         .buttonStyle(HouseButtonStyle())
                 }
             } else {
                 HStack(spacing: 16) {
                     Button(kicker: isSet ? "Change" : "Set") { editingPassword = true }
-                    if isSet { Button(kicker: "Clear") { model.auth.clearPreviewPassword() } }
+                        .accessibilityIdentifier("previewPasswordSet")
+                    if isSet {
+                        Button(kicker: "Clear") { model.auth.clearPreviewPassword() }
+                            .accessibilityIdentifier("previewPasswordClear")
+                    }
                 }
                 .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0)))
             }

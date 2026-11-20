@@ -209,7 +209,7 @@ enum PnvRegions {
 
 enum PnvAPI {
     /// Which way the Reel skips a broken video: the way the last step went (Down onto one goes on
-    /// back), except from the stream's first video, where there is nothing behind it to go to.
+    /// back), except from the stream's first video, which is skipped forward: a deal starts there.
     static func reelSkipDelta(lastDelta: Int, isFirst: Bool) -> Int {
         isFirst || lastDelta >= 0 ? 1 : -1
     }

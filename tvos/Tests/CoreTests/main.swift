@@ -2942,7 +2942,7 @@ func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
 func pnvReelSkipsInTheDirectionOfThePress() throws {
     try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: false), 1)
     try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: false), -1)
-    // Nothing behind the first video: a broken one there is skipped forward.
+    // A deal starts from its first video: a broken one there is skipped forward.
     try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: true), 1)
     try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: true), 1)
 }

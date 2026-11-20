@@ -379,8 +379,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
 - **The Reel moves as Transmission does and gives the screen to the video** (owner, 2026-11-20):
-  Up is the next video and Down the one before, as Channel Up and Down (Down stays put on the
-  first video of a deal, and a broken video is skipped in the direction of the press). Right
+  Up is the next video and Down the one before, as Channel Up and Down (Down on the first video of a
+  deal comes round to the last one loaded, and a broken video is skipped in the direction of the press). Right
   lights Save, Collection, Shuffle and Region; Left walks back and lets go. No status band and no
   panel: one line, *@account · Region*, on a ground plate that hugs it at the bottom left, with
   *→ Save* beside it while the controls are down. The controls' strip shows only while one is lit,

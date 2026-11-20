@@ -328,9 +328,6 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(2)
         let first = surface.value as? String
         XCTAssertFalse((first ?? "").isEmpty, "the Reel shows its first video")
-        // Only the second is broken here, so the Reel is on its first video: Down stays put.
-        XCUIRemote.shared.press(.down); kjPause(1)
-        XCTAssertEqual(surface.value as? String, first, "Down on the first video stays put")
         // Up onto the broken second. It must show, then be skipped on: a second that played would
         // make the rest of this test pass with no skip run at all.
         XCUIRemote.shared.press(.up)
@@ -343,6 +340,15 @@ final class PicsVidsUITests: XCTestCase {
         let landed = waitForValue(surface, notIn: [third, second], seconds: 8)
         print("PNVBACK first=\(first ?? "nil") second=\(second ?? "nil") third=\(third ?? "nil") landed=\(landed ?? "nil")")
         XCTAssertEqual(landed, first, "Down onto a broken video skips on back to the one before it")
+        // Back on the first video, which plays: Down comes round to the last video loaded (owner,
+        // 2026-11-20: "it should work both ways"), and Down again goes on back from there.
+        XCUIRemote.shared.press(.down)
+        let wrapped = waitForValue(surface, notIn: [first], seconds: 5)
+        print("PNVWRAP first=\(first ?? "nil") wrapped=\(wrapped ?? "nil")")
+        XCTAssertNotNil(wrapped, "Down on the first video moves")
+        XCTAssertNotEqual(wrapped, third, "Down on the first goes round to the end, not forward")
+        XCUIRemote.shared.press(.down)
+        XCTAssertNotNil(waitForValue(surface, notIn: [wrapped, first], seconds: 5), "Down goes on back from the last")
     }
 
     /// A lit control holds the skip of a broken video, and a control left alone lets go after
@@ -599,14 +605,22 @@ final class PicsVidsUITests: XCTestCase {
         for _ in 0..<6 where (surface.value as? String ?? "").hasPrefix("ktv-") {
             XCUIRemote.shared.press(.up); kjPause(2)
         }
-        let first = surface.value as? String
+        // Live data: clips run from seconds to minutes. Give each clip 90 s to end by itself; a
+        // longer one is passed with Up and the next clip is watched instead, three at most.
+        var first = surface.value as? String
         XCTAssertFalse((first ?? "").isEmpty, "the Reel shows a video")
-        // Live data: clips run from seconds to minutes, so poll every 2 s for up to 120 s.
         var now = first
         var waited = 0.0
-        while now == first, waited < 120 {
-            kjPause(2); waited += 2
-            now = surface.value as? String
+        for attempt in 0..<3 {
+            waited = 0
+            while now == first, waited < 90 {
+                kjPause(2); waited += 2
+                now = surface.value as? String
+            }
+            if now != first || attempt == 2 { break }
+            XCUIRemote.shared.press(.up); kjPause(3)
+            first = surface.value as? String
+            now = first
         }
         print("PNVAUTOPLAY \(first ?? "nil") -> \(now ?? "nil") after \(Int(waited)) s")
         XCTAssertNotEqual(now, first, "the next video started with no press")

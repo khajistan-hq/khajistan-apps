@@ -102,6 +102,8 @@ final class TransmissionStore {
         let status: Int
         /// The ETag of a body that came from the network, to keep it on the device by.
         var etag: String? = nil
+        /// The body is the copy kept on the device, answered by a 304.
+        var fromCache = false
     }
 
     init(auth: AuthStore) {
@@ -237,9 +239,17 @@ final class TransmissionStore {
                 reply = try await send(request(authorization: authorization, ifNoneMatch: held))
             }
             if reply.status == 304 {
+                guard gen == scheduleGeneration else { return }
+                // Unchanged, and this month's schedule is already on screen: it stays, with no
+                // 8.8 MB read and decode every half hour.
+                if programming != nil, month == monthKey, schedule == .ready {
+                    fetchedAt = ProcessInfo.processInfo.systemUptime
+                    refreshing = false
+                    return
+                }
                 // Unchanged: the copy on the device is the schedule. Purged since? Fetch it whole.
                 if let data = await Task.detached(priority: .userInitiated, operation: { cache.data(month: monthKey) }).value {
-                    reply = Reply(data: data, status: 200)
+                    reply = Reply(data: data, status: 200, fromCache: true)
                 } else {
                     guard gen == scheduleGeneration else { return }
                     reply = try await send(request(authorization: authorization, ifNoneMatch: nil))
@@ -276,6 +286,15 @@ final class TransmissionStore {
             }.value
         } catch {
             guard gen == scheduleGeneration else { return }
+            if reply.fromCache {
+                // The kept copy will not decode (an older app's file, say): drop it, or every
+                // later load is answered 304 and reads it again. Fetched whole once more; with
+                // nothing kept, that fetch sends no If-None-Match, so it cannot come back here.
+                await Task.detached(priority: .userInitiated) { ScheduleCache.shared.clear() }.value
+                guard gen == scheduleGeneration else { return }
+                await fetchSchedule(month: monthKey, generation: gen)
+                return
+            }
             dropSchedule(.failed("The schedule could not be read."))
             return
         }

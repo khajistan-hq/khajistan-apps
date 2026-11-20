@@ -9,6 +9,8 @@ struct PicsVidsView: View {
     @Environment(\.palette) private var palette
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var viewing: PnvRow?
+    /// The Reel, opened from the grid's reel button: videos only, shuffled (owner, 2026-11-19).
+    @State private var reelFrom: PnvRow?
     @State private var dontAskAgain = false
 
     private var store: PicsVidsStore { model.pnv }
@@ -40,6 +42,10 @@ struct PicsVidsView: View {
         }
         .fullScreenCover(item: $viewing) { row in
             PnvReelsView(start: row)
+                .blocksMacNavigation(model)
+        }
+        .fullScreenCover(item: $reelFrom) { row in
+            PnvReelsView(start: row, source: .reel)
                 .blocksMacNavigation(model)
         }
     }
@@ -104,8 +110,8 @@ struct PicsVidsView: View {
                 .accessibilityLabel(store.shuffled ? "Shuffle again" : "Shuffle")
                 .accessibilityIdentifier("pnvShuffle")
                 if let first = feed.items.first {
-                    // The stream as reels from its top, without choosing a tile first.
-                    Button { viewing = first } label: {
+                    // The Reel: the stream as videos only, shuffled, from its first video.
+                    Button { reelFrom = first } label: {
                         Image(systemName: "play.rectangle.on.rectangle").font(.system(.title3, weight: .semibold)).frame(width: 44, height: 44)
                     }
                     .buttonStyle(.plain)

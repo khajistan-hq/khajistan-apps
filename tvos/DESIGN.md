@@ -475,6 +475,12 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   again at once. The phone keeps the feed's own order.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
+- **The Reel moves as Transmission does and gives the screen to the video** (owner, 2026-11-20):
+  Up is the next video and Down the one before, as Channel Up and Down; Right lights Save,
+  Collection, Shuffle and Region, Left walks back and lets go. No status band and no panel: one
+  line, *@account · Region → Save*, on a ground plate that hugs it at the bottom left; the controls'
+  strip shows only while one is lit. The phone's Reel carries the same one line, and its Shuffle
+  plate is not lit, since the Reel is always shuffled.
 - **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
   opens on pictures. Its viewer walks that mixed stream, pictures and videos both.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own

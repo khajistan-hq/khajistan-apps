@@ -276,9 +276,8 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
-        // Down lights Save; Right three times reaches Region.
-        XCUIRemote.shared.press(.down); kjPause(0.5)
-        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        // In the Reel Right lights Save; three more reach Region.
+        for _ in 0..<4 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let region = app.descendants(matching: .any)["pnvReelRegion"]
         for _ in 0..<12 where (region.value as? String)?.lowercased() != "anatolia" {
             XCUIRemote.shared.press(.select); kjPause(3)
@@ -291,10 +290,10 @@ final class PicsVidsUITests: XCTestCase {
         // Until the first object seen twice: the region's end, passed. 200 presses holds until
         // Anatolia has that many videos.
         for press in 1...200 {
-            XCUIRemote.shared.press(.right)
+            XCUIRemote.shared.press(.up)
             kjPause(1.2)
             let now = surface.value as? String
-            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            XCTAssertNotEqual(now, last, "Up \(press) moved on")
             last = now
             if let now, !seen.insert(now).inserted { cameRound = true; break }
         }
@@ -303,7 +302,35 @@ final class PicsVidsUITests: XCTestCase {
     }
 
     /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
-    /// Shuffle deals again and stays on, and Region steps to a region; Right keeps moving on.
+    /// Shuffle deals again and stays on, and Region steps to a region; Up keeps moving on and Down goes back.
+    /// A video that cannot play is skipped after a moment; after two in a row the Reel stays on the
+    /// third (owner, 2026-11-19: the Reel plays on by itself).
+    func testReelSkipsTwoBrokenVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("YES") }
+
+    /// The same, for a video that fails inside the player (a dead address), not before it.
+    func testReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
+
+    private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", broken]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        var seen: [String] = []
+        let end = Date().addingTimeInterval(30)
+        while Date() < end {
+            if let now = surface.value as? String, !now.isEmpty, seen.last != now { seen.append(now) }
+            kjPause(0.3)
+        }
+        print("PNVSKIP \(seen)")
+        XCTAssertEqual(seen.count, 3, "two skips, then the Reel stays on the third broken video")
+    }
+
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)
@@ -314,10 +341,8 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
-        // Down lights Save; Right twice reaches Shuffle.
-        XCUIRemote.shared.press(.down); kjPause(0.5)
-        XCUIRemote.shared.press(.right); kjPause(0.5)
-        XCUIRemote.shared.press(.right); kjPause(0.5)
+        // In the Reel Right lights Save; two more reach Shuffle.
+        for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
         // Shuffle is on from the start on the Apple TV, and Select deals again rather than turning
         // it off (owner, 2026-11-14: "shuffle everytime").
@@ -338,11 +363,14 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.up); kjPause(1)
         var last = surface.value as? String
         var seen = Set([last].compactMap { $0 })
+        var shown: [String] = []
         for press in 1...22 {
-            XCUIRemote.shared.press(.right)
+            // Up is the next video, as Channel Up on Transmission (owner, 2026-11-20).
+            XCUIRemote.shared.press(.up)
             kjPause(1.5)
             let now = surface.value as? String
-            XCTAssertNotEqual(now, last, "Right \(press) moved on")
+            XCTAssertNotEqual(now, last, "Up \(press) moved on")
+            if let now { shown.append(now) }
             // The status band names the kind; the Reel shows nothing but video.
             XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'picture'")).firstMatch.exists,
                            "Right \(press) is a video, not a picture")
@@ -352,6 +380,63 @@ final class PicsVidsUITests: XCTestCase {
         // Every press moved on. The wrap past a stream's end is proven without live data in
         // ios/Tests/PnvRetry; no bound here rests on the region's count.
         print("PNVREEL distinct \(seen.count) of 23 shown")
+        // Down goes back to the video before, as Channel Down.
+        XCUIRemote.shared.press(.down); kjPause(1.5)
+        XCTAssertEqual(surface.value as? String, shown.dropLast().last, "Down goes back one video")
         kjScreenshot("pv-reel-03-came-round", app: app)
+    }
+
+    /// The reel plays on by itself (owner, 2026-11-19: reel should auto play the next video): with
+    /// no press at all, the video on screen gives way to the next one when it ends.
+    func testReelPlaysTheNextVideoByItself() {
+        let app = launch()
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        let first = surface.value as? String
+        XCTAssertFalse((first ?? "").isEmpty, "the Reel shows a video")
+        // Live data: clips run from seconds to minutes, so poll every 2 s for up to 120 s.
+        var now = first
+        var waited = 0.0
+        while now == first, waited < 120 {
+            kjPause(2); waited += 2
+            now = surface.value as? String
+        }
+        print("PNVAUTOPLAY \(first ?? "nil") -> \(now ?? "nil") after \(Int(waited)) s")
+        XCTAssertNotEqual(now, first, "the next video started with no press")
+        kjScreenshot("pv-reel-autoplay", app: app)
+    }
+
+    /// Screens of the Reel's overlay in each skin, written to /tmp/kj-reel-shots for review: the one
+    /// line at rest, and the controls once Right lights them.
+    func testZZReelOverlayShots() {
+        let dir = URL(fileURLWithPath: "/tmp/kj-reel-shots")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for skin in ["day", "grove", "smut"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjtab", "picsvids", "-kjskin", skin]
+            kjLaunch(app)
+            dismissNotice(app)
+            let reel = app.buttons["pnvReel"]
+            XCTAssertTrue(reel.waitForExistence(timeout: 30))
+            XCTAssertTrue(kjFocus(reel, app: app))
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(app.buttons["pnvViewerSurface"].waitForExistence(timeout: 30))
+            kjPause(4)
+            XCUIRemote.shared.press(.playPause); XCUIRemote.shared.press(.playPause)
+            kjPause(0.8)
+            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-1-rest.png"))
+            XCUIRemote.shared.press(.right); kjPause(0.8)
+            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-2-controls.png"))
+            kjPause(4)
+            XCUIRemote.shared.press(.left); kjPause(4)
+            try? app.screenshot().pngRepresentation.write(to: dir.appendingPathComponent("\(skin)-3-clean.png"))
+            app.terminate()
+        }
     }
 }

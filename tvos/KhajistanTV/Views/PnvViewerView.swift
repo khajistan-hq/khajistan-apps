@@ -23,6 +23,13 @@ struct PnvViewerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
+    /// The step running now, if any: an end notice does not cancel a press still waiting on a page.
+    @State private var stepping: UUID?
+    /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
+    /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
+    @State private var skips = 0
+    @State private var skipped: String?
+    @State private var skipTask: Task<Void, Never>?
     /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
     @State private var restartTask: Task<Void, Never>?
     /// True from a restart until the new deal's first object is shown: the object in `current`
@@ -114,6 +121,7 @@ struct PnvViewerView: View {
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
+            if videosOnly { return reelMove(direction) }
             if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
                 case .right where index + 1 < controls.count: armed = controls[index + 1]
@@ -144,7 +152,12 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
-        .onChange(of: controller.state) { wake() }
+        .onChange(of: controller.state) {
+            wake()
+            // A video that fails in the player (a dead file, a start that times out) never ends.
+            if controller.state.isFailed { skipBroken(current.id) }
+            if controller.state == .playing { skips = 0 }
+        }
         .task { show(current) }
         .onDisappear { stopEverything() }
         .kjFullScreenCover(isPresented: $showSignIn) {
@@ -168,6 +181,50 @@ struct PnvViewerView: View {
     // MARK: - Overlay
 
     private func overlay(_ palette: Palette) -> some View {
+        Group {
+            if videosOnly { reelOverlay(palette) } else { fullOverlay(palette) }
+        }
+        .opacity(overlayVisible ? 1 : 0)
+        .animation(.easeOut(duration: 0.25), value: overlayVisible)
+    }
+
+    /// The Reel gives the screen to the video (owner, 2026-11-20: the bars "taking attention away
+    /// from the video"). No status band and no full-width panel: one short line on a ground plate
+    /// that hugs it, bottom left, the account and the region. The controls come up only when Right
+    /// lights them; a state (loading, paused, a failure) takes the line's place.
+    private func reelOverlay(_ palette: Palette) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Spacer(minLength: 0)
+            if armed != nil {
+                saveControls
+            }
+            Group {
+                if let state = stateText {
+                    Text(state).accessibilityIdentifier("pnvViewerState")
+                } else if phase == .needsSignIn {
+                    Text("Select to sign in")
+                } else if !stranded {
+                    Text(reelLine)
+                }
+            }
+            .kjSmall()
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(palette.ground)
+        }
+        .padding(.leading, KJLayout.inset)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+
+    /// "@account · Region", and the cue for the controls while none is lit.
+    private var reelLine: String {
+        let place = store.regionToken(for: current).map(PnvRegions.label) ?? regionName
+        return "@" + store.accountHandle(for: current) + " \u{00B7} " + place + (armed == nil ? "   \u{2192} Save" : "")
+    }
+
+    private func fullOverlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             StatusBand(leading: ["Khajistan Pics/Vids", stranded ? regionName : "@" + store.accountHandle(for: current)],
                        trailing: stranded ? [] : [current.isVideo ? "Video" : "Picture"])
@@ -175,8 +232,6 @@ struct PnvViewerView: View {
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
         }
-        .opacity(overlayVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: overlayVisible)
     }
 
     private var panel: some View {
@@ -201,6 +256,29 @@ struct PnvViewerView: View {
         .padding(.horizontal, KJLayout.inset)
         .padding(.vertical, 40)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The Reel moves as Transmission does (owner, 2026-11-20): Up is the next video, Down the one
+    /// before, as Channel Up and Down. Right lights the controls and walks them; Left walks back
+    /// and lets go from Save. Up or Down with a control lit lets go and moves.
+    private func reelMove(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .up, .down:
+            armed = nil
+            step(by: direction == .up ? 1 : -1)
+        case .right:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                if index + 1 < controls.count { armed = controls[index + 1] }
+            } else {
+                armed = .save
+            }
+        case .left:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                armed = index > 0 ? controls[index - 1] : nil
+            }
+        @unknown default:
+            break
+        }
     }
 
     /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
@@ -259,6 +337,10 @@ struct PnvViewerView: View {
     private func restart(_ change: () -> Void) {
         stepTask?.cancel()
         restartTask?.cancel()
+        skipTask?.cancel()
+        // A new hand or region starts the count of broken videos skipped in a row again.
+        skips = 0
+        skipped = nil
         // The object on screen stops now, not when the new deal arrives.
         loadTask?.cancel()
         controller.stop()
@@ -382,10 +464,19 @@ struct PnvViewerView: View {
             let url = try await store.playableURL(for: row)
             try Task.checkCancellation()
             guard current.id == key else { return }
-            // A clip loops, as a reel does; a Khajistan TV programme plays once.
+            // In the Reel the next video starts by itself when one ends (owner, 2026-11-19: reel
+            // should auto play the next video), Khajistan TV programmes included. Opened from a
+            // shelf, a clip loops and a Khajistan TV programme plays once, as before.
             // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
             controller.onEnded = { [weak controller] in
-                guard !row.isKtv, let controller else { return }
+                // A late end notice for a video already left behind does not step a second time.
+                // VoiceOver loops the video instead, so the object does not change under the reader;
+                // a press still waiting on the next page is left to finish.
+                if videosOnly, !UIAccessibility.isVoiceOverRunning {
+                    if current.id == key, stepping == nil { step(by: 1) }
+                    return
+                }
+                guard videosOnly || !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()
             }
@@ -397,6 +488,20 @@ struct PnvViewerView: View {
         } catch {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .failed(error.localizedDescription)
+            skipBroken(key)
+        }
+    }
+
+    /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
+    /// Only while it is still on screen, once per object, and not three in a row.
+    private func skipBroken(_ key: String) {
+        guard videosOnly, !UIAccessibility.isVoiceOverRunning, skips < 2, skipped != key else { return }
+        skips += 1
+        skipped = key
+        skipTask?.cancel()
+        skipTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if !Task.isCancelled, current.id == key { step(by: 1) }
         }
     }
 
@@ -407,7 +512,12 @@ struct PnvViewerView: View {
         // A deal that came back empty or failed: Left or Right asks for it again.
         if stranded { restart {}; return }
         stepTask?.cancel()
+        skipTask?.cancel()
+        skipped = nil
+        let mine = UUID()
+        stepping = mine
         stepTask = Task {
+            defer { if stepping == mine { stepping = nil } }
             if let list {
                 guard let index = list.firstIndex(where: { $0.id == current.id }), list.indices.contains(index + delta) else { return }
                 saveNote = nil
@@ -442,6 +552,7 @@ struct PnvViewerView: View {
     private func stopEverything() {
         loadTask?.cancel()
         stepTask?.cancel()
+        skipTask?.cancel()
         restartTask?.cancel()
         hideTask?.cancel()
         controller.stop()

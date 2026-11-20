@@ -837,6 +837,79 @@ final class KhajistanUITests: XCTestCase {
                        "the first page on screen has its rail")
     }
 
+    /// The Reel plays the next video by itself when one ends (owner, 2026-11-19: "reel should auto
+    /// play the next video"). Live data: clips run seconds to minutes, so the wait is long.
+    func testPicsVidsReelPlaysTheNextVideoByItself() {
+        let app = launch(skin: "grove", tab: "picsVids")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        func onScreen() -> String? {
+            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+        }
+        var first: String?
+        XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            first = onScreen(); return first != nil }, object: nil)], timeout: 30) == .completed, "the Reel opens")
+        // No touch from here: the page must change on its own.
+        let moved = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let now = onScreen(); return now != nil && now != first }, object: nil)], timeout: 180) == .completed
+        print("PNVAUTO from \(first ?? "-") to \(onScreen() ?? "-")")
+        XCTAssertTrue(moved, "the next video started by itself")
+    }
+
+    /// A video that cannot play is skipped after a moment, and after two in a row the Reel stops on
+    /// the third and shows its error (owner, 2026-11-19: the Reel plays on by itself).
+    func testPicsVidsReelSkipsTwoBrokenVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("YES") }
+
+    /// The same, for a video that fails inside the player (a dead address), not before it.
+    func testPicsVidsReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
+
+    private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
+        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", broken])
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        func onScreen() -> String? {
+            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+        }
+        var seen: [String] = []
+        // Each skip waits 2 s after the failure (a dead address takes a moment to fail); 30 s is
+        // room for both and then some.
+        let end = Date().addingTimeInterval(30)
+        while Date() < end {
+            if let now = onScreen(), seen.last != now { seen.append(now) }
+            usleep(300_000)
+        }
+        print("PNVSKIP \(seen)")
+        XCTAssertEqual(seen.count, 3, "two skips, then the Reel stays on the third broken video")
+    }
+
+    /// The Reel is videos only: a region with none says so, and another region still plays.
+    /// Horn of Africa had 0 videos on 2026-11-19; if it gains some, pick another empty region.
+    func testPicsVidsReelSaysWhenARegionHasNoVideos() {
+        let app = launch(skin: "grove", tab: "picsVids")
+        let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
+        waitFor(tile, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        app.buttons["pnvReelsLink"].tap()
+        waitFor(app.buttons["pnvReelRegion"], 10, "the Reel opens")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        waitFor(app.staticTexts["No videos from here yet."], 30, "an empty region says it has no videos")
+        app.buttons["pnvReelRegion"].tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Mashriq' AND identifier != 'pnvregion-arabia'")).firstMatch.tap()
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        XCTAssertTrue(reels.firstMatch.waitForExistence(timeout: 30), "a region with videos plays again")
+        XCTAssertFalse(app.staticTexts["No videos from here yet."].exists)
+    }
+
     /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
     /// moves on every swipe, because the reel deals its objects again once the feed has given
     /// them all. The region and Shuffle are changed from inside the reel.
@@ -849,9 +922,8 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["pnvReelsLink"].tap()
         let shuffle = app.buttons["pnvReelShuffle"]
         waitFor(shuffle, 10, "Shuffle is at the top of the reel")
-        XCTAssertEqual(shuffle.value as? String, "Off")
-        shuffle.tap()
-        XCTAssertTrue(NSPredicate(format: "value == 'On'").evaluate(with: shuffle) || shuffle.waitForValue("On"), "Shuffle turns on")
+        // The Reel is always shuffled (owner, 2026-11-19: "only shuffle the reel").
+        XCTAssertTrue(shuffle.waitForValue("On"), "the Reel opens shuffled")
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
             (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
@@ -865,14 +937,13 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertEqual(shuffle.value as? String, "On", "a tap while on deals again and stays on")
         reelOpens("a new deal opens on a page")
         shuffle.press(forDuration: 1.2)
-        app.buttons["Stream order"].tap()
-        XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
-        // Horn of Africa holds 19 objects (measured 2026-11-14): 24 swipes go past its end.
+        XCTAssertFalse(app.buttons["Stream order"].waitForExistence(timeout: 2), "the Reel has no stream order")
+        // The Reel is videos only; Horn of Africa has none (measured 2026-11-19), Mashriq thousands.
         app.buttons["pnvReelRegion"].tap()
         // The menu's item, not the grid's chip of the same name under the reel.
-        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Mashriq' AND identifier != 'pnvregion-arabia'")).firstMatch.tap()
         reelOpens("the region's reel opens")
-        XCTAssertEqual(app.buttons["pnvReelRegion"].value as? String, "Horn of Africa")
+        XCTAssertEqual(app.buttons["pnvReelRegion"].value as? String, "Mashriq")
         var last = onScreen()
         var seen = Set([last].compactMap { $0 })
         func moved(from last: String?) -> Bool {
@@ -890,17 +961,17 @@ final class KhajistanUITests: XCTestCase {
             if let now { seen.insert(now) }
             last = now
         }
-        // Every swipe moved on: past the region's end (19 objects on 2026-11-14) that is the lap.
+        // Every swipe moved on.
         // The walk itself (every object once, the wrap) is proven without live data in
         // ios/Tests/PnvRetry; no bound here rests on the region's count.
         print("PNVREEL distinct \(seen.count) of 25 shown")
-        // Back to All regions and to Horn of Africa again, a feed already loaded: the reel must
+        // Back to All regions and to Mashriq again, a feed already loaded: the reel must
         // land on a page, not between two.
         app.buttons["pnvReelRegion"].tap()
         app.buttons.matching(NSPredicate(format: "label == 'All regions' AND identifier != 'pnvregion-all'")).firstMatch.tap()
         reelOpens("All regions opens on a page")
         app.buttons["pnvReelRegion"].tap()
-        app.buttons.matching(NSPredicate(format: "label == 'Horn of Africa' AND identifier != 'pnvregion-horn'")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label == 'Mashriq' AND identifier != 'pnvregion-arabia'")).firstMatch.tap()
         reelOpens("a region already loaded opens on a page")
         shot("pnv-reel-endless", app)
     }

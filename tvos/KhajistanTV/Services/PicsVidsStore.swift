@@ -227,6 +227,9 @@ final class PicsVidsStore {
         let videosOnly = region.hasPrefix(Self.videosPrefix)
         let place = videosOnly ? String(region.dropFirst(Self.videosPrefix.count)) : region
         let kind = videosOnly ? PnvKind.video : self.kind
+        // The Reel's feed is always shuffled (owner, 2026-11-19: "only shuffle the reel"), whatever the
+        // grid's Shuffle says, so opening the Reel never re-deals the grid.
+        let shuffled = self.shuffled || videosOnly
         // No roster, or a region nobody is filed under: nothing to ask for.
         guard let keys = PnvAPI.accountKeys(roster: roster, region: place == Self.allRegions ? nil : place) else {
             feed.isDone = true
@@ -330,6 +333,16 @@ final class PicsVidsStore {
     /// The address to play. A Khajistan TV row goes through tv-play with the viewer's session, as
     /// the Transmission page does; every other row is a plain file.
     func playableURL(for row: PnvRow) async throws -> URL {
+        #if DEBUG
+        // `-kjbrokenvideos YES`: every video fails before it plays; `-kjbrokenvideos dead`: every
+        // video is handed to the player at an address that answers nothing, so it fails inside the
+        // player. Tests prove the Reel skips either kind, and stops after two in a row. Debug only.
+        switch UserDefaults.standard.string(forKey: "kjbrokenvideos") {
+        case "YES": throw PnvPlaybackError.unavailable
+        case "dead" where row.isVideo: return URL(string: "http://127.0.0.1:9/kj-dead.mp4")!
+        default: break
+        }
+        #endif
         guard let full = PnvMedia.full(row) else { throw PnvPlaybackError.unavailable }
         guard row.isKtv else { return full }
         guard auth.isSignedIn else { throw PnvPlaybackError.needsSignIn }

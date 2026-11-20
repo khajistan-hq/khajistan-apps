@@ -13,12 +13,12 @@ final class FilmsUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch() throws -> XCUIApplication {
+    private func launch(extra: [String] = []) throws -> XCUIApplication {
         guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjfilms", origin]
+        app.launchArguments = ["-kjfilms", origin] + extra
         kjLaunch(app)
         return app
     }
@@ -89,6 +89,61 @@ final class FilmsUITests: XCTestCase {
 
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelf")
+    }
+
+    /// The film page's buttons keep every label whole, on one line, in every skin. On the owner's
+    /// Apple TV HD (2026-11-17) the four sat squeezed in one row and broke mid-word: "PREVIE / W",
+    /// "WATCHLI / ST", "WEBSIT / E", and "RESUME FROM 1:21:38" on three lines.
+    /// A saved place is set through the launch arguments, so Play reads "Resume from 1:21:38".
+    func testFilmPageButtonLabelsStayOnOneLine() throws {
+        // The tallest a one-line button may be. Measured on the tvOS 27 simulator at 1920 × 1080:
+        // Play (a filled plate) is 66 pt on one line and was 126 on three; the others report their
+        // label, 29 pt on one line, about 58 on two.
+        let oneLine: [String: CGFloat] = ["filmPlay": 80, "filmPreview": 40, "filmWatchlist": 40, "filmOnWebsite": 40]
+        let buttons = ["filmPlay", "filmPreview", "filmWatchlist", "filmOnWebsite"]
+        // The page's text column ends at 1760 (the 80 pt safe area and 80 pt inset). The three plain
+        // buttons report their label alone, and their plate runs 26 pt past it, so a label ends by 1734.
+        let columnEnd: CGFloat = 1734
+        // Jism is the film in the owner's photograph; World ka Centre has the longest title in front.
+        for handle in ["jism-2006-khajistan", "world-ka-centre-center-of-the-world-2002-directors-cut-khajistan"] {
+            for skin in ["day", "grove", "smut"] {
+                // The saved place puts the film first on the Screening Room's Up Next, whose card
+                // opens the film page (a Receiver poster opens the player instead).
+                let app = try launch(extra: ["-kjskin", skin, "-kjtab", "rooms", "-kjroom", "screening",
+                                             "-kj.filmPlaces", "<dict><key>\(handle)</key><real>4898</real></dict>"])
+                // Rooms keeps a copy of Up Next under the room, so the card is found by its focus.
+                let card = app.buttons.matching(identifier: "upnext-\(handle)")
+                    .matching(NSPredicate(format: "hasFocus == true")).firstMatch
+                XCTAssertTrue(card.waitForExistence(timeout: 60), "\(skin): Up Next must carry \(handle), focused")
+                XCUIRemote.shared.press(.select)
+
+                let play = app.buttons["filmPlay"]
+                XCTAssertTrue(play.waitForExistence(timeout: 20), "\(skin): the film page must open")
+                kjPause(2)
+                XCTAssertTrue(play.label.contains("Resume from 1:21:38"), "\(skin): Play must offer the saved place; reads \(play.label)")
+                var drawn: [String] = []
+                var row: [CGRect] = []   // Preview, Watchlist, Website: the row under Play
+                continueAfterFailure = true   // measure all four, so a failure names every broken label
+                defer { continueAfterFailure = false }
+                for id in buttons where app.buttons[id].exists {
+                    let frame = app.buttons[id].frame
+                    drawn.append("\(id) \(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))")
+                    XCTAssertLessThanOrEqual(frame.height, oneLine[id]!, "\(skin) \(handle): \(id) breaks onto a second line (\(frame))")
+                    XCTAssertLessThanOrEqual(frame.maxX, columnEnd, "\(skin) \(handle): \(id) runs past the page's column (\(frame))")
+                    if id != "filmPlay" { row.append(frame) }
+                }
+                // Play alone on the first row, the others under it, left to right without touching.
+                // Labels are measured, so two plates (26 pt padding each side) clear by 52 between labels.
+                for (i, frame) in row.enumerated() {
+                    XCTAssertGreaterThan(frame.minY, play.frame.maxY, "\(skin) \(handle): button \(i + 1) must sit under Play")
+                    if i > 0 { XCTAssertGreaterThanOrEqual(frame.minX, row[i - 1].maxX + 52, "\(skin) \(handle): buttons \(i) and \(i + 1) overlap") }
+                }
+                print("FILMBUTTONS \(skin) \(handle) " + drawn.joined(separator: " | "))
+                XCTAssertGreaterThanOrEqual(drawn.count, 3, "\(skin): Play, Watchlist and Website must draw")
+                kjScreenshot("film-buttons-\(skin)-\(handle.prefix(14))", app: app)
+                app.terminate()
+            }
+        }
     }
 
     func testRegionCarriesItsFilmsOnDemand() throws {

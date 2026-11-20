@@ -91,14 +91,18 @@ final class KhajistanUITests: XCTestCase {
             if channel.exists && channel.isHittable { return channel }
             // Flicks until the first row is built, because a press-and-drag on the map scrubs
             // stations instead of scrolling.
-            guard channel.exists else { catalogue.swipeUp(); usleep(400_000); continue }
+            // One snapshot for the row's place: the catalogue is lazy, so a row seen by `exists`
+            // can be gone by the next query, and `frame` on it then fails the test (as on HOME, 6571d69).
+            guard let row = (try? channel.snapshot())?.frame, !row.isEmpty else {
+                catalogue.swipeUp(); usleep(400_000); continue
+            }
             // Then short drags with no momentum, started just above the house bar, where the list
             // or the controls above it are. Since the Receiver's two switches (c9932fd) a flick
             // carried the row across the whole gap between the docked player and the bar (about
             // 370 pt on iPhone 17); 160 pt cannot jump it.
             let start = app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
-            let move: CGFloat = channel.frame.midY < catalogue.frame.midY ? 160 : -160
+            let move: CGFloat = row.midY < catalogue.frame.midY ? 160 : -160
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
             usleep(400_000)
         }
@@ -793,6 +797,43 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(reel.exists && abs(reel.frame.minY) < 20, "a swipe down goes back to the tapped object")
         app.buttons["closePlayer"].tap()
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "close returns to the grid")
+    }
+
+    /// A reel opened on a deep tile, then re-dealt in stream order, opens on the stream's first
+    /// object with its rail: the deep tile is in the new deal too, and must not stand in for it.
+    func testPicsVidsRedealOpensOnTheFirstPage() {
+        let app = launch(skin: "day", tab: "picsVids")
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
+        waitFor(tiles.firstMatch, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        let firstKey = String(tiles.element(boundBy: 0).identifier.dropFirst("tile-".count))
+        // Three or more pages from the first, so the first page is not a built neighbour with a rail.
+        let deep = (3..<max(3, min(tiles.count, 9))).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable }
+        guard let deep else { return XCTFail("a tile three or more past the first is on screen") }
+        let deepKey = String(deep.identifier.dropFirst("tile-".count))
+        XCTAssertNotEqual(deepKey, firstKey)
+        deep.tap()
+        waitFor(app.descendants(matching: .any)["reel-\(deepKey)"], 10, "the reel opens on the deep tile")
+        let shuffle = app.buttons["pnvReelShuffle"]
+        waitFor(shuffle, 10, "Shuffle is at the top of the reel")
+        shuffle.tap()
+        XCTAssertTrue(shuffle.waitForValue("On"), "Shuffle turns on")
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        let dealt = NSPredicate { _, _ in (0..<min(reels.count, 4)).contains { abs(reels.element(boundBy: $0).frame.minY) < 20 } }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dealt, object: nil)], timeout: 30), .completed,
+                       "the shuffled deal opens on a page")
+        shuffle.press(forDuration: 1.2)
+        app.buttons["Stream order"].tap()
+        XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
+        let first = app.descendants(matching: .any)["reel-\(firstKey)"]
+        let landed = NSPredicate { _, _ in first.exists && abs(first.frame.minY) < 20 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: landed, object: nil)], timeout: 30), .completed,
+                       "stream order opens on the stream's first object, not the deep tile")
+        let save = app.buttons["pnvSave"]
+        let railed = NSPredicate { _, _ in save.exists && save.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: railed, object: nil)], timeout: 10), .completed,
+                       "the first page on screen has its rail")
     }
 
     /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still

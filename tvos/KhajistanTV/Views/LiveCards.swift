@@ -97,6 +97,9 @@ struct ChannelHero: View {
     let still: UIImage?
     /// The countries the region's channels come from, most channels first.
     var countries: [String] = []
+    /// The small radio player is up under the page: only the crumb, so the tallest card (a film,
+    /// 695 pt focused) still fits above the bar and Down can reach the bar.
+    var compact = false
     @Environment(\.palette) private var palette
     /// The picture has kept the viewer waiting past `slowAfter` with nothing to show.
     @State private var slow = false
@@ -105,16 +108,33 @@ struct ChannelHero: View {
     private var playing: Bool { preview.live && preview.channelId == channel?.id }
 
     var body: some View {
+        if compact {
+            Kicker("Receiver \u{2192} \(region.label)")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("regionHero")
+        } else {
+            full
+        }
+    }
+
+    private var title: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Kicker("Receiver \u{2192} \(region.label)")
+            HStack(alignment: .firstTextBaseline, spacing: 24) {
+                Text(region.label).kjDisplay(KJType.headline, tracking: -0.055).lineLimit(1).layoutPriority(1)
+                // Native script is never letter-spaced: tracking breaks the joins.
+                if let native {
+                    Text(native).kjDisplay(KJType.name * 1.4, tracking: 0).foregroundStyle(palette.faint).lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private var full: some View {
         HStack(alignment: .top, spacing: 48) {
             VStack(alignment: .leading, spacing: 12) {
-                Kicker("Receiver \u{2192} \(region.label)")
-                HStack(alignment: .firstTextBaseline, spacing: 24) {
-                    Text(region.label).kjDisplay(KJType.headline, tracking: -0.055).lineLimit(1).layoutPriority(1)
-                    // Native script is never letter-spaced: tracking breaks the joins.
-                    if let native {
-                        Text(native).kjDisplay(KJType.name * 1.4, tracking: 0).foregroundStyle(palette.faint).lineLimit(1)
-                    }
-                }
+                title
                 if !countries.isEmpty {
                     Text(countries.prefix(5).joined(separator: " \u{00B7} ")).kjBody().lineLimit(1)
                         .accessibilityIdentifier("regionCountries")

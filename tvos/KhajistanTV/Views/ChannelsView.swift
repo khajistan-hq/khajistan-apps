@@ -64,7 +64,8 @@ struct ChannelsView: View {
                 channel: heroChannel,
                 preview: preview,
                 still: heroChannel.flatMap { model.stills.image(for: $0.id) },
-                countries: countries
+                countries: countries,
+                compact: radioBarUp
             )
             .padding(.horizontal, KJLayout.inset)
             .padding(.top, 24)
@@ -95,6 +96,7 @@ struct ChannelsView: View {
             if let id { heroId = id }
             follow()
         }
+        .onChange(of: radioBarUp) { _, _ in follow() }
         .onChange(of: playing == nil) { _, free in
             // One signal at a time: the hero and the stills give way to the player.
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
@@ -105,6 +107,9 @@ struct ChannelsView: View {
     }
 
     // MARK: - The hero and the stills
+
+    /// The small radio player sits under the page: the hero shrinks to its crumb, with no picture.
+    private var radioBarUp: Bool { model.radioAway.map { $0.pip == nil } ?? false }
 
     private var tvChannels: [Channel] { channels.filter { $0.mediaType == "tv" } }
 
@@ -132,7 +137,8 @@ struct ChannelsView: View {
     /// player covers the page), and asks for stills of the cards nearest focus.
     private func follow() {
         guard playing == nil else { return }
-        let onCard = focusedId != nil || heroId == nil
+        // No picture plays where the shrunk hero has none to show it in.
+        let onCard = (focusedId != nil || heroId == nil) && !radioBarUp
         preview.show(onCard ? heroChannel : nil, receiver: model.receiver, stills: model.stills)
         model.stills.want(nearFocus)
     }

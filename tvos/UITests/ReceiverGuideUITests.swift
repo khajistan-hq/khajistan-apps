@@ -260,7 +260,16 @@ final class ReceiverGuideUITests: XCTestCase {
         kjPause(1)
         kjScreenshot("\(skin)-g5-radio-bar", app: app)
         let off = app.buttons["radioBarOff"]
-        XCTAssertTrue(kjFocus(off, app: app), "the remote reaches the bar's Off")
+        // Down into the bar first, then right along it. The region's lowest shelf (Films, under
+        // radio) can sit level with the bar, and kjFocus, steering by height, walked its posters
+        // to the right instead (CI 2026-11-19, run 44633692006).
+        let inBar = app.buttons.matching(NSPredicate(format: "hasFocus == true AND identifier BEGINSWITH 'radioBar'")).firstMatch
+        for _ in 0..<6 where !inBar.exists { XCUIRemote.shared.press(.down); kjPause(0.6) }
+        let held = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(inBar.exists, "Down reaches the small player; focus held on "
+                      + (held.exists ? "\(held.identifier) at \(held.frame)" : "nothing") + ", bar at \(bar.frame)")
+        for _ in 0..<3 where !off.hasFocus { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(off.hasFocus, "the remote reaches the bar's Off")
         XCTAssertTrue(awakeIs("on"), "the station playing on in the small player still holds it awake")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")

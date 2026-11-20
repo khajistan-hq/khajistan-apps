@@ -54,11 +54,15 @@ struct RootView: View {
         // a shelf, which stops the radio behind its page) and takes its full shape on the next page.
         // Grown back in place it moved the card focus was on: behind a page, focus was lost when
         // the page closed; on screen, the card was pushed off the bottom (2026-11-20).
+        // Set whenever the bar shows, even for a moment (a restore from picture-in-picture shows
+        // it until the player opens): if that player cannot open, the bar stays and needs room.
         .onChange(of: model.radioBarUp, initial: true) { _, up in
             if up { underBar = true }
         }
         .onChange(of: model.section) { leavePage() }
         .onChange(of: model.receiverPath.map(\.id)) { leavePage() }
+        // A new dial rebuilds the Receiver's front: a new page too.
+        .onChange(of: model.receiver.dialID) { leavePage() }
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.
         .onChange(of: model.restoring?.id) {

@@ -98,7 +98,7 @@ struct ChannelHero: View {
     /// The countries the region's channels come from, most channels first.
     var countries: [String] = []
     /// The small radio player is up under the page: only the crumb, so the tallest card (a film,
-    /// with its poster shrunk too, see `FilmCard.posterHeightUnderBar`) fits above the bar and
+    /// its text box cut to the title, see `FilmCard.textHeightUnderBar`) fits above the bar and
     /// Down can reach the bar.
     var compact = false
     @Environment(\.palette) private var palette

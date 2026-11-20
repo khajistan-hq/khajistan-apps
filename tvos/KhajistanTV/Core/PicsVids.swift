@@ -215,6 +215,12 @@ enum PnvRegions {
 // MARK: - The query (kj-browse-archive.js)
 
 enum PnvAPI {
+    /// Which way the Reel skips a broken video: the way the last step went (Down onto one goes on
+    /// back), except from the stream's first video, where there is nothing behind it to go to.
+    static func reelSkipDelta(lastDelta: Int, isFirst: Bool) -> Int {
+        isFirst || lastDelta >= 0 ? 1 : -1
+    }
+
     static let columns = "media_key,account,account_key,shortcode,child_index,kind,resource_type,media_host,resource_endpoint,width,height,tags,taken_at,corpus,feed_rank,da_id"
     static let pageSize = 60
 

@@ -3472,6 +3472,14 @@ func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
     return try decode(PnvAccount.self, #"{"slug":"\#(key)","account_key":"\#(key)","region_token":\#(t)}"#)
 }
 
+func pnvReelSkipsInTheDirectionOfThePress() throws {
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: false), 1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: false), -1)
+    // Nothing behind the first video: a broken one there is skipped forward.
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: true), 1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: true), 1)
+}
+
 func pnvAccountKeysFollowTheRosterAndTheFold() throws {
     let roster = [try pnvAccount("a1", "arabia"), try pnvAccount("a2", "egypt-nile"), try pnvAccount("m1", "egypt"),
                   try pnvAccount("i1", "indus"), try pnvAccount("n1", nil)]
@@ -6377,6 +6385,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Pics/Vids: the page's requests", pnvRequests),
     ("Pics/Vids: Content-Range totals", pnvContentRange),
     ("Pics/Vids: account keys follow the roster and the fold", pnvAccountKeysFollowTheRosterAndTheFold),
+    ("Pics/Vids: the Reel skips a broken video in the direction of the press", pnvReelSkipsInTheDirectionOfThePress),
     ("Pics/Vids: the summary line", pnvSummaryLine),
     ("Pics/Vids: captions", pnvCaptions),
     ("Pics/Vids: the viewer's meta line", pnvMetaLine),

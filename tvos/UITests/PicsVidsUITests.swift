@@ -138,6 +138,9 @@ final class PicsVidsUITests: XCTestCase {
             let save = app.descendants(matching: .any)["pnvSave"]
             XCTAssertTrue(save.waitForExistence(timeout: 20), "the viewer offers Save")
             XCTAssertFalse(save.isSelected, "nothing is lit until the remote moves to it")
+            // The grid's viewer draws the status band: the Reel's "no band" check matches it here.
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Khajistan Pics/Vids'")).firstMatch.exists,
+                          "the grid viewer shows the status band")
             XCUIRemote.shared.press(.down)
             kjPause(0.6)
             XCTAssertTrue(save.isSelected, "Down lights Save")
@@ -301,8 +304,6 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(cameRound, "past the end the stream comes round and shows an object again")
     }
 
-    /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
-    /// Shuffle deals again and stays on, and Region steps to a region; Up keeps moving on and Down goes back.
     /// A video that cannot play is skipped after a moment; after two in a row the Reel stays on the
     /// third (owner, 2026-11-19: the Reel plays on by itself).
     func testReelSkipsTwoBrokenVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("YES") }
@@ -331,6 +332,9 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(seen.count, 3, "two skips, then the Reel stays on the third broken video")
     }
 
+    /// The reel (owner, 2026-11-14): Reel opens every region as one stream of videos; on its strip
+    /// Shuffle deals again and stays on, and Region steps to a region. It moves as Transmission
+    /// does (owner, 2026-11-20): Up the next video, Down the one before, Right lights the controls.
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)
@@ -344,14 +348,29 @@ final class PicsVidsUITests: XCTestCase {
         // At rest the Reel shows one line and no controls (owner, 2026-11-20).
         let save = app.descendants(matching: .any)["pnvSave"]
         let start = surface.value as? String
+        XCTAssertFalse((start ?? "").isEmpty, "the Reel shows a video")
         XCTAssertFalse(save.exists, "no controls at rest")
+        let line = app.descendants(matching: .any)["pnvReelLine"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "the Reel shows its one line")
+        XCTAssertTrue(line.label.hasPrefix("@"), "the line names the account: \(line.label)")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Khajistan Pics/Vids'")).firstMatch.exists,
+                       "no status band in the Reel")
+        // A press that must not change the video: compared with the video just before it, since
+        // the Reel plays on by itself and a short clip can end between two checks.
+        func keeps(_ button: XCUIRemote.Button, _ note: String) {
+            let before = surface.value as? String
+            XCUIRemote.shared.press(button); kjPause(0.6)
+            XCTAssertEqual(surface.value as? String, before, note)
+        }
+        // Down on the first video of a deal stays put; Left with nothing lit does nothing.
+        keeps(.down, "Down on the first video stays put")
+        keeps(.left, "Left with nothing lit does not change the video")
+        XCTAssertFalse(save.exists, "Left with nothing lit lights nothing")
         // Right lights Save and does not change the video; Left from Save lets go.
-        XCUIRemote.shared.press(.right); kjPause(0.6)
+        keeps(.right, "Right does not change the video")
         XCTAssertTrue(save.isSelected, "Right lights Save")
-        XCTAssertEqual(surface.value as? String, start, "Right does not change the video")
-        XCUIRemote.shared.press(.left); kjPause(0.6)
+        keeps(.left, "Left does not change the video")
         XCTAssertFalse(save.exists, "Left from Save lets go")
-        XCTAssertEqual(surface.value as? String, start, "Left does not change the video")
         // Right lights Save again; two more reach Shuffle.
         for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let shuffle = app.descendants(matching: .any)["pnvReelShuffle"]
@@ -371,6 +390,9 @@ final class PicsVidsUITests: XCTestCase {
         }
         XCTAssertEqual((region.value as? String)?.lowercased(), "mashriq", "Region steps to Mashriq")
         kjScreenshot("pv-reel-02-region", app: app)
+        // Region is the last control: a further Right stays on it.
+        XCUIRemote.shared.press(.right); kjPause(0.6)
+        XCTAssertTrue(region.isSelected, "Right on Region stays on Region")
         let beforeUp = surface.value as? String
         XCUIRemote.shared.press(.up); kjPause(1.5)
         // Up with a control lit lets go and moves on, as Channel Up does.
@@ -392,9 +414,14 @@ final class PicsVidsUITests: XCTestCase {
         // Every press moved on. The wrap past a stream's end is proven without live data in
         // ios/Tests/PnvRetry; no bound here rests on the region's count.
         print("PNVREEL distinct \(seen.count) of 23 shown")
-        // Down goes back to the video before, as Channel Down.
+        // Down goes back to a video already shown, as Channel Down.
+        let beforeDown = surface.value as? String
         XCUIRemote.shared.press(.down); kjPause(1.5)
-        XCTAssertEqual(surface.value as? String, shown.dropLast().last, "Down goes back one video")
+        let afterDown = surface.value as? String
+        XCTAssertNotEqual(afterDown, beforeDown, "Down moves")
+        // The one before the last Up, or the last shown if a clip ended just before the press.
+        XCTAssertTrue(afterDown == shown.dropLast().last || afterDown == shown.last,
+                      "Down goes back one video: \(afterDown ?? "nil")")
         kjScreenshot("pv-reel-03-came-round", app: app)
     }
 

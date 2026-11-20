@@ -932,6 +932,10 @@ final class KhajistanUITests: XCTestCase {
             XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed, note)
         }
         reelOpens("the shuffled reel opens")
+        // The Reel carries one short line, the account first (owner, 2026-11-20).
+        let line = app.staticTexts["pnvReelLine"].firstMatch
+        waitFor(line, 10, "the Reel shows its one line")
+        XCTAssertTrue(line.label.hasPrefix("@"), "the line names the account: \(line.label)")
         // A second deal while Shuffle is on changes no flag; the reel must still load it.
         shuffle.tap()
         XCTAssertEqual(shuffle.value as? String, "On", "a tap while on deals again and stays on")

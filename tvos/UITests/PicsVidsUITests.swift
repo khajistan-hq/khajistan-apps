@@ -419,7 +419,9 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.down); kjPause(1.5)
         let afterDown = surface.value as? String
         XCTAssertNotEqual(afterDown, beforeDown, "Down moves")
-        XCTAssertTrue(shown.contains(afterDown ?? ""), "Down goes back to a video already shown: \(afterDown ?? "nil")")
+        // The one before the last Up, or the last shown if a clip ended just before the press.
+        XCTAssertTrue(afterDown == shown.dropLast().last || afterDown == shown.last,
+                      "Down goes back one video: \(afterDown ?? "nil")")
         kjScreenshot("pv-reel-03-came-round", app: app)
     }
 

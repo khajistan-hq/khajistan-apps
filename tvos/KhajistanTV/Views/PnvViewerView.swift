@@ -533,7 +533,10 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         skipTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if !Task.isCancelled, current.id == key { step(by: lastDelta) }
+            if !Task.isCancelled, current.id == key {
+                let isFirst = store.feed(feedKey).items.first?.id == key
+                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta, isFirst: isFirst))
+            }
         }
     }
 
@@ -544,6 +547,8 @@ struct PnvViewerView: View {
         // A deal that came back empty or failed: a step (Left or Right; Up or Down in the Reel)
         // asks for it again.
         if stranded { restart {}; return }
+        // Down on the Reel's first video has nowhere to go: leave its pending skip alone.
+        if videosOnly, delta < 0, store.feed(feedKey).items.first?.id == current.id { return }
         stepTask?.cancel()
         skipTask?.cancel()
         skipped = nil

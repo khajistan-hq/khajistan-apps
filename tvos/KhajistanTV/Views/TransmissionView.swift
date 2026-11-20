@@ -136,20 +136,17 @@ struct TransmissionView: View {
             }
         case .ready:
             VStack(alignment: .leading, spacing: 48) {
-                // The cards read the clock. Slots start on the minute, so they are drawn again on
-                // every minute and "now" is never the slot that has just ended.
-                // One row of the channels the schedule names, scrolled sideways past the third.
+                // A TV guide: one row per channel, what is on now and its hours. The rows read the
+                // clock; slots start on the minute, so they are drawn again on every minute and
+                // "now" is never the slot that has just ended.
                 TimelineView(.everyMinute) { context in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 64) {
-                            ForEach(store.channelNumbers, id: \.self) { number in
-                                card(number, at: TransmissionStore.now(context.date))
-                            }
+                    LazyVStack(alignment: .leading, spacing: 4) {
+                        ForEach(store.channelNumbers, id: \.self) { number in
+                            row(number, at: TransmissionStore.now(context.date))
                         }
-                        // Room for the focused card's lift and shadow.
-                        .padding(.vertical, 40)
                     }
-                    .scrollClipDisabled()
+                    // The rows' plates run past the column by their padding, as a list's do.
+                    .padding(.horizontal, -ScheduleRow.padding.leading)
                 }
                 if !model.auth.isSignedIn && !store.isScheduleFile {
                     VStack(alignment: .leading, spacing: 24) {
@@ -175,23 +172,29 @@ struct TransmissionView: View {
         .padding(.leading, -26)
     }
 
-    private func card(_ number: Int, at date: Date) -> some View {
+    private func row(_ number: Int, at date: Date) -> some View {
         Button {
             choose(number)
         } label: {
-            ChannelCardLabel(
+            ScheduleRow(
                 number: number,
-                line: store.channelLine(number),
+                // The schedule names a channel "Channel 1 · Bioscope"; the row prints the number
+                // in its own column, so the name is the part after it.
+                name: Self.shortName(store.channelName(number), number: number),
                 onAir: store.nowOn(channel: number, at: date),
-                upcoming: store.upcoming(channel: number, at: date),
                 returns: store.returnLabel(channel: number, at: date),
                 back: store.returnStrip(channel: number, at: date)
             )
         }
         .onPlayPauseCommand { choose(number) }
-        .buttonStyle(HouseCardStyle())
+        .buttonStyle(HouseButtonStyle(padding: ScheduleRow.padding))
         .focused($focusedCard, equals: number)
         .accessibilityIdentifier("transmission-channel-\(number)")
+    }
+
+    static func shortName(_ name: String, number: Int) -> String {
+        let prefix = "Channel \(number) \u{00B7} "
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name
     }
 
     // MARK: - Choosing
@@ -217,63 +220,88 @@ struct TransmissionView: View {
 
 }
 
-/// One channel's card, as the website's channel card reads: the channel, whether it is on air,
-/// the show on now and its hours, and what is up next. Off air, when it is back and with what.
-/// Show names only: programme titles are file names (owner, 2026-09-06, on the receiver's
-/// channel rows). It sits inside a button's plate, so every colour comes from the palette the
-/// plate sets for it, through the kicker and the inherited ink.
-private struct ChannelCardLabel: View {
+/// One channel's row in the guide, read left to right as a printed TV guide: the channel's number
+/// and name, the hours of what is on, and the show. Off air, when it is back and with what. Show
+/// names only: programme titles are file names (owner, 2026-09-06). Nothing about later: the row
+/// is what is on now (owner, 2026-11-19: "removing up next from the cards and making it more like
+/// a simple tv guide"). It sits inside a button's plate, so its colours come from the palette the
+/// plate sets for it.
+private struct ScheduleRow: View {
+    static let padding = EdgeInsets(top: 20, leading: 28, bottom: 20, trailing: 28)
+
     let number: Int
-    let line: String?
+    let name: String
     let onAir: OnAir?
-    let upcoming: [ScheduleStrip]
     /// When an off-air channel is back, the clock's label (StationClock.returnLabel), and the strip
-    /// it comes back with. Not `upcoming.first`: that list stops at 24 hours.
+    /// it comes back with.
     let returns: String?
     let back: ScheduleStrip?
+    @Environment(\.palette) private var palette
 
     var body: some View {
-        // Three to a screen at the page's inset; the rest are a scroll to the right.
-        CardPlate(width: 560, height: 460) { card }
-    }
-
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 20) {
-                Kicker("Channel \(number)")
-                // Off air is the card's headline, so it is not said here as well.
-                if onAir != nil { Kicker("\u{25CF} On air") }
-            }
-            if let line, !line.isEmpty {
-                Text(line).kjSmall(faint: true).lineLimit(3)
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 40) {
+            Text("\(number)")
+                .kjName(48)
+                .monospacedDigit()
+                .frame(width: 80, alignment: .trailing)
+            // The channel is a label and the programme the headline, so the two never read as
+            // the same kind of thing (owner, 2026-11-19: "there needs to be a distinction between
+            // name of channel in transmission and the program playing").
+            Kicker(name)
+                .lineLimit(1)
+                .frame(width: 420, alignment: .leading)
             if let air = onAir {
-                Text(air.show?.name ?? "Channel \(number)")
-                    .kjName(48)
-                    .lineLimit(2)
-                    .padding(.top, 10)
-                Kicker("Now \(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
-                UpNextList(title: "Up next", strips: upcoming)
-                    .padding(.top, 18)
+                Text("\(air.startLabel)\u{2013}\(air.endLabel)")
+                    .kjBody()
+                    .monospacedDigit()
+                    .frame(width: 210, alignment: .leading)
+                Text(onNow(air))
+                    .kjName()
+                    .lineLimit(1)
             } else {
                 Text("Off air")
-                    .kjName(48)
-                    .padding(.top, 10)
-                if let back, let returns {
-                    Text(backLine(returns, back)).kjBody()
-                    UpNextList(title: "Later", strips: upcoming.filter { $0 != back }, emphasizesFirst: false)
-                        .padding(.top, 18)
+                    .kjBody()
+                    .foregroundStyle(palette.faint)
+                    .frame(width: 210, alignment: .leading)
+                if let returns {
+                    Text(backLine(returns))
+                        .kjBody()
+                        .foregroundStyle(palette.faint)
+                        .lineLimit(1)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    /// What is on: the programme by its standardized name, as the player's strip heads it, else
+    /// the show. Nothing when that is only the channel's own name again (a one-show channel), and
+    /// nothing for a slot whose show the schedule has lost; the hours still show.
+    private func onNow(_ air: OnAir) -> String {
+        let now = air.nowName ?? air.show?.name ?? ""
+        return now == name ? "" : now
+    }
+
+    /// "Channel 1, Bioscope, 18:00 to 18:15 Pakistan time, Ghunghat."
+    private var spoken: String {
+        var parts = ["Channel \(number)", name]
+        if let air = onAir {
+            parts.append("\(air.startLabel) to \(air.endLabel) Pakistan time")
+            let now = onNow(air)
+            if !now.isEmpty { parts.append(now) }
+        } else {
+            parts.append(returns.map { backLine($0) } ?? "Off air")
+        }
+        return parts.joined(separator: ", ")
     }
 
     /// The website's off-air line: "Back at 23:00 PKT with The Feature.", with the day once the
     /// channel is a day or more from coming back.
-    private func backLine(_ returns: String, _ strip: ScheduleStrip) -> String {
+    private func backLine(_ returns: String) -> String {
         var text = "Back at \(returns)"
-        if let show = strip.show?.name, !show.isEmpty { text += " with \(show)" }
+        if let show = back?.show?.name, !show.isEmpty { text += " with \(show)" }
         return text + "."
     }
 }

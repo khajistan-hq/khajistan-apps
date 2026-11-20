@@ -22,16 +22,16 @@ final class NowNextUITests: XCTestCase {
         kjLaunch(app)
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
-        // The cards sit in a lazy row: the later ones exist once the remote walks to them.
+        // The guide's rows sit in a lazy list: the later ones exist once the remote walks to them.
         let first = app.buttons["transmission-channel-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
         XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
         for _ in 1..<channel {
-            XCUIRemote.shared.press(.right)
+            XCUIRemote.shared.press(.down)
             kjPause(0.4)
         }
         let card = app.buttons["transmission-channel-\(channel)"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10) && card.hasFocus, "focus walks right to channel \(channel)")
+        XCTAssertTrue(card.waitForExistence(timeout: 10) && card.hasFocus, "focus walks down to channel \(channel)")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         return app

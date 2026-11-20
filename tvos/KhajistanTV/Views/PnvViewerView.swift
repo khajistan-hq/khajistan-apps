@@ -30,9 +30,12 @@ struct PnvViewerView: View {
     /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
     /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
     @State private var skips = 0
+    /// VoiceOver's state, followed live, so the Reel's strip comes and goes with it.
+    @State private var voiceOver = UIAccessibility.isVoiceOverRunning
     @State private var skipped: String?
     @State private var skipTask: Task<Void, Never>?
-    /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
+    /// A new region or deal loading: its own task, so a step (Left or Right; Up or Down in the
+    /// Reel) cannot cancel it.
     @State private var restartTask: Task<Void, Never>?
     /// True from a restart until the new deal's first object is shown: the object in `current`
     /// belongs to the old deal, so nothing of it is drawn.
@@ -154,6 +157,10 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in
+            voiceOver = UIAccessibility.isVoiceOverRunning
+            wake()
+        }
         .onChange(of: controller.state) {
             wake()
             // A video that fails in the player (a dead file, a start that times out) never ends.
@@ -198,12 +205,13 @@ struct PnvViewerView: View {
         VStack(alignment: .leading, spacing: 8) {
             Spacer(minLength: 0)
             // Shown only while lit; always there for VoiceOver, whose swipes are not move commands.
-            if armed != nil || UIAccessibility.isVoiceOverRunning {
+            if stripUp {
                 saveControls
             }
             Group {
                 if phase == .needsSignIn {
-                    Text((stateText ?? "") + "  \u{00B7}  Select to sign in")
+                    // With a control lit, Select works that control and not the sign-in.
+                    Text((stateText ?? "") + (armed == nil ? "  \u{00B7}  Select to sign in" : ""))
                         .lineLimit(2)
                         .accessibilityIdentifier("pnvViewerState")
                 } else if let state = stateText {
@@ -212,7 +220,7 @@ struct PnvViewerView: View {
                     HStack(spacing: 18) {
                         Text(reelLine).lineLimit(1)
                         // The cue for the controls, a hint for the eye and not content to be read.
-                        if armed == nil { Text("\u{2192} Save").accessibilityHidden(true) }
+                        if !stripUp { Text("\u{2192} Save").accessibilityHidden(true) }
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("pnvReelLine")
@@ -222,11 +230,16 @@ struct PnvViewerView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(palette.ground)
+            // A long failure message wraps rather than growing back into a full-width bar.
+            .frame(maxWidth: 900, alignment: .leading)
         }
         .padding(.leading, KJLayout.inset)
         .padding(.bottom, 48)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
     }
+
+    /// The Reel's control strip is up: a control is lit, or VoiceOver is on.
+    private var stripUp: Bool { armed != nil || voiceOver }
 
     /// "@account · Region"; no region when the object carries none (never the filter's name).
     private var reelLine: String {
@@ -299,7 +312,7 @@ struct PnvViewerView: View {
         // Between deals there is no object on screen to have saved.
         let saved = !stranded && model.saves.isSaved(pnvKey: current.media_key)
         return HStack(spacing: 14) {
-            StripChipStyle.face(Text((armed == nil ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
+            StripChipStyle.face(Text((armed == nil && !videosOnly ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAddTraits(armed == .save ? .isSelected : [])
                 .accessibilityLabel(saved ? "Saved" : "Save")
@@ -445,9 +458,12 @@ struct PnvViewerView: View {
         wake()
         let key = row.id
         loadTask = Task {
-            Task { @MainActor in
-                let text = await store.caption(for: row)
-                if current.id == key { caption = text }
+            // The Reel shows no caption, so it does not ask for one.
+            if !videosOnly {
+                Task { @MainActor in
+                    let text = await store.caption(for: row)
+                    if current.id == key { caption = text }
+                }
             }
             if row.isVideo {
                 model.silenceRadio()
@@ -521,7 +537,8 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         // While a new deal loads there is no neighbour yet; the press waits for nothing.
         guard restartTask == nil else { return }
-        // A deal that came back empty or failed: Left or Right asks for it again.
+        // A deal that came back empty or failed: a step (Left or Right; Up or Down in the Reel)
+        // asks for it again.
         if stranded { restart {}; return }
         stepTask?.cancel()
         skipTask?.cancel()

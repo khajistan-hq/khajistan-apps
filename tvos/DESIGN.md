@@ -380,8 +380,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
 - **The Reel moves as Transmission does and gives the screen to the video** (owner, 2026-11-20):
   Up is the next video and Down the one before, as Channel Up and Down (Down stays put on the
-  first video of a deal); Right lights Save,
-  Collection, Shuffle and Region, Left walks back and lets go. No status band and no panel: one
+  first video of a deal); Right lights Save, Collection, Shuffle and Region, Left walks back and
+  lets go. No status band and no panel: one
   line, *@account · Region → Save*, on a ground plate that hugs it at the bottom left; the controls'
   strip shows only while one is lit. The phone's Reel carries the same one line, and its Shuffle
   plate is not lit, since the Reel is always shuffled.

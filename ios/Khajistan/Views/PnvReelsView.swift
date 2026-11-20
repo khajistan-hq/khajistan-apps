@@ -430,7 +430,7 @@ private struct ReelItem: Identifiable {
     static func id(lap: Int, _ key: String) -> String { "\(lap)|\(key)" }
 }
 
-/// One reel: the object, and over it the rail and the caption. Only the current page holds the
+/// One reel: the object, and over it the rail and the caption (in the Reel, one short line). Only the current page holds the
 /// player; the others show their still, so a page scrolled past costs no decoding.
 private struct PnvReelPage: View {
     let row: PnvRow
@@ -528,6 +528,7 @@ private struct PnvReelPage: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("@" + store.accountHandle(for: row) + (place.map { " \u{00B7} " + $0 } ?? ""))
                 .kjSmall().lineLimit(1)
+                .accessibilityIdentifier("pnvReelLine")
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(palette.ground.opacity(0.9), in: Capsule())

@@ -113,6 +113,7 @@ struct PnvViewerView: View {
             overlay(palette)
             // The focus target: it draws nothing and holds focus so the remote's presses land.
             Button {
+                defer { armIdle() }
                 switch armed {
                 // Between deals the object in `current` is not on screen: nothing acts on it.
                 case .save: wake(); if !stranded { toggleSave() }
@@ -133,7 +134,7 @@ struct PnvViewerView: View {
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
-            if videosOnly { return reelMove(direction) }
+            if videosOnly { reelMove(direction); armIdle(); return }
             if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
                 case .right where index + 1 < controls.count: armed = controls[index + 1]
@@ -152,6 +153,7 @@ struct PnvViewerView: View {
         }
         .onPlayPauseCommand {
             wake()
+            armIdle()
             if current.isVideo && phase == .ready { controller.toggle() }
         }
         .onExitCommand {
@@ -164,8 +166,11 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
-        // Lighting a control starts its idle timer (wake runs before the press lights it).
-        .onChange(of: armed) { if videosOnly, armed != nil { wake() } }
+        // Lighting or letting go of a control starts or stops its idle timer; so does a panel
+        // closing over a lit Collection.
+        .onChange(of: armed) { armIdle() }
+        .onChange(of: showCollections) { armIdle() }
+        .onChange(of: showSignIn) { armIdle() }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in
             voiceOver = UIAccessibility.isVoiceOverRunning
             wake()
@@ -177,6 +182,17 @@ struct PnvViewerView: View {
             if controller.state == .playing { skips = 0 }
         }
         .task { show(current) }
+        #if DEBUG
+        // `-kjwakepulse YES`: wake() every 2 s with no press, as a short clip's loop does, so a
+        // test can prove the lit control's idle timer is not restarted by it. Debug only.
+        .task {
+            guard UserDefaults.standard.string(forKey: "kjwakepulse") == "YES" else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                wake()
+            }
+        }
+        #endif
         .onDisappear { stopEverything() }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
@@ -604,7 +620,22 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         restartTask?.cancel()
         hideTask?.cancel()
+        releaseTask?.cancel()
         controller.stop()
+    }
+
+    /// In the Reel, starts the lit control's idle timer again. Called on presses and on a control
+    /// lighting or a panel closing, never from wake(): a looping clip's state changes would
+    /// restart it on every loop and the control would never let go.
+    private func armIdle() {
+        releaseTask?.cancel()
+        guard videosOnly, armed != nil, !showCollections, !showSignIn else { return }
+        releaseTask = Task {
+            try? await Task.sleep(for: Self.reelArmIdle)
+            guard !Task.isCancelled, armed != nil, !showCollections, !showSignIn else { return }
+            armed = nil
+            wake()
+        }
     }
 
     /// Shows the overlay. Once the object is showing (a picture, or a video that is playing) it
@@ -613,15 +644,6 @@ struct PnvViewerView: View {
     private func wake() {
         overlayVisible = true
         hideTask?.cancel()
-        releaseTask?.cancel()
-        if videosOnly, armed != nil {
-            releaseTask = Task {
-                try? await Task.sleep(for: Self.reelArmIdle)
-                guard !Task.isCancelled, !showCollections, !showSignIn else { return }
-                armed = nil
-                wake()
-            }
-        }
         let settled = phase == .ready && (!current.isVideo || controller.state == .playing)
         guard settled else { return }
         guard OverlayTiming.hidesItself else { return }

@@ -328,6 +328,9 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(2)
         let first = surface.value as? String
         XCTAssertFalse((first ?? "").isEmpty, "the Reel shows its first video")
+        // Only the second is broken here, so the Reel is on its first video: Down stays put.
+        XCUIRemote.shared.press(.down); kjPause(1)
+        XCTAssertEqual(surface.value as? String, first, "Down on the first video stays put")
         // Up onto the broken second. It must show, then be skipped on: a second that played would
         // make the rest of this test pass with no skip run at all.
         XCUIRemote.shared.press(.up)
@@ -371,6 +374,28 @@ final class PicsVidsUITests: XCTestCase {
         print("PNVHOLD first=\(first ?? "nil") second=\(second ?? "nil") moved=\(moved ?? "nil")")
         XCTAssertNotNil(moved, "the idle control let go and the Reel went on")
         XCTAssertFalse(save.exists, "Save let go")
+    }
+
+    /// A lit control lets go after 10 s even while the viewer wakes with no press, as a short
+    /// clip's loop makes it do (Fable round 9): the idle timer counts presses, not wakes.
+    func testReelLitControlLetsGoUnderAWakePulse() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjwakepulse", "YES"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["pnvViewerSurface"].waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(3)
+        XCUIRemote.shared.press(.right)
+        let save = app.descendants(matching: .any)["pnvSave"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2) && save.isSelected, "Right lights Save")
+        let lit = Date()
+        while save.exists, Date().timeIntervalSince(lit) < 16 { kjPause(0.5) }
+        print("PNVPULSE let go after \(Int(Date().timeIntervalSince(lit))) s")
+        XCTAssertFalse(save.exists, "Save let go within 16 s although the viewer woke every 2 s")
     }
 
     /// A broken first video is skipped forward even after a Down, since nothing is behind it.
@@ -463,15 +488,8 @@ final class PicsVidsUITests: XCTestCase {
             XCUIRemote.shared.press(button); kjPause(0.6)
             XCTAssertEqual(surface.value as? String, before, note)
         }
-        // Down on the first video of a deal stays put; Left with nothing lit does nothing. Live
-        // data: a first video that is really broken is skipped on after 2 s, and then Down rightly
-        // goes back, so the stay-put check runs only when the Reel is still on the video it opened.
-        kjPause(3)
-        if surface.value as? String == start {
-            keeps(.down, "Down on the first video stays put")
-        } else {
-            print("PNVREEL first video was skipped; stay-put check not run")
-        }
+        // Left with nothing lit does nothing. (Down on the first video is proved in
+        // testReelSkipsBackwardAfterDown, where the first video is known to play.)
         keeps(.left, "Left with nothing lit does not change the video")
         XCTAssertFalse(save.exists, "Left with nothing lit lights nothing")
         // Right lights Save and does not change the video; Left from Save lets go.

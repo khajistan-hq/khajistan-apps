@@ -11,9 +11,8 @@ struct RootView: View {
     /// Set while Back changes the section, so the change is not recorded as a visit.
     @State private var goingBack = false
     /// The sections are laid out for the radio bar under them (`underRadioBar`). Set as the bar
-    /// comes; cleared once it has gone and no full-screen page covers the sections.
+    /// comes; once it has gone, cleared only when the viewer moves to another page.
     @State private var underBar = false
-    private static let coverCheck: Duration = .milliseconds(300)
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -30,13 +29,9 @@ struct RootView: View {
         #endif
     }
 
-    /// A full-screen page is up over the sections. SwiftUI presents every `fullScreenCover` as a
-    /// UIKit presentation on the window's root, and the app presents nothing else, so this reads
-    /// them all; a cover shown another way would need its own flag here.
-    private static var coverUp: Bool {
-        UIApplication.shared.connectedScenes.contains { scene in
-            (scene as? UIWindowScene)?.windows.contains { $0.rootViewController?.presentedViewController != nil } ?? false
-        }
+    /// A new page with no bar under it is laid out in full.
+    private func leavePage() {
+        if !model.radioBarUp { underBar = false }
     }
 
     private func screens(_ palette: Palette) -> some View {
@@ -55,18 +50,15 @@ struct RootView: View {
                 }
             }
         }
-        // A film or channel opened from a shelf stops the radio, so the bar goes behind its page.
-        // The section keeps its shape until it is back on screen: a shelf that regrew out of sight
-        // moved the card focus had left, and focus was lost when the page closed (2026-11-20).
-        .task(id: model.radioBarUp) {
-            guard !model.radioBarUp else { underBar = true; return }
-            // `reopened` is set with the silence, before UIKit has begun to present its player.
-            while Self.coverUp || reopened != nil {
-                try? await Task.sleep(for: Self.coverCheck)
-                if Task.isCancelled { return }
-            }
-            underBar = false
+        // The page keeps the bar's shape after the bar goes (Off, or a film or channel opened from
+        // a shelf, which stops the radio behind its page) and takes its full shape on the next page.
+        // Grown back in place it moved the card focus was on: behind a page, focus was lost when
+        // the page closed; on screen, the card was pushed off the bottom (2026-11-20).
+        .onChange(of: model.radioBarUp, initial: true) { _, up in
+            if up { underBar = true }
         }
+        .onChange(of: model.section) { leavePage() }
+        .onChange(of: model.receiverPath.map(\.id)) { leavePage() }
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.
         .onChange(of: model.restoring?.id) {

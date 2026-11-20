@@ -327,8 +327,8 @@ final class ReceiverGuideUITests: XCTestCase {
         let back = NSPredicate { _, _ in focus.exists && focus.identifier == chosen }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: back, object: nil)], timeout: 8), .completed,
                        "focus comes back to the film just closed, \(chosen); it is on \(focus.exists ? focus.identifier : "nothing")")
-        // The page takes its full shape again once the film has gone: the card stays on screen.
+        // The page keeps the bar's shape until the viewer leaves it: the card stays on screen.
         kjPause(2)
-        XCTAssertTrue(focus.exists && app.frame.contains(focus.frame), "the film card is on screen after the page regrows: \(focus.frame)")
+        XCTAssertTrue(focus.exists && app.frame.contains(focus.frame), "the film card is on screen after the film closes: \(focus.frame)")
     }
 }

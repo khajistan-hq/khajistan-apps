@@ -54,7 +54,7 @@ struct FilmCard: View {
     /// bar's Off. The poster keeps its size, so the cards keep their width and place on the shelf
     /// when the bar comes or goes (a film opened from the shelf stops the radio behind it, and a
     /// shelf that moved sideways lost focus when the film closed). RootView holds the bar's
-    /// shape while a page covers the sections, so nothing regrows out of sight either.
+    /// shape until the next page, so nothing regrows under focus either.
     static let textHeightUnderBar: CGFloat = 90
 
     let film: Film

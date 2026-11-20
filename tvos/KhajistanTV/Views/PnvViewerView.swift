@@ -26,6 +26,8 @@ struct PnvViewerView: View {
     /// In the Reel, lets go of a lit control left alone for `reelArmIdle`, so a remote put down
     /// after one Right does not hold the Reel on one video for good.
     @State private var releaseTask: Task<Void, Never>?
+    /// Debug only: the `-kjfakeend` loop, cancelled with everything else when the viewer goes.
+    @State private var fakeEndTask: Task<Void, Never>?
     private static let reelArmIdle: Duration = .seconds(10)
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
@@ -546,7 +548,8 @@ struct PnvViewerView: View {
             // `-kjfakeend N`: the video "ends" every N s of play, so a test can see what an end
             // does under a lit control without waiting on a real clip's length. Debug only.
             if let seconds = Int(UserDefaults.standard.string(forKey: "kjfakeend") ?? "") {
-                Task { @MainActor [weak controller] in
+                fakeEndTask?.cancel()
+                fakeEndTask = Task { @MainActor [weak controller] in
                     while let controller, current.id == key, !Task.isCancelled {
                         try? await Task.sleep(for: .seconds(seconds))
                         if current.id == key { controller.onEnded?() }
@@ -638,6 +641,7 @@ struct PnvViewerView: View {
         restartTask?.cancel()
         hideTask?.cancel()
         releaseTask?.cancel()
+        fakeEndTask?.cancel()
         controller.stop()
     }
 

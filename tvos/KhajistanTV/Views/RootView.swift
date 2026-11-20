@@ -156,7 +156,7 @@ struct RootView: View {
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()
         case .rooms:
-            if StoreBuild.roomsAreScreeningOnly { TVScreeningRoom() } else { RoomsTVView() }
+            if StoreBuild.roomsAreScreeningOnly { TVScreeningRoom(underTopBar: true) } else { RoomsTVView() }
         case .chat: ChatView()
         case .account: AccountView()
         }

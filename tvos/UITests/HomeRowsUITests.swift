@@ -67,12 +67,12 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertEqual(reached.last, "cameras", "CCTV is the last shelf; reached \(reached)")
 
         // Up walks back to the front.
-        for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && focusedID(app) != "beyondTheAtlas" {
+        for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && !["beyondTheAtlas", "shuffle"].contains(focusedID(app)) {
             XCUIRemote.shared.press(.up)
             kjPause(0.6)
         }
         let back = focusedID(app)
-        XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "up returns to the front, got \(back)")
+        XCTAssertEqual(back, "shuffle", "up returns to the front at Surf, not the A–Z list or the switch")
     }
 
     /// The themes are one row of names with no pictures (owner, 2026-11-18), and Select on one

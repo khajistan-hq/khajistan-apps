@@ -116,6 +116,202 @@ final class PiPWindowUITests: XCTestCase {
         kjScreenshot("pip-restored-full-screen", app: app)
     }
 
+    /// Once focus has left the bar (Up into the page, as on a long shelf page where Down reaches
+    /// the bar only past the last row), one press of Back lights Full screen again; from the bar,
+    /// Back does what it did before (owner, 2026-11-18: "pip shows ... but no way to get to it").
+    func testBackFromThePageLightsTheBar() throws {
+        let app = XCUIApplication()
+        try openFullFilm(app)
+        openWindow(app)
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        let lit = NSPredicate { _, _ in fullScreen.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 10), .completed)
+        for _ in 0..<3 { XCUIRemote.shared.press(.up); kjPause(0.6) }
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        XCTAssertFalse(onBar.exists, "Up has taken focus off the bar")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "one Back lights Full screen")
+        XCTAssertEqual(app.state, .runningForeground, "Back went to the bar, not out of the app")
+        // With the window up, Up still reaches the top bar.
+        let nav = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        func focusedId() -> String {
+            let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            return f.exists ? (f.identifier.isEmpty ? "<\(f.label)>" : f.identifier) : "none"
+        }
+        var trail = [focusedId()]
+        // From the bar, Up climbs the shelves (one press each), then lands on Surf, then the bar:
+        // never into the A–Z list, whose twelve rows read as Up going nowhere.
+        for _ in 0..<24 where !nav.exists { XCUIRemote.shared.press(.up); kjPause(0.5); trail.append(focusedId()) }
+        print("PIPNAV up trail:", trail)
+        XCTAssertTrue(nav.exists, "Up reaches the top bar with the PiP window up: \(trail)")
+        XCTAssertFalse(trail.contains { $0.hasPrefix("region-") }, "Up does not walk the A–Z list: \(trail)")
+        XCTAssertTrue(trail.dropLast().last == "shuffle", "the press before the top bar is on Surf: \(trail)")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "from the top bar too, one Back lights Full screen")
+        // Another section, Transmission: Back lights the bar and the section stays.
+        let transmissionTab = app.buttons["nav-transmission"]
+        XCTAssertTrue(kjFocus(transmissionTab, app: app), "the top bar reaches Transmission")
+        XCUIRemote.shared.press(.select)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForNonExistence(timeout: 10), "Transmission replaces the atlas")
+        for _ in 0..<2 { XCUIRemote.shared.press(.down); kjPause(0.6) }
+        XCTAssertFalse(onBar.exists, "focus is on the Transmission page")
+        XCTAssertFalse(transmissionTab.hasFocus, "Down has left the top bar")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "on Transmission, one Back lights Full screen")
+        XCTAssertFalse(regions.firstMatch.exists, "and the section did not change")
+        // Up from the bar on Transmission reaches its tab, and Back from the tab lights the bar.
+        for _ in 0..<8 where !nav.exists { XCUIRemote.shared.press(.up); kjPause(0.5) }
+        XCTAssertTrue(transmissionTab.hasFocus, "Up on Transmission with the window up reaches its tab")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "from the Transmission tab, one Back lights Full screen")
+        // From the bar, Back goes back a section as before; the window stays up.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "from the bar, Back goes back to the atlas")
+        XCTAssertTrue(app.otherElements["pipBar"].exists, "the window and its bar stay up")
+        // On the front, from the bar, Back leaves the app as tvOS does at a root screen; the
+        // picture carries on in the window (a device check).
+        if !onBar.exists {
+            XCUIRemote.shared.press(.menu)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed)
+        }
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in app.state != .runningForeground }, object: nil)], timeout: 10),
+                       .completed, "from the bar on the front, Back leaves the app")
+    }
+
+    /// A Receiver channel's window from a region page, a long list inside the Receiver's
+    /// navigation stack (Fable, round 15: the stack might take Back and pop the region instead).
+    func testBackLightsTheBarOnARegionPage() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "smut", "-kjpipproof", "YES"]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach Indus in the region list")
+        XCUIRemote.shared.press(.select)
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-' AND NOT (identifier BEGINSWITH 'channel-radio-') AND label CONTAINS 'live picture'")).firstMatch
+        XCTAssertTrue(tv.waitForExistence(timeout: 60), "a television channel is listed")
+        XCTAssertTrue(kjFocus(tv, app: app), "the remote reaches it")
+        XCUIRemote.shared.press(.select)
+        try kjTuneUntilPlaying(app)
+        let pip = app.buttons["pipControl"]
+        XCUIRemote.shared.press(.select)
+        kjPause(0.6)
+        for _ in 0..<6 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 15), "the window opens with its bar")
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        let lit = NSPredicate { _, _ in fullScreen.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 10), .completed)
+        let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
+        XCTAssertTrue(channels.firstMatch.exists, "the viewer is back on the region page")
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        for _ in 0..<2 { XCUIRemote.shared.press(.up); kjPause(0.6) }
+        XCTAssertFalse(onBar.exists, "Up has taken focus into the list")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "one Back lights Full screen on the region page")
+        XCTAssertTrue(channels.firstMatch.exists, "Back did not pop the region")
+        // From the bar (Play/Pause, not Full screen), Back is not the bar's: it pops the region as
+        // it did before, and the window stays up.
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(app.buttons["pipBarToggle"].hasFocus, "Right walks the bar to Play/Pause")
+        XCTAssertFalse(regions.firstMatch.exists, "on the region page, not the front")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "from the bar, Back pops the region as before")
+        XCTAssertTrue(app.otherElements["pipBar"].exists, "the window and its bar stay up")
+        // Back on the front, focus in the list: one Back lights Full screen; Select restores.
+        XCTAssertTrue(kjFocusRegions(app), "focus reaches the region list")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "on the front, one Back lights Full screen")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens full screen")
+    }
+
+    /// The owner's screen (2026-11-18): the store build's Screening Room with the window up. A film
+    /// played from its page leaves the viewer on the page (a cover); Back lights the bar, Back from
+    /// the bar closes the page, and on the shelves Up climbs to the Screening Room tab.
+    func testScreeningRoomWithTheWindowUp() throws {
+        #if !KJ_APP_STORE
+        throw XCTSkip("the Screening Room is its own section only in the store build (KJ_APP_STORE)")
+        #else
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kjfilmasfull", "YES", "-kjpipproof", "YES",
+                               "-kjtab", "rooms", "-kj.filmPlaces", "<dict><key>\(Self.film)</key><real>60</real></dict>",
+                               "-kj-of-subtitles.\(Self.film)", "en"]
+        kjLaunch(app)
+        let card = app.buttons["upnext-\(Self.film)"].firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 45), "Up Next carries the film")
+        XCTAssertTrue(kjFocus(card, app: app), "the card takes focus")
+        XCUIRemote.shared.press(.select)
+        let play = app.buttons["filmPlay"]
+        XCTAssertTrue(play.waitForExistence(timeout: 20), "the film's page opens")
+        kjPause(1)
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["caption"].waitForExistence(timeout: 60), "the film plays")
+        openWindow(app)
+        XCTAssertTrue(play.waitForExistence(timeout: 10), "the viewer is back on the film's page")
+        let fullScreen = app.buttons["pipBarFullScreen"]
+        let lit = NSPredicate { _, _ in fullScreen.hasFocus }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 10), .completed)
+        // From the bar on the page, Back closes the page as before; the window stays up.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(play.waitForNonExistence(timeout: 10), "from the bar, Back closes the film's page")
+        XCTAssertTrue(app.otherElements["pipBar"].waitForExistence(timeout: 5), "the window and its bar stay up")
+        // On the shelves: Up from wherever focus is reaches the Screening Room tab.
+        let rooms = app.buttons["nav-rooms"]
+        let nav = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        if !onBar.exists {
+            XCUIRemote.shared.press(.menu)
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                           "on the Screening Room, one Back lights Full screen")
+        }
+        var trail: [String] = []
+        for _ in 0..<10 where !nav.exists {
+            XCUIRemote.shared.press(.up)
+            kjPause(0.6)
+            let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            trail.append(f.exists ? f.identifier : "none")
+        }
+        print("PIPNAV rooms up trail:", trail)
+        XCTAssertTrue(rooms.hasFocus, "Up from the bar reaches the Screening Room tab: \(trail)")
+        // The owner's screen exactly: the window up, a focused Up Next poster. One Up is the tab;
+        // without topBarCall Up stayed on the poster for ten presses.
+        // Down from the tab goes to the poster nearest under it, which with one film in Up Next
+        // (far left) is the next shelf; Up from there is the Up Next poster.
+        let poster = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'upnext-' AND hasFocus == true")).firstMatch
+        var walk: [String] = []
+        func step(_ d: XCUIRemote.Button) {
+            XCUIRemote.shared.press(d)
+            kjPause(0.8)
+            let f = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+            walk.append(f.exists ? f.identifier : "none")
+        }
+        step(.down)
+        for _ in 0..<2 where !poster.exists { step(.up) }
+        XCTAssertTrue(poster.exists, "an Up Next poster takes focus: \(walk)")
+        XCUIRemote.shared.press(.up)
+        kjPause(0.8)
+        XCTAssertTrue(rooms.hasFocus, "one Up from the Up Next poster reaches the Screening Room tab")
+        // And from the tab, Back lights the bar again.
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: lit, object: nil)], timeout: 5), .completed,
+                       "from the top bar, one Back lights Full screen")
+        #endif
+    }
+
     /// Close ends the film; it does not reopen it (the window's restore request after a close is
     /// not the viewer asking for full screen).
     func testCloseOnTheBarEndsTheFilm() throws {
@@ -187,6 +383,14 @@ final class PiPWindowUITests: XCTestCase {
         XCUIRemote.shared.press(.playPause)
         kjPause(0.8)
         XCTAssertEqual(app.buttons["pipBarToggle"].label, "Pause")
+        // Back on the cover: focus off the bar, one Back lights Full screen and the page stays.
+        let onBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'pipBar' AND hasFocus == true")).firstMatch
+        for _ in 0..<3 where onBar.exists { XCUIRemote.shared.press(.up); kjPause(0.6) }
+        XCTAssertFalse(onBar.exists, "Up has taken focus onto the page")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in fullScreen.hasFocus }, object: nil)], timeout: 5),
+                       .completed, "one Back on the film page lights Full screen")
+        XCTAssertTrue(play.exists, "Back did not close the film's page")
         // Full screen from the bar over the page: the film opens over it (TopScreen), not under it.
         XCTAssertTrue(kjFocus(fullScreen, app: app), "Left walks back to Full screen")
         XCUIRemote.shared.press(.select)

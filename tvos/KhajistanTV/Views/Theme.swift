@@ -920,6 +920,7 @@ enum Section: String, CaseIterable, Identifiable {
 struct TopBar: View {
     let current: Section
     let select: (Section) -> Void
+    @Environment(AppModel.self) private var model
     /// Focus enters the bar on the section on screen, so a first press never jumps elsewhere.
     @FocusState private var focused: Section?
 
@@ -955,16 +956,19 @@ struct TopBar: View {
                     .accessibilityIdentifier("nav-\(section.rawValue)")
                 }
             }
-            // Up from a page lands on the section on screen, as on Apple's TV app, not on the
-            // tab nearest the item left.
-            .defaultFocus($focused, current, priority: .userInitiated)
         }
         // The launch focus is the system's first pick, top-left; place it on the current tab.
         .onAppear { focused = current }
+        // Up from a page's first shelf (AppModel.topBarCall).
+        .onChange(of: model.topBarCall) { focused = current }
         .padding(.horizontal, KJLayout.inset)
         .padding(.top, 40)
         .padding(.bottom, 20)
         .focusSection()
+        // Up from a page lands on the section on screen, as on Apple's TV app, not on the tab
+        // nearest the item left. On the focus section itself: on the row of tabs inside it, focus
+        // entering from a page never asked, and Up from the Screening Room lit Receiver.
+        .defaultFocus($focused, current, priority: .userInitiated)
     }
 }
 

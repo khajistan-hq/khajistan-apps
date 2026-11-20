@@ -99,11 +99,12 @@ final class ShelfUITests: XCTestCase {
             shot("\(skin)-2-receiver-cameras-shelf", app)
             press(.down, app: app)
             XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): nothing sits below CCTV, got \(focusedID(app))")
-            // Up through the shelves and the Themes row returns to the front: the sidebar's
-            // switch, or the list.
-            for _ in 0..<16 where !(focusedID(app).hasPrefix("region-") || focusedID(app) == "beyondTheAtlas") { press(.up, app: app) }
+            // Up through the shelves and the Themes row returns to the front at Surf, never the
+            // A–Z list or the switch (owner, 2026-11-18: "no way to go to the nav"). The walk stops
+            // at anything on the front, so a wrong landing fails below rather than walking on.
+            for _ in 0..<16 where !(focusedID(app) == "shuffle" || focusedID(app).hasPrefix("region-") || focusedID(app) == "beyondTheAtlas") { press(.up, app: app) }
             let back = focusedID(app)
-            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
+            XCTAssertEqual(back, "shuffle", "\(skin): up from the first shelf returns to the front at Surf")
             app.terminate()
         }
     }

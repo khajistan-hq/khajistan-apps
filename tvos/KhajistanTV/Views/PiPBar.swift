@@ -5,13 +5,19 @@ import SwiftUI
 /// window itself cannot take the remote's focus (only tvOS's own menu, behind the TV button, reaches
 /// it), so the bar is how the window is worked from inside the app (owner, 2026-11-17: "hard to
 /// navigate into small pip window and click it back up to full screen"). Full screen is lit as the
-/// window opens, so one press of Select brings the picture back; Down reaches the bar from any page
-/// after that, the root's and every cover's alike (PiPBarHost).
+/// window opens, so one press of Select brings the picture back. After that, one press of Back from
+/// anywhere on the page lights Full screen again (PiPBarHost): on a long page Down reached the bar
+/// only past the last shelf (owner, 2026-11-18: "no way to get to it"). That holds on the root and
+/// on a cover with no Back of its own, such as a film's page. A cover that handles Back itself (a
+/// Reading title, the sign-in form) closes first, and the next Back lights the bar. From the bar,
+/// Back does what it did before.
 ///
 /// It stops short of the right-hand 40% of the screen, where tvOS puts the window by default.
 struct PiPBar: View {
+    /// The bar's controls, so the host knows whether focus is anywhere on the bar.
+    enum Control: Hashable { case fullScreen, playPause, captions, close }
     let pip: PictureInPicture
-    var focus: FocusState<Bool>.Binding
+    var focus: FocusState<Control?>.Binding
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -26,23 +32,26 @@ struct PiPBar: View {
                 Label("Full screen", systemImage: "arrow.up.left.and.arrow.down.right").kjBarLabel()
             }
             .buttonStyle(OnBandStyle())
-            .focused(focus)
+            .focused(focus, equals: .fullScreen)
             .accessibilityIdentifier("pipBarFullScreen")
             Button { pip.setPlaying(!pip.isPlaying) } label: {
                 Image(systemName: pip.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 30, weight: .bold)).frame(width: 52)
             }
             .buttonStyle(OnBandStyle())
+            .focused(focus, equals: .playPause)
             .accessibilityLabel(pip.isPlaying ? "Pause" : "Play")
             .accessibilityIdentifier("pipBarToggle")
             if let label = pip.captionLabel?() {
                 Button { pip.onCaptionToggle?() } label: { Text(label).kjBarLabel() }
                     .buttonStyle(OnBandStyle())
+                    .focused(focus, equals: .captions)
                     .accessibilityIdentifier("pipBarCaptions")
             }
             Button { pip.close() } label: {
                 Label("Close", systemImage: "xmark").kjBarLabel()
             }
             .buttonStyle(OnBandStyle())
+            .focused(focus, equals: .close)
             .accessibilityLabel("Close picture in picture")
             .accessibilityIdentifier("pipBarClose")
         }
@@ -74,7 +83,7 @@ struct PiPBarHost: ViewModifier {
     /// The root has its own Play/Pause (the radio bar) and passes false.
     var handlesPlayPause = true
     @Environment(AppModel.self) private var model
-    @FocusState private var focus: Bool
+    @FocusState private var focus: PiPBar.Control?
     @State private var id = UUID()
 
     func body(content: Content) -> some View {
@@ -97,11 +106,14 @@ struct PiPBarHost: ViewModifier {
                     for _ in 0..<6 where held < 2 {
                         try? await Task.sleep(for: .milliseconds(250))
                         guard model.activePiP != nil else { return }
-                        if focus { held += 1 } else { held = 0; focus = true }
+                        if focus == .fullScreen { held += 1 } else { held = 0; focus = .fullScreen }
                     }
                 }
             }
             .onPlayPauseCommand(perform: handlesPlayPause ? model.activePiP.map { pip in { pip.setPlaying(!pip.isPlaying) } } : nil)
+            // Back with the window up and the bar not lit: the bar. A page's own Back handler
+            // sits nearer the focus and comes first; the Receiver front hands it on (ReceiverView).
+            .onExitCommand(perform: model.activePiP != nil && focus == nil && PiPBarStack.shared.top == id ? { focus = .fullScreen } : nil)
     }
 }
 

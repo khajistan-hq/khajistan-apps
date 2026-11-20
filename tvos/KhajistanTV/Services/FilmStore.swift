@@ -34,7 +34,9 @@ final class FilmStore {
         config.timeoutIntervalForRequest = 25
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        // The public film list is recorded with the Receiver's lists: it files films to regions, and
+        // a region page grows an On Demand shelf from it (CI, 2026-11-19: the site began serving it).
+        urlSession = URLSession(configuration: config.answeringFromFixtures())
         origin = Self.debugOrigin() ?? SiteOrigin.current
     }
 

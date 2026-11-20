@@ -1,7 +1,8 @@
 #!/bin/sh
 # Re-records the answers UI tests read with -kjfixtures (KJFixtureProtocol in SupabaseRoute.swift):
 # the receiver's index, every region shard, whole (the set can open on any region, and tests name
-# channels in Indus and Arabia), the three feeds cut to the channels those name, the map shapes, and
+# channels in Indus and Arabia), the three feeds cut to the channels those name, the map shapes, the
+# public film list (it files films to regions, so a region page has an On Demand shelf), and
 # the chat room list. Chat lines stay empty. Run from anywhere; commit what changes.
 set -eu
 cd "$(dirname "$0")"
@@ -14,6 +15,8 @@ mkdir -p "$raw/regions" data/open-frequencies/regions rest/v1
 python3 -c "import json,sys; print('\n'.join(json.load(open(sys.argv[1]))['regionFiles'].values()))" "$raw/receiver-index.json" |
   while read -r path; do curl -fsS -A Khajistan-iOS/1.0 -o "$raw/regions/$(basename "$path")" "$site$path"; done
 curl -fsS -o data/region-shapes.json "$site/data/region-shapes.json"
+mkdir -p data/khajistan-tv
+curl -fsS -o data/khajistan-tv/vod-public.json "$site/data/khajistan-tv/vod-public.json"
 python3 - "$raw" <<'PY'
 import glob, json, os, re, sys
 raw, out = sys.argv[1], 'data/open-frequencies/'

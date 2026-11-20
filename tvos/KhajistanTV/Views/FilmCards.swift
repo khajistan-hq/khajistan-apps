@@ -10,6 +10,11 @@ struct FilmShelf: View {
     var opensPage = false
     /// Up Next: each card says where this device stopped the full film.
     var showsPlaces = false
+    /// Posters alone, at a picture card's height: a region page has only the room under its hero
+    /// and over the radio bar, and a card taller than that runs on under the bar, where Down
+    /// cannot leave it for the bar's Off (CI, 2026-11-19). The title stays on the poster and in
+    /// the card's spoken label.
+    var compact = false
     @State private var playing: Film?
     /// Play/Pause on a card: the film itself, not its page, as on Apple's TV app.
     @State private var playingDirect: Film?
@@ -24,7 +29,11 @@ struct FilmShelf: View {
                     onChoose()
                     if let present { present(film, false) } else { playing = film }
                 } label: {
-                    FilmCard(film: film, place: showsPlaces ? FilmPlaces.position(film.handle) : nil)
+                    if compact {
+                        FilmPoster(film: film, height: PictureCard.height, maxPixel: 600).kjCardArt()
+                    } else {
+                        FilmCard(film: film, place: showsPlaces ? FilmPlaces.position(film.handle) : nil)
+                    }
                 }
                 .buttonStyle(HouseCardStyle())
                 .onPlayPauseCommand {

@@ -188,7 +188,7 @@ struct ChannelsView: View {
         switch kind {
         case "vod":
             // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
-            FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films)
+            FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films, compact: true)
                 .accessibilityIdentifier("shelf-vod")
         case "camera":
             cameraShelf

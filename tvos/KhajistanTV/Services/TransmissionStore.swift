@@ -100,6 +100,8 @@ final class TransmissionStore {
     private struct Reply {
         let data: Data
         let status: Int
+        /// The ETag of a body that came from the network, to keep it on the device by.
+        var etag: String? = nil
     }
 
     init(auth: AuthStore) {
@@ -216,18 +218,32 @@ final class TransmissionStore {
             return
         }
         #endif
+        let cache = ScheduleCache.shared
+        let held = await Task.detached(priority: .userInitiated) { cache.etag(month: monthKey) }.value
+        func request(authorization: String?, ifNoneMatch: String?) -> URLRequest {
+            var request = URLRequest(url: url)
+            if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
+            if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+            return request
+        }
         do {
             // Without the preview password first: after the launch switch the schedule is
             // public, and a stored password that no longer matches must not stand in the way.
-            reply = try await send(URLRequest(url: url))
+            var authorization: String?
+            reply = try await send(request(authorization: nil, ifNoneMatch: held))
             if reply.status == 401, let password = auth.previewPassword {
                 guard gen == scheduleGeneration else { return }
-                var request = URLRequest(url: url)
-                request.setValue(
-                    Transmission.basicAuthorization(user: KJConfig.previewUser, password: password),
-                    forHTTPHeaderField: "Authorization"
-                )
-                reply = try await send(request)
+                authorization = Transmission.basicAuthorization(user: KJConfig.previewUser, password: password)
+                reply = try await send(request(authorization: authorization, ifNoneMatch: held))
+            }
+            if reply.status == 304 {
+                // Unchanged: the copy on the device is the schedule. Purged since? Fetch it whole.
+                if let data = await Task.detached(priority: .userInitiated, operation: { cache.data(month: monthKey) }).value {
+                    reply = Reply(data: data, status: 200)
+                } else {
+                    guard gen == scheduleGeneration else { return }
+                    reply = try await send(request(authorization: authorization, ifNoneMatch: nil))
+                }
             }
         } catch {
             guard gen == scheduleGeneration else { return }
@@ -264,6 +280,10 @@ final class TransmissionStore {
             return
         }
         guard gen == scheduleGeneration else { return }
+        // Kept only once it has decoded, so a broken file is never the one sent back as current.
+        if let etag = reply.etag {
+            Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }
+        }
         programming = decoded
         month = monthKey
         schedule = .ready
@@ -564,7 +584,9 @@ final class TransmissionStore {
 
     private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> Reply {
         let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession, delegate: refusingRedirects ? RefuseRedirects() : nil)
-        return Reply(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        let http = response as? HTTPURLResponse
+        return Reply(data: data, status: http?.statusCode ?? 0,
+                     etag: http?.statusCode == 200 ? http?.value(forHTTPHeaderField: "ETag") : nil)
     }
 
     /// The URL to play for a route, or nil once the phase has been set to say why not. As in the

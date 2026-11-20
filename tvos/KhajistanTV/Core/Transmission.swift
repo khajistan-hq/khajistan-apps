@@ -368,3 +368,38 @@ struct StoredSubtitles: Equatable, Sendable {
     }
 
 }
+
+/// The month's schedule kept on the device with the ETag it came with, so a launch asks the site
+/// only whether it changed. programming-2026-11.json is 8.8 MB (1.45 MB compressed, about 7 s
+/// to fetch); unchanged, the site answers If-None-Match with a 0-byte 304 in about 1 s.
+struct ScheduleCache: Sendable {
+    let directory: URL
+
+    static let shared = ScheduleCache(directory: FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("schedule", isDirectory: true))
+
+    private func body(_ month: String) -> URL { directory.appendingPathComponent("programming-\(month).json") }
+    private func tag(_ month: String) -> URL { directory.appendingPathComponent("programming-\(month).etag") }
+
+    /// The ETag to send as If-None-Match: only when the body it names is on disk.
+    func etag(month: String) -> String? {
+        guard FileManager.default.fileExists(atPath: body(month).path),
+              let data = try? Data(contentsOf: tag(month)), !data.isEmpty else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    func data(month: String) -> Data? { try? Data(contentsOf: body(month)) }
+
+    /// Keeps this month's schedule and drops every other month's. The old tag goes first, so a
+    /// write cut short leaves no tag naming a body it did not come with.
+    func store(_ data: Data, etag: String, month: String) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? [] {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+        guard (try? data.write(to: body(month), options: .atomic)) != nil else { return }
+        try? Data(etag.utf8).write(to: tag(month), options: .atomic)
+    }
+}

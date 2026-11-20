@@ -416,6 +416,24 @@ func tiersAndMediumLabels() throws {
 
 // MARK: - Carrier
 
+func gateOutcomes() throws {
+    let next = "/data/open-frequencies/receiver-index.json"
+    func outcome(_ status: Int, _ path: String?, _ cookie: Bool) -> ReceiverRules.GateOutcome {
+        ReceiverRules.gateOutcome(status: status, landedOn: path, next: next, cookieSet: cookie)
+    }
+    try expectEqual(outcome(200, next, true), .signedIn)
+    // Landed on the index without the cookie: not signed in, and not a refusal either.
+    try expectEqual(outcome(200, next, false), .tryLater)
+    try expectEqual(outcome(200, "/gate", false), .refused)
+    try expectEqual(outcome(200, "/gate.html", false), .refused)
+    // A throttle, an outage, a captive portal or a moved host never marks a password refused.
+    try expectEqual(outcome(429, "/gate", false), .tryLater)
+    try expectEqual(outcome(503, next, false), .tryLater)
+    try expectEqual(outcome(200, "/", true), .tryLater)
+    try expectEqual(outcome(200, "/login", false), .tryLater)
+    try expectEqual(outcome(200, nil, false), .tryLater)
+}
+
 func carrierURLEncodesTheStreamID() throws {
     let plain = ReceiverRules.carrierURL(streamID: "anatolia-t-rkiye-4u-tv-720p-primary")
     try expectEqual(plain.absoluteString, "https://khajistan-archive.pages.dev/api/frequency?stream=anatolia-t-rkiye-4u-tv-720p-primary")
@@ -2360,6 +2378,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Site sign-in outcomes", gateOutcomes),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
     ("Transmission routes the three shapes", transmissionRoutesTheThreeShapes),

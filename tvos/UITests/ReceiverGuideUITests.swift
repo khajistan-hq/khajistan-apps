@@ -13,6 +13,56 @@ final class ReceiverGuideUITests: XCTestCase {
     func testGrove() throws { try walk("grove") }
     func testSmut() throws { try walk("smut") }
 
+    /// A dead channel moves on by itself, an open guide holds that move, and Select on the row
+    /// already on screen closes the guide as Back does, so the move goes ahead (PR 58). Every
+    /// Indus television channel is made to fail (`-kjdeadchannels`, debug builds only).
+    func testSelectOnTheDeadChannelInTheGuideMovesOn() throws {
+        let shard = URL(fileURLWithPath: kjRecordedFixtures).appendingPathComponent("data/open-frequencies/regions/indus.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: shard)) as? [String: Any]
+        let dead = (root?["channels"] as? [[String: Any]] ?? [])
+            .filter { $0["mediaType"] as? String == "tv" }.compactMap { $0["id"] as? String }
+        XCTAssertFalse(dead.isEmpty, "the recorded Indus list has television")
+        let app = XCUIApplication()
+        app.launchArguments += ["-kjskin", "day", "-kjdeadchannels", dead.joined(separator: ",")]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
+        XCUIRemote.shared.press(.select)
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
+        XCTAssertTrue(tv.firstMatch.waitForExistence(timeout: 60))
+        kjPause(2)
+        let focusedChannel = tv.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<8 where !focusedChannel.exists { XCUIRemote.shared.press(.down); kjPause(0.4) }
+        XCTAssertTrue(focusedChannel.exists, "the remote reaches a channel")
+        XCUIRemote.shared.press(.select)
+
+        let current = app.staticTexts["currentChannel"]
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(current.waitForExistence(timeout: 15))
+        let start = current.label
+        XCTAssertTrue(dead.contains(start), "a television channel opened: \(start)")
+        let failed = NSPredicate { _, _ in !["", "Playing", "Paused"].contains(state.label) && !state.label.hasPrefix("Connecting") }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: failed, object: nil)], timeout: 20), .completed,
+                       "the dead channel fails")
+        // Within the 3 s before the move: Right on a failed picture opens the guide, which holds it.
+        XCUIRemote.shared.press(.right)
+        let guide = app.descendants(matching: .any)["receiverGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the failed picture opens the guide")
+        let live = app.descendants(matching: .any)["guide-\(start)"]
+        XCTAssertTrue(live.waitForExistence(timeout: 5) && live.isSelected, "the guide opens on the dead channel")
+        kjPause(5)
+        XCTAssertEqual(current.label, start, "no move while the guide is open")
+        kjScreenshot("dead-g1-guide-holds", app: app)
+        // Select on that same row: the guide closes and the move goes ahead.
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Select on the row on screen closes the guide")
+        let moved = NSPredicate { _, _ in current.label != start }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20), .completed,
+                       "Select on the dead channel's row moves on, as Back does")
+        kjScreenshot("dead-g2-moved-on", app: app)
+    }
+
     /// A region with no channel of the medium says so in the guide, inside the rows' space, which
     /// keeps the height the last region's rows had. Dakhan has no television in the recorded list,
     /// and only the extended atlas reaches it.

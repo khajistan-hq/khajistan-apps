@@ -6221,7 +6221,24 @@ func scheduleCacheKeepsOneMonthWithItsTag() throws {
     try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
 }
 
+/// The Apple TV's Pics/Vids shows videos only (owner, 2026-11-20: "only videos from the pics n vids
+/// on the appletv"). A photo that comes back from the server anyway never reaches a shelf.
+func pnvVideosOnlyDropsEveryPhoto() throws {
+    func row(_ k: String, _ kind: String) -> PnvRow {
+        PnvRow(media_key: k, account: nil, account_key: nil, shortcode: nil, kind: kind, resource_type: nil, media_host: nil,
+               resource_endpoint: nil, width: nil, height: nil, taken_at: nil, corpus: nil, da_id: nil)
+    }
+    let mixed = [row("v1", "video"), row("p1", "image"), row("v2", "video"), row("x1", "gif"), row("p2", "image")]
+    let shown = PnvKind.shown(mixed, only: .video)
+    try expectEqual(shown.map(\.media_key), ["v1", "v2"], "a photo, or anything not a video, is dropped")
+    try expect(shown.allSatisfy(\.isVideo))
+    let videos = [row("v1", "video"), row("v2", "video"), row("v3", "video")]
+    try expectEqual(PnvKind.shown(videos, only: .video).map(\.media_key), ["v1", "v2", "v3"], "an all-video feed is kept whole, in order")
+    try expectEqual(PnvKind.shown(mixed, only: nil).count, mixed.count, "no kind keeps every row")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Pics/Vids held to videos drops every photo", pnvVideosOnlyDropsEveryPhoto),
     ("programmeDecodesRomanTitleAndYear", programmeDecodesRomanTitleAndYear),
     ("filmControlRowOffersPlayAndPiP", filmControlRowOffersPlayAndPiP),
     ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),

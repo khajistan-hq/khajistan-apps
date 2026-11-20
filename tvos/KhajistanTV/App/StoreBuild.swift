@@ -20,6 +20,11 @@ enum StoreBuild {
     static let carriesPicsVids = false
     #endif
 
+    /// What kind Pics/Vids is held to, or nil for every kind and the Everything / Pictures / Videos
+    /// tabs. A store build that carries Pics/Vids (the owner's TV, the Friends build) shows videos
+    /// only (owner, 2026-11-20: "only videos from the pics n vids on the appletv").
+    static var picsVidsKind: PnvKind? { isOn ? .video : nil }
+
     static func includes(_ section: Section) -> Bool {
         // Chat too, until a server-side word filter and a room block exist (owner, 2026-10-06:
         // App Review 1.2). And the Reading Room (owner, 2026-10-29: the Apple TV store build is

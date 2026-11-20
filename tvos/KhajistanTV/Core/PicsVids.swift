@@ -66,6 +66,13 @@ enum PnvKind: String, CaseIterable, Sendable {
 
     /// The site's button labels (browse-archive.html: Everything / Pictures / Videos).
     var label: String { self == .image ? "Pictures" : "Videos" }
+
+    /// The rows a page held to one kind may draw: a row of any other kind is dropped, even one the
+    /// server's filter let through. nil keeps every row.
+    static func shown(_ rows: [PnvRow], only kind: PnvKind?) -> [PnvRow] {
+        guard let kind else { return rows }
+        return rows.filter { $0.kind == kind.rawValue }
+    }
 }
 
 // MARK: - URLs (kj-media.js)

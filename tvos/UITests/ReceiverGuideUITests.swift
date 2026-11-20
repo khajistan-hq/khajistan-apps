@@ -264,7 +264,15 @@ final class ReceiverGuideUITests: XCTestCase {
         // radio) can sit level with the bar, and kjFocus, steering by height, walked its posters
         // to the right instead (CI 2026-11-19, run 44633692006).
         let inBar = app.buttons.matching(NSPredicate(format: "hasFocus == true AND identifier BEGINSWITH 'radioBar'")).firstMatch
-        for _ in 0..<6 where !inBar.exists { XCUIRemote.shared.press(.down); kjPause(0.6) }
+        // Every card Down passes on the way must end above the bar: one that runs under it is
+        // where focus got stuck (a focused film card, 695 pt, under the full hero).
+        let card = app.buttons.matching(NSPredicate(format: "hasFocus == true AND NOT (identifier BEGINSWITH 'radioBar')")).firstMatch
+        for _ in 0..<6 where !inBar.exists {
+            if card.exists {
+                XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY, "\(card.identifier) ends above the bar")
+            }
+            XCUIRemote.shared.press(.down); kjPause(0.6)
+        }
         let held = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
         XCTAssertTrue(inBar.exists, "Down reaches the small player; focus held on "
                       + (held.exists ? "\(held.identifier) at \(held.frame)" : "nothing") + ", bar at \(bar.frame)")

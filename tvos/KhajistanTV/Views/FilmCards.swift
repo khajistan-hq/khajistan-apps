@@ -48,16 +48,20 @@ struct FilmShelf: View {
 /// fixed box too, so the cards line up whatever the record carries.
 struct FilmCard: View {
     static let posterHeight: CGFloat = 420
+    /// While the radio bar shows: a focused card (poster, text, lift) fits the shortest page above
+    /// the bar, the region page under its crumb, so Down can reach the bar's Off.
+    static let posterHeightUnderBar: CGFloat = 300
     static let textHeight: CGFloat = 210
 
     let film: Film
     /// Seconds in, where this device stopped the full film: a progress line and the time take the
     /// offer line's place.
     var place: Double? = nil
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            FilmPoster(film: film, height: Self.posterHeight, maxPixel: 900)
+            FilmPoster(film: film, height: model.radioBarUp ? Self.posterHeightUnderBar : Self.posterHeight, maxPixel: 900)
                 // How far in, on the artwork, as the Apple TV app draws Up Next.
                 .overlay(alignment: .bottom) {
                     if let place, let minutes = film.runtime_minutes, minutes > 0 {

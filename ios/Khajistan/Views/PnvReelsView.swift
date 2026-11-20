@@ -510,7 +510,7 @@ private struct PnvReelPage: View {
             if !Task.isCancelled { showLoader = true }
         }
         // Only the reel on screen asks for its caption: the stack builds its neighbours too.
-        .task(id: isCurrent ? row.id : "") { if isCurrent, caption == nil { caption = await store.caption(for: row) } }
+        .task(id: isCurrent ? row.id : "") { if isCurrent, !minimal, caption == nil { caption = await store.caption(for: row) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reel-\(row.media_key)")
     }
@@ -531,7 +531,8 @@ private struct PnvReelPage: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(palette.ground.opacity(0.9), in: Capsule())
-            if isCurrent { stateLine }
+            // A state or a sign-in stands on its own plate: nothing else is behind it here.
+            if isCurrent, hasStateLine { stateLine.padding(8).background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous)) }
             if let note { Text(note).kjSmall().padding(8).background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).accessibilityIdentifier("pnvSaveNote") }
         }
         .frame(maxWidth: 520, alignment: .leading)
@@ -549,6 +550,15 @@ private struct PnvReelPage: View {
         .padding(12)
         .background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private var hasStateLine: Bool {
+        switch phase {
+        case .needsSignIn, .failed: return true
+        default:
+            if row.isVideo, case .failed = controller.state { return true }
+            return false
+        }
     }
 
     @ViewBuilder

@@ -260,6 +260,9 @@ struct TransmissionPlayerView: View {
             Text(headline(air))
                 .kjDisplay()
                 .multilineTextAlignment(.center)
+            if let latin = air.secondTitle {
+                Text(latin).kjBody().multilineTextAlignment(.center)
+            }
             if !song.isEmpty {
                 Text("Now playing: " + song).kjBody().multilineTextAlignment(.center)
             }
@@ -290,6 +293,7 @@ struct TransmissionPlayerView: View {
                 PlayerStrip(
                     // A sound programme carries its name on the ground, with the dancer.
                     name: soundOnly ? nil : headline(air),
+                    secondName: soundOnly ? nil : air.secondTitle,
                     detail: stripDetail(air, soundOnly: soundOnly),
                     attribution: credit(air),
                     // The channel's own name, always: a show name in the headline read as the
@@ -371,7 +375,7 @@ struct TransmissionPlayerView: View {
         if soundOnly { return stateText(air) }
         let playing = store.player.state == .playing || store.player.state == .idle
         // Country first, then year (owner, 2026-11-15: "country is imp").
-        return [nonEmpty(air.programme?.country), air.programme?.year.map(String.init), nonEmpty(air.programme?.part), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
+        return [nonEmpty(air.programme?.country), air.shownYear(headline: headline(air)), nonEmpty(air.programme?.part), showUnderTitle(air), stateText(air), playing && !song.isEmpty ? "Now playing: " + song : nil]
             .compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
@@ -740,8 +744,8 @@ struct TransmissionPlayerView: View {
         pip.onFail = { say($0) }
         pip.onRestore = {
             guard model.transmissionPiP === pip else { return }
-            // The screen that opens loads the programme's subtitles afresh; the window's stay until
-            // it has closed.
+            // The screen that opens loads the programme's subtitles afresh. The window's track is
+            // switched off now (reclaim()), so tvOS draws no line of its own in between.
             follower.end(clearing: false)
             // transmissionPiP stays set: the player that opens over whatever is on top takes the
             // channel over as it plays (start(), RootView). If it cannot open, the next signal to

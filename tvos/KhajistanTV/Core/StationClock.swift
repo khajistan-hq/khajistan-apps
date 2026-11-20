@@ -781,7 +781,7 @@ enum StationClock {
                 if let slotEnd = date(iso: air.date, second: air.slot.endSecond), slotEnd < end { end = slotEnd }
                 // The clock reads whole seconds: a programme ending inside this second is over.
                 end = max(end, Date(timeIntervalSince1970: whole + 1))
-                raw.append((GuideSlot(start: start, end: end, title: air.nowName ?? air.show?.name ?? ""),
+                raw.append((GuideSlot(start: start, end: end, title: air.guideLine),   // with its Roman form after a Persian name (PR 103)
                             "\(air.date) \(air.slot.startSecond)", air.show?.name, runSeconds(air.programme)))
                 at = Date(timeIntervalSince1970: end.timeIntervalSince1970.rounded(.up))
             } else {

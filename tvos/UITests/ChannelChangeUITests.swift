@@ -41,7 +41,12 @@ final class ChannelChangeUITests: XCTestCase {
     /// A press while the pigeon is still flying must not be lost: down, and down again 0.6 s
     /// later, lands two channels on, not one (2026-10-06: a view laid over the screen during a
     /// flight kept presses from the player).
+    ///
+    /// A dead carrier moves the player on by itself, and that move was read as a press: Up landed
+    /// on ABN Urdu, not ABN News, because ABN News was off air (CI 2026-11-15, run 43685308130).
+    /// `-kjnomoveon` leaves a dead channel on screen, so only the test's presses move the channel.
     func testAPressDuringAFlightIsNotLost() {
+        app.launchArguments += ["-kjnomoveon", "YES"]
         openChannel()
         let current = app.staticTexts["currentChannel"]
         XCTAssertTrue(current.waitForExistence(timeout: 10))
@@ -60,6 +65,39 @@ final class ChannelChangeUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 14)
         XCTAssertNotEqual(current.label, one, "the second press, made mid-flight, moved on a second channel")
         XCTAssertNotEqual(current.label, start)
+    }
+
+    /// Indus's first television channels in the recorded list; the walk opens the first of them.
+    private static let indusTelevision = ["swept-pk-24-news-hd", "swept-pk-365-news", "swept-pk-abn-news",
+                                          "swept-us-abn-urdu", "swept-in-balle-balle", "swept-pk-capital-tv"]
+
+    /// `-kjnomoveon` holds a dead channel on screen, which the test above relies on.
+    func testNoMoveOnHoldsADeadChannel() throws { try deadChannel(held: true) }
+
+    /// Without `-kjnomoveon` the player moves past dead channels, so the test above it is not
+    /// passing on a flag that does nothing.
+    func testADeadChannelMovesOnWithoutTheFlag() throws { try deadChannel(held: false) }
+
+    /// `-kjdeadchannels` makes Indus's first six channels fail as a dead signal does. The player
+    /// waits 3 s on a dead signal before it moves on, and `openChannel` waits 9 s after Select.
+    private func deadChannel(held: Bool) throws {
+        // The ids are the recorded list's; a live run reads the live lists, where they may be absent.
+        try XCTSkipIf(kjLiveMedia, "needs the recorded Indus list")
+        app.launchArguments += ["-kjdeadchannels", Self.indusTelevision.joined(separator: ",")]
+        if held { app.launchArguments += ["-kjnomoveon", "YES"] }
+        openChannel()
+        let current = app.staticTexts["currentChannel"]
+        XCTAssertTrue(current.waitForExistence(timeout: 10))
+        if held {
+            let opened = current.label
+            XCTAssertTrue(Self.indusTelevision.contains(opened), "a dead channel opened, got \(opened)")
+            Thread.sleep(forTimeInterval: 6)
+            XCTAssertEqual(current.label, opened, "-kjnomoveon holds the dead channel on screen")
+        } else {
+            let passed = NSPredicate { _, _ in current.exists && !Self.indusTelevision.contains(current.label) }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: passed, object: nil)], timeout: 60), .completed,
+                           "the player moves past every dead channel, last on \(current.label)")
+        }
     }
 
     /// A press made while the sign-on's pigeon is still flying must not stop channel changes for

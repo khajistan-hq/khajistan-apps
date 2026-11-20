@@ -213,6 +213,40 @@ enum SupabaseRoute {
         url.host == host || url.host == directBase.host || (url.host == proxyBase.host && url.path.hasPrefix(proxyBase.path + "/"))
     }
 
+    /// The network failures a player is retuned once for: a request that ran out of time (-1001),
+    /// a host not reached (-1004), a connection that went away (-1005), no network (-1009), a TLS
+    /// handshake cut off (-1200). Never an answer that came back.
+    static let retunableCodes: Set<Int> = [NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost,
+                                           NSURLErrorNotConnectedToInternet, NSURLErrorSecureConnectionFailed]
+    /// A refusal in a player's error log: HTTP 401/403, and CoreMedia's names for them (-12937
+    /// authentication, -12660 forbidden). An account gate stays shut; it is never retuned.
+    static let refusalCodes: Set<Int> = [401, 403, -12937, -12660]
+
+    /// How old the newest error-log entry may be and still say the failure now was the network.
+    static let logRecency: TimeInterval = 60
+
+    /// Whether a player that failed or stalled gets its one retune. `error` is the failure's own
+    /// (its underlying errors are read too); `logged` is the item's error log, newest last, and
+    /// `lastAge` the newest entry's age in seconds (nil when undated). A stall with nothing
+    /// logged is a carrier that stopped sending, which is the network too.
+    static func retunesPlayback(error: Error?, logged: [(domain: String, code: Int)], lastAge: TimeInterval? = nil,
+                                stalled: Bool) -> Bool {
+        if logged.contains(where: { refusalCodes.contains($0.code) }) { return false }
+        var next = error.map { $0 as NSError }
+        while let cause = next {
+            if refusalCodes.contains(cause.code) { return false }
+            if cause.domain == NSURLErrorDomain, retunableCodes.contains(cause.code) { return true }
+            next = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        if let last = logged.last {
+            // A newest entry that is not the network says so, however old. One that is counts
+            // only while recent: a blip recovered from long ago earns a later failure nothing.
+            guard last.domain == NSURLErrorDomain, retunableCodes.contains(last.code) else { return false }
+            if (lastAge ?? 0) <= logRecency { return true }
+        }
+        return stalled
+    }
+
     /// Errors that mean the address could not be reached, as against an answer that came back.
     static func isUnreachable(_ error: Error) -> Bool {
         guard let code = (error as? URLError)?.code else { return false }

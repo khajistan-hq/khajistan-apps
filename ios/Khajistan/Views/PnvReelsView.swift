@@ -108,7 +108,7 @@ struct PnvReelsView: View {
                 ForEach(reel) { item in
                     let row = item.row
                     PnvReelPage(row: row, isCurrent: item.id == currentId, ownsPlayer: owner == item.id,
-                                controller: controller, phase: phase, insets: insets,
+                                controller: controller, phase: phase, insets: insets, minimal: isReel,
                                 signIn: { showSignIn = true })
                         .containerRelativeFrame([.horizontal, .vertical])
                         // Only the reel on screen is read: a built neighbour's Save is not reachable
@@ -196,7 +196,8 @@ struct PnvReelsView: View {
                 Button { if isReel { restart { redeal() } } else { deal(shuffled: true) } } label: {
                     Image(systemName: "shuffle").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
                 }
-                .buttonStyle(ReelRailStyle(isOn: isReel || store.shuffled))
+                // In the Reel it is always on, so it is not lit: a lit plate only pulls the eye.
+                .buttonStyle(ReelRailStyle(isOn: !isReel && store.shuffled))
                 .accessibilityLabel("Shuffle")
                 .accessibilityValue(isReel || store.shuffled ? "On" : "Off")
                 .accessibilityHint(isReel ? "Deals the reel again." : store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
@@ -439,6 +440,9 @@ private struct PnvReelPage: View {
     let phase: PnvReelsView.Phase
     /// The screen's safe area, which the full-bleed pager cannot read for itself.
     let insets: EdgeInsets
+    /// The Reel (owner, 2026-11-20: the bars were "taking attention away from the video"): one
+    /// short line for the account and the region, no meta line, no caption.
+    var minimal = false
     let signIn: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -513,7 +517,27 @@ private struct PnvReelPage: View {
 
     // MARK: - Bottom left
 
+    @ViewBuilder
     private var details: some View {
+        if minimal { reelLine } else { fullDetails }
+    }
+
+    /// "@account · Region" on a plate that hugs it, and below it only what needs saying now.
+    private var reelLine: some View {
+        let place = store.regionToken(for: row).map(PnvRegions.label)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("@" + store.accountHandle(for: row) + (place.map { " \u{00B7} " + $0 } ?? ""))
+                .kjSmall().lineLimit(1)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(palette.ground.opacity(0.9), in: Capsule())
+            if isCurrent { stateLine }
+            if let note { Text(note).kjSmall().padding(8).background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).accessibilityIdentifier("pnvSaveNote") }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private var fullDetails: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("@" + store.accountHandle(for: row)).kjName(.headline).lineLimit(1)
             Text(PnvAPI.metaLine(for: row, regionToken: store.regionToken(for: row), date: Self.dateText, showsSize: false))

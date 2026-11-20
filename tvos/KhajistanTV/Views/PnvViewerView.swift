@@ -121,6 +121,7 @@ struct PnvViewerView: View {
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
+            if videosOnly { return reelMove(direction) }
             if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
                 case .right where index + 1 < controls.count: armed = controls[index + 1]
@@ -180,6 +181,50 @@ struct PnvViewerView: View {
     // MARK: - Overlay
 
     private func overlay(_ palette: Palette) -> some View {
+        Group {
+            if videosOnly { reelOverlay(palette) } else { fullOverlay(palette) }
+        }
+        .opacity(overlayVisible ? 1 : 0)
+        .animation(.easeOut(duration: 0.25), value: overlayVisible)
+    }
+
+    /// The Reel gives the screen to the video (owner, 2026-11-20: the bars "taking attention away
+    /// from the video"). No status band and no full-width panel: one short line on a ground plate
+    /// that hugs it, bottom left, the account and the region. The controls come up only when Right
+    /// lights them; a state (loading, paused, a failure) takes the line's place.
+    private func reelOverlay(_ palette: Palette) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Spacer(minLength: 0)
+            if armed != nil {
+                saveControls
+            }
+            Group {
+                if let state = stateText {
+                    Text(state).accessibilityIdentifier("pnvViewerState")
+                } else if phase == .needsSignIn {
+                    Text("Select to sign in")
+                } else if !stranded {
+                    Text(reelLine)
+                }
+            }
+            .kjSmall()
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(palette.ground)
+        }
+        .padding(.leading, KJLayout.inset)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+
+    /// "@account · Region", and the cue for the controls while none is lit.
+    private var reelLine: String {
+        let place = store.regionToken(for: current).map(PnvRegions.label) ?? regionName
+        return "@" + store.accountHandle(for: current) + " \u{00B7} " + place + (armed == nil ? "   \u{2192} Save" : "")
+    }
+
+    private func fullOverlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             StatusBand(leading: ["Khajistan Pics/Vids", stranded ? regionName : "@" + store.accountHandle(for: current)],
                        trailing: stranded ? [] : [current.isVideo ? "Video" : "Picture"])
@@ -187,8 +232,6 @@ struct PnvViewerView: View {
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
         }
-        .opacity(overlayVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: overlayVisible)
     }
 
     private var panel: some View {
@@ -214,6 +257,29 @@ struct PnvViewerView: View {
         .padding(.horizontal, KJLayout.inset)
         .padding(.vertical, 40)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The Reel moves as Transmission does (owner, 2026-11-20): Up is the next video, Down the one
+    /// before, as Channel Up and Down. Right lights the controls and walks them; Left walks back
+    /// and lets go from Save. Up or Down with a control lit lets go and moves.
+    private func reelMove(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .up, .down:
+            armed = nil
+            step(by: direction == .up ? 1 : -1)
+        case .right:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                if index + 1 < controls.count { armed = controls[index + 1] }
+            } else {
+                armed = .save
+            }
+        case .left:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                armed = index > 0 ? controls[index - 1] : nil
+            }
+        @unknown default:
+            break
+        }
     }
 
     /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in

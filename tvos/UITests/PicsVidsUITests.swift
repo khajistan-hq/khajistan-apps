@@ -306,9 +306,14 @@ final class PicsVidsUITests: XCTestCase {
     /// Shuffle deals again and stays on, and Region steps to a region; Right keeps moving on.
     /// A video that cannot play is skipped after a moment; after two in a row the Reel stays on the
     /// third (owner, 2026-11-19: the Reel plays on by itself).
-    func testReelSkipsTwoBrokenVideosThenStops() {
+    func testReelSkipsTwoBrokenVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("YES") }
+
+    /// The same, for a video that fails inside the player (a dead address), not before it.
+    func testReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
+
+    private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
         let app = XCUIApplication()
-        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "YES"]
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", broken]
         kjLaunch(app)
         dismissNotice(app)
         let reel = app.buttons["pnvReel"]
@@ -318,7 +323,7 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         var seen: [String] = []
-        let end = Date().addingTimeInterval(20)
+        let end = Date().addingTimeInterval(30)
         while Date() < end {
             if let now = surface.value as? String, !now.isEmpty, seen.last != now { seen.append(now) }
             kjPause(0.3)

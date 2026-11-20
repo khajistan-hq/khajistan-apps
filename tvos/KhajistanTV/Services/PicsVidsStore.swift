@@ -334,9 +334,14 @@ final class PicsVidsStore {
     /// the Transmission page does; every other row is a plain file.
     func playableURL(for row: PnvRow) async throws -> URL {
         #if DEBUG
-        // `-kjbrokenvideos YES`: every video fails as a dead file does, so a test can prove the Reel
-        // skips a broken video, and stops after two in a row. Debug builds only.
-        if UserDefaults.standard.bool(forKey: "kjbrokenvideos") { throw PnvPlaybackError.unavailable }
+        // `-kjbrokenvideos YES`: every video fails before it plays; `-kjbrokenvideos dead`: every
+        // video is handed to the player at an address that answers nothing, so it fails inside the
+        // player. Tests prove the Reel skips either kind, and stops after two in a row. Debug only.
+        switch UserDefaults.standard.string(forKey: "kjbrokenvideos") {
+        case "YES": throw PnvPlaybackError.unavailable
+        case "dead" where row.isVideo: return URL(string: "http://127.0.0.1:9/kj-dead.mp4")!
+        default: break
+        }
         #endif
         guard let full = PnvMedia.full(row) else { throw PnvPlaybackError.unavailable }
         guard row.isKtv else { return full }

@@ -857,8 +857,13 @@ final class KhajistanUITests: XCTestCase {
 
     /// A video that cannot play is skipped after a moment, and after two in a row the Reel stops on
     /// the third and shows its error (owner, 2026-11-19: the Reel plays on by itself).
-    func testPicsVidsReelSkipsTwoBrokenVideosThenStops() {
-        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", "YES"])
+    func testPicsVidsReelSkipsTwoBrokenVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("YES") }
+
+    /// The same, for a video that fails inside the player (a dead address), not before it.
+    func testPicsVidsReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
+
+    private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
+        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", broken])
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
@@ -869,8 +874,9 @@ final class KhajistanUITests: XCTestCase {
             (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
         }
         var seen: [String] = []
-        // Each skip waits 2 s after the failure; 20 s is room for both and then some.
-        let end = Date().addingTimeInterval(20)
+        // Each skip waits 2 s after the failure (a dead address takes a moment to fail); 30 s is
+        // room for both and then some.
+        let end = Date().addingTimeInterval(30)
         while Date() < end {
             if let now = onScreen(), seen.last != now { seen.append(now) }
             usleep(300_000)

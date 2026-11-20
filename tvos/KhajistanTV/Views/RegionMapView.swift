@@ -361,9 +361,10 @@ private struct RegionMapPainter {
     private func paintLabel(_ label: RegionMapLabel, in context: GraphicsContext) {
         let resolved = context.resolve(label.face.text(label.text))
         if label.region.isPeople {
-            // A people's region is a facet, not a place to tune: its name is dimmed, no halo.
+            // A people's region is a facet, not a place to tune: its name is dimmed, no halo. The
+            // skin's own label colour, so it reads on the Grove and Smut grounds as well as the yellow.
             var dimmed = resolved
-            dimmed.shading = .color(.black.opacity(0.82))
+            dimmed.shading = .color(palette.onBand.opacity(0.7))
             context.draw(dimmed, at: label.center, anchor: .center)
             return
         }

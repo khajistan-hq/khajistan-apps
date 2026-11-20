@@ -61,6 +61,8 @@ fi
 # the owner's Apple TV carries what the store build carries (owner, 2026-11-04).
 CONDITIONS='$(inherited) KJ_APP_STORE'
 [ "${KJ_FULL:-0}" = 1 ] && CONDITIONS='$(inherited)'
+# KJ_FRIENDS=1: the store build plus Pics/Vids, as the Friends TestFlight build (owner, 2026-11-19).
+[ "${KJ_FRIENDS:-0}" = 1 ] && [ "${KJ_FULL:-0}" != 1 ] && CONDITIONS="$CONDITIONS KJ_FRIENDS"
 echo "Team $TEAM, Apple TV $DEVICE, conditions: $CONDITIONS"
 xcodebuild -project "$ROOT/KhajistanTV.xcodeproj" -scheme KhajistanTV -configuration Release \
   -destination "platform=tvOS,id=$DEVICE" -derivedDataPath "$WORK/DerivedData" \

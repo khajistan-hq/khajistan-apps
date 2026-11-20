@@ -49,13 +49,13 @@ final class LikedShelfUITests: XCTestCase {
         kjScreenshot("liked-player", app: app)
     }
 
-    /// Signed out and with no likes there is no shelf, and down from the front goes to the genres.
+    /// Signed out and with no likes there is no shelf, and down from the front goes to the themes.
     func testNoLikesNoShelf() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
         kjLaunch(app)
         let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'"))
-        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front's genre shelves load")
+        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front's themes load")
         XCTAssertFalse(app.descendants(matching: .any)["shelf-liked"].exists, "no Liked shelf without likes")
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'")).count, 0)
     }

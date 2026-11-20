@@ -76,7 +76,7 @@ final class BackToAtlasUITests: XCTestCase {
             XCUIRemote.shared.press(.down)
             kjPause(0.35)
         }
-        XCTAssertTrue(genre.exists, "start on a channel shelf below the front")
+        XCTAssertTrue(genre.exists, "start on the Themes row below the front")
         XCTAssertTrue(kjFocusRegions(app), "focus must return upward to the region list")
         XCTAssertTrue(regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists,
                       "an actual region row must have focus")

@@ -77,7 +77,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (the front's camera regions, the Transmission channels) sit on a `CardPlate`:
+- **Text cards** (Rooms, the Madrassa, the home's See all) sit on a `CardPlate`:
   the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
   front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
   Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.
@@ -116,11 +116,20 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   genre row (2026-11-04) went the same day, because the Music and Film & drama shelves surf
   their genre in the player.
 - **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
-  shelf (Liked, or News) peeks under them with its live pictures, as the TV app lays its rows.
-  In the store build all eleven stay (owner, 2026-11-17): Liked, News, Music, Film & drama,
-  Faith, Culture, Sport, Children, Street cameras, the Screening Room and Transmission (once the
-  schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
-  Bazaar, Chat) after the genre shelves. The Khajistan Radio mixes are
+  row (Liked, or Themes) peeks under them, as the TV app lays its rows.
+  **Themes** (owner, 2026-11-18) is one row of names with no pictures: News, Music, Film & drama,
+  Faith, Culture, Sport, Children, each with its live count. Focus comes into the row on News the first time, and after that on the theme last focused,
+  from above, from below, and back from the player (the shelves take the nearest card instead). Select plays one of the
+  theme's channels at random, radio included, and up and down in the player surf every channel of that theme. Until that day each
+  theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
+  "Street cameras"), and since 2026-11-19 it is a row of region names, each with its live count,
+  set as Themes is, at the foot of the page (owner: "cctv should go at the bottom of the main
+  page" and "need no cards just names is wnough that can be clicked"). Select opens the region
+  on its cameras. Khajistan Transmission and the Screening Room have no shelf on Home since the
+  same day (owner: "remov khajistan transmission and screening room from the home page of the
+  apple tv"); each has its door in the top bar. In the store build Home is Liked, Themes and
+  CCTV. The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
+  Bazaar, Chat) after the Themes row. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
@@ -131,7 +140,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
-  filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
+  filter. The count says *live*, as the themes do: a liked channel that is off air or gone
   is not drawn; it is looked for again at the first launch six hours on, or at once when it is
   liked again (the app remembers it on the device, so a stale like costs no walk of every list at
   each launch). Likes are read again when the app comes

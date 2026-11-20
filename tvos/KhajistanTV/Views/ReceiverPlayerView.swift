@@ -16,7 +16,7 @@ struct ReceiverPlayerView: View {
     @State private var list: [Channel]
     let surfChoice: SurfChoice?
     /// The region `list` is from: the region page the viewer came from, or the region last chosen
-    /// from in the guide. Nil for a shelf that spans regions (News, Music) and for Surf.
+    /// from in the guide. Nil for a list that spans regions (a theme, Liked) and for Surf.
     @State private var listRegion: String?
     /// The name of a shelf that spans regions, which titles the guide's first page.
     @State private var listTitle: String?

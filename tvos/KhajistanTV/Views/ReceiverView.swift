@@ -10,9 +10,6 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var composed: ComposedMap?
     @State private var mapError: String?
-    /// Each camera region's cameras to take a still from, and the ones asked for now.
-    @State private var cameraPicks: [String: [Channel]] = [:]
-    @State private var cameraWanted: [Channel] = []
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
     @State private var surfTask: Task<Void, Never>?
@@ -72,9 +69,13 @@ struct ReceiverView: View {
         switch link {
         case .receiver:
             model.receiverPath = []
+            // The front opens at its top, not on the CCTV name that opened the region.
+            model.camerasFirst = nil
             model.link = nil
         case .region(let id):
             guard let index = model.receiver.index else { return }
+            // A linked region opens on its television, and Back from it is not a CCTV return.
+            model.camerasFirst = nil
             model.receiverPath = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
             model.link = nil
         default:
@@ -103,11 +104,17 @@ struct ReceiverView: View {
                     // where the shelf would be. The shelf brings its own 12 points above it.
                     LikedShelf()
                     }
-                    GenreShelves()
+                    ThemeRow()
                     HomeSections()
-                    camerasRow(index)
-                    filmsRow
+                    // Transmission and the Screening Room are not shelves here: each has its own
+                    // door in the top bar (owner, 2026-11-19: "remov khajistan transmission and
+                    // screening room from the home page of the apple tv").
                     HomeRows()
+                    // Shelves above it arrive on their own fetches after it is drawn, so a name
+                    // focused early is kept on screen as they push it down.
+                    CCTVRow(index: index) {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(CCTVRow.anchor, anchor: .bottom) }
+                    }
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
@@ -270,73 +277,6 @@ struct ReceiverView: View {
         surfTask?.cancel()
         surfTask = nil
         shuffling = false
-    }
-
-    // MARK: - Cameras
-
-    /// Every region with public cameras, main atlas first, each opening its page on its cameras
-    /// (owner, 2026-10-07: "make cctv show up in the reciever").
-    @ViewBuilder
-    private func camerasRow(_ index: ReceiverIndex) -> some View {
-        let regions = CameraRegions.ordered(index)
-        if !regions.isEmpty {
-            Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
-                ForEach(regions) { region in
-                    Button {
-                        model.camerasFirst = region.id
-                        model.receiverPath.append(region)
-                    } label: {
-                        // The region's name over a still from one of its cameras, taken on this
-                        // device as the region cards' are (owner, 2026-10-29: pictures on them).
-                        PictureCard(title: region.label,
-                                    still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
-                                    width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
-                    }
-                    .buttonStyle(HouseCardStyle())
-                    .accessibilityIdentifier("cameras-\(region.id)")
-                }
-            }
-            .accessibilityIdentifier("shelf-cameras")
-            .task(id: regions.map(\.id)) { await pickCameras(regions) }
-            // Back from a region page: the stills store forgot the list when the page went.
-            .onAppear { model.stills.wantToo(cameraWanted) }
-        }
-    }
-
-    /// Up to three cameras per region, and the stills for them: the first of each, then a spare
-    /// only where the card is still a plate (a black frame or a dead stream).
-    private func pickCameras(_ regions: [ReceiverIndex.Region]) async {
-        for region in regions where cameraPicks[region.id] == nil {
-            guard !Task.isCancelled else { return }
-            let cameras = (try? await model.receiver.channels(regionId: region.id, cameras: true)) ?? []
-            cameraPicks[region.id] = Array(cameras.prefix(3))
-        }
-        for rank in 0..<3 {
-            guard !Task.isCancelled else { return }
-            let lacking = regions.filter { region in
-                !(cameraPicks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
-            }
-            cameraWanted = lacking.compactMap { cameraPicks[$0.id]?.dropFirst(rank).first }
-            if cameraWanted.isEmpty { return }
-            model.stills.wantToo(cameraWanted)
-            try? await Task.sleep(for: .seconds(Double(cameraWanted.count) * 4))
-        }
-    }
-
-    // MARK: - The Screening Room
-
-    /// The Screening Room, every film as the site's On Demand carries them, on a shelf of posters.
-    @ViewBuilder
-    private var filmsRow: some View {
-        let films = model.films.films
-        if !films.isEmpty {
-            FilmShelf(
-                title: "The Screening Room",
-                count: "\(films.count) \(films.count == 1 ? "film" : "films") on demand",
-                films: films
-            )
-            .accessibilityIdentifier("screeningRoom")
-        }
     }
 
     private func failure(_ message: String) -> some View {
@@ -526,11 +466,13 @@ private struct AtlasPanel: View {
     static let mapHeight: CGFloat = 640
 }
 
-/// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
-/// 2026-11-04: news was not on the front as a category). The kinds are the region lists' own
-/// `genres`; a channel sits on every shelf it is tagged for. The shelves follow the Beyond the
-/// atlas switch, and up and down in the player surf the shelf the channel came from.
-private struct GenreShelves: View {
+/// Live channels by theme across the atlas, as one row of names with no pictures (owner,
+/// 2026-11-18: the News-to-Children carousels "should be shown as not carousels but simpler way no
+/// thumbnails more like themes that people can click and all channels with those themes play").
+/// Select on a theme plays one of its channels at random, so a stream that is down is never the
+/// only way in; up and down in the player surf every channel of that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
+/// is tagged for. The row follows the Beyond the atlas switch.
+private struct ThemeRow: View {
     private struct Kind: Identifiable {
         let id: String
         let label: String
@@ -560,49 +502,70 @@ private struct GenreShelves: View {
         Kind(id: "sport", label: "Sport", tags: ["sport"]),
         Kind(id: "children", label: "Children", tags: ["children"]),
     ]
-    /// A kind with fewer channels than this is not a shelf yet.
+    /// A theme with fewer channels than this is not shown yet.
     private static let fewest = 3
-    /// The shelves whose first cards get live stills, and how many each. Liked takes its share
-    /// first; 24 a visit in all (StillPlan).
-    private static let pictured: [String] = ["news", "music"]
-    private static let picturedCards = 4
 
     @Environment(AppModel.self) private var model
     @State private var rows: [Row] = []
     @State private var playing: Pick?
+    /// Focus coming into the row lands on the theme last focused (Back from the player: the one
+    /// pressed), or on News the first time, not on whichever sits under the control it came from.
+    /// tvOS did not do either reliably by itself (HomeRowsUITests, 2026-11-18: the full build
+    /// lost the theme pressed, the store build came up from CCTV onto another theme).
+    @FocusState private var focused: String?
+    @State private var lastFocused: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(rows) { row in
-                Shelf(row.kind.label, count: "\(row.channels.count) live") {
-                    ForEach(row.channels) { channel in
-                        let liked = model.saves.isSaved(channel)
-                        let still = model.stills.image(for: channel.id)
+        // A stack, not a Group: with no rows yet there would be no child to carry the task.
+        VStack(alignment: .leading, spacing: 8) {
+            if !rows.isEmpty {
+                Text("Themes").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                // Scrolls sideways if the themes ever outgrow the screen; today they fit.
+                ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(rows) { row in
                         Button {
-                            playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+                            play(row)
                         } label: {
-                            PictureCard(channel: channel, still: still, liked: liked)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.kind.label).kjName(30).lineLimit(1)
+                                Text("\(row.channels.count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                            }
                         }
-                        .buttonStyle(HouseCardStyle())
-                        // Play/Pause on a card plays it, as on Apple's TV app.
-                        .onPlayPauseCommand { playing = Pick(channel: channel, list: row.channels, title: row.kind.label) }
-                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
-                        .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
+                        .buttonStyle(HouseButtonStyle())
+                        // Play/Pause plays it too, as on Apple's TV app.
+                        .onPlayPauseCommand { play(row) }
+                        .focused($focused, equals: row.id)
+                        .accessibilityLabel("\(row.kind.label), \(row.channels.count.formatted()) live")
+                        .accessibilityIdentifier("genre-\(row.id)")
                     }
                 }
-                .accessibilityIdentifier("genre-\(row.id)")
+                // Room over and under the row for a focused plate's lift.
+                .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+                .padding(.bottom, 14)
             }
         }
+        .focusSection()
+        .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id)
+        .onChange(of: focused) { _, now in if let now { lastFocused = now } }
         .task(id: model.extendedAtlas) { await load() }
-        // Back from a player: the visit ended, and with it the wanted lists.
-        .onAppear { wantStills() }
         .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
     }
 
+    private func play(_ row: Row) {
+        guard let channel = row.channels.randomElement() else { return }
+        playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+    }
+
     /// Every region list in the atlas shown, read together (each is cached after its first read),
-    /// then sorted into the kinds in region order, each channel once per shelf.
+    /// then sorted into the themes in region order, each channel once per theme.
     private func load() async {
         guard let index = model.receiver.index else { return }
         let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
@@ -626,14 +589,6 @@ private struct GenreShelves: View {
             }
             return shelf.count >= Self.fewest ? Row(kind: kind, channels: shelf) : nil
         }
-        wantStills()
-    }
-
-    private func wantStills() {
-        let first = Self.pictured.flatMap { id in
-            rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
-        }
-        if !first.isEmpty { model.stills.wantNext(first, place: 1) }
     }
 }
 
@@ -805,5 +760,102 @@ private struct LikedShelf: View {
         let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
         // Sent when empty too, so channels no longer liked stop taking stills.
         model.stills.wantNext(first, place: 0)
+    }
+}
+
+/// Every region with public cameras, main atlas first, each opening its page on its cameras
+/// (owner, 2026-10-07: "make cctv show up in the reciever"). Names only, at the foot of the page
+/// (owner, 2026-11-19: "cctv should go at the bottom of the main page" and "need no cards just
+/// names is wnough that can be clicked"), set as the Themes row is: focus comes in on the first
+/// name, then on the one last focused, and Back from a region returns to the name pressed.
+private struct CCTVRow: View {
+    static let anchor = "shelf-cameras"
+    let index: ReceiverIndex
+    /// Scrolls the page so the row is on screen.
+    let keepVisible: () -> Void
+    @Environment(AppModel.self) private var model
+    @FocusState private var focused: String?
+    @State private var lastFocused: String?
+    /// The name whose region page is open, focused again when the page comes back.
+    @State private var pressed: String?
+    /// Where the row last sat on screen, to tell a push down from a scroll.
+    @State private var lastY: CGFloat?
+
+    var body: some View {
+        let regions = CameraRegions.ordered(index)
+        if !regions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CCTV").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(regions) { region in
+                            let count = index.regionCounts[region.id]?.byMedium["camera"] ?? 0
+                            Button {
+                                pressed = region.id
+                                model.camerasFirst = region.id
+                                model.receiverPath.append(region)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(region.label).kjName(30).lineLimit(1)
+                                    // A count the index does not carry is left out, never "0 live".
+                                    if count > 0 {
+                                        Text("\(count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                                    }
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            .focused($focused, equals: region.id)
+                            .accessibilityLabel(count > 0
+                                ? "\(region.label) cameras, \(count.formatted()) live"
+                                : "\(region.label) cameras")
+                            .accessibilityIdentifier("cameras-\(region.id)")
+                        }
+                    }
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+            }
+            .focusSection()
+            // Entering the row, focus goes to the first name, then to the one last focused. tvOS
+            // gives the name under the card it came from and does not honour defaultFocus here
+            // (UI test, 2026-11-19), so the row moves it itself.
+            .onChange(of: focused) { old, now in
+                guard let now else { return }
+                let home = regions.contains { $0.id == lastFocused } ? lastFocused : regions.first?.id
+                if old == nil, let home, now != home {
+                    focused = home
+                } else {
+                    lastFocused = now
+                }
+            }
+            // Shelves loading above push the row down; a focused name stays on screen. Only a push
+            // down acts: the focus engine's scroll and this one move the row up. Not reproduced
+            // on the simulator, where the shelves land before a walk reaches the foot; aimed at
+            // the slower Apple TV HD.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
+                defer { lastY = y }
+                if focused != nil, let lastY, y > lastY + 1 { keepVisible() }
+            }
+            // Back from the region page: the name pressed takes focus again, and a later visit to
+            // the same region from the list opens on its television, not its cameras.
+            .onAppear {
+                guard let id = pressed else { return }
+                pressed = nil
+                // Back from the region leaves camerasFirst set; a link that opened the front
+                // cleared it, and then the front opens at its top.
+                guard model.camerasFirst == id else { return }
+                model.camerasFirst = nil
+                Task { @MainActor in
+                    focused = id
+                    keepVisible()
+                }
+            }
+            .id(Self.anchor)
+            .accessibilityIdentifier(Self.anchor)
+        }
     }
 }

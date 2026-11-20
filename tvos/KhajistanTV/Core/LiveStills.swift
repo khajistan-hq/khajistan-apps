@@ -58,8 +58,9 @@ struct StillCache<Value> {
 /// channels it wants, nearest the viewer's focus first.
 struct StillPlan {
     static let spacing: TimeInterval = 1.5
-    /// The Apple TV's front carries a Liked shelf above News and Music; four more stills a visit
-    /// keep Music's first cards pictured when Liked takes its four (2026-11-08). The phone keeps 24.
+    /// The Apple TV's front carried a Liked shelf above News and Music, and four more stills a
+    /// visit kept Music's first cards pictured (2026-11-08). The themes take no stills since
+    /// 2026-11-18, so Liked and the CCTV shelf have the whole share. The phone keeps 24.
     #if os(tvOS)
     static let perVisit = 28
     #else

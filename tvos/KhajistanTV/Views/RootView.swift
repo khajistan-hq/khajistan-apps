@@ -30,7 +30,9 @@ struct RootView: View {
         #endif
     }
 
-    /// A full-screen page is up over the sections.
+    /// A full-screen page is up over the sections. SwiftUI presents every `fullScreenCover` as a
+    /// UIKit presentation on the window's root, and the app presents nothing else, so this reads
+    /// them all; a cover shown another way would need its own flag here.
     private static var coverUp: Bool {
         UIApplication.shared.connectedScenes.contains { scene in
             (scene as? UIWindowScene)?.windows.contains { $0.rootViewController?.presentedViewController != nil } ?? false
@@ -58,7 +60,8 @@ struct RootView: View {
         // moved the card focus had left, and focus was lost when the page closed (2026-11-20).
         .task(id: model.radioBarUp) {
             guard !model.radioBarUp else { underBar = true; return }
-            while Self.coverUp {
+            // `reopened` is set with the silence, before UIKit has begun to present its player.
+            while Self.coverUp || reopened != nil {
                 try? await Task.sleep(for: Self.coverCheck)
                 if Task.isCancelled { return }
             }

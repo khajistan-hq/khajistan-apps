@@ -14,6 +14,11 @@ struct ChannelsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @Environment(\.underRadioBar) private var underRadioBar
+    /// The bar has shown under this visit to the region. The page keeps its compact shape until
+    /// the viewer leaves it: grown back under focus (a film closed, Off pressed), the page pushed
+    /// the focused card off the bottom of the screen.
+    @State private var barSeen = false
+    private var compact: Bool { underRadioBar || barSeen }
     @State private var channels: [Channel] = []
     @State private var cameraChannels: [Channel] = []
     @State private var mainLoaded = false
@@ -66,7 +71,7 @@ struct ChannelsView: View {
                 preview: preview,
                 still: heroChannel.flatMap { model.stills.image(for: $0.id) },
                 countries: countries,
-                compact: underRadioBar
+                compact: compact
             )
             .padding(.horizontal, KJLayout.inset)
             .padding(.top, 24)
@@ -83,8 +88,10 @@ struct ChannelsView: View {
             }
             .kjTopFade()
         }
+        .environment(\.underRadioBar, compact)
         .background(palette.ground.ignoresSafeArea())
         .foregroundStyle(palette.ink)
+        .onAppear { if underRadioBar { barSeen = true } }
         .task { await start() }
         .task { await model.saves.load() }
         .task { await model.films.load() }
@@ -97,7 +104,7 @@ struct ChannelsView: View {
             if let id { heroId = id }
             follow()
         }
-        .onChange(of: underRadioBar) { _, _ in follow() }
+        .onChange(of: underRadioBar) { _, up in if up { barSeen = true }; follow() }
         .onChange(of: playing == nil) { _, free in
             // One signal at a time: the hero and the stills give way to the player.
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
@@ -136,7 +143,7 @@ struct ChannelsView: View {
     private func follow() {
         guard playing == nil else { return }
         // No picture plays where the shrunk hero has none to show it in.
-        let onCard = (focusedId != nil || heroId == nil) && !underRadioBar
+        let onCard = (focusedId != nil || heroId == nil) && !compact
         preview.show(onCard ? heroChannel : nil, receiver: model.receiver, stills: model.stills)
         model.stills.want(nearFocus)
     }

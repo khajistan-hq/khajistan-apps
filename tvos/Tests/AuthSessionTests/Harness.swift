@@ -14,9 +14,11 @@ enum SupabaseRoute {
 @MainActor final class URLSession {
     static var pending: [(URLRequest, CheckedContinuation<(Data, URLResponse), Error>)] = []
     static var hasFactor = false
+    static var logouts: [String] = []
     init(configuration: URLSessionConfiguration) {}
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         if request.url!.path.hasSuffix("logout") {
+            Self.logouts.append(request.value(forHTTPHeaderField:"Authorization") ?? "")
             return (Data("{}".utf8),HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:nil,headerFields:nil)!)
         }
         // Answer setup requests at once so each race suspends only the response under test.
@@ -46,8 +48,11 @@ struct Failure: Error { let message: String }
     }
     throw Failure(message:"Missing synthetic auth request")
 }
-@MainActor func store() throws -> AuthStore {
-    let old=Session(accessToken:"old",refreshToken:"old-refresh",expiresAt:.distantPast,email:"a@example.invalid",userId:"a")
+@MainActor func store(expiresAt: Date = .distantPast) throws -> AuthStore {
+    // A request a sign-out sent in the background must not be answered by the next scenario.
+    for (_, waiter) in URLSession.pending { waiter.resume(throwing: CancellationError()) }
+    URLSession.pending = []; URLSession.logouts = []
+    let old=Session(accessToken:"old",refreshToken:"old-refresh",expiresAt:expiresAt,email:"a@example.invalid",userId:"a")
     Keychain.values=["session":try JSONEncoder().encode(old)]
     return AuthStore()
 }
@@ -137,6 +142,24 @@ struct Failure: Error { let message: String }
         preview.clearPreviewPassword()
         try check(observed == ["fixture-preview-one", "fixture-preview-two", nil, nil],
                   "preview callbacks see updated state; unchanged save is quiet and every Clear invalidates")
-        print("PASS twelve actual AuthStore scenarios; no external network")
+        // Sign-out tells the server with a token it accepts: a current one as it is, an expired one
+        // refreshed first (the server refuses a logout with an expired token, and the session would
+        // live on there). The refreshed session is never kept on the device.
+        do {
+            let current=try store(expiresAt:Date().addingTimeInterval(3600))
+            await current.signOut()
+            for _ in 0..<100 where URLSession.logouts.isEmpty { try await Task.sleep(for:.milliseconds(5)) }
+            try check(URLSession.logouts == ["Bearer old"] && URLSession.pending.isEmpty,"current token signs out as it is")
+            let expired=try store()
+            await expired.signOut()
+            try check(expired.session == nil && Keychain.read("session") == nil,"expired signout clears at once")
+            try await waitRequest()
+            try check(URLSession.pending[0].0.url!.query == "grant_type=refresh_token" && URLSession.logouts.isEmpty,"expired signout refreshes before logout")
+            URLSession.release("a")
+            for _ in 0..<100 where URLSession.logouts.isEmpty { try await Task.sleep(for:.milliseconds(5)) }
+            try check(URLSession.logouts == ["Bearer token-a"],"expired signout logs out with the refreshed token")
+            try check(expired.session == nil && Keychain.read("session") == nil,"refreshed session is never kept")
+        }
+        print("PASS fourteen actual AuthStore scenarios; no external network")
     }
 }

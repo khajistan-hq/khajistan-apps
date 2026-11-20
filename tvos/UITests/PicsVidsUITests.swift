@@ -433,8 +433,8 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertFalse(save.exists, "Save let go within 16 s although the viewer woke every 2 s")
     }
 
-    /// A broken first video is skipped forward even after a Down, since nothing is behind it.
-    func testReelSkipsForwardFromABrokenFirstVideo() {
+    /// A deal that opens on a broken video skips it forward; after a Down onto it, on back.
+    func testReelSkipsABrokenFirstVideoBothWays() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "first"]
         kjLaunch(app)
@@ -452,13 +452,58 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(state.exists && !state.label.contains("Loading"), "the first video shows its failure: \(state.label)")
         let second = waitForValue(surface, notIn: [first, nil, ""], seconds: 8)
         XCTAssertNotNil(second, "the broken first was skipped on to the second")
-        // Down onto the broken first: it must show, then be skipped forward to the second again.
+        // Down onto the broken first: it must show, then be skipped on back, round to the last
+        // video loaded, never forward to the second again (Down must work both ways).
         XCUIRemote.shared.press(.down)
         let back = waitForValue(surface, notIn: [second], seconds: 5)
         XCTAssertEqual(back, first, "Down went back onto the first video")
         let landed = waitForValue(surface, notIn: [first], seconds: 8)
         print("PNVFWD first=\(first ?? "nil") second=\(second ?? "nil") landed=\(landed ?? "nil")")
-        XCTAssertEqual(landed, second, "a broken first video is skipped forward")
+        XCTAssertNotNil(landed, "the broken first was skipped after the Down")
+        XCTAssertNotEqual(landed, second, "after a Down a broken first video is skipped on back, not forward")
+    }
+
+    /// A video the device cannot decode (VP9 on the Apple TV HD) says so and the Reel moves on;
+    /// these do not stop it after two (owner, 2026-11-20: "some videos are showing as black").
+    func testReelSkipsAVideoTheTVCannotDecode() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjundecodable", "YES"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'cannot play on this Apple TV'")).firstMatch
+        XCTAssertTrue(said.waitForExistence(timeout: 15), "an undecodable video says so")
+        var seen: [String] = []
+        let end = Date().addingTimeInterval(25)
+        while Date() < end {
+            if let now = surface.value as? String, !now.isEmpty, seen.last != now { seen.append(now) }
+            kjPause(0.3)
+        }
+        print("PNVCODEC \(seen.count) \(seen)")
+        XCTAssertGreaterThan(seen.count, 3, "undecodable videos are skipped past the two-in-a-row cap")
+    }
+
+    /// On a shelf (not the Reel) Left from the first object stays put: only the Reel comes round.
+    func testShelfLeftFromTheFirstStaysPut() {
+        let app = launch()
+        dismissNotice(app)
+        let tile = tiles(app).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
+        XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "the tile opens the viewer")
+        kjPause(2)
+        let first = surface.value as? String
+        XCUIRemote.shared.press(.left); kjPause(2)
+        XCTAssertEqual(surface.value as? String, first, "Left from a shelf's first object stays put")
+        XCUIRemote.shared.press(.right)
+        XCTAssertNotNil(waitForValue(surface, notIn: [first], seconds: 8), "Right moves on, so the check above could fail")
     }
 
     /// The surface's value once it is none of `values`, polled every 0.25 s; nil if it never is.

@@ -546,16 +546,7 @@ struct PnvViewerView: View {
                 controller.resume()
             }
             controller.attach(url: url, seekTo: nil, title: "@" + store.accountHandle(for: row), subtitle: "Khajistan", isLive: false)
-            // A VP9 or AV1 file loads and plays its sound over a black picture on a device with no
-            // decoder for it (the Apple TV HD has neither): say so, and in the Reel skip it.
-            if let asset = controller.player.currentItem?.asset, await Self.cannotDecode(asset) {
-                guard !Task.isCancelled, current.id == key else { return }
-                controller.stop()
-                phase = .failed("This video cannot play on this Apple TV.")
-                skipBroken(key)
-                return
-            }
-            guard !Task.isCancelled, current.id == key else { return }
+            let asset = controller.player.currentItem?.asset
             #if DEBUG
             // `-kjfakeend N`: the video "ends" every N s of play, so a test can see what an end
             // does under a lit control without waiting on a real clip's length. Debug only.
@@ -570,6 +561,15 @@ struct PnvViewerView: View {
             }
             #endif
             phase = .ready
+            // A VP9 or AV1 file loads and plays its sound over a black picture on a device with no
+            // decoder for it (the Apple TV HD has neither): say so, and in the Reel skip it. Read
+            // after `.ready`, so a slow or empty track list never holds the viewer on Loading.
+            guard let asset, await Self.cannotDecode(asset) else { return }
+            guard !Task.isCancelled, current.id == key else { return }
+            controller.stop()
+            phase = .failed("This video cannot play on this Apple TV.")
+            // VP9 files sit together by account, so these do not stop the Reel after two.
+            skipBroken(key, limit: 8)
         } catch PnvPlaybackError.needsSignIn {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .needsSignIn
@@ -584,6 +584,11 @@ struct PnvViewerView: View {
     /// are asked about: every Apple device decodes H.264 and HEVC, and VideoToolbox answers for
     /// the hardware. Read off the player's own asset, so nothing extra is downloaded.
     nonisolated static func cannotDecode(_ asset: AVAsset) async -> Bool {
+        #if DEBUG
+        // `-kjundecodable YES`: every video reads as undecodable, so a test can see the message
+        // and the skip without a VP9 file or an Apple TV HD. Debug only.
+        if UserDefaults.standard.string(forKey: "kjundecodable") == "YES" { return true }
+        #endif
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,
               let formats = try? await track.load(.formatDescriptions) else { return false }
         let vp9: FourCharCode = 0x7670_3039, av1: FourCharCode = 0x6176_3031 // 'vp09', 'av01'
@@ -595,8 +600,8 @@ struct PnvViewerView: View {
 
     /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
     /// Only while it is still on screen, once per object, and not three in a row.
-    private func skipBroken(_ key: String) {
-        guard videosOnly, OverlayTiming.hidesItself, skips < 2, skipped != key else { return }
+    private func skipBroken(_ key: String, limit: Int = 2) {
+        guard videosOnly, OverlayTiming.hidesItself, skips < limit, skipped != key else { return }
         skips += 1
         skipped = key
         skipTask?.cancel()
@@ -605,8 +610,7 @@ struct PnvViewerView: View {
             // A lit control holds the skip as it holds autoplay; it goes on once the control lets go.
             while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
             if !Task.isCancelled, current.id == key {
-                let isFirst = store.feed(feedKey).items.first?.id == key
-                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta, isFirst: isFirst))
+                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta))
             }
         }
     }

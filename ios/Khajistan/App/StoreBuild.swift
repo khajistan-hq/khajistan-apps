@@ -26,6 +26,10 @@ enum StoreBuild {
 #endif
 
     /// Whether a room the app draws itself is in this build. Website rooms (nil) always are.
+    /// Pics/Vids is held to videos on the Apple TV only (owner, 2026-11-20); the iPhone shows
+    /// every kind. The shared PicsVidsStore reads this on both.
+    static var picsVidsKind: PnvKind? { nil }
+
     static func includes(_ room: NativeRoom?) -> Bool {
         !(isOn && room == .picsVids && !carriesPicsVids)
     }

@@ -385,6 +385,8 @@ struct ScheduleCache: Sendable {
     private func file(_ month: String) -> URL { directory.appendingPathComponent("programming-\(month).cache") }
     private static let newline = UInt8(ascii: "\n")
     private static let maxTag = 1024
+    /// Well inside the head read by etag(), which needs the newline and a body byte in it.
+    private static let maxStoredTag = 512
 
     /// The ETag to send as If-None-Match: read from the head of the file, so the body comes with it.
     func etag(month: String) -> String? {
@@ -406,7 +408,7 @@ struct ScheduleCache: Sendable {
 
     /// Keeps this month's schedule and drops every other month's.
     func store(_ data: Data, etag: String, month: String) {
-        guard !etag.isEmpty, etag.utf8.count < Self.maxTag, !etag.contains("\n"), !data.isEmpty else { return }
+        guard !etag.isEmpty, etag.utf8.count <= Self.maxStoredTag, !etag.contains("\n"), !data.isEmpty else { return }
         clear()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? (Data(etag.utf8) + [Self.newline] + data).write(to: file(month), options: .atomic)

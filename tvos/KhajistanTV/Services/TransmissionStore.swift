@@ -104,6 +104,8 @@ final class TransmissionStore {
         var etag: String? = nil
         /// The body is the copy kept on the device, answered by a 304.
         var fromCache = false
+        /// The body was opened by the preview password, so it is kept only while that is held.
+        var authorized = false
     }
 
     init(auth: AuthStore) {
@@ -208,7 +210,7 @@ final class TransmissionStore {
         await task.value
     }
 
-    private func fetchSchedule(month monthKey: String, generation gen: Int) async {
+    private func fetchSchedule(month monthKey: String, generation gen: Int, useKept: Bool = true) async {
         let url = Transmission.scheduleURL(month: monthKey)
         var reply: Reply
         #if DEBUG
@@ -221,7 +223,7 @@ final class TransmissionStore {
         }
         #endif
         let cache = ScheduleCache.shared
-        let held = await Task.detached(priority: .userInitiated) { cache.etag(month: monthKey) }.value
+        let held = useKept ? await Task.detached(priority: .userInitiated) { cache.etag(month: monthKey) }.value : nil
         func request(authorization: String?, ifNoneMatch: String?) -> URLRequest {
             var request = URLRequest(url: url)
             if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
@@ -237,6 +239,7 @@ final class TransmissionStore {
                 guard gen == scheduleGeneration else { return }
                 authorization = Transmission.basicAuthorization(user: KJConfig.previewUser, password: password)
                 reply = try await send(request(authorization: authorization, ifNoneMatch: held))
+                reply.authorized = true
             }
             if reply.status == 304 {
                 guard gen == scheduleGeneration else { return }
@@ -253,6 +256,7 @@ final class TransmissionStore {
                 } else {
                     guard gen == scheduleGeneration else { return }
                     reply = try await send(request(authorization: authorization, ifNoneMatch: nil))
+                    reply.authorized = authorization != nil
                 }
             }
         } catch {
@@ -288,11 +292,11 @@ final class TransmissionStore {
             guard gen == scheduleGeneration else { return }
             if reply.fromCache {
                 // The kept copy will not decode (an older app's file, say): drop it, or every
-                // later load is answered 304 and reads it again. Fetched whole once more; with
-                // nothing kept, that fetch sends no If-None-Match, so it cannot come back here.
+                // later load is answered 304 and reads it again. Fetched whole once more, with no
+                // If-None-Match whatever is still on disk, so it cannot come back here.
                 await Task.detached(priority: .userInitiated) { ScheduleCache.shared.clear() }.value
                 guard gen == scheduleGeneration else { return }
-                await fetchSchedule(month: monthKey, generation: gen)
+                await fetchSchedule(month: monthKey, generation: gen, useKept: false)
                 return
             }
             dropSchedule(.failed("The schedule could not be read."))
@@ -300,7 +304,8 @@ final class TransmissionStore {
         }
         guard gen == scheduleGeneration else { return }
         // Kept only once it has decoded, so a broken file is never the one sent back as current.
-        if let etag = reply.etag {
+        // A password cleared while this fetch was in flight: its body is not put back on disk.
+        if let etag = reply.etag, !reply.authorized || auth.previewPassword != nil {
             Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }
         }
         programming = decoded

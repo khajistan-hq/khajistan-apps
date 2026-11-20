@@ -42,6 +42,9 @@ struct PnvReelsView: View {
     /// Shuffle or region change waits for its feed; otherwise the last page known. The scroll view
     /// can set position to nil while the reel is empty, so this, not the tapped object, decides.
     @State private var home: String?
+    /// Broken videos skipped in a row: past two the Reel stops and says so, so a dead network does
+    /// not page through everything loaded every two seconds.
+    @State private var skips = 0
 
     let start: PnvRow
     let source: Source
@@ -158,6 +161,12 @@ struct PnvReelsView: View {
         }
         .onChange(of: items.first?.id) { reopenIfLost() }
         .onDisappear { loadTask?.cancel(); controller.stop() }
+        // A video that fails inside the player (a dead file, a start that times out) never ends
+        // either; one that plays resets the count of skips in a row.
+        .onChange(of: controller.state) {
+            if controller.state.isFailed, let owner { skipBroken(owner) }
+            if controller.state == .playing { skips = 0 }
+        }
         .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { activate(force: true) }) }
         // A keyboard or a trackpad pages too: a drag does not page a scroll view on the Mac.
         .focusable()
@@ -363,12 +372,19 @@ struct PnvReelsView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 phase = .failed(error.localizedDescription)
-                // A video that cannot play never ends: the Reel says so for a moment, then moves on.
-                if isReel, !assistiveTechRunning {
-                    try? await Task.sleep(for: .seconds(2))
-                    if !Task.isCancelled, currentId == key, hasNextPage { step(1) }
-                }
+                skipBroken(key)
             }
+        }
+    }
+
+    /// A video that cannot play never ends: in the Reel it shows its error for a moment, then the
+    /// next page plays. Only while the broken page is still on screen, and not three in a row.
+    private func skipBroken(_ key: String) {
+        guard isReel, !assistiveTechRunning, skips < 2 else { return }
+        skips += 1
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if currentId == key, hasNextPage { step(1) }
         }
     }
 

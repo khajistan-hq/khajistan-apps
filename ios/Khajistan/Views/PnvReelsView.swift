@@ -12,8 +12,9 @@ import SwiftUI
 /// with shuffle button and all regions or specific region options").
 struct PnvReelsView: View {
     /// Where the pages come from: the live stream under the region filter, which grows as the
-    /// viewer nears its end, or a fixed list (an account's saves).
-    enum Source { case feed, rows([PnvRow]) }
+    /// viewer nears its end; the Reel, the same stream as videos only and always shuffled (owner,
+    /// 2026-11-19: "remove pictures ... only shuffle the reel"); or a fixed list (an account's saves).
+    enum Source { case feed, reel, rows([PnvRow]) }
 
     enum Phase: Equatable { case idle, loading, ready, needsSignIn, failed(String) }
 
@@ -51,13 +52,26 @@ struct PnvReelsView: View {
         // the scrollTo on arrival corrects a lazy stack that lands a page off.
         _position = State(initialValue: ReelItem.id(lap: 0, start.id))
         if case .rows(let rows) = source { _fixed = State(initialValue: rows) } else { _fixed = State(initialValue: []) }
+        // The Reel opens on its own first video, not on a tapped object: no page is current until
+        // the videos feed has one, and reopenIfLost() then opens on it.
+        if case .reel = source {
+            _position = State(initialValue: "")
+            _home = State(initialValue: "")
+        }
     }
 
     private var store: PicsVidsStore { model.pnv }
 
+    /// The store feed the pages come from: the region's own stream, or its videos-only feed.
+    private var feedKey: String {
+        if case .reel = source { return PicsVidsStore.videosKey(model.pnvRegion) }
+        return model.pnvRegion
+    }
+    private var isReel: Bool { if case .reel = source { return true } else { return false } }
+
     private var items: [PnvRow] {
         switch source {
-        case .feed: return store.feed(model.pnvRegion).items
+        case .feed, .reel: return store.feed(feedKey).items
         case .rows: return fixed
         }
     }
@@ -68,7 +82,7 @@ struct PnvReelsView: View {
         ([items] + laps).enumerated().flatMap { lap, rows in rows.map { ReelItem(lap: lap, row: $0) } }
     }
 
-    private var isStream: Bool { if case .feed = source { return true } else { return false } }
+    private var isStream: Bool { if case .rows = source { return false } else { return true } }
     /// The page on screen. A missing position means `home`, so a re-deal holding the tapped
     /// object still reopens on its own first page.
     private var currentId: String { position ?? home ?? ReelItem.id(lap: 0, start.id) }
@@ -103,7 +117,7 @@ struct PnvReelsView: View {
         .ignoresSafeArea()
         // The seeded position can land a page off in a lazy stack that has not built the tapped
         // page yet; scrolling to it once on arrival puts the reel on the object that was tapped.
-        .onAppear { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) }
+        .onAppear { if !isReel { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) } }
         // A counter, not the id: two regions can open on the same object, and the same id set
         // twice would not change and would not scroll.
         .onChange(of: jump) { if let position { proxy.scrollTo(position, anchor: .top) } }
@@ -123,7 +137,11 @@ struct PnvReelsView: View {
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .statusBarHidden()
-        .onAppear { activate() }
+        .onAppear {
+            // The Reel is always shuffled, and each opening deals a new hand.
+            if isReel { if store.shuffled { store.discard(feedKey) } else { store.setShuffled(true) } }
+            activate()
+        }
         .task { await model.saves.load() }
         .onChange(of: position) {
             // The last page known, so a nil from the scroll view later still names a real page.
@@ -132,9 +150,9 @@ struct PnvReelsView: View {
             activate()
         }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
-        .task(id: "\(model.pnvRegion)|\(store.deal)") {
+        .task(id: "\(feedKey)|\(store.deal)") {
             guard isStream else { return }
-            if store.feed(model.pnvRegion).isUntouched { await store.loadMore(region: model.pnvRegion) }
+            if store.feed(feedKey).isUntouched { await store.loadMore(region: feedKey) }
         }
         .onChange(of: items.first?.id) { reopenIfLost() }
         .onDisappear { loadTask?.cancel(); controller.stop() }
@@ -166,13 +184,14 @@ struct PnvReelsView: View {
                 .buttonStyle(ReelRailStyle(isOn: store.shuffled))
                 .accessibilityLabel("Shuffle")
                 .accessibilityValue(store.shuffled ? "On" : "Off")
-                .accessibilityHint(store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
+                .accessibilityHint(isReel ? "Deals the reel again." : store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
                 .accessibilityActions {
-                    if store.shuffled { Button("Stream order") { deal(shuffled: false) } }
+                    if store.shuffled && !isReel { Button("Stream order") { deal(shuffled: false) } }
                 }
                 .accessibilityIdentifier("pnvReelShuffle")
                 .contextMenu {
-                    if store.shuffled {
+                    // The Reel is only ever shuffled: no way back to the stream's order there.
+                    if store.shuffled && !isReel {
                         Button("Stream order", systemImage: "list.bullet") { deal(shuffled: false) }
                     }
                 }
@@ -208,15 +227,15 @@ struct PnvReelsView: View {
     /// While a new region or deal has nothing yet: the loader, or what went wrong.
     @ViewBuilder
     private var emptyState: some View {
-        let feed = store.feed(model.pnvRegion)
+        let feed = store.feed(feedKey)
         if let error = feed.error {
             VStack(spacing: 12) {
                 Text(error).kjBody()
-                Button(kicker: "Try again") { Task { await store.retry(region: model.pnvRegion) } }
+                Button(kicker: "Try again") { Task { await store.retry(region: feedKey) } }
                     .buttonStyle(HouseButtonStyle(solid: true))
             }
         } else if feed.isDone {
-            Text("Nothing filed under this yet.").kjBody()
+            Text(isReel ? "No videos from here yet." : "Nothing filed under this yet.").kjBody()
         } else {
             TuningLoader("Loading\u{2026}")
         }
@@ -269,14 +288,14 @@ struct PnvReelsView: View {
         guard let row = current else { return }
         let pages = reel
         if isStream, let index = pages.firstIndex(where: { $0.id == currentId }), index >= pages.count - 4 {
-            if store.feed(model.pnvRegion).isDone {
+            if store.feed(feedKey).isDone {
                 // The feed has given everything: deal it again, so the reel never ends.
                 // ponytail: every lap is kept and `reel` is rebuilt per render. A lap starts only
                 // once the whole feed has been shown and is the feed's size, so it costs what the
                 // feed already costs, after as many swipes; cap laps if a big region ever gets there.
                 if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
             } else {
-                let region = model.pnvRegion
+                let region = feedKey
                 Task {
                     // A page that failed blocks loadMore until it is cleared: ask again, or the
                     // reel stops at its end with nothing said.
@@ -288,7 +307,7 @@ struct PnvReelsView: View {
                     // The last page came back and the feed is done while the end is already on
                     // screen: activate() will not run again for this page, so deal the lap here,
                     // or the reel stops on its last object (a feed whose size is a page multiple).
-                    guard isStream, region == model.pnvRegion, store.feed(region).isDone, !items.isEmpty else { return }
+                    guard isStream, region == feedKey, store.feed(region).isDone, !items.isEmpty else { return }
                     let now = reel
                     guard let at = now.firstIndex(where: { $0.id == currentId }), at >= now.count - 4 else { return }
                     laps.append(PnvReel.nextLap(items, after: now.last?.row.id))
@@ -309,6 +328,10 @@ struct PnvReelsView: View {
                 // Weak: the controller stores this closure, so a strong capture keeps the player.
                 controller.onEnded = { [weak controller] in
                     guard let controller else { return }
+                    // The next page plays by itself, as a short-video feed does (owner, 2026-11-19:
+                    // "reel should auto play the next video"). Only the page that ended moves on, so
+                    // a late notice after a swipe cannot skip a second page.
+                    if currentId == key, hasNextPage { step(1); return }
                     // A Khajistan TV programme ends rather than looping, and says it is stopped.
                     guard !row.isKtv else { controller.pause(); return }
                     // Loops in place: resume() would tune again, flashing the still and fading in.
@@ -334,7 +357,16 @@ struct PnvReelsView: View {
         }
     }
 
-    /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1).
+    /// A page after the one on screen: on a stream there always is one in the end (a new lap); a
+    /// fixed list stops at its last object, which then loops.
+    private var hasNextPage: Bool {
+        let pages = reel
+        guard let index = pages.firstIndex(where: { $0.id == currentId }) else { return false }
+        return index + 1 < pages.count
+    }
+
+    /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1), and for the
+    /// next video when one ends.
     private func step(_ delta: Int) {
         let pages = reel
         guard let index = pages.firstIndex(where: { $0.id == currentId }) else { return }

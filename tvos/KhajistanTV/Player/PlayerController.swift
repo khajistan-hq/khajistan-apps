@@ -512,6 +512,9 @@ final class PlayerController {
         retuneToken += 1
         let token = retuneToken
         retunePending = true
+        // Stamped when the retune is decided, not when it attaches: a carrier that plays again
+        // during the grace (which calls the attach off) still counts as retuned once.
+        retunedAt = .now
         // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
         // back has a moment. ponytail: fixed wait, not a network path monitor.
         timeoutTask = Task { [weak self] in

@@ -481,7 +481,8 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   lights Save, Collection, Shuffle and Region; Left walks back and lets go. No status band and no
   panel: one line, *@account · Region*, on a ground plate that hugs it at the bottom left, with
   *→ Save* beside it while the controls are down. The controls' strip shows only while one is lit,
-  and always while VoiceOver runs. The phone's Reel carries the same one line, and its Shuffle
+  and always while VoiceOver runs. A lit control holds the Reel on its video (an ending clip loops,
+  a broken one waits) and lets go after 10 s without a press. The phone's Reel carries the same one line, and its Shuffle
   plate is not lit, since the Reel is always shuffled.
 - **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
   opens on pictures. Its viewer walks that mixed stream, pictures and videos both.

@@ -879,11 +879,15 @@ final class KhajistanUITests: XCTestCase {
             (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
         }
         var seen: [String] = []
+        var candidate: String?
         // Each skip waits 2 s after the failure (a dead address takes a moment to fail); 30 s is
-        // room for both and then some.
+        // room for both and then some. A page counts once two polls in a row agree on it, so a
+        // read taken mid-scroll is not counted as a page of its own.
         let end = Date().addingTimeInterval(30)
         while Date() < end {
-            if let now = onScreen(), seen.last != now { seen.append(now) }
+            let now = onScreen()
+            if let now, now == candidate, seen.last != now { seen.append(now) }
+            candidate = now
             usleep(300_000)
         }
         print("PNVSKIP \(seen)")

@@ -311,6 +311,161 @@ final class PicsVidsUITests: XCTestCase {
     /// The same, for a video that fails inside the player (a dead address), not before it.
     func testReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
 
+    /// Down onto a broken video skips on back, not forward to the video just left (Fable round 5):
+    /// with only the deal's second video broken, Up, Up (skipped on to the third), then Down onto
+    /// the broken second, which must skip back to the first.
+    func testReelSkipsBackwardAfterDown() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(2)
+        let first = surface.value as? String
+        XCTAssertFalse((first ?? "").isEmpty, "the Reel shows its first video")
+        // Only the second is broken here, so the Reel is on its first video: Down stays put.
+        XCUIRemote.shared.press(.down); kjPause(1)
+        XCTAssertEqual(surface.value as? String, first, "Down on the first video stays put")
+        // Up onto the broken second. It must show, then be skipped on: a second that played would
+        // make the rest of this test pass with no skip run at all.
+        XCUIRemote.shared.press(.up)
+        let second = waitForValue(surface, notIn: [first], seconds: 5)
+        XCTAssertNotNil(second, "Up moved onto the second video")
+        let third = waitForValue(surface, notIn: [first, second], seconds: 8)
+        XCTAssertNotNil(third, "the broken second was skipped on to the third")
+        // Down at once onto the broken second must skip back to the first, not forward again.
+        XCUIRemote.shared.press(.down)
+        let landed = waitForValue(surface, notIn: [third, second], seconds: 8)
+        print("PNVBACK first=\(first ?? "nil") second=\(second ?? "nil") third=\(third ?? "nil") landed=\(landed ?? "nil")")
+        XCTAssertEqual(landed, first, "Down onto a broken video skips on back to the one before it")
+    }
+
+    /// A lit control holds the skip of a broken video, and a control left alone lets go after
+    /// 10 s, so the Reel plays on (Fable round 8).
+    func testReelLitControlHoldsTheSkipThenLetsGo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        // Up onto the broken second, and light Save at once.
+        XCUIRemote.shared.press(.up)
+        let second = waitForValue(surface, notIn: [first], seconds: 5)
+        XCTAssertNotNil(second, "Up moved onto the second video")
+        XCUIRemote.shared.press(.right)
+        let save = app.descendants(matching: .any)["pnvSave"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2) && save.isSelected, "Right lights Save")
+        // Well past the 2 s skip: still on the broken second while Save is lit.
+        kjPause(5)
+        XCTAssertEqual(surface.value as? String, second, "a lit control holds the skip")
+        // Left alone, Save lets go after 10 s and the skip goes on.
+        let moved = waitForValue(surface, notIn: [second], seconds: 12)
+        print("PNVHOLD first=\(first ?? "nil") second=\(second ?? "nil") moved=\(moved ?? "nil")")
+        XCTAssertNotNil(moved, "the idle control let go and the Reel went on")
+        XCTAssertFalse(save.exists, "Save let go")
+    }
+
+    /// A lit control holds autoplay: a video that ends while Save is lit plays again rather than
+    /// moving on, and once Save lets go the next end moves on (Fable round 10).
+    func testReelLitControlHoldsAutoplay() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjfakeend", "3"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        XCUIRemote.shared.press(.right)
+        let save = app.descendants(matching: .any)["pnvSave"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2) && save.isSelected, "Right lights Save")
+        let held = surface.value as? String
+        // Two "ends" pass while Save is lit: the video stays.
+        kjPause(7)
+        XCTAssertTrue(save.isSelected, "Save is still lit")
+        XCTAssertEqual(surface.value as? String, held, "a lit control holds autoplay")
+        // Left lets go; the next end moves on.
+        XCUIRemote.shared.press(.left)
+        let moved = waitForValue(surface, notIn: [held], seconds: 8)
+        print("PNVAUTOHOLD first=\(first ?? "nil") held=\(held ?? "nil") moved=\(moved ?? "nil")")
+        XCTAssertNotNil(moved, "with nothing lit, the end moves on")
+    }
+
+    /// A lit control lets go after 10 s even while the viewer wakes with no press, as a short
+    /// clip's loop makes it do (Fable round 9): the idle timer counts presses, not wakes.
+    func testReelLitControlLetsGoUnderAWakePulse() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjwakepulse", "YES"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.buttons["pnvViewerSurface"].waitForExistence(timeout: 30), "Reel opens the viewer")
+        kjPause(3)
+        XCUIRemote.shared.press(.right)
+        let save = app.descendants(matching: .any)["pnvSave"]
+        XCTAssertTrue(save.waitForExistence(timeout: 2) && save.isSelected, "Right lights Save")
+        let lit = Date()
+        while save.exists, Date().timeIntervalSince(lit) < 16 { kjPause(0.5) }
+        print("PNVPULSE let go after \(Int(Date().timeIntervalSince(lit))) s")
+        XCTAssertFalse(save.exists, "Save let go within 16 s although the viewer woke every 2 s")
+    }
+
+    /// A broken first video is skipped forward even after a Down, since nothing is behind it.
+    func testReelSkipsForwardFromABrokenFirstVideo() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "first"]
+        kjLaunch(app)
+        dismissNotice(app)
+        let reel = app.buttons["pnvReel"]
+        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
+        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
+        XCUIRemote.shared.press(.select)
+        let surface = app.buttons["pnvViewerSurface"]
+        XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
+        let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
+        // Read while the first is still failing: a `first` that is really the second (read late)
+        // would let short clips pass every later check with no skip run.
+        let state = app.descendants(matching: .any)["pnvViewerState"]
+        XCTAssertTrue(state.exists && !state.label.contains("Loading"), "the first video shows its failure: \(state.label)")
+        let second = waitForValue(surface, notIn: [first, nil, ""], seconds: 8)
+        XCTAssertNotNil(second, "the broken first was skipped on to the second")
+        // Down onto the broken first: it must show, then be skipped forward to the second again.
+        XCUIRemote.shared.press(.down)
+        let back = waitForValue(surface, notIn: [second], seconds: 5)
+        XCTAssertEqual(back, first, "Down went back onto the first video")
+        let landed = waitForValue(surface, notIn: [first], seconds: 8)
+        print("PNVFWD first=\(first ?? "nil") second=\(second ?? "nil") landed=\(landed ?? "nil")")
+        XCTAssertEqual(landed, second, "a broken first video is skipped forward")
+    }
+
+    /// The surface's value once it is none of `values`, polled every 0.25 s; nil if it never is.
+    private func waitForValue(_ element: XCUIElement, notIn values: [String?], seconds: TimeInterval) -> String? {
+        let end = Date().addingTimeInterval(seconds)
+        while Date() < end {
+            let now = element.value as? String
+            if !values.contains(now) { return now }
+            kjPause(0.25)
+        }
+        return nil
+    }
+
     private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
         let app = XCUIApplication()
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", broken]
@@ -362,8 +517,8 @@ final class PicsVidsUITests: XCTestCase {
             XCUIRemote.shared.press(button); kjPause(0.6)
             XCTAssertEqual(surface.value as? String, before, note)
         }
-        // Down on the first video of a deal stays put; Left with nothing lit does nothing.
-        keeps(.down, "Down on the first video stays put")
+        // Left with nothing lit does nothing. (Down on the first video is proved in
+        // testReelSkipsBackwardAfterDown, where the first video is known to play.)
         keeps(.left, "Left with nothing lit does not change the video")
         XCTAssertFalse(save.exists, "Left with nothing lit lights nothing")
         // Right lights Save and does not change the video; Left from Save lets go.
@@ -407,6 +562,8 @@ final class PicsVidsUITests: XCTestCase {
             kjPause(1.5)
             let now = surface.value as? String
             XCTAssertNotEqual(now, last, "Up \(press) moved on")
+            // The surface names the kind on show in debug builds: the Reel shows nothing but video.
+            XCTAssertEqual(surface.label, "video", "Up \(press) is a video, not a picture")
             if let now { shown.append(now) }
             if let now { seen.insert(now) }
             last = now
@@ -437,6 +594,11 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
+        // Live data: a Khajistan TV programme (ktv-) runs for many minutes, past this test's wait.
+        // Step on to a short clip first; the end of a clip is what is being proved.
+        for _ in 0..<6 where (surface.value as? String ?? "").hasPrefix("ktv-") {
+            XCUIRemote.shared.press(.up); kjPause(2)
+        }
         let first = surface.value as? String
         XCTAssertFalse((first ?? "").isEmpty, "the Reel shows a video")
         // Live data: clips run from seconds to minutes, so poll every 2 s for up to 120 s.

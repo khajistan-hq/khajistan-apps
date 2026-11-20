@@ -129,6 +129,10 @@ struct PnvViewerView: View {
             .accessibilityIdentifier("pnvViewerSurface")
             // The object on show, for UI tests that walk the stream.
             .accessibilityValue(stranded ? "" : current.media_key)
+            #if DEBUG
+            // The kind on show, for the test that the Reel shows only video. Debug only.
+            .accessibilityLabel(current.isVideo ? "video" : "picture")
+            #endif
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
@@ -528,7 +532,8 @@ struct PnvViewerView: View {
                 // a press still waiting on the next page is left to finish.
                 // A lit control loops the video too, so Select never acts on one the viewer did
                 // not choose.
-                if videosOnly, !UIAccessibility.isVoiceOverRunning, armed == nil {
+                // VoiceOver and Switch Control loop too, as on the iPhone.
+                if videosOnly, OverlayTiming.hidesItself, armed == nil {
                     if current.id == key, stepping == nil { step(by: 1) }
                     return
                 }
@@ -537,6 +542,18 @@ struct PnvViewerView: View {
                 controller.resume()
             }
             controller.attach(url: url, seekTo: nil, title: "@" + store.accountHandle(for: row), subtitle: "Khajistan", isLive: false)
+            #if DEBUG
+            // `-kjfakeend N`: the video "ends" every N s of play, so a test can see what an end
+            // does under a lit control without waiting on a real clip's length. Debug only.
+            if let seconds = Int(UserDefaults.standard.string(forKey: "kjfakeend") ?? "") {
+                Task { @MainActor [weak controller] in
+                    while let controller, current.id == key, !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(seconds))
+                        if current.id == key { controller.onEnded?() }
+                    }
+                }
+            }
+            #endif
             phase = .ready
         } catch PnvPlaybackError.needsSignIn {
             guard !Task.isCancelled, current.id == key else { return }
@@ -551,7 +568,7 @@ struct PnvViewerView: View {
     /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
     /// Only while it is still on screen, once per object, and not three in a row.
     private func skipBroken(_ key: String) {
-        guard videosOnly, !UIAccessibility.isVoiceOverRunning, skips < 2, skipped != key else { return }
+        guard videosOnly, OverlayTiming.hidesItself, skips < 2, skipped != key else { return }
         skips += 1
         skipped = key
         skipTask?.cancel()
@@ -629,7 +646,8 @@ struct PnvViewerView: View {
     /// restart it on every loop and the control would never let go.
     private func armIdle() {
         releaseTask?.cancel()
-        guard videosOnly, armed != nil, !showCollections, !showSignIn else { return }
+        // Never under VoiceOver or Switch Control, whose users may need longer between presses.
+        guard videosOnly, OverlayTiming.hidesItself, armed != nil, !showCollections, !showSignIn else { return }
         releaseTask = Task {
             try? await Task.sleep(for: Self.reelArmIdle)
             guard !Task.isCancelled, armed != nil, !showCollections, !showSignIn else { return }

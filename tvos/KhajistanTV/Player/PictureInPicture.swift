@@ -29,8 +29,15 @@ final class PictureInPicture: NSObject {
 
     /// A layer as it is drawn. Called on every redraw; a layer already held is left alone.
     func bind(_ layer: AVPlayerLayer) {
-        guard Self.isSupported, controllers[ObjectIdentifier(layer)] == nil,
-              let pip = AVPictureInPictureController(playerLayer: layer) else { return }
+        guard Self.isSupported, controllers[ObjectIdentifier(layer)] == nil else { return }
+        // AVKit answers isPictureInPicturePossible with false on any session but playback, so
+        // the session is set before the controller is made, not when the viewer asks: set in
+        // start(), it came after the check and the window never opened (Apple TV HD, 2026-11-16).
+        // Only when not already playback: a radio playing under the screens set it, and changing
+        // the mode under a live session can drop its sound for a moment.
+        let session = AVAudioSession.sharedInstance()
+        if session.category != .playback { try? session.setCategory(.playback, mode: .moviePlayback) }
+        guard let pip = AVPictureInPictureController(playerLayer: layer) else { return }
         pip.delegate = self
         controllers[ObjectIdentifier(layer)] = pip
     }
@@ -40,8 +47,6 @@ final class PictureInPicture: NSObject {
     func start(_ player: AVPlayer) -> Bool {
         guard !isActive, let pip = controllers.values.first(where: { $0.playerLayer.player === player }),
               pip.isPictureInPicturePossible else { return false }
-        // The window keeps playing outside the app only on a playback session.
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
         restoring = false
         stopping = false
         pip.startPictureInPicture()

@@ -36,6 +36,10 @@ struct PnvReelsView: View {
     /// The page reopenIfLost() put current: the lazy stack may land a seeded position a page off,
     /// so the reader scrolls to it, as it does on arrival.
     @State private var jump = 0
+    /// The page a missing position stands for: nil means the tapped object; "" means none, while a
+    /// Shuffle or region change waits for its feed; otherwise the last page known. The scroll view
+    /// can set position to nil while the reel is empty, so this, not the tapped object, decides.
+    @State private var home: String?
 
     let start: PnvRow
     let source: Source
@@ -65,7 +69,9 @@ struct PnvReelsView: View {
     }
 
     private var isStream: Bool { if case .feed = source { return true } else { return false } }
-    private var currentId: String { position ?? ReelItem.id(lap: 0, start.id) }
+    /// The page on screen. A missing position means `home`, so a re-deal holding the tapped
+    /// object still reopens on its own first page.
+    private var currentId: String { position ?? home ?? ReelItem.id(lap: 0, start.id) }
     private var current: PnvRow? { reel.first { $0.id == currentId }?.row }
 
     var body: some View {
@@ -119,7 +125,12 @@ struct PnvReelsView: View {
         .statusBarHidden()
         .onAppear { activate() }
         .task { await model.saves.load() }
-        .onChange(of: position) { activate() }
+        .onChange(of: position) {
+            // The last page known, so a nil from the scroll view later still names a real page.
+            // Not while a restart waits: only reopenIfLost() ends that, on the new first page.
+            if let position, home != "" { home = position }
+            activate()
+        }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
         .task(id: "\(model.pnvRegion)|\(store.deal)") {
             guard isStream else { return }
@@ -229,6 +240,7 @@ struct PnvReelsView: View {
         owner = nil
         activatedId = nil
         laps = []
+        home = ""
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.
@@ -236,10 +248,12 @@ struct PnvReelsView: View {
         reopenIfLost()
     }
 
-    /// The page on screen left the reel (a new region, a new deal): open on the first page.
+    /// A Shuffle or region change is waiting for its feed, or the page on screen left the reel:
+    /// open on the first page.
     private func reopenIfLost() {
-        guard isStream, let first = items.first, current == nil else { return }
+        guard isStream, let first = items.first, home == "" || current == nil else { return }
         position = ReelItem.id(lap: 0, first.id)
+        home = position
         jump += 1
         activate()
     }

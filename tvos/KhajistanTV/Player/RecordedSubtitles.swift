@@ -25,7 +25,7 @@ final class RecordedSubtitles {
     /// The language on, nil for off.
     private(set) var current: String?
 
-    @ObservationIgnored private var cues: [SubtitleCue] = []
+    @ObservationIgnored private var fileCues: [String: [SubtitleCue]] = [:]
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var group: AVMediaSelectionGroup?
     @ObservationIgnored private var options: [String: AVMediaSelectionOption] = [:]
@@ -44,11 +44,14 @@ final class RecordedSubtitles {
         generation += 1
         ticker?.cancel()
         ticker = nil
+        // Deselect too: with its suppressing output gone, a selected track would be drawn by the
+        // system itself, in its own style, in the picture-in-picture window.
+        if let group, let item { item.select(nil, in: group) }
         if let output, let item { item.remove(output) }
         output = nil
         group = nil
         options = [:]
-        cues = []
+        fileCues = [:]
         tracks = []
         current = nil
         text = nil
@@ -75,17 +78,50 @@ final class RecordedSubtitles {
     /// Reads the file and follows `clock` (seconds into the programme's file). A file that does not
     /// parse offers nothing: there is no control for subtitles that cannot be shown.
     func load(vtt source: String, language: Track, clock: @escaping @MainActor () -> Double?) {
+        load(files: [(language, source)], first: language.code, clock: clock)
+    }
+
+    /// Several files for one programme (English, and Urdu, Persian or Arabic where made), one per
+    /// language, on in `first` when it is among them, else the first that parses. The control steps
+    /// through them and off, as with a film's tracks; a file's choice is not remembered (video.html).
+    func load(files: [(Track, String)], first: String?, clock: @escaping @MainActor () -> Double?) {
         clear()
-        guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { return }
-        cues = parsed
-        tracks = [language]
-        current = language.code
+        addFiles(files, first: first, clock: clock)
+    }
+
+    /// Stored files beside what is already offered. After `attach`, a file in a language the
+    /// manifest carries is skipped (a Stream programme's English file is its manifest's English),
+    /// and the opener is chosen again over the union by the manifest's rule (desiredSubtitle()).
+    /// Alone, files are on by default in `first`.
+    func addFiles(_ files: [(Track, String)], first: String?, clock: @escaping @MainActor () -> Double?) {
+        var added = false
+        for (track, source) in files where fileCues[track.code] == nil && options[track.code] == nil {
+            guard let parsed = WebVTT.parse(source), !parsed.isEmpty else { continue }
+            fileCues[track.code] = parsed
+            tracks.append(track)
+            added = true
+        }
+        guard added else { return }
+        if group == nil {
+            current = tracks.contains { $0.code == first } ? first : tracks.first?.code
+        } else {
+            let stored = UserDefaults.standard.string(forKey: SubtitleChoice.storeKey)
+            let want = SubtitleChoice.desired(available: tracks.map(\.code), stored: stored, preferred: Locale.preferredLanguages)
+            // Only when the union changes the opener: re-applying the same option blanks a line.
+            if want != current { apply(want) }
+        }
+        guard ticker == nil else { return }
         let gen = generation
         ticker = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, gen == self.generation else { return }
-                let showing = self.current == nil ? nil : clock().flatMap { WebVTT.text(at: $0, in: self.cues) }
-                if self.text != showing { self.text = showing }
+                // A file is on: its cues. A manifest track is on: the legible output writes the text.
+                if let code = self.current, let cues = self.fileCues[code] {
+                    let showing = clock().flatMap { WebVTT.text(at: $0, in: cues) }
+                    if self.text != showing { self.text = showing }
+                } else if self.current == nil, self.text != nil {
+                    self.text = nil
+                }
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
@@ -116,6 +152,7 @@ final class RecordedSubtitles {
         legible.suppressesPlayerRendering = true
         relay.onText = { [weak self] text in
             guard let self, gen == self.generation else { return }
+            if let code = self.current, self.fileCues[code] != nil { return }   // a stored file is on
             self.text = self.current == nil ? nil : text
         }
         legible.setDelegate(relay, queue: .main)

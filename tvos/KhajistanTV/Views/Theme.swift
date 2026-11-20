@@ -236,9 +236,37 @@ struct HouseCardStyle: ButtonStyle {
     }
 }
 
-private enum CardMotion {
+/// The motion a remote press drives. Cards, plates and tabs lift on one spring, so focus moves
+/// on one clock, as tvOS's focus engine does, rather than each control easing to its own.
+enum CardMotion {
     static let lift: CGFloat = 1.08
     static let spring = Animation.spring(response: 0.34, dampingFraction: 0.74)
+    /// A list that scrolls under the remote (the guides): no bounce, as a tvOS list does not
+    /// overshoot its rows. Under Reduce Motion it is a short linear step with no lift.
+    static func scroll(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .linear(duration: 0.12) : .smooth(duration: 0.3)
+    }
+    /// A panel that rises over the picture (the guides): opaque, sliding on a curve with no
+    /// bounce. The fade it had under the slide showed the picture and the rows doubled through a
+    /// half-drawn yellow panel. Under Reduce Motion it cuts.
+    static func panel(reduceMotion: Bool) -> Animation? { reduceMotion ? nil : .smooth(duration: 0.4) }
+    /// The guide's rows moving one place. Under Reduce Motion they cut, and only the lit row's
+    /// plate changes, on `scroll`'s short step.
+    static func rows(reduceMotion: Bool) -> Animation? { reduceMotion ? nil : scroll(reduceMotion: false) }
+}
+
+extension View {
+    /// Focus motion on `value`: the card spring, or under Reduce Motion a 0.12 s ease with no
+    /// overshoot. Every focusable card, plate, tab and strip chip moves on this, on one clock.
+    func kjFocusMotion<V: Equatable>(value: V) -> some View { modifier(FocusMotion(value: value)) }
+}
+
+private struct FocusMotion<V: Equatable>: ViewModifier {
+    let value: V
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? .easeOut(duration: 0.12) : CardMotion.spring, value: value)
+    }
 }
 
 private struct CardControl<Face: View>: View {
@@ -249,7 +277,7 @@ private struct CardControl<Face: View>: View {
     var body: some View {
         label
             .scaleEffect(isPressed ? 1.03 : (isFocused ? CardMotion.lift : 1))
-            .animation(CardMotion.spring, value: isFocused)
+            .kjFocusMotion(value: isFocused)
             .animation(.easeOut(duration: 0.1), value: isPressed)
     }
 }
@@ -266,7 +294,7 @@ private struct CardShadow: ViewModifier {
             // a halo under the lettering and the marks (seen in smut, 2026-10-27).
             .compositingGroup()
             .shadow(color: palette.band.opacity(isFocused ? 0.55 : 0), radius: isFocused ? 30 : 0, x: 0, y: isFocused ? 20 : 0)
-            .animation(CardMotion.spring, value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }
 
@@ -304,7 +332,7 @@ struct CardPlate<Content: View>: View {
             .foregroundStyle(look.ink)
             .background(isFocused ? palette.focusPlate : palette.lift)
             .kjCardArt()
-            .animation(.easeOut(duration: 0.15), value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }
 
@@ -429,7 +457,7 @@ private struct HousePlate<Face: View>: View {
             .foregroundStyle(look.ink)
             .background(plate)
             .scaleEffect(isFocused ? 1.03 : 1)
-            .animation(.easeOut(duration: 0.12), value: isFocused)
+            .kjFocusMotion(value: isFocused)
     }
 }
 
@@ -642,7 +670,10 @@ struct HouseSwitch: View {
             SwitchLabel(title: title, detail: detail, isOn: isOn)
         }
         .buttonStyle(HouseButtonStyle())
-        .accessibilityValue(isOn ? "On" : "Off")
+        // Named here, not read off the label: with no detail line the label is the one kicker,
+        // and its uppercase reached the value too ("OFF"), 2026-11-17.
+        .accessibilityLabel(Text(verbatim: title))
+        .accessibilityValue(Text(verbatim: isOn ? "On" : "Off"))
     }
 }
 

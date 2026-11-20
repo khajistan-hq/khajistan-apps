@@ -158,10 +158,17 @@ final class TransmissionStore {
         return StationClock.upcoming(p, channelId: id, at: date, count: count)
     }
 
-    /// When the channel is next on air, for the moment nothing is.
-    func returnTime(channel: Int, at date: Date) -> String? {
+    /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
+    /// it is a day or more away (StationClock.returnLabel).
+    func returnLabel(channel: Int, at date: Date) -> String? {
         guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
-        return StationClock.returnTime(p, channelId: id, at: date)
+        return StationClock.returnLabel(p, channelId: id, at: date)
+    }
+
+    /// The strip a dark channel comes back with, for its show's name beside returnLabel.
+    func returnStrip(channel: Int, at date: Date) -> ScheduleStrip? {
+        guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return nil }
+        return StationClock.returnStrip(p, channelId: id, at: date)
     }
 
     // MARK: - Loading the month
@@ -311,7 +318,12 @@ final class TransmissionStore {
     /// ordinary way and the phase says why.
     func switchBehind(step: Int) async -> PendingSwitch? {
         await loadSchedule()
-        let target = channel(step: step)
+        return await switchBehind(to: channel(step: step))
+    }
+
+    /// `switchBehind(step:)` for a channel chosen by number, as the guide chooses one.
+    func switchBehind(to target: Int) async -> PendingSwitch? {
+        await loadSchedule()
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return nil }
@@ -366,10 +378,25 @@ final class TransmissionStore {
         await tune(channel: channelNumber)
     }
 
+    /// Changes only when account or preview access is invalidated, not at programme handovers.
+    private(set) var accessRevision = 0
+
+    func accessDidChange() {
+        let watching = phase != .idle
+        accessRevision += 1
+        signed.removeAll()
+        stop()
+        // A refused refresh clears the session from inside `carrier`, whose answer the
+        // generation bump above then drops: say so here, or the screen waits on a loader.
+        if watching, auth.session == nil { phase = .needsSignIn }
+    }
+
     func stop() {
         _ = beginTune()
-        playerA.stop()
-        playerB.stop()
+        // An idle controller has already released its item; stopping it again would clear
+        // the shared Now Playing metadata owned by a public Receiver playing elsewhere.
+        if playerA.state != .idle { playerA.stop() }
+        if playerB.state != .idle { playerB.stop() }
         phase = .idle
     }
 
@@ -427,17 +454,19 @@ final class TransmissionStore {
 
     /// Signs one channel's programme. Quiet: a failure here changes nothing on screen.
     private func warm(channel target: Int) async {
+        let access = accessRevision
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),
               let playURL = air.programme?.play_url, let route = Transmission.route(for: playURL) else { return }
         if case .direct = route { return }
-        guard let token = try? await auth.validAccessToken(), let viewer = auth.session?.userId else { return }
+        guard let token = try? await auth.validAccessToken(), access == accessRevision,
+              let viewer = auth.session?.userId else { return }
         let key = "\(route)|\(viewer)"
         if let held = signed[key], held.until > Date() { return }
         guard let request = Transmission.request(for: route, accessToken: token),
               let reply = try? await send(request, refusingRedirects: true), reply.status == 200,
               let url = try? Transmission.carrier(from: reply.data, route: route),
-              auth.session?.userId == viewer else { return }
+              access == accessRevision, auth.session?.userId == viewer else { return }
         signed[key] = (url, Date().addingTimeInterval(Self.signedLife))
     }
 
@@ -447,6 +476,16 @@ final class TransmissionStore {
         guard case .onAir(let current) = phase, let p = programming else { return }
         let now = Self.now()
         if let month, month != StationClock.stationMonth(now) {
+            await tune(channel: channelNumber)
+            return
+        }
+        // The last file of the month ending on time: what follows is in next month's schedule.
+        // Wait for the turn (under handoverLead), then tune, which loads it. Asking this month's
+        // file played the strip's own opener out on iPhone.
+        if let wait = StationClock.monthHandoverWait(after: current, at: now) {
+            let gen = generation
+            try? await Task.sleep(for: .seconds(wait + 0.05))   // a hair past the turn
+            guard gen == generation, case .onAir = phase else { return }
             await tune(channel: channelNumber)
             return
         }
@@ -479,7 +518,7 @@ final class TransmissionStore {
 
     private func goOffAir(_ p: Programming, channelId: String?, at date: Date, generation gen: Int) {
         player.stop()
-        let returns = channelId.flatMap { StationClock.returnTime(p, channelId: $0, at: date) }
+        let returns = channelId.flatMap { StationClock.returnLabel(p, channelId: $0, at: date) }
         phase = .offAir(channelName: channelName(channelNumber), returns: returns)
         watchForReturn(generation: gen)
     }

@@ -143,7 +143,45 @@ enum SubtitleChoice {
     /// The site's stored choice, "off" or a two-letter code (open-frequencies.js SUBS_KEY).
     static let storeKey = "kj-of-subtitles"
 
-    static func langOf(_ value: String?) -> String { String((value ?? "").prefix(2)).lowercased() }
+    /// A language tag's base code: "fa-IR" and "fa_IR" are fa, "est" stays est (not "es"), "prs"
+    /// stays Dari. The website's tvSubCode() reads tags the same way.
+    static func langOf(_ value: String?) -> String {
+        String((value ?? "").split(whereSeparator: { $0 == "-" || $0 == "_" }).first ?? "").lowercased()
+    }
+
+    /// The house's own names for the languages a Transmission programme can carry, as vod.json
+    /// labels a film's. Punjabi is written in Shahmukhi, so its own name is too.
+    static let house: [SubtitleLanguage] = [
+        .init(code: "en", name: "English", native: nil),
+        .init(code: "fa", name: "Persian", native: "فارسی"),
+        .init(code: "ur", name: "Urdu", native: "اردو"),
+        .init(code: "pa", name: "Punjabi", native: "پنجابی"),
+        .init(code: "ar", name: "Arabic", native: "العربية"),
+        .init(code: "ps", name: "Pashto", native: "پښتو"),
+        .init(code: "he", name: "Hebrew", native: "עברית"),
+        .init(code: "fr", name: "French", native: "français"),
+        .init(code: "es", name: "Spanish", native: "español"),
+        .init(code: "de", name: "German", native: "Deutsch"),
+        .init(code: "prs", name: "Dari", native: "دری"),
+    ]
+
+    /// The language of a prepared file, from its name: `<id>.fa.vtt` is Persian, `<id>.fa-IR.vtt`
+    /// too, `<id>.prs.vtt` is Dari; a query or fragment is not part of the name. A name without a
+    /// language is English, which is what every file was before the name said otherwise. The
+    /// website's tvSubFileLang() reads names the same way.
+    static func fileLanguage(_ path: String) -> String {
+        let bare = path.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "?" || $0 == "#" }).first ?? ""
+        let parts = (bare.split(separator: "/").last ?? "").split(separator: ".")
+        guard parts.count >= 3, parts.last?.lowercased() == "vtt" else { return "en" }
+        let tag = parts[parts.count - 2].lowercased().split(separator: "-", omittingEmptySubsequences: false)
+        let letters = { (s: Substring) in s.allSatisfy { $0.isASCII && $0.isLetter } }
+        guard (2...3).contains(tag[0].count), letters(tag[0]) else { return "en" }
+        if tag.count == 2, !((2...8).contains(tag[1].count) && tag[1].allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }) { return "en" }
+        guard tag.count <= 2 else { return "en" }
+        // A three-letter word counts only when it is a language the house names (x.raw.vtt is English).
+        let code = String(tag[0])
+        return code.count == 2 || house.contains(where: { $0.code == code }) ? code : "en"
+    }
 
     /// One entry per language, the first announcement winning (availableSubtitles()).
     static func distinct(_ codes: [String]) -> [String] {
@@ -166,6 +204,15 @@ enum SubtitleChoice {
         if let stored, available.contains(stored) { return stored }
         for language in preferred.map(langOf) where available.contains(language) { return language }
         return available.contains("en") ? "en" : nil
+    }
+
+    /// Which of a programme's prepared files opens (video.html offer()): files are on by default, so
+    /// "off" is not a choice here. The remembered language, then the device's, then the language the
+    /// schedule's file name gives, then the first.
+    static func fileOpener(available: [String], stored: String?, preferred: [String], named: String) -> String? {
+        if let stored, available.contains(stored) { return stored }
+        for language in preferred.map(langOf) where available.contains(language) { return language }
+        return available.contains(named) ? named : available.first
     }
 }
 

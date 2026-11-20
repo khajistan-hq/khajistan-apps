@@ -92,9 +92,7 @@ struct ReceiverPlayerView: View {
                 if current.mediaType == "tv", let song = NowPlaying.caption(song: tuner.song, mediaType: "tv") {
                     Text(song).kjBody().lineLimit(2)
                 }
-                if let attribution = current.sourceLine {
-                    Text(attribution).kjSmall(faint: true).lineLimit(3)
-                }
+                // No "broadcast by" line in the app: it stays on the website (owner, 2026-11-16).
             }
             HStack {
                 Button { overlay.wake(settled: false); model.captions.toggle() } label: {
@@ -426,7 +424,7 @@ struct ReceiverDevice: View {
             case .idle, .tuning: return "\(store.channelName(store.channelNumber)) \u{00B7} Connecting\u{2026}"
             case .needsSignIn: return "Sign in to watch"
             case .offAir(_, let returns):
-                return returns.map { "Off air \u{00B7} returns at \($0) \(StationClock.tzLabel)" } ?? "Off air"
+                return returns.map { "Off air \u{00B7} returns at \($0)" } ?? "Off air"
             case .failed(let message): return message
             case .onAir: return "\(store.channelName(store.channelNumber)) \u{00B7} \(playerText)"
             }

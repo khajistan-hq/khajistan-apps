@@ -30,11 +30,12 @@ enum SupabaseRoute {
 
     private static let key = "kj.supabaseRoute"
     /// How long either way gets to answer before it counts as unreachable.
-    private static let probeLimit: TimeInterval = 2.5
+    static let probeLimit: TimeInterval = 2.5
     private static let lock = NSLock()
     nonisolated(unsafe) private static var chosen = Path(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .direct
     nonisolated(unsafe) private static var settling: Task<Path, Never>?
     nonisolated(unsafe) private static var decidedAt = Date.distantPast
+    nonisolated(unsafe) private static var settlingStarted = Date.distantPast
     /// While neither way answers, how often a request may ask again before it fails at once.
     private static let recheckEvery: TimeInterval = 10
 
@@ -87,7 +88,7 @@ enum SupabaseRoute {
     static func ready() async -> Path {
         // Nothing answered last time: ask again now, as the screen opens (at most `probeLimit`).
         if path == .unreachable {
-            lock.withLock { settling = nil }
+            askAgain()
             return await settle()
         }
         if UserDefaults.standard.string(forKey: key) != nil {
@@ -97,24 +98,58 @@ enum SupabaseRoute {
         return await settle()
     }
 
+    /// What an asking runs. The two probes, except in the test that counts how many askings a
+    /// burst of failures starts.
+    nonisolated(unsafe) static var decider: @Sendable () async -> Path = { await decide() }
+
+    /// Forgets the asking outright, for a test to start from a known state.
+    static func forgetAsking() { lock.withLock { settling = nil; settlingStarted = .distantPast } }
+
     /// Asks both ways once per launch; a second caller waits for the same answer.
     @discardableResult
     static func settle() async -> Path {
         let task: Task<Path, Never> = lock.withLock {
             if let settling { return settling }
-            let made = Task.detached(priority: .userInitiated) { await decide() }
+            let made = Task.detached(priority: .userInitiated) { await decider() }
             settling = made
+            settlingStarted = Date()
             return made
         }
         return await task.value
     }
+
+    /// Forgets the last answer so the next `settle()` asks both ways again, unless that asking began
+    /// within the last `shareWindow` seconds. Thirty cover loads failing in one Wi-Fi blink each
+    /// called this and each began its own pair of probes, the last to finish choosing the route;
+    /// now they share the one already under way.
+    static func askAgain() {
+        lock.withLock {
+            if asksAgain(now: Date(), started: settlingStarted, decided: decidedAt, chosen: chosen) { settling = nil }
+        }
+    }
+
+    /// Whether a failure or a screen opening starts a new asking, or shares the last one.
+    /// - An asking that began within `shareWindow` is still under way or just answered: share it.
+    ///   The window is longer than the longest a probe can run (`probeLimit` + 0.5 s resource
+    ///   timeout), so a failure can never start a second asking while the first is in flight.
+    /// - Except an asking that has FINISHED with no way open (`decided` at or after `started`):
+    ///   the network may be back, and a screen opening or a Try again must ask. While that
+    ///   asking is still in flight (`decided` is the earlier answer's time) it is shared.
+    static func asksAgain(now: Date, started: Date, decided: Date, chosen: Path) -> Bool {
+        if chosen == .unreachable && decided >= started { return true }
+        // A clock set backwards makes the age negative: ask, or the last answer would be shared
+        // for as long as the clock takes to catch up.
+        let age = now.timeIntervalSince(started)
+        return age < 0 || age > shareWindow
+    }
+    static let shareWindow: TimeInterval = probeLimit + 1
 
     /// A request on the project could not connect: ask both ways again, and say whether there is now
     /// a working route other than the one that failed, so the caller can try once more on it.
     static func reconsider(after error: Error) async -> Bool {
         guard isUnreachable(error) else { return false }
         let before = path
-        lock.withLock { settling = nil }
+        askAgain()
         let after = await settle()
         return after != before && after != .unreachable
     }
@@ -133,7 +168,7 @@ enum SupabaseRoute {
             // Ask again now and then, so the apps come back by themselves when the network does.
             let stale = lock.withLock { Date().timeIntervalSince(decidedAt) > recheckEvery }
             if stale {
-                lock.withLock { settling = nil }
+                askAgain()
                 _ = await settle()
             }
             if path == .unreachable { throw URLError(.cannotConnectToHost) }
@@ -227,5 +262,97 @@ enum SupabaseRoute {
         defer { session.finishTasksAndInvalidate() }
         guard let (_, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return false }
         return answers(status: http.statusCode, routeHeader: http.value(forHTTPHeaderField: "x-kj-route"), viaProxy: viaProxy)
+    }
+}
+
+#if DEBUG
+/// `-kjfixtures <dir>`: a debug build asks the network first and, when that fails or answers
+/// anything but 200, answers a GET from `<dir>/<path>`. CI, 2026-11-14: one TLS error on
+/// receiver-index.json failed a pull request that never touched the Receiver. Live first because a
+/// recording goes stale: by 11-15 the nightly probe had taken four Indus news channels the 11-14
+/// recording still listed off the dial, and a test that played them found them dead.
+/// `-kjfixturesonly YES` skips the network, so a test can prove the recording is what it reads.
+final class KJFixtureProtocol: URLProtocol, @unchecked Sendable {
+    /// Read on each request, not once: package tests in one process point it at different directories.
+    static var directory: URL? { UserDefaults.standard.string(forKey: "kjfixtures").map { URL(fileURLWithPath: $0) } }
+    static var only: Bool { UserDefaults.standard.bool(forKey: "kjfixturesonly") }
+    /// The network, without this protocol, and short enough that a dead connection still leaves
+    /// the caller's own timeout time to read the recording.
+    private static let live: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 15
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: config)
+    }()
+    private var liveTask: URLSessionDataTask?
+
+    /// Explicit UI-test media: real AVPlayer decoding without an upstream carrier dependency.
+    /// Release builds have neither this switch nor the local-file route.
+    static func mediaURL(for medium: String) throws -> URL? {
+        guard UserDefaults.standard.bool(forKey: "kjfixturemedia") else { return nil }
+        guard let directory else { throw URLError(.fileDoesNotExist) }
+        let file = directory.appendingPathComponent("media/" + (medium == "radio" ? "sound.m4a" : "picture.mp4"))
+        guard FileManager.default.fileExists(atPath: file.path) else { throw URLError(.fileDoesNotExist) }
+        return file
+    }
+
+    /// The recorded answer for a URL: its path (off the `/sb/` proxy) under the fixture directory.
+    static func file(for request: URLRequest) -> URL? {
+        guard let directory, let url = request.url, (request.httpMethod ?? "GET") == "GET" else { return nil }
+        let path = SupabaseRoute.unrouted(url).path
+        guard path.count > 1, !path.contains("..") else { return nil }
+        let file = directory.appendingPathComponent(String(path.dropFirst()))
+        return FileManager.default.fileExists(atPath: file.path) ? file : nil
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { file(for: request) != nil }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() { liveTask?.cancel() }
+
+    // ponytail: the live answer reaches the client from the session's queue, not the loading
+    // thread; fine for tests, not for a shipping protocol.
+    override func startLoading() {
+        if Self.only { return answerFromFile() }
+        liveTask = Self.live.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            if (error as? URLError)?.code == .cancelled { return }
+            if let data, let http = response as? HTTPURLResponse, http.statusCode == 200 {
+                self.answer(data, headers: ["Content-Type": http.value(forHTTPHeaderField: "Content-Type") ?? "application/json"])
+            } else {
+                self.answerFromFile()
+            }
+        }
+        liveTask?.resume()
+    }
+
+    private func answerFromFile() {
+        guard let file = Self.file(for: request), let body = try? Data(contentsOf: file) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.fileDoesNotExist))
+            return
+        }
+        answer(body, headers: ["Content-Type": "application/json"])
+    }
+
+    private func answer(_ body: Data, headers: [String: String]) {
+        guard let url = request.url,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers) else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+#endif
+
+extension URLSessionConfiguration {
+    /// Recorded answers behind the network in a debug build launched with `-kjfixtures`; unchanged otherwise.
+    func answeringFromFixtures() -> URLSessionConfiguration {
+        #if DEBUG
+        if KJFixtureProtocol.directory != nil { protocolClasses = [KJFixtureProtocol.self] + (protocolClasses ?? []) }
+        #endif
+        return self
     }
 }

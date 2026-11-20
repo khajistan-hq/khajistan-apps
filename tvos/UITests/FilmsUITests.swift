@@ -67,8 +67,9 @@ final class FilmsUITests: XCTestCase {
 
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "The film's player must show its state")
-        for _ in 0..<45 where state.label != "Playing" { kjPause(1) }
-        XCTAssertEqual(state.label, "Playing", "the preview must play")
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45),
+                       .completed, "the preview must play")
         kjScreenshot("vod-04-preview-with-panel", app: app)
         kjPause(5)
         kjScreenshot("vod-05-preview-picture", app: app)
@@ -93,14 +94,10 @@ final class FilmsUITests: XCTestCase {
     func testRegionCarriesItsFilmsOnDemand() throws {
         let app = try launch()
         XCTAssertTrue(films(app).firstMatch.waitForExistence(timeout: 60), "vod.json must load")
-        // Down onto the region strip, then east along it to Indus.
+        // Onto the region list beside the map, then down it to Indus.
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<20 where !(focusedRegion.exists && focusedRegion.identifier == "region-indus") {
-            XCUIRemote.shared.press(.right)
-            kjPause(0.6)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
         XCTAssertEqual(focusedRegion.identifier, "region-indus", "Indus must take focus")
         XCUIRemote.shared.press(.select)
 

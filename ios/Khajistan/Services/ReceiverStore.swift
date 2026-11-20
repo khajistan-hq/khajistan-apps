@@ -47,7 +47,7 @@ final class ReceiverStore {
         config.timeoutIntervalForResource = 30
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
-        urlSession = URLSession(configuration: config)
+        urlSession = URLSession(configuration: config.answeringFromFixtures())
     }
 
     private nonisolated static func dataURL(_ file: String) -> URL {
@@ -181,6 +181,9 @@ final class ReceiverStore {
               let stream = channel.activeStream else {
             throw ReceiverStoreError.notOnDial
         }
+        #if DEBUG
+        if let fixture = try KJFixtureProtocol.mediaURL(for: channel.mediaType) { return fixture }
+        #endif
         let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }

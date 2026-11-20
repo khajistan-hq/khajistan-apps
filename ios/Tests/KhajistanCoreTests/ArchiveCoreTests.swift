@@ -76,6 +76,38 @@ func downloadNamesCannotTraverseDirectories() throws {
     try expect(longName.hasSuffix(".pdf"))
 }
 
+func downloadsComeOnlyFromTheArchivesHosts() throws {
+    for value in ["https://khajistan-archive.pages.dev/books/a.pdf", "https://ARCHIVE.khajistan.com/x.zip",
+                  "blob:https://khajistan-archive.pages.dev/5c1f-uuid"] {
+        try expect(ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    for value in ["https://evil.example/a.pdf", "http://khajistan-archive.pages.dev/a.pdf",
+                  "https://khajistan-archive.pages.dev.evil.example/a.pdf", "https://khajistan-archive.pages.dev:8443/a.pdf",
+                  "https://user@khajistan-archive.pages.dev/a.pdf", "blob:https://evil.example/5c1f-uuid",
+                  "blob:null/5c1f-uuid", "data:application/pdf;base64,JVBERi0=", "file:///etc/hosts"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    try expect(!ArchiveURL.allowsDownload(nil))
+    // A buyer's file is a signed URL into the archive's own Storage; nothing else on that host.
+    let storage = "https://\(SupabaseRoute.host)/storage/v1/object"
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/sign/digital/a.pdf?token=t")))
+    try expect(ArchiveURL.allowsDownload(URL(string: "\(storage)/public/covers/a.jpg")))
+    for value in ["https://\(SupabaseRoute.host)/rest/v1/orders", "https://\(SupabaseRoute.host)/functions/v1/my-downloads",
+                  "https://evil.supabase.co/storage/v1/object/sign/a.pdf", "http://\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://x@\(SupabaseRoute.host)/storage/v1/object/sign/a.pdf",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/../../functions/v1/x",
+                  "https://\(SupabaseRoute.host)/storage/v1/object/public/%2E%2E/%2E%2E/functions/v1/x"] {
+        try expect(!ArchiveURL.allowsDownload(URL(string: value)))
+    }
+    // The browser's response decision, as ArchiveBrowser calls it.
+    let site = URL(string: "https://khajistan-archive.pages.dev/a.pdf"), evil = URL(string: "https://evil.example/a.pdf")
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "") == .allow)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: true, contentDisposition: "Attachment; filename=a.pdf") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: evil, canShowMIMEType: false, contentDisposition: "") == .refuse)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: false, contentDisposition: "") == .download)
+    try expect(ArchiveURL.decideResponse(url: site, canShowMIMEType: true, contentDisposition: "attachment") == .download)
+}
+
 // MARK: - Sky (the website's KJSky, differential)
 
 private struct SkyFixture: Decodable {
@@ -323,6 +355,67 @@ func regionTapPreservesMediumAndEligibleCatalogue() throws {
     try expect(changed.channel == radio && changed.list == [radio])
 }
 
+func surfPressVisitsEveryChannelBeforeRepeating() throws {
+    let channels = try (0..<5).map { try regionChannel("ch-\($0)", region: ["indus", "parsistan"][$0 % 2]) }
+    let ids = Set(channels.map(\.id))
+    let main = SurfChoice(medium: .all, scope: .main)
+    // Shuffling is random, so many fresh histories make a lucky pass of the old behaviour impossible.
+    for _ in 0..<40 {
+        var history = SurfHistory()
+        var onAir: Channel? = channels[2] // chosen from a region before the first Surf
+        var seen: [String] = []
+        for _ in 0..<(channels.count - 1) {
+            let pick = try require(history.press(SurfCatalogue(channels: channels.shuffled(), missingRegions: []),
+                                                 for: main, onAir: onAir))
+            try expect(pick.id != onAir?.id)
+            seen.append(pick.id)
+            onAir = pick
+        }
+        try expect(Set(seen) == ids.subtracting([channels[2].id]) && seen.count == channels.count - 1)
+        // The cycle is done: the next one visits all five, never opening with the channel on air.
+        var next: [String] = []
+        for _ in channels {
+            let pick = try require(history.press(SurfCatalogue(channels: channels, missingRegions: []), for: main, onAir: onAir))
+            try expect(pick.id != onAir?.id)
+            next.append(pick.id)
+            onAir = pick
+        }
+        try expect(Set(next) == ids)
+        // A new pool (Beyond the atlas on) starts its own cycle: every channel, the one on air not first.
+        let everywhere = SurfChoice(medium: .all, scope: .everywhere)
+        let first = try require(history.press(SurfCatalogue(channels: channels, missingRegions: []), for: everywhere, onAir: onAir))
+        try expect(first.id != onAir?.id)
+    }
+}
+
+func surfCountsStepsAndOutlivesAFailingList() throws {
+    let channels = try (0..<5).map { try regionChannel("ch-\($0)", region: "indus") }
+    let main = SurfChoice(medium: .all, scope: .main)
+    for _ in 0..<40 {
+        // Next/previous inside the pool are visits (ReceiverTuner.step): Surf never lands on them.
+        var history = SurfHistory()
+        let full = SurfCatalogue(channels: channels, missingRegions: [])
+        let first = try require(history.press(full, for: main, onAir: nil))
+        let stepped = channels.filter { $0.id != first.id }.prefix(3)
+        for channel in stepped { history.visit(channel, for: main) }
+        let surfed = try require(history.press(full, for: main, onAir: stepped.last))
+        try expect(surfed.id != first.id && !stepped.contains { $0.id == surfed.id })
+        // A region list that never loads: once the loaded channels are spent, Surf still plays one
+        // (not the one on air) instead of going dead until relaunch.
+        var failing = SurfHistory()
+        let partial = SurfCatalogue(channels: Array(channels.prefix(2)), missingRegions: ["parsistan"])
+        var onAir: Channel?
+        for _ in 0..<6 {
+            let pick = try require(failing.press(partial, for: main, onAir: onAir))
+            try expect(pick.id != onAir?.id)
+            onAir = pick
+        }
+        // Nothing loaded at all: nothing to play.
+        var empty = SurfHistory()
+        try expect(empty.press(SurfCatalogue(channels: [], missingRegions: ["indus"]), for: main, onAir: nil) == nil)
+    }
+}
+
 private func expect(_ condition: @autoclosure () throws -> Bool, file: String = #fileID, line: Int = #line) throws {
     guard try condition() else { throw AssertionFailure(description: "\(file):\(line) assertion failed") }
 }
@@ -360,6 +453,7 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Bounded history and bookmark toggle", historyDeduplicatesAndHasBoundedSize),
             ("Disk round trip and corruption preservation", libraryRoundTripAndCorruptFile),
             ("Download traversal and Unicode limits", downloadNamesCannotTraverseDirectories),
+            ("Downloads come only from the archive's hosts", downloadsComeOnlyFromTheArchivesHosts),
             ("Sky matches the site's KJSky (differential)", skyMatchesTheSitesJS),
             ("The sky comparator can fail", skyComparatorCanFail),
             ("A skin pick holds only in its band", skyPickHoldsOnlyInItsBand),
@@ -371,6 +465,8 @@ func captionRequestRejectsIdentityChangesAcrossAuthAndReply() throws {
             ("Every live website navigation route has a destination", everyLiveWebsiteNavigationRouteHasADestination),
             ("Preview password only answers the exact HTTPS archive gate once", previewPasswordOnlyAnswersTheExactHTTPSArchiveGateOnce),
             ("A region tap after global Surf steps and wraps only within that region", regionTapAfterGlobalSurfNeverEscapesItsRegion),
+            ("Surf visits every channel in its pool before any repeats", surfPressVisitsEveryChannelBeforeRepeating),
+            ("Surf counts next/previous as visits and outlives a list that keeps failing", surfCountsStepsAndOutlivesAFailingList),
             ("Region taps preserve media choices and the eligible catalogue", regionTapPreservesMediumAndEligibleCatalogue),
             ("A store build leaves out the site's own Pics/Vids, Chat and Wall routes", storeBuildLeavesOutTheSitesOwnRoutes),
             ("The open chain preserves the store exclusion at every step", storeExclusionSurvivesTheOpenChain)

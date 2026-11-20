@@ -11,13 +11,21 @@ final class KhajistanUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Recorded answers for the receiver's list, feeds and map and for the chat room list
+    /// (`tvos/UITests/Fixtures/recorded`, shared with the Apple TV tests and refreshed by its
+    /// `refresh.sh`), read instead of the live list (see `kjFixtureArguments`): one TLS error on
+    /// receiver-index.json failed pull requests that never touched the Receiver (CI, 2026-11-14).
+    static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../../tvos/UITests/Fixtures/recorded").standardized.path
+
     /// `-kjstorefront USA` stands in for the App Store storefront the simulator does not have; a
     /// test of another storefront passes its own in `extra`, which comes later and wins.
     private func launch(skin: String, tab: String = "home", extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         // The app plays a channel when it opens on the Receiver; the tests that drive the
         // receiver start it quiet so a launch pick cannot race their own. `extra` can turn it on.
-        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"] + extra
+        app.launchArguments = ["-kjskin", skin, "-kjtab", tab, "-kjstorefront", "USA", "-kjautoplay", "NO"]
+            + kjFixtureArguments(Self.fixtures) + extra
         app.launch()
         return app
     }
@@ -83,20 +91,49 @@ final class KhajistanUITests: XCTestCase {
             if channel.exists && channel.isHittable { return channel }
             // Flicks until the first row is built, because a press-and-drag on the map scrubs
             // stations instead of scrolling.
-            guard channel.exists else { catalogue.swipeUp(); usleep(400_000); continue }
+            // One snapshot for the row's place: the catalogue is lazy, so a row seen by `exists`
+            // can be gone by the next query, and `frame` on it then fails the test (as on HOME, 6571d69).
+            guard let row = (try? channel.snapshot())?.frame, !row.isEmpty else {
+                catalogue.swipeUp(); usleep(400_000); continue
+            }
             // Then short drags with no momentum, started just above the house bar, where the list
             // or the controls above it are. Since the Receiver's two switches (c9932fd) a flick
             // carried the row across the whole gap between the docked player and the bar (about
             // 370 pt on iPhone 17); 160 pt cannot jump it.
             let start = app.coordinate(withNormalizedOffset: .zero)
                 .withOffset(CGVector(dx: catalogue.frame.midX, dy: catalogue.frame.maxY - 120))
-            let move: CGFloat = channel.frame.midY < catalogue.frame.midY ? 160 : -160
+            let move: CGFloat = row.midY < catalogue.frame.midY ? 160 : -160
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: move)))
             usleep(400_000)
         }
         waitFor(channel, 40, "Indus lists its channels after scrolling past the map")
         XCTAssertTrue(channel.isHittable, "A listed channel can be selected with one tap")
         return channel
+    }
+
+    /// Tunes channels in list order, by the set's own Next, until one plays and, given
+    /// `lit`, shows a lit picture there. A live stream can be down on the runner (CoreMedia
+    /// -12312, CI 2026-11-14) or open on a black frame, so after `limit` channels the test is
+    /// skipped, naming what each channel said, instead of failing a change that did not touch it.
+    /// Two channels that play and stay black are the app's picture, not the streams: that fails.
+    private func tuneUntilPlaying(_ app: XCUIApplication, limit: Int = 5, lit: (() -> CGRect)? = nil) throws {
+        let state = app.staticTexts["screenState"]
+        var tried: [String] = []
+        var playedBlack = 0
+        for attempt in 0..<limit {
+            let previous = state.value as? String ?? ""
+            if attempt > 0 { app.buttons["nextChannel"].tap() }
+            let playing = NSPredicate(format: "label == 'Playing' AND value != %@", attempt > 0 ? previous : "")
+            let played = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: state)], timeout: 30) == .completed
+            if played, lit.map({ becomesLit($0(), app) }) ?? true { return }
+            if played { playedBlack += 1 }
+            tried.append("\(state.value as? String ?? "?"): \(played ? "Playing, no picture" : state.label)")
+        }
+        let report = tried.joined(separator: "; ")
+        if playedBlack >= 2 { XCTFail("Channels played with no picture on the set: \(report)"); return }
+        // The local test video always plays: if it did not, the test media is broken.
+        guard kjLiveMedia else { XCTFail("The local test video did not play: \(report)"); return }
+        throw XCTSkip("No channel played on this runner in \(limit) tries: \(report)")
     }
 
     /// The house bar is the app's own: no system tab bar anywhere.
@@ -233,14 +270,33 @@ final class KhajistanUITests: XCTestCase {
         waitFor(map, 5, "the map is on screen")
         let title = app.descendants(matching: .any)["regionTitle"]
         waitFor(title, 10, "the region block is on screen")
-        // The receiver set sits above the map when it is off, so the map can start below the
-        // screen: bring it fully into view before tapping on it.
+        // The playing receiver is pinned above the catalogue. A map can be inside the window
+        // but hidden behind that player, so bring the actual tap point into the scroll viewport.
+        let catalogue = app.scrollViews["receiverCatalogue"]
         let window = app.windows.firstMatch.frame
-        for _ in 0..<4 where map.frame.maxY > window.maxY - 60 || map.frame.minY < window.minY {
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-            start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
+        func tapPoint() -> CGPoint {
+            let frame = map.frame
+            return CGPoint(x: frame.minX + frame.width * 0.25, y: frame.minY + frame.height * 0.48)
+        }
+        func visibleCatalogue() -> CGRect {
+            catalogue.frame.intersection(window).insetBy(dx: 8, dy: 16)
+        }
+        for _ in 0..<8 {
+            let visible = visibleCatalogue()
+            let point = tapPoint()
+            if visible.contains(point) { break }
+            let upper = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.25))
+            let lower = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visible.midX, dy: visible.minY + visible.height * 0.75))
+            if point.y < visible.minY {
+                upper.press(forDuration: 0.05, thenDragTo: lower)
+            } else {
+                lower.press(forDuration: 0.05, thenDragTo: upper)
+            }
             usleep(600_000)
         }
+        XCTAssertTrue(visibleCatalogue().contains(tapPoint()), "the map tap is inside the visible catalogue, below the pinned receiver")
         // The Maghreb is the map's western mass. Its label sits a quarter of the way across and just
         // under half way down, at the same place on every screen because the map is drawn from one
         // viewBox: the middle of the shape, not near an edge of it. The tap is placed on the map
@@ -282,7 +338,7 @@ final class KhajistanUITests: XCTestCase {
     /// A channel plays on the receiver set at the top of the Receiver and goes full screen only
     /// when full screen is chosen (owner, 2026-10-08). Next tunes the next channel behind the
     /// pigeon; closing full screen leaves the same channel playing; power puts it on standby.
-    func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() {
+    func testChannelPlaysDockedAndFullScreenOnlyWhenChosen() throws {
         // The full-screen controls stay up (-kjcontrolsstay, debug only): on the iOS 26 runner the
         // close button never reports a hit point, so it is tapped by its frame, and a hide racing
         // the tap would turn that tap into a wake.
@@ -293,9 +349,7 @@ final class KhajistanUITests: XCTestCase {
         waitFor(state, 10, "the receiver is on the page")
         XCTAssertFalse(app.buttons["closePlayer"].exists, "a channel does not open full screen by itself")
         XCTAssertTrue(app.buttons["tab-receiver"].isHittable, "the tab bar stays on screen")
-        let playing = NSPredicate(format: "label == 'Playing'")
-        expectation(for: playing, evaluatedWith: state)
-        waitForExpectations(timeout: 60)
+        try tuneUntilPlaying(app)
         shot("player-playing", app)
         let before = state.value as? String ?? ""
         XCTAssertFalse(before.isEmpty, "the screen names the channel it carries")
@@ -337,8 +391,9 @@ final class KhajistanUITests: XCTestCase {
             catalogue.swipeDown()
             usleep(400_000)
         }
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         XCTAssertEqual(state.value as? String, "", "Off clears the tuned channel as well as its status")
         shot("player-off", app)
     }
@@ -455,22 +510,23 @@ final class KhajistanUITests: XCTestCase {
     /// "Play with the app closed" (DECISIONS 24): the picture lets go of the player while the app
     /// is away, so a television channel's sound carries on. Back in the app, the picture comes
     /// back, full screen and then docked; Bugbot found both black while the state said Playing.
-    func testReceiverPictureComesBackAfterTheBackground() {
+    func testReceiverPictureComesBackAfterTheBackground() throws {
         let app = launch(skin: "grove", tab: "receiver", extra: ["-kjcontrolsstay", "YES", "-kjtestsignedout", "YES"])
         let first = firstReceiverChannel(app)
         first.tap()
         let state = app.staticTexts["screenState"]
         waitFor(state, 10, "the receiver is on the page")
-        expectation(for: NSPredicate(format: "label == 'Playing'"), evaluatedWith: state)
-        waitForExpectations(timeout: 60)
-        sleep(4)
         // The docked screen sits on the remote, 16:9 across the set; the middle of it is read.
-        let surf = app.buttons["surf"].frame
-        let set = app.descendants(matching: .any)["receiverScreen"].frame
-        let dockHeight = (set.width - 12) * 9 / 16
-        let dock = CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
-                          width: set.width * 0.6, height: dockHeight * 0.6)
-        XCTAssertTrue(becomesLit(dock, app), "the docked picture shows before the background")
+        let docked = { () -> CGRect in
+            let surf = app.buttons["surf"].frame
+            let set = app.descendants(matching: .any)["receiverScreen"].frame
+            let dockHeight = (set.width - 12) * 9 / 16
+            return CGRect(x: set.minX + set.width * 0.2, y: surf.minY - dockHeight * 0.8,
+                         width: set.width * 0.6, height: dockHeight * 0.6)
+        }
+        // A channel that plays and shows a lit picture docked: the precondition, not the check.
+        try tuneUntilPlaying(app, lit: docked)
+        let dock = docked()
 
         app.buttons["fullScreen"].tap()
         waitFor(app.buttons["closePlayer"], 10, "full screen opens")
@@ -529,8 +585,9 @@ final class KhajistanUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'Paused'"), evaluatedWith: state)
         waitForExpectations(timeout: 5)
         app.buttons["receiverOff"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
         // Tap near a tab cell's edge, away from its text; the whole cell must work.
         app.buttons["tab-home"].coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
         waitForHome(app, 5, "One edge tap selects Home")
@@ -574,10 +631,8 @@ final class KhajistanUITests: XCTestCase {
         waitFor(app.buttons["receiverOff"], 5, "One Close tap returns to the dock")
     }
 
-    /// App Store builds (KJ_APP_STORE, owner rulings 2026-10-06) leave Pics/Vids, Chat and the Wall
-    /// out: none of their doors in ROOMS or on HOME, and a stored Pics/Vids launch opens ROOMS
-    /// without it. Builds for our own devices keep all of them. The same test runs in both builds and
-    /// asserts the opposite in each.
+    /// App Store builds leave Pics/Vids, Chat and Wall out; Friends builds retain Pics/Vids.
+    /// Builds for our own devices keep all three. Check the stored launch and ROOMS doors.
     func testPicsVidsChatAndWallAreLeftOutOfStoreBuildsOnly() {
         let app = launch(skin: "day", tab: "picsVids")
         waitFor(app.buttons["tab-home"], 10, "the house bar is drawn")
@@ -588,7 +643,7 @@ final class KhajistanUITests: XCTestCase {
         // The first BAZAAR door follows WALL in the menu in every build: reaching it means the
         // three doors above it were passed.
         let marker = app.buttons["destination-toshakhana"]
-#if KJ_APP_STORE
+#if KJ_APP_STORE && !KJ_FRIENDS
         if app.buttons["tab-rooms"].exists {
             XCTAssertTrue(app.buttons["tab-rooms"].isSelected, "an excluded Pics/Vids launch falls back to ROOMS")
         } else {
@@ -608,10 +663,16 @@ final class KhajistanUITests: XCTestCase {
         if app.buttons["stackBack"].exists { app.buttons["stackBack"].tap() }
         for _ in 0..<8 where !marker.exists { app.swipeUp() }
         XCTAssertTrue(marker.exists, "ROOMS scrolled past the Chat and Wall doors")
-        XCTAssertTrue(pnvDoor.exists, "builds for our own devices keep the Pics/Vids room")
+        XCTAssertTrue(pnvDoor.exists, "this build keeps the Pics/Vids room")
         XCTAssertFalse(app.buttons["destination-receiver"].exists, "ROOMS does not repeat a bar door")
+#if KJ_APP_STORE
+        XCTAssertFalse(chatDoor.exists, "a Friends build has no Chat door")
+        XCTAssertFalse(wallDoor.exists, "a Friends build has no Wall door")
+        shot("friends-build-rooms", app)
+#else
         XCTAssertTrue(chatDoor.exists, "builds for our own devices keep the Chat door")
         XCTAssertTrue(wallDoor.exists, "builds for our own devices keep the Wall door")
+#endif
 #endif
     }
 
@@ -737,6 +798,43 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(reel.exists && abs(reel.frame.minY) < 20, "a swipe down goes back to the tapped object")
         app.buttons["closePlayer"].tap()
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "close returns to the grid")
+    }
+
+    /// A reel opened on a deep tile, then re-dealt in stream order, opens on the stream's first
+    /// object with its rail: the deep tile is in the new deal too, and must not stand in for it.
+    func testPicsVidsRedealOpensOnTheFirstPage() {
+        let app = launch(skin: "day", tab: "picsVids")
+        let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
+        waitFor(tiles.firstMatch, 40, "the stream loads")
+        let notice = app.buttons["adultNoticeOK"]
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        let firstKey = String(tiles.element(boundBy: 0).identifier.dropFirst("tile-".count))
+        // Three or more pages from the first, so the first page is not a built neighbour with a rail.
+        let deep = (3..<max(3, min(tiles.count, 9))).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable }
+        guard let deep else { return XCTFail("a tile three or more past the first is on screen") }
+        let deepKey = String(deep.identifier.dropFirst("tile-".count))
+        XCTAssertNotEqual(deepKey, firstKey)
+        deep.tap()
+        waitFor(app.descendants(matching: .any)["reel-\(deepKey)"], 10, "the reel opens on the deep tile")
+        let shuffle = app.buttons["pnvReelShuffle"]
+        waitFor(shuffle, 10, "Shuffle is at the top of the reel")
+        shuffle.tap()
+        XCTAssertTrue(shuffle.waitForValue("On"), "Shuffle turns on")
+        let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
+        let dealt = NSPredicate { _, _ in (0..<min(reels.count, 4)).contains { abs(reels.element(boundBy: $0).frame.minY) < 20 } }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dealt, object: nil)], timeout: 30), .completed,
+                       "the shuffled deal opens on a page")
+        shuffle.press(forDuration: 1.2)
+        app.buttons["Stream order"].tap()
+        XCTAssertTrue(shuffle.waitForValue("Off"), "a long press goes back to the stream's order")
+        let first = app.descendants(matching: .any)["reel-\(firstKey)"]
+        let landed = NSPredicate { _, _ in first.exists && abs(first.frame.minY) < 20 }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: landed, object: nil)], timeout: 30), .completed,
+                       "stream order opens on the stream's first object, not the deep tile")
+        let save = app.buttons["pnvSave"]
+        let railed = NSPredicate { _, _ in save.exists && save.isHittable }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: railed, object: nil)], timeout: 10), .completed,
+                       "the first page on screen has its rail")
     }
 
     /// The reel never ends (owner, 2026-11-14): a region with fewer objects than swipes still
@@ -942,6 +1040,25 @@ final class KhajistanUITests: XCTestCase {
         }
         XCTFail("no free title with several issues on the first rows of the shelf")
         return ""
+    }
+
+    func testEmptyPreviewSaveKeepsMountedReadingRoomUsable() {
+        let app = launch(skin: "day", extra: ["-kjtestsignedout", "YES"])
+        tapOnHome(app, "home-room-reading")
+        let titles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'rr-title-'"))
+        waitFor(titles.firstMatch, 60, "the Reading Room loads before changing preview settings")
+        app.buttons["tab-library"].tap()
+        let set = app.buttons.matching(NSPredicate(format: "label ==[c] 'Set'")).firstMatch
+        for _ in 0..<12 where !set.exists || !set.isHittable { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(set.exists && set.isHittable, "the unset preview password offers Set")
+        set.tap()
+        let save = app.buttons.matching(NSPredicate(format: "label ==[c] 'Save'")).firstMatch
+        waitFor(save, 5, "preview settings offer Save")
+        save.tap() // Empty Save reaches Clear while the preview password is already nil.
+        app.buttons["tab-home"].tap()
+        tapOnHome(app, "home-room-reading")
+        waitFor(titles.firstMatch, 20, "the already-mounted Reading Room reloads after an empty preview Save")
+        shot("rr-after-empty-preview-save", app)
     }
 
     /// The Reading Room on the phone: a free title opens to its first page full screen with the
@@ -1257,8 +1374,9 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["nowPlayingOff"].tap()
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off leaves nothing playing and nothing on screen")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// A channel left on plays while reading, and its small player is in the reader too, which
@@ -1309,8 +1427,9 @@ final class KhajistanUITests: XCTestCase {
         openRooms(app)
         XCTAssertFalse(app.descendants(matching: .any)["nowPlaying"].waitForExistence(timeout: 3), "nothing plays on another page")
         app.buttons["tab-receiver"].tap()
+        // 15 s, not 5: one read of the accessibility tree took 4.3 s on the runner (CI 43766169820).
         expectation(for: NSPredicate(format: "label == 'Standing by'"), evaluatedWith: state)
-        waitForExpectations(timeout: 5)
+        waitForExpectations(timeout: 15)
     }
 
     /// "Keep playing" off, the viewer leaves while the launch Surf is still choosing: the Surf is
@@ -1357,7 +1476,13 @@ final class KhajistanUITests: XCTestCase {
         let app = launch(skin: "day")
         waitForHome(app, 15, "HOME is up")
         sleep(6)   // the shelves load a moment after Home
-        let wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+        var wanted = ["home-surf", "home-shelf-reading", "home-shelf-picsvids", "home-shelf-chat"]
+#if KJ_APP_STORE
+        wanted.removeAll { $0 == "home-shelf-chat" }
+#if !KJ_FRIENDS
+        wanted.removeAll { $0 == "home-shelf-picsvids" }
+#endif
+#endif
         var seen = Set<String>()
         for step in 0..<14 {
             for shelf in wanted where app.descendants(matching: .any)[shelf].exists { seen.insert(shelf) }
@@ -1377,8 +1502,30 @@ final class KhajistanUITests: XCTestCase {
         let isPad = UIDevice.current.userInterfaceIdiom == .pad
         var overflow: [String] = []
         for room in ["receiver", "picsVids", "yours", "chat", "reading", "screening", "bazaar", "madrassa"] {
-            let app = launch(skin: "day", extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
-            waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+#if KJ_APP_STORE
+            if room == "chat" { continue }
+#if !KJ_FRIENDS
+            if room == "picsVids" { continue }
+#endif
+#endif
+            // Bar destinations and Chat intentionally do not open through -kjroom.
+            let tab = room == "receiver" ? "receiver" : room == "yours" ? "library" : room == "chat" ? "rooms" : "home"
+            let app = launch(skin: "day", tab: tab, extra: ["-kjroom", room, "-kjtestsignedout", "YES"])
+            switch room {
+            case "receiver":
+                waitFor(app.scrollViews["receiverCatalogue"], 30, "the actual Receiver is open")
+            case "yours":
+                waitFor(app.buttons["accountSignIn"], 15, "the signed-out Account is open")
+            case "chat":
+                let door = app.buttons["destination-chat"]
+                for _ in 0..<8 where !door.exists { app.swipeUp() }
+                waitFor(door, 10, "ROOMS offers Chat")
+                door.tap()
+                waitFor(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'chat-room-'")).firstMatch,
+                        30, "the actual Chat room list is open")
+            default:
+                waitFor(app.buttons["tab-home"], 15, "the house bar is up in \(room)")
+            }
             for orientation in [UIDeviceOrientation.portrait, isPad ? .landscapeLeft : .landscapeRight] {
                 XCUIDevice.shared.orientation = orientation
                 sleep(6)
@@ -1416,4 +1563,16 @@ private extension XCUIElement {
         XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", value), object: self)],
                        timeout: timeout) == .completed
     }
+}
+
+/// The run plays live carriers (`TEST_RUNNER_KJ_LIVE_RECEIVER=1`), which may be down; the
+/// default local media may not.
+var kjLiveMedia: Bool { ProcessInfo.processInfo.environment["KJ_LIVE_RECEIVER"] == "1" }
+
+/// The recorded lists and local media by default, so a navigation test reads no live list and
+/// plays no live carrier. `TEST_RUNNER_KJ_LIVE_RECEIVER=1` makes a live probe: lists live first
+/// with the recording behind them, streams live.
+func kjFixtureArguments(_ directory: String) -> [String] {
+    if kjLiveMedia { return ["-kjfixtures", directory] }
+    return ["-kjfixtures", directory, "-kjfixturesonly", "YES", "-kjfixturemedia", "YES"]
 }

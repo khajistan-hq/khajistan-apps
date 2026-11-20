@@ -5289,7 +5289,46 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The schedule kept on the device: its ETag is offered only with its body, and a new month
+/// replaces the old one.
+func scheduleCacheKeepsOneMonthWithItsTag() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kj-schedule-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = ScheduleCache(directory: dir)
+    // Nothing held: nothing to offer (negative case).
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    cache.store(Data("{\"a\":1}".utf8), etag: "\"e1\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e1\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"a\":1}".utf8))
+    // A body gone (purged) takes its tag with it: no 304 can be asked for with nothing to answer it.
+    try FileManager.default.removeItem(at: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A file holding a tag and no body offers neither (negative case).
+    try Data("\"e9\"\n".utf8).write(to: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A tag that would break the one-line header, or an empty one, is not kept.
+    cache.store(Data("{}".utf8), etag: "\"a\nb\"", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    cache.store(Data("{}".utf8), etag: "", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    // Two stores: the pair on disk is always one store's tag with that store's body.
+    cache.store(Data("{\"old\":1}".utf8), etag: "\"e-old\"", month: "2026-11")
+    cache.store(Data("{\"new\":1}".utf8), etag: "\"e-new\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e-new\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"new\":1}".utf8))
+    // The next month drops the last.
+    cache.store(Data("{}".utf8), etag: "\"e1\"", month: "2026-11")
+    cache.store(Data("{\"b\":2}".utf8), etag: "\"e2\"", month: "2026-12")
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    try expectEqual(cache.etag(month: "2026-12"), "\"e2\"")
+    try expectEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).count, 1)
+    // clear() drops every month.
+    cache.clear()
+    try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),

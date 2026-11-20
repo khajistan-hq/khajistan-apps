@@ -100,6 +100,12 @@ final class TransmissionStore {
     private struct Reply {
         let data: Data
         let status: Int
+        /// The ETag of a body that came from the network, to keep it on the device by.
+        var etag: String? = nil
+        /// The body is the copy kept on the device, answered by a 304.
+        var fromCache = false
+        /// The body was opened by the preview password, so it is kept only while that is held.
+        var authorized = false
     }
 
     init(auth: AuthStore) {
@@ -204,7 +210,7 @@ final class TransmissionStore {
         await task.value
     }
 
-    private func fetchSchedule(month monthKey: String, generation gen: Int) async {
+    private func fetchSchedule(month monthKey: String, generation gen: Int, useKept: Bool = true) async {
         let url = Transmission.scheduleURL(month: monthKey)
         var reply: Reply
         #if DEBUG
@@ -216,18 +222,42 @@ final class TransmissionStore {
             return
         }
         #endif
+        let cache = ScheduleCache.shared
+        let held = useKept ? await Task.detached(priority: .userInitiated) { cache.etag(month: monthKey) }.value : nil
+        func request(authorization: String?, ifNoneMatch: String?) -> URLRequest {
+            var request = URLRequest(url: url)
+            if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
+            if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+            return request
+        }
         do {
             // Without the preview password first: after the launch switch the schedule is
             // public, and a stored password that no longer matches must not stand in the way.
-            reply = try await send(URLRequest(url: url))
+            var authorization: String?
+            reply = try await send(request(authorization: nil, ifNoneMatch: held))
             if reply.status == 401, let password = auth.previewPassword {
                 guard gen == scheduleGeneration else { return }
-                var request = URLRequest(url: url)
-                request.setValue(
-                    Transmission.basicAuthorization(user: KJConfig.previewUser, password: password),
-                    forHTTPHeaderField: "Authorization"
-                )
-                reply = try await send(request)
+                authorization = Transmission.basicAuthorization(user: KJConfig.previewUser, password: password)
+                reply = try await send(request(authorization: authorization, ifNoneMatch: held))
+                reply.authorized = true
+            }
+            if reply.status == 304 {
+                guard gen == scheduleGeneration else { return }
+                // Unchanged, and this month's schedule is already on screen: it stays, with no
+                // 8.8 MB read and decode every half hour.
+                if programming != nil, month == monthKey, schedule == .ready {
+                    fetchedAt = ProcessInfo.processInfo.systemUptime
+                    refreshing = false
+                    return
+                }
+                // Unchanged: the copy on the device is the schedule. Purged since? Fetch it whole.
+                if let data = await Task.detached(priority: .userInitiated, operation: { cache.data(month: monthKey) }).value {
+                    reply = Reply(data: data, status: 200, fromCache: true)
+                } else {
+                    guard gen == scheduleGeneration else { return }
+                    reply = try await send(request(authorization: authorization, ifNoneMatch: nil))
+                    reply.authorized = authorization != nil
+                }
             }
         } catch {
             guard gen == scheduleGeneration else { return }
@@ -260,10 +290,24 @@ final class TransmissionStore {
             }.value
         } catch {
             guard gen == scheduleGeneration else { return }
+            if reply.fromCache {
+                // The kept copy will not decode (an older app's file, say): drop it, or every
+                // later load is answered 304 and reads it again. Fetched whole once more, with no
+                // If-None-Match whatever is still on disk, so it cannot come back here.
+                await Task.detached(priority: .userInitiated) { ScheduleCache.shared.clear() }.value
+                guard gen == scheduleGeneration else { return }
+                await fetchSchedule(month: monthKey, generation: gen, useKept: false)
+                return
+            }
             dropSchedule(.failed("The schedule could not be read."))
             return
         }
         guard gen == scheduleGeneration else { return }
+        // Kept only once it has decoded, so a broken file is never the one sent back as current.
+        // A password cleared while this fetch was in flight: its body is not put back on disk.
+        if let etag = reply.etag, !reply.authorized || auth.previewPassword != nil {
+            Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }
+        }
         programming = decoded
         month = monthKey
         schedule = .ready
@@ -386,6 +430,10 @@ final class TransmissionStore {
         accessRevision += 1
         signed.removeAll()
         stop()
+        // A schedule a cleared preview password opened is not kept on the device without it.
+        if auth.previewPassword == nil {
+            Task.detached(priority: .utility) { ScheduleCache.shared.clear() }
+        }
         // A refused refresh clears the session from inside `carrier`, whose answer the
         // generation bump above then drops: say so here, or the screen waits on a loader.
         if watching, auth.session == nil { phase = .needsSignIn }
@@ -564,7 +612,9 @@ final class TransmissionStore {
 
     private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> Reply {
         let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession, delegate: refusingRedirects ? RefuseRedirects() : nil)
-        return Reply(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        let http = response as? HTTPURLResponse
+        return Reply(data: data, status: http?.statusCode ?? 0,
+                     etag: http?.statusCode == 200 ? http?.value(forHTTPHeaderField: "ETag") : nil)
     }
 
     /// The URL to play for a route, or nil once the phase has been set to say why not. As in the

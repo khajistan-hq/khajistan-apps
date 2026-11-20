@@ -138,6 +138,9 @@ final class PicsVidsUITests: XCTestCase {
             let save = app.descendants(matching: .any)["pnvSave"]
             XCTAssertTrue(save.waitForExistence(timeout: 20), "the viewer offers Save")
             XCTAssertFalse(save.isSelected, "nothing is lit until the remote moves to it")
+            // The grid's viewer draws the status band: the Reel's "no band" check matches it here.
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Khajistan Pics/Vids'")).firstMatch.exists,
+                          "the grid viewer shows the status band")
             XCUIRemote.shared.press(.down)
             kjPause(0.6)
             XCTAssertTrue(save.isSelected, "Down lights Save")
@@ -350,7 +353,7 @@ final class PicsVidsUITests: XCTestCase {
         let line = app.descendants(matching: .any)["pnvReelLine"]
         XCTAssertTrue(line.waitForExistence(timeout: 10), "the Reel shows its one line")
         XCTAssertTrue(line.label.hasPrefix("@"), "the line names the account: \(line.label)")
-        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label ==[c] 'Khajistan Pics/Vids'")).firstMatch.exists,
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'Khajistan Pics/Vids'")).firstMatch.exists,
                        "no status band in the Reel")
         // A press that must not change the video: compared with the video just before it, since
         // the Reel plays on by itself and a short clip can end between two checks.
@@ -411,9 +414,12 @@ final class PicsVidsUITests: XCTestCase {
         // Every press moved on. The wrap past a stream's end is proven without live data in
         // ios/Tests/PnvRetry; no bound here rests on the region's count.
         print("PNVREEL distinct \(seen.count) of 23 shown")
-        // Down goes back to the video before, as Channel Down.
+        // Down goes back to a video already shown, as Channel Down.
+        let beforeDown = surface.value as? String
         XCUIRemote.shared.press(.down); kjPause(1.5)
-        XCTAssertEqual(surface.value as? String, shown.dropLast().last, "Down goes back one video")
+        let afterDown = surface.value as? String
+        XCTAssertNotEqual(afterDown, beforeDown, "Down moves")
+        XCTAssertTrue(shown.contains(afterDown ?? ""), "Down goes back to a video already shown: \(afterDown ?? "nil")")
         kjScreenshot("pv-reel-03-came-round", app: app)
     }
 

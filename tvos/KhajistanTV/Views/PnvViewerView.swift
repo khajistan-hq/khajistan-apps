@@ -30,6 +30,9 @@ struct PnvViewerView: View {
     /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
     /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
     @State private var skips = 0
+    /// The way the last step went, so a broken video is skipped in that direction: Down onto one
+    /// goes on back, not forward to the video just left.
+    @State private var lastDelta = 1
     /// VoiceOver's state, followed live, so the Reel's strip comes and goes with it.
     @State private var voiceOver = UIAccessibility.isVoiceOverRunning
     @State private var skipped: String?
@@ -56,7 +59,7 @@ struct PnvViewerView: View {
         case failed(String)
     }
 
-    /// The shelf the object was chosen from: left and right step through its region's stream, or
+    /// The shelf the object was chosen from: left and right (Up and Down in the Reel) step through its region's stream, or
     /// through the saved list it was opened from.
     /// The region the stream is read from: "" is every region. Changed in place from the strip.
     @State private var region: String
@@ -365,6 +368,7 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         // A new hand or region starts the count of broken videos skipped in a row again.
         skips = 0
+        lastDelta = 1
         skipped = nil
         // The object on screen stops now, not when the new deal arrives.
         loadTask?.cancel()
@@ -529,7 +533,7 @@ struct PnvViewerView: View {
         skipTask?.cancel()
         skipTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if !Task.isCancelled, current.id == key { step(by: 1) }
+            if !Task.isCancelled, current.id == key { step(by: lastDelta) }
         }
     }
 
@@ -543,6 +547,7 @@ struct PnvViewerView: View {
         stepTask?.cancel()
         skipTask?.cancel()
         skipped = nil
+        lastDelta = delta < 0 ? -1 : 1
         let mine = UUID()
         stepping = mine
         stepTask = Task {
@@ -568,7 +573,7 @@ struct PnvViewerView: View {
             let items = store.feed(feedKey).items
             guard !Task.isCancelled, !items.isEmpty else { return }
             // The stream never ends: past its last object it comes round to its first, once the
-            // feed has given everything; Left from the first stays put.
+            // feed has given everything; Left (Down in the Reel) from the first stays put.
             if index >= items.count {
                 guard store.feed(feedKey).isDone else { return }
                 index = 0

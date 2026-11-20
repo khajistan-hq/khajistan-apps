@@ -361,12 +361,20 @@ private struct RegionMapPainter {
     private func paintLabel(_ label: RegionMapLabel, in context: GraphicsContext) {
         let resolved = context.resolve(label.face.text(label.text))
         if label.region.isPeople {
-            // A people's region is a facet, not a place to tune: its name is dimmed, no halo. The
-            // skin's own label colour on Grove and Smut; on Day, whose page is that yellow, the band's
-            // green, as the plate swaps there (a name that runs off the map lands on the page).
+            // A people's region is a facet, not a place to tune: its name is dimmed, in the skin's
+            // own label colour, with no halo. Day's page is that yellow and its deep fill that green
+            // (1.0:1 and 1.1:1), and a name can run from one onto the other, so there it is the band's
+            // green on a halo of the page: the inverse of a place's yellow on black.
             let onDay = palette.ground == palette.onBand
             var dimmed = resolved
             dimmed.shading = .color((onDay ? palette.band : palette.onBand).opacity(0.7))
+            if onDay {
+                var halo = resolved
+                halo.shading = .color(palette.ground)
+                for offset in Self.haloOffsets {
+                    context.draw(halo, at: CGPoint(x: label.center.x + offset.x, y: label.center.y + offset.y), anchor: .center)
+                }
+            }
             context.draw(dimmed, at: label.center, anchor: .center)
             return
         }

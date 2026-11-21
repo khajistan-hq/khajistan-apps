@@ -289,6 +289,15 @@ final class PicsVidsStore {
             } else if rows.count < PnvAPI.pageSize {
                 next.isDone = true
             }
+            #if DEBUG
+            // `-kjreelcap N`: the Reel's feed ends after N videos, so a test reaches its end in a few
+            // presses however many videos a region has. Debug only.
+            let cap = UserDefaults.standard.integer(forKey: "kjreelcap")
+            if videosOnly, cap > 0, next.items.count >= cap {
+                next.items = Array(next.items.prefix(cap))
+                next.isDone = true
+            }
+            #endif
             next.isLoading = false
             feeds[region] = next
             // A walk that just came round from 1 has nothing on screen to ask for it: read on now.

@@ -267,10 +267,13 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20))
     }
 
-    /// The Reel comes round at a stream's end rather than stopping. It walks Anatolia (48 videos
-    /// on 2026-11-14) until an object comes back; the bound is presses, not the region's count.
+    /// The Reel comes round at a stream's end rather than stopping. The feed is cut to 12 videos
+    /// (`-kjreelcap`), so the end is reached whatever a region holds: Anatolia had 48 videos on
+    /// 2026-11-14 and 567 on 2026-11-20, past the 200 presses this test used to walk.
     func testReelComesRoundAtTheEndOfASmallRegion() {
-        let app = launch()
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjtab", "picsvids", "-kjreelcap", "12"]
+        kjLaunch(app)
         dismissNotice(app)
         let reel = app.buttons["pnvReel"]
         XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
@@ -279,20 +282,12 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
-        // In the Reel Right lights Save; three more reach Region.
-        for _ in 0..<4 { XCUIRemote.shared.press(.right); kjPause(0.5) }
-        let region = app.descendants(matching: .any)["pnvReelRegion"]
-        for _ in 0..<12 where (region.value as? String)?.lowercased() != "anatolia" {
-            XCUIRemote.shared.press(.select); kjPause(3)
-        }
-        XCTAssertEqual((region.value as? String)?.lowercased(), "anatolia", "Region steps to Anatolia")
         XCUIRemote.shared.press(.up); kjPause(1)
         var last = surface.value as? String
         var seen = Set([last].compactMap { $0 })
         var cameRound = false
-        // Until the first object seen twice: the region's end, passed. 200 presses holds until
-        // Anatolia has that many videos.
-        for press in 1...200 {
+        // Until the first object seen twice: the feed's end, passed.
+        for press in 1...30 {
             XCUIRemote.shared.press(.up)
             kjPause(1.2)
             let now = surface.value as? String
@@ -300,7 +295,7 @@ final class PicsVidsUITests: XCTestCase {
             last = now
             if let now, !seen.insert(now).inserted { cameRound = true; break }
         }
-        print("PNVREEL anatolia came round after \(seen.count) distinct")
+        print("PNVREEL came round after \(seen.count) distinct")
         XCTAssertTrue(cameRound, "past the end the stream comes round and shows an object again")
     }
 

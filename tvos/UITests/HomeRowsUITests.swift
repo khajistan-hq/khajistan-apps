@@ -54,12 +54,14 @@ final class HomeRowsUITests: XCTestCase {
         // and Pics/Vids only for Friends; its doors shelf shows only with two doors or more.
         var required = ["news", "music"]
         #if !KJ_APP_STORE
-        required += ["doors", "reading", "picsvids"]
-        #elseif KJ_FRIENDS
-        required += ["doors", "picsvids"]
+        required += ["reading"]
         #endif
         for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
+        }
+        // Off Home since 2026-11-21 (owner): the shelf of every part of Khajistan, and Pics/Vids.
+        for gone in ["doors", "picsvids"] {
+            XCTAssertFalse(reached.contains(gone), "no \(gone) shelf on Home; reached \(reached)")
         }
 
         // Up walks back to the front.

@@ -742,7 +742,7 @@ final class TransmissionStore {
         // The standardised name, with its year (owner, 2026-11-20), where the build wrote one.
         let title = air.programme?.display_title ?? air.programme?.title ?? ""
         if !title.isEmpty { return title }
-        return air.show?.name ?? "Khajistan TV"
+        return air.show?.name ?? "Khajistan Transmission"
     }
 }
 

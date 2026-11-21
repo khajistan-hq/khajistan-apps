@@ -5193,6 +5193,38 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(asks(after: -30, decidedAfter: nil, .direct), "a clock set backwards asks, and does not share until it catches up")
 }
 
+func aPlayerIsRetunedOnlyForTheNetwork() throws {
+    func retunes(_ error: Error?, _ logged: [(domain: String, code: Int)] = [], stalled: Bool = false) -> Bool {
+        SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled)
+    }
+    for code in [URLError.Code.timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .secureConnectionFailed] {
+        try expect(retunes(URLError(code)), "\(code.rawValue) is the network")
+    }
+    let wrapped = NSError(domain: "AVFoundationErrorDomain", code: -11800,
+                          userInfo: [NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)])
+    try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
+    try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
+    try expect(!retunes(URLError(.userAuthenticationRequired)))
+    try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
+    try expect(!retunes(nil), "an item failure with no cause")
+    try expect(retunes(nil, stalled: true), "a carrier that stopped sending")
+    try expect(retunes(nil, [(NSURLErrorDomain, NSURLErrorTimedOut)], stalled: true))
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", 404)], stalled: true), "a stall after a 404 is not the network")
+    try expect(!retunes(URLError(.networkConnectionLost), [("CoreMediaErrorDomain", 403)]), "a gate refused once stays shut")
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", -12937)], stalled: true), "an authentication error stays shut")
+    // The newest entry's age: a network blip long ago earns a later item failure nothing, while
+    // an old answer that came back still says the stall is not the network.
+    let timedOut = [(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)]
+    let old = SupabaseRoute.logRecency + 1
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: 20, stalled: false), "a recent timeout")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: false), "an old timeout, a failure now")
+    try expect(!SupabaseRoute.retunesPlayback(error: URLError(.badServerResponse), logged: timedOut, lastAge: old, stalled: false))
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: true), "a stall is the network by itself")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: [("CoreMediaErrorDomain", 404)], lastAge: old, stalled: true),
+               "an old 404 still says a stall is not the network")
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: nil, stalled: false), "an undated entry counts")
+}
+
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubClockProtocol.self]
@@ -5263,7 +5295,46 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The schedule kept on the device: its ETag is offered only with its body, and a new month
+/// replaces the old one.
+func scheduleCacheKeepsOneMonthWithItsTag() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kj-schedule-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = ScheduleCache(directory: dir)
+    // Nothing held: nothing to offer (negative case).
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    cache.store(Data("{\"a\":1}".utf8), etag: "\"e1\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e1\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"a\":1}".utf8))
+    // A body gone (purged) takes its tag with it: no 304 can be asked for with nothing to answer it.
+    try FileManager.default.removeItem(at: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A file holding a tag and no body offers neither (negative case).
+    try Data("\"e9\"\n".utf8).write(to: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A tag that would break the one-line header, or an empty one, is not kept.
+    cache.store(Data("{}".utf8), etag: "\"a\nb\"", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    cache.store(Data("{}".utf8), etag: "", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    // Two stores: the pair on disk is always one store's tag with that store's body.
+    cache.store(Data("{\"old\":1}".utf8), etag: "\"e-old\"", month: "2026-11")
+    cache.store(Data("{\"new\":1}".utf8), etag: "\"e-new\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e-new\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"new\":1}".utf8))
+    // The next month drops the last.
+    cache.store(Data("{}".utf8), etag: "\"e1\"", month: "2026-11")
+    cache.store(Data("{\"b\":2}".utf8), etag: "\"e2\"", month: "2026-12")
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    try expectEqual(cache.etag(month: "2026-12"), "\"e2\"")
+    try expectEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).count, 1)
+    // clear() drops every month.
+    cache.clear()
+    try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
@@ -5343,6 +5414,7 @@ let tests: [(String, () throws -> Void)] = [
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
+    ("A player is retuned only for the network, never past a refusal", aPlayerIsRetunedOnlyForTheNetwork),
     ("A burst of failed requests starts one network check, not one each", aBurstOfFailuresStartsOneAsking),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),

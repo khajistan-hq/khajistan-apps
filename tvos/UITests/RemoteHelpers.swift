@@ -96,6 +96,16 @@ extension XCTestCase {
         id.hasPrefix("region-") || id == "beyondTheAtlas" || id == "shuffle" || id.hasPrefix("shuffle-medium-")
     }
 
+    /// Reach the foot of the front's left column: the All chip under Surf. Down from it lands on the
+    /// first theme at the left (News); the switch now sits over the map, so Down from it lands on the
+    /// theme under the map instead (2026-11-21, PR 122 on the TV build).
+    @discardableResult
+    func kjFocusFrontFoot(_ app: XCUIApplication) -> Bool {
+        let chip = app.buttons["shuffle-medium-all"]
+        guard chip.waitForExistence(timeout: 30) else { return false }
+        return kjFocus(chip, app: app)
+    }
+
     /// Reach the Beyond the atlas switch, over the map (it was at the foot of the sidebar until
     /// 2026-11-20). Up from the first shelf under the front (Liked, or News) lands on it.
     @discardableResult

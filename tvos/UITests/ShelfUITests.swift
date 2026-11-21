@@ -76,7 +76,7 @@ final class ShelfUITests: XCTestCase {
             XCTAssertEqual(focusedID(app), "region-indus")
             shot("\(skin)-1-receiver-front", app)
             // The shelves start one press down from the front.
-            XCTAssertTrue(kjFocusAtlasSwitch(app), "\(skin): focus reaches the Beyond the atlas switch")
+            XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the foot of the front's left column")
 
             // Under the front, the Themes row (News first), then every part of Khajistan as a
             // tile (owner, 2026-10-29), then the rest, and CCTV last, a name per region that has

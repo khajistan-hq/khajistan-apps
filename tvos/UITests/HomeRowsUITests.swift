@@ -88,7 +88,7 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertLessThanOrEqual(themes.count, 7, "one button a theme, not one a channel; got \(themes.count)")
         // A theme is a name: its plate is two lines of text (67 points), where a channel card is 190 or more.
         XCTAssertLessThan(news.frame.height, 160, "a theme is a name, with no picture; height \(news.frame.height)")
-        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch")
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front's left column")
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
         kjScreenshot("home-themes", app: app)

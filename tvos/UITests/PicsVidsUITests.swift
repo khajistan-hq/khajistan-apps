@@ -51,6 +51,23 @@ final class PicsVidsUITests: XCTestCase {
     }
 
     /// The notice is the first thing under the top bar: reach OK, press it once.
+    /// The Reel opens from a video on a shelf (owner, 2026-11-20: the Reel button is gone, every
+    /// region's row works as the Reel). Videos filter, then the first account video on the
+    /// All regions shelf: a Khajistan TV row asks for a sign-in first.
+    private func openReel(_ app: XCUIApplication) {
+        XCTAssertFalse(app.buttons["pnvReel"].exists, "no Reel button on the page")
+        let videos = app.buttons["pnvkind-video"]
+        XCTAssertTrue(videos.waitForExistence(timeout: 30), "the Videos tab is there")
+        XCTAssertTrue(kjFocus(videos, app: app), "the Videos tab takes focus")
+        XCUIRemote.shared.press(.select)
+        kjPause(2)
+        let tile = app.otherElements["pnv-shelf-"].buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'tile-' AND NOT identifier BEGINSWITH 'tile-ktv-'")).firstMatch
+        XCTAssertTrue(tile.waitForExistence(timeout: 30), "the All regions shelf shows a video")
+        XCTAssertTrue(kjFocus(tile, app: app), "the video takes focus")
+        XCUIRemote.shared.press(.select)
+    }
+
     private func dismissNotice(_ app: XCUIApplication) {
         let ok = app.buttons["adultNoticeOK"]
         XCTAssertTrue(ok.waitForExistence(timeout: 60), "The notice must come before the stream")
@@ -131,6 +148,12 @@ final class PicsVidsUITests: XCTestCase {
             app.launchArguments = ["-kjtab", "picsvids", "-kjskin", skin]
             kjLaunch(app)
             dismissNotice(app)
+            // A video tile opens as a Reel, which hides Save until Right: open a picture.
+            let pictures = app.buttons["pnvkind-image"]
+            XCTAssertTrue(pictures.waitForExistence(timeout: 60), "Pictures is offered")
+            XCTAssertTrue(kjFocus(pictures, app: app), "Pictures takes focus")
+            XCUIRemote.shared.press(.select)
+            kjPause(10)
             let tile = tiles(app).firstMatch
             XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
             XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")
@@ -275,10 +298,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjreelcap", "12"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
@@ -314,10 +334,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
@@ -353,10 +370,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "second"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
@@ -384,10 +398,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjfakeend", "3"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
@@ -413,10 +424,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjwakepulse", "YES"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         XCTAssertTrue(app.buttons["pnvViewerSurface"].waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(3)
         XCUIRemote.shared.press(.right)
@@ -434,10 +442,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", "first"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let first = waitForValue(surface, notIn: [nil, ""], seconds: 10)
@@ -465,10 +470,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjundecodable", "YES"]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'cannot play on this Apple TV'")).firstMatch
@@ -528,10 +530,7 @@ final class PicsVidsUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "picsvids", "-kjbrokenvideos", broken]
         kjLaunch(app)
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         var seen: [String] = []
@@ -550,10 +549,7 @@ final class PicsVidsUITests: XCTestCase {
     func testReelShufflesPicksARegionAndNeverEnds() {
         let app = launch()
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)
@@ -644,10 +640,7 @@ final class PicsVidsUITests: XCTestCase {
     func testReelPlaysTheNextVideoByItself() {
         let app = launch()
         dismissNotice(app)
-        let reel = app.buttons["pnvReel"]
-        XCTAssertTrue(reel.waitForExistence(timeout: 30), "Reel sits beside the kind tabs")
-        XCTAssertTrue(kjFocus(reel, app: app), "Reel takes focus")
-        XCUIRemote.shared.press(.select)
+        openReel(app)
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "Reel opens the viewer")
         kjPause(2)

@@ -134,20 +134,18 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   over the map, or the list; from the left-most card it can be the sidebar's chips, and the page
   goes back to its top for them as for Surf and the switch. The account's likes from `passport_saves` (`channel:` refs, the ones the
   player's Like and the website's heart write, read at launch and at sign-in; a like made on this
-  TV shows at once), newest first, as **Liked cards** (owner, 2026-11-20: the shelf "looks cluttery"; "same frame,
-  same crop"): every card one 420x236 box, the still filling it at one crop (scaled to fill, the
-  black bars a broadcaster burned in already cut away, see Stills), nothing written over it, and the
-  name on one line under it in ink. Radio's box is the plate with the name alone (40pt), no kicker
-  and no sound line, and its name line is left empty so the shelf keeps one height. Before a still
-  arrives the box is the lift plate. No heart on these cards; the shelf's name
-  says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
+  TV shows at once), newest first, as **names only**, the way the Themes row is set (owner, 2026-11-21: "the liked
+  channels should also be text only like themes"; on 2026-11-20 the picture cards had read as
+  "cluttery"): the heading **Liked** with its live count, then a row of plates, each the channel's
+  name (30pt black) with its place under it in small faint type, no picture, no mark. A plate is
+  the house button: the ground at rest, the focus plate under focus. Play/Pause plays it as Select
+  does. No heart on these plates; the row's name says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
   filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
   is not drawn; it is looked for again at the first launch six hours on, or at once when it is
   liked again (the app remembers it on the device, so a stale like costs no walk of every list at
   each launch). Likes are read again when the app comes
-  forward if the first read failed. Stills: 28 a visit on the TV (24 on the phone), so Liked's four
-  do not cost Music its pictures.
+  forward if the first read failed. Liked takes no stills.
 - **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero
   across the top that stays while the shelves scroll under it. At left the crumb kicker RECEIVER →
   INDUS, the name (headline) and native name, then the channel focus rests on: ● LIVE · TELEVISION
@@ -171,8 +169,8 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   with any black bars cut away first (`Letterbox`, read off a 96x54 copy's row and column
   brightness). Bars come in pairs: an axis is cut only when both ends are dark and the two cuts
   are about the same size, so a night sky at the top or a logo lit in one pillar leaves it whole;
-  a frame that would lose more than 40% of a side is a dark picture and kept whole. (Only the Liked
-  cards fill their box with the crop; the other picture cards still fit the still on black.) At
+  a frame that would lose more than 40% of a side is a dark picture and kept whole. (The picture cards fit the
+  cropped still on black.) At
   least 1.5 s apart and twelve a page visit, for the cards nearest focus; the hero's own frame
   becomes its card's still. Never while the hero is starting up, never on an expensive or
   constrained connection. Kept in memory only, about 12 MB at most, oldest out first, retaken after

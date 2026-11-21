@@ -296,58 +296,6 @@ struct PictureCard: View {
     }
 }
 
-/// A card on the Receiver's Liked shelf (owner, 2026-11-20: the shelf "looks cluttery"; "same
-/// frame, same crop"). Every card is the same 16:9 box: a still fills it at one crop, black bars
-/// already cut away (`Letterbox`), with nothing written over it, and the name on one line under
-/// it. Radio has no picture, so its box is the plate with the name alone. The name line is kept
-/// for radio too, empty, so every card on the shelf is the same height.
-struct LikedCard: View {
-    static let captionHeight: CGFloat = 48
-
-    let channel: Channel
-    let still: UIImage?
-    @Environment(\.palette) private var palette
-
-    private var isRadio: Bool { channel.mediaType == "radio" }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            tile
-            Text(isRadio ? "" : channel.name)
-                .kjName()
-                .lineLimit(1)
-                .foregroundStyle(palette.ink)
-                .frame(width: PictureCard.width, height: Self.captionHeight, alignment: .topLeading)
-        }
-    }
-
-    @ViewBuilder
-    private var tile: some View {
-        if isRadio {
-            CardPlate(width: PictureCard.width, height: PictureCard.height) {
-                Text(channel.name)
-                    .kjName(40)
-                    .lineLimit(3)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            }
-        } else {
-            ZStack {
-                palette.lift
-                if let still {
-                    Image(uiImage: still)
-                        .resizable()
-                        .scaledToFill()
-                        .transition(.opacity)
-                }
-            }
-            .frame(width: PictureCard.width, height: PictureCard.height)
-            .clipped()
-            .animation(.easeOut(duration: 0.35), value: still != nil)
-            .kjCardArt()
-        }
-    }
-}
-
 /// A radio card: the station's name set large over its sound line, on the lift plate.
 struct RadioCard: View {
     let channel: Channel

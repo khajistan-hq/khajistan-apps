@@ -445,7 +445,7 @@ final class TransmissionStore {
     private func nowPlayingTitle(_ air: OnAir) -> String {
         let title = air.programme?.title ?? ""
         if !title.isEmpty { return title }
-        return air.show?.name ?? "Khajistan TV"
+        return air.show?.name ?? "Khajistan Transmission"
     }
 }
 

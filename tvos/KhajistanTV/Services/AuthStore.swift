@@ -144,7 +144,7 @@ final class AuthStore {
     /// the session is dropped, because a refresh token is not worth keeping once refused.
     func validAccessToken() async throws -> String {
         guard let current = session else {
-            throw AuthError.server("Sign in to watch Khajistan TV.")
+            throw AuthError.server("Sign in to watch Khajistan Transmission.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
         // One refresh at a time: every caller waits on the same request. Parallel refreshes sent

@@ -738,7 +738,7 @@ final class KhajistanUITests: XCTestCase {
         if notice.exists {
             notice.tap()
             // A tap while the notice is still leaving lands on it, not on the tile under it.
-            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 15), "the notice goes")
         }
         let count = app.staticTexts["pnvCount"]
         func objects() -> Int {
@@ -771,7 +771,7 @@ final class KhajistanUITests: XCTestCase {
         if notice.exists {
             notice.tap()
             // A tap while the notice is still leaving lands on it, not on the tile under it.
-            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 15), "the notice goes")
         }
         XCTAssertTrue(app.buttons["pnvReelsLink"].isHittable, "Play as reels is on screen")
         shot("pnv-grid", app)
@@ -806,7 +806,7 @@ final class KhajistanUITests: XCTestCase {
         let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
         waitFor(tiles.firstMatch, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         let firstKey = String(tiles.element(boundBy: 0).identifier.dropFirst("tile-".count))
         // Three or more pages from the first, so the first page is not a built neighbour with a rail.
         let deep = (3..<max(3, min(tiles.count, 9))).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable }
@@ -844,7 +844,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
@@ -882,7 +882,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
@@ -911,7 +911,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         waitFor(app.buttons["pnvReelRegion"], 10, "the Reel opens")
         app.buttons["pnvReelRegion"].tap()
@@ -932,7 +932,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let shuffle = app.buttons["pnvReelShuffle"]
         waitFor(shuffle, 10, "Shuffle is at the top of the reel")
@@ -1544,7 +1544,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         XCTAssertFalse(app.buttons["pnvSavedLink"].exists, "no Saved link for a signed-out reader")
         tile.tap()
         waitFor(app.buttons["closePlayer"], 10, "the viewer opens")

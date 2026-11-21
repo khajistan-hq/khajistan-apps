@@ -56,8 +56,12 @@ final class AppModel {
     /// is later than `welcoming` turning false. Whatever presents a cover of its own (a channel's
     /// player from a Top Shelf link) or takes the first focus waits for this, or it is presented
     /// under the closing welcome and dropped (round-3 review; testAChannelLinkOverTheWelcome…).
-    /// A link that closes the welcome also clears it 1.5 s on, in case no dismissal ever comes.
+    /// A link that closes the welcome before it ever appeared also clears it 1.5 s on, as no
+    /// dismissal may come for a cover never shown.
     var welcomeOnScreen = Welcome.due
+    /// The welcome's page has appeared (WelcomeView.onAppear): from then on only its dismissal
+    /// clears `welcomeOnScreen`.
+    var welcomeAppeared = false
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
     /// A Transmission channel playing in the picture-in-picture window. The store keeps the

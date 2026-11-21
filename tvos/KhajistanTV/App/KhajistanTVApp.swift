@@ -14,6 +14,8 @@ struct KhajistanTVApp: App {
                 // `-kjopenurl khajistan://…` opens a link at launch, as the Top Shelf does, with no
                 // relaunch, so a UI test keeps its own launch arguments (WelcomeUITests).
                 .task {
+                    // `-kjopenurlearly` has already opened it in AppModel.init: once only.
+                    guard !UserDefaults.standard.bool(forKey: "kjopenurlearly") else { return }
                     if let text = UserDefaults.standard.string(forKey: "kjopenurl"), let url = URL(string: text) { model.open(url) }
                 }
                 #endif

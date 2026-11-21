@@ -79,6 +79,7 @@ struct WelcomeView: View {
         .defaultFocus($startFocused, true)
         .onExitCommand(perform: done)
         .onAppear {
+            model.welcomeAppeared = true
             let reel = reel ?? WelcomeReel()
             self.reel = reel
             reel.start(skin: model.skin, moving: !reduceMotion)

@@ -839,7 +839,8 @@ final class KhajistanUITests: XCTestCase {
     /// The Reel plays the next video by itself when one ends (owner, 2026-11-19: "reel should auto
     /// play the next video"). Live data: clips run seconds to minutes, so the wait is long.
     func testPicsVidsReelPlaysTheNextVideoByItself() {
-        let app = launch(skin: "grove", tab: "picsVids")
+        // Each video "ends" after 8 s, so a long live clip (a kabaddi match) cannot outlast the wait.
+        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjfakeend", "8"])
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]

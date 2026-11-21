@@ -52,8 +52,10 @@ struct TransmissionView: View {
         .kjFullScreenCover(item: $playing) { choice in
             TransmissionPlayerView(channel: choice.number)
         }
-        // A Top Shelf link: the station page, or one channel tuned from it.
-        .task(id: model.link) {
+        // A Top Shelf link: the station page, or one channel tuned from it. Held while the welcome
+        // is still going, so the player's cover is not presented under it and dropped.
+        .task(id: HeldLink(link: model.link, held: model.welcomeOnScreen)) {
+            guard !model.welcomeOnScreen else { return }
             switch model.link {
             case .transmission:
                 model.link = nil
@@ -315,4 +317,11 @@ private extension View {
         accessibilityIdentifier("transmissionState")
             .accessibilityValue(marker)
     }
+}
+
+/// A link and whether it must wait (the welcome still on screen), so the link's task runs again
+/// when the welcome has gone.
+private struct HeldLink: Equatable {
+    let link: DeepLink?
+    let held: Bool
 }

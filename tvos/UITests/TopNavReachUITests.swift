@@ -27,7 +27,7 @@ final class TopNavReachUITests: XCTestCase {
         kjLaunch(app)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'")).firstMatch.waitForExistence(timeout: 60))
         kjPause(2)
-        XCTAssertTrue(kjFocusFrontFoot(app), "focus starts on the front, off the top bar")
+        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus starts on the front, off the top bar")
         // The switch keeps focus when it is turned, though the map it governs is drawn again.
         XCUIRemote.shared.press(.select)
         kjPause(2)
@@ -45,7 +45,7 @@ final class TopNavReachUITests: XCTestCase {
         print("TOPNAV from list:", trail2)
         XCTAssertTrue(fromList, "Up from the region list reaches the top bar: \(trail2)")
         // Down into the shelves below the front, then back up.
-        XCTAssertTrue(kjFocusFrontFoot(app))
+        XCTAssertTrue(kjFocusAtlasSwitch(app))
         for _ in 0..<3 { XCUIRemote.shared.press(.down); kjPause(0.6) }
         let (fromShelf, trail3) = upToNav(app, limit: 10)
         print("TOPNAV from shelf:", trail3)
@@ -63,7 +63,7 @@ final class TopNavReachUITests: XCTestCase {
         kjLaunch(app)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'")).firstMatch.waitForExistence(timeout: 60))
         kjPause(2)
-        XCTAssertTrue(kjFocusFrontFoot(app))
+        XCTAssertTrue(kjFocusAtlasSwitch(app))
         XCUIRemote.shared.press(.down)
         kjPause(0.8)
         for _ in 0..<12 { XCUIRemote.shared.press(.right); kjPause(0.4) }

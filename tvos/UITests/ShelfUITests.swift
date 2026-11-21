@@ -75,8 +75,8 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(kjFocusRegion(app, "indus"), "\(skin): the walk down the region list reaches Indus")
             XCTAssertEqual(focusedID(app), "region-indus")
             shot("\(skin)-1-receiver-front", app)
-            // The shelves start one press down from the foot of the front.
-            XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
+            // The shelves start one press down from the front.
+            XCTAssertTrue(kjFocusAtlasSwitch(app), "\(skin): focus reaches the Beyond the atlas switch")
 
             // Under the front, the Themes row (News first), then every part of Khajistan as a
             // tile (owner, 2026-10-29), then the rest, and CCTV last, a name per region that has
@@ -116,7 +116,7 @@ final class ShelfUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         kjPause(3)
-        XCTAssertTrue(kjFocusFrontFoot(app), "focus must reach the foot of the front")
+        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus must reach the atlas switch")
         _ = downPastGenres("day", app)
         // CCTV is the foot of the page: down past every shelf.
         for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") { press(.down, app: app) }

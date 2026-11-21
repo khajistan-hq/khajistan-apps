@@ -816,7 +816,7 @@ final class KhajistanUITests: XCTestCase {
         shuffle.tap()
         XCTAssertTrue(shuffle.waitForValue("On"), "Shuffle turns on")
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
-        let dealt = NSPredicate { _, _ in (0..<min(reels.count, 4)).contains { abs(reels.element(boundBy: $0).frame.minY) < 20 } }
+        let dealt = NSPredicate { [unowned self] _, _ in self.reelOnScreen(reels) != nil }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dealt, object: nil)], timeout: 30), .completed,
                        "the shuffled deal opens on a page")
         shuffle.press(forDuration: 1.2)
@@ -843,7 +843,7 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         var first: String?
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -862,6 +862,16 @@ final class KhajistanUITests: XCTestCase {
     /// The same, for a video that fails inside the player (a dead address), not before it.
     func testPicsVidsReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
 
+    /// The Reel page at the top of the screen, if any. Read from snapshots, which throw rather
+    /// than fail the test: the page list changes as the Reel scrolls, and a page counted a moment
+    /// ago may be gone by the time it is read (CI, 2026-11-21: "No matches found for Element at
+    /// index 3").
+    private func reelOnScreen(_ reels: XCUIElementQuery) -> String? {
+        (0..<min(reels.count, 4)).lazy
+            .compactMap { try? reels.element(boundBy: $0).snapshot() }
+            .first { abs($0.frame.minY) < 20 }?.identifier
+    }
+
     private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
         let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", broken])
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
@@ -871,7 +881,7 @@ final class KhajistanUITests: XCTestCase {
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         var seen: [String] = []
         var candidate: String?
@@ -925,7 +935,7 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(shuffle.waitForValue("On"), "the Reel opens shuffled")
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         func reelOpens(_ note: String) {
             XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed, note)

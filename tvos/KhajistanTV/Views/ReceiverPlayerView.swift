@@ -542,7 +542,11 @@ struct ReceiverPlayerView: View {
     }
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
+    /// The row already on screen is the exception: it closes the guide, as Back does.
     private func pick(_ target: Channel) {
+        // The channel already on screen: exactly Back (the list stays the one it was tuned from,
+        // and a dead signal moves on).
+        guard target.id != (destination ?? current).id else { return closeGuide() }
         stopMovingOn()
         withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         armed = nil
@@ -551,7 +555,6 @@ struct ReceiverPlayerView: View {
             list = guideList
             if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
         }
-        guard target.id != (destination ?? current).id else { return wake() }
         if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()
@@ -986,6 +989,7 @@ struct RadioBar: View {
     @Environment(\.palette) private var palette
     /// The song while the radio plays on under the screens (NowPlaying).
     @State private var song = ""
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         let state = away.controller.state
@@ -1012,6 +1016,7 @@ struct RadioBar: View {
             .buttonStyle(OnBandStyle())
             .accessibilityHint("Opens the channel full screen")
             .accessibilityIdentifier("radioBarName")
+            .focused($nameFocused)
             // Play tunes the station afresh, full screen, as the player's own Play does: a live
             // signal paused or stopped is not the live signal any more.
             Button {
@@ -1041,6 +1046,7 @@ struct RadioBar: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("radioBar")
+        .onChange(of: model.radioBarFocusRequests) { nameFocused = true }
         .task(id: away.channel.id) {
             song = ""
             await NowPlaying.watch(away.channel.id, active: { away.controller.state == .playing }) { song = $0 }

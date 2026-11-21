@@ -125,7 +125,8 @@ struct TVFilmPage: View {
                     Text(Films.displayTitle(film))
                         .kjDisplay(KJType.headline, tracking: -0.055)
                         .accessibilityAddTraits(.isHeader)
-                    let line = [film.year.map(String.init), film.runtime_minutes.map(Self.runtime), film.country]
+                    // The year is in the title, "Jism (2006)" (owner, 2026-11-20), so not on this line.
+                    let line = [film.runtime_minutes.map(Self.runtime), film.country]
                         .compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                         .joined(separator: " \u{00B7} ")
                     if !line.isEmpty { Text(line).kjBody() }
@@ -197,7 +198,7 @@ struct TVFilmPage: View {
     /// What the record says, label beside value, as the Apple TV app's Information section.
     private var information: some View {
         let rows: [(String, String?)] = [
-            ("Publisher", film.publisher), ("Country", film.country), ("Year", film.year.map(String.init)),
+            ("Publisher", film.publisher), ("Country", film.country),
             ("Running time", film.runtime_minutes.map(Self.runtime)), ("Languages", film.languages?.text),
             ("Licensing", film.licence_price != nil ? "Institutional licence, by inquiry on the film's page" : nil),
         ]

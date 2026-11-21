@@ -10,6 +10,9 @@ struct RootView: View {
     @State private var visited: [Section] = []
     /// Set while Back changes the section, so the change is not recorded as a visit.
     @State private var goingBack = false
+    /// The sections are laid out for the radio bar under them (`underRadioBar`). Set as the bar
+    /// comes; once it has gone, cleared only when the viewer moves to another page.
+    @State private var underBar = false
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -26,21 +29,41 @@ struct RootView: View {
         #endif
     }
 
+    /// A new page with no bar under it is laid out in full.
+    private func leavePage() {
+        if !model.radioBarUp { underBar = false }
+    }
+
     private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             TopBar(current: model.section, select: { model.section = $0 })
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
+                .environment(\.underRadioBar, underBar)
             // The radio left playing, under every section (owner gap: "while browsing other tabs"),
             // until it is turned off. A full-screen page over a section covers it; Menu brings it back.
-            if let away = model.radioAway, away.pip == nil {
+            if model.radioBarUp, let away = model.radioAway {
                 RadioBar(away: away) {
                     model.silenceRadio()
                     reopened = away
                 }
             }
         }
+        // The page keeps the bar's shape after the bar goes (Off, or a film or channel opened from
+        // a shelf, which stops the radio behind its page) and takes its full shape on the next page.
+        // Grown back in place it moved the card focus was on: behind a page, focus was lost when
+        // the page closed; on screen, the card was pushed off the bottom (2026-11-20).
+        // Set whenever the bar shows, even for a moment (a restore from picture-in-picture shows
+        // it until the player opens): if that player cannot open, the bar stays and needs room.
+        .onChange(of: model.radioBarUp, initial: true) { _, up in
+            if up { underBar = true }
+        }
+        .onChange(of: model.section) { leavePage() }
+        .onChange(of: model.receiverPath.map(\.id)) { leavePage() }
+        // A new dial rebuilds the Receiver's front: a new page too. Only there: the dial also turns
+        // when a player closes, over whatever section opened it.
+        .onChange(of: model.receiver.dialID) { if model.section == .receiver { leavePage() } }
         // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
         // as a radio from the small player does.
         .onChange(of: model.restoring?.id) {

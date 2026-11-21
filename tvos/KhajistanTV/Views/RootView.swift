@@ -83,7 +83,8 @@ struct RootView: View {
             model.radioAway = bar
             reopened = away
         }
-        .fullScreenCover(isPresented: Binding(get: { model.welcoming }, set: { if !$0 { closeWelcome() } })) {
+        .fullScreenCover(isPresented: Binding(get: { model.welcoming }, set: { if !$0, model.welcoming { closeWelcome() } }),
+                         onDismiss: { model.welcomeOnScreen = false }) {
             WelcomeView(done: closeWelcome)
         }
         // A launch from the Top Shelf (khajistan://…) goes where it points: the welcome steps

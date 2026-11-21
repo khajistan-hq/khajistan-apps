@@ -50,8 +50,13 @@ final class AppModel {
     /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
     /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
     var surfFocusedOnce = false
-    /// The welcome is up (Welcome.due at launch). The Receiver's first focus waits for it to close.
+    /// The welcome is asked for (Welcome.due at launch); false once it is closed.
     var welcoming = Welcome.due
+    /// The welcome is still on screen: true until its cover has finished going (onDismiss), which
+    /// is later than `welcoming` turning false. Whatever presents a cover of its own (a channel's
+    /// player from a Top Shelf link) or takes the first focus waits for this, or it is presented
+    /// under the closing welcome and dropped (round-3 review; testAChannelLinkOverTheWelcome…).
+    var welcomeOnScreen = Welcome.due
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
     /// A Transmission channel playing in the picture-in-picture window. The store keeps the

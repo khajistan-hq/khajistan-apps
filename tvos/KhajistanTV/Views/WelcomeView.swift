@@ -65,7 +65,7 @@ struct WelcomeView: View {
             .overlay { TimelineView(.periodic(from: .now, by: 1)) { _ in
                 Color.clear.accessibilityElement()
                     .accessibilityIdentifier("welcomePicture")
-                    .accessibilityValue(reel?.isPlaying == true ? "playing" : "stopped")
+                    .accessibilityValue(reel?.probe ?? "stopped")
             } }
             #else
             .accessibilityHidden(true)
@@ -181,8 +181,13 @@ final class WelcomeReel {
         player.play()
     }
 
-    /// Something is on the picture and moving: for the UI test that reads the reel 20 s in.
-    var isPlaying: Bool { player.currentItem != nil && player.rate > 0 }
+    /// What is on the picture and where: "ident 4.1", "wordmark 0.8", or "stopped". The UI test reads
+    /// it over 30 s to see the wordmark go back to its start, which a frozen last frame never does.
+    var probe: String {
+        guard let item = player.currentItem, player.rate > 0 else { return "stopped" }
+        let name = (item.asset as? AVURLAsset)?.url.lastPathComponent.contains("ident") == true ? "ident" : "wordmark"
+        return String(format: "%@ %.1f", name, player.currentTime().seconds)
+    }
 
     func stop() {
         run += 1

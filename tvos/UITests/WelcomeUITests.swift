@@ -53,17 +53,25 @@ final class WelcomeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["welcomeStart"].exists, "no welcome in a Debug run without -kjwelcome")
     }
 
-    /// The picture is still moving past the ident (10 s) and one turn of the wordmark (8 s): the
-    /// last item of a queue ends on `.none` and loops, rather than being dropped (round-2 review).
+    /// The picture keeps moving past the ident (10 s) and one turn of the wordmark (8 s): the
+    /// wordmark goes back to its start (a frozen last frame never does), and the queue is never
+    /// left empty (round-2 and round-3 reviews).
     func testThePictureKeepsPlayingPastOneLoop() {
         let app = launch("day")
         let picture = app.descendants(matching: .any).matching(identifier: "welcomePicture").firstMatch
         XCTAssertTrue(picture.waitForExistence(timeout: 30))
-        for second in [5, 22, 30] {
-            let waited = second == 5 ? 5.0 : (second == 22 ? 17.0 : 8.0)
-            kjPause(waited)
-            XCTAssertEqual(picture.value as? String, "playing", "the picture is playing at about \(second) s")
+        var reads: [(String, Double)] = []
+        for _ in 0..<30 {
+            kjPause(1)
+            let parts = ((picture.value as? String) ?? "stopped").split(separator: " ")
+            reads.append((String(parts[0]), parts.count > 1 ? Double(parts[1]) ?? -1 : -1))
         }
+        XCTAssertFalse(reads.contains { $0.0 == "stopped" }, "the picture never stops: \(reads)")
+        XCTAssertEqual(reads.first?.0, "ident", "the ident plays first: \(reads)")
+        let wordmark = reads.filter { $0.0 == "wordmark" }.map(\.1)
+        let wrapped = zip(wordmark, wordmark.dropFirst()).contains { $1 < $0 - 2 }
+        XCTAssertTrue(wrapped, "the wordmark goes back to its start: \(wordmark)")
+        XCTAssertNotEqual(reads[reads.count - 1].1, reads[reads.count - 2].1, "still moving at the end: \(reads.suffix(2))")
     }
 
     /// Once seen, it does not come again: `-kjwelcome once` reads the device's record as Release does.
@@ -86,13 +94,44 @@ final class WelcomeUITests: XCTestCase {
     }
 
     /// A launch from the Top Shelf goes where its link points, and the welcome steps aside.
-    func testATopShelfLinkSkipsTheWelcome() throws {
-        let app = launch("day")
-        XCTAssertTrue(app.buttons["welcomeStart"].waitForExistence(timeout: 30), "the welcome is up first")
-        // As DeepLinkUITests does: open relaunches the app with the link, and the flag still asks for it.
-        app.open(try XCTUnwrap(URL(string: "khajistan://receiver/indus")))
+    /// `-kjopenurl` opens the link at launch with no relaunch, so `-kjwelcome YES` stays set.
+    func testATopShelfLinkSkipsTheWelcome() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjwelcome", "YES", "-kjopenurl", "khajistan://receiver/indus"]
+        kjLaunch(app)
         let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
         XCTAssertTrue(tv.waitForExistence(timeout: 60), "the link opens the region page")
         XCTAssertFalse(app.buttons["welcomeStart"].exists, "the welcome stepped aside for the link")
+    }
+
+    /// A channel link opens its player, a cover of its own, while the welcome is going: the player
+    /// must be up, not dropped behind the closing welcome (round-3 review).
+    func testAChannelLinkOverTheWelcomeOpensThePlayer() {
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-seven-channels.json").path
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjwelcome", "YES", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-04T12:00:00+05:00", "-kjopenurl", "khajistan://transmission/7"]
+        kjLaunch(app)
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "the channel's player is up")
+        XCTAssertEqual(channel.label, "7")
+        XCTAssertFalse(app.buttons["welcomeStart"].exists, "the welcome stepped aside")
+    }
+
+    /// A link launch does not count as seeing the welcome: the next plain launch shows it.
+    func testALinkLaunchDoesNotMarkItSeen() {
+        var app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjwelcome", "once", "-kjwelcomereset", "YES",
+                               "-kjopenurl", "khajistan://receiver/indus"]
+        kjLaunch(app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'")).firstMatch
+            .waitForExistence(timeout: 60), "the link opened")
+        kjPause(2)
+        app.terminate()
+        app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjwelcome", "once"]
+        kjLaunch(app)
+        XCTAssertTrue(app.buttons["welcomeStart"].waitForExistence(timeout: 30), "the next plain launch shows the welcome")
     }
 }

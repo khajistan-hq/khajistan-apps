@@ -211,7 +211,10 @@ The first time the app opens (owner, 2026-11-20: "a landing page ... to intro wh
 with the Higgsfield clips), before the Receiver: once per device (`kj.welcomed.v1`), in Release
 builds; a Debug build shows it only with `-kjwelcome YES`, so the other UI tests never meet it
 (`WelcomeUITests` passes the flag). A launch from the Top Shelf goes where its link points: the
-welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. The Receiver's first focus on Surf waits for the welcome to close.
+welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. A
+link that opens a cover of its own (a channel's player) waits until the welcome has finished going,
+or the player is presented under it and dropped. `-kjopenurl <link>` (Debug) opens a link at launch
+for the tests. The Receiver's first focus on Surf waits for the welcome to close.
 
 - At left, on the skin's ground, inset 80 and 720 wide: **KHAJISTAN** in display type, one body
   line (live television and radio from the Indus to the Maghreb, and the station), then a row per

@@ -207,8 +207,8 @@ struct ReceiverView: View {
             .focused($surfFocused)
             // The top bar and the list each claim the first focus; this one is placed last. Not
             // under the welcome: it waits for the welcome to close, or focus is lost under it.
-            .task(id: model.welcoming) {
-                guard !model.welcoming, !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+            .task(id: model.welcomeOnScreen) {
+                guard !model.welcomeOnScreen, !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
                 model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true

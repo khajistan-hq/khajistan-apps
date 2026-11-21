@@ -211,7 +211,7 @@ The first time the app opens (owner, 2026-11-20: "a landing page ... to intro wh
 with the Higgsfield clips), before the Receiver: once per device (`kj.welcomed.v1`), in Release
 builds; a Debug build shows it only with `-kjwelcome YES`, so the other UI tests never meet it
 (`WelcomeUITests` passes the flag). A launch from the Top Shelf goes where its link points: the
-welcome steps aside for it. The Receiver's first focus on Surf waits for the welcome to close.
+welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. The Receiver's first focus on Surf waits for the welcome to close.
 
 - At left, on the skin's ground, inset 80 and 720 wide: **KHAJISTAN** in display type, one body
   line (live television and radio from the Indus to the Maghreb, and the station), then a row per
@@ -221,8 +221,9 @@ welcome steps aside for it. The Receiver's first focus on Surf waits for the wel
   Menu does what Start does, and does not leave the app.
 - At right, 1040x585 running to the screen's edge, on the page's own ground with no black (owner,
   2026-11-20: "no black backgroiund"): the pigeon's sign-on ident once (10 s), then the jewelled
-  wordmark on a loop, muted, from one queue so the handover has no blank beat; an ident that fails
-  or stalls hands over at once. Each clip is rendered onto each skin's ground and the file for the
+  wordmark on a loop, muted, from one queue so the handover has no blank beat; the wordmark, last in the queue, ends
+  held (`.none`) and is sought back to its start, since an item that ends on `.advance` is dropped
+  and the picture goes blank 18 s in; an ident that fails or stalls hands over at once. Each clip is rendered onto each skin's ground and the file for the
   skin on screen is played; it follows the skin if Automatic turns it while the page is up. Under Reduce Motion, the wordmark still.
   Both are house chrome under the Higgsfield rulings of 2026-10-04 (the pigeon) and 2026-11-15
   (the wordmark loops), never a holding.

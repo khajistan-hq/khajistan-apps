@@ -23,8 +23,9 @@ struct ReceiverView: View {
     @FocusState private var surfFocused: Bool
     /// The switch over the map, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
-    /// The All · TV · Radio chip focused, if any.
-    @FocusState private var chipFocused: String?
+    /// Focus is on the All · TV · Radio row. Set only as focus enters or leaves the row (ChipRow),
+    /// so a step along it does not re-run the front.
+    @State private var chipsFocused = false
 
     var body: some View {
         @Bindable var model = model
@@ -126,7 +127,7 @@ struct ReceiverView: View {
             // at its top for either, as for the list, so the front is never left half under the bar.
             // Up from the left-most card of the first shelf lands on the sidebar's chips (straight
             // above it), and the page goes back to its top for them too.
-            .onChange(of: surfFocused || switchFocused || chipFocused != nil) { _, onFront in if onFront { toTop(proxy) } }
+            .onChange(of: surfFocused || switchFocused || chipsFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
             .defaultFocus($surfFocused, true)
@@ -242,18 +243,7 @@ struct ReceiverView: View {
     private var scope: ShuffleScope { model.extendedAtlas ? .everywhere : .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
-        HStack(spacing: 4) {
-            ForEach(items, id: \.0) { item in
-                Button {
-                    set(item.0)
-                } label: { Text(item.1).kjKicker() }
-                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
-                    .focused($chipFocused, equals: item.0)
-                    .accessibilityIdentifier("\(id)-\(item.0)")
-            }
-        }
-        // The tabs' plate padding is pulled back so their text sits on the page margin.
-        .padding(.leading, -22)
+        ChipRow(items: items, current: current, id: id, set: set) { chipsFocused = $0 }
     }
 
     private func shuffle() async {
@@ -822,5 +812,32 @@ private struct LikedShelf: View {
         let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
         // Sent when empty too, so channels no longer liked stop taking stills.
         model.stills.wantNext(first, place: 0)
+    }
+}
+
+/// The front's All · TV · Radio row, with its own focus, so a step along it is the row's business
+/// and only entering or leaving it reaches the front (`onFocus`).
+private struct ChipRow: View {
+    let items: [(String, String)]
+    let current: String
+    let id: String
+    let set: (String) -> Void
+    let onFocus: (Bool) -> Void
+    @FocusState private var focused: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.0) { item in
+                Button {
+                    set(item.0)
+                } label: { Text(item.1).kjKicker() }
+                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    .focused($focused, equals: item.0)
+                    .accessibilityIdentifier("\(id)-\(item.0)")
+            }
+        }
+        // The tabs' plate padding is pulled back so their text sits on the page margin.
+        .padding(.leading, -22)
+        .onChange(of: focused != nil) { _, on in onFocus(on) }
     }
 }

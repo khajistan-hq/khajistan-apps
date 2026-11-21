@@ -60,7 +60,16 @@ struct WelcomeView: View {
                 if let reel { PlayerLayerView(player: reel.player) } else { Color.clear }
             }
             .frame(width: Self.pictureSize.width, height: Self.pictureSize.height)
+            #if DEBUG
+            // Read by WelcomeUITests past the ident and one turn of the wordmark.
+            .overlay { TimelineView(.periodic(from: .now, by: 1)) { _ in
+                Color.clear.accessibilityElement()
+                    .accessibilityIdentifier("welcomePicture")
+                    .accessibilityValue(reel?.isPlaying == true ? "playing" : "stopped")
+            } }
+            #else
             .accessibilityHidden(true)
+            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.ground.ignoresSafeArea())
@@ -107,6 +116,7 @@ struct WelcomeView: View {
 final class WelcomeReel {
     let player = AVQueuePlayer()
     private var observers: [NSObjectProtocol] = []
+    private var itemWatch: NSKeyValueObservation?
     private var run = 0
     private var skin = Skin.day
 
@@ -121,17 +131,32 @@ final class WelcomeReel {
         self.skin = skin
         player.isMuted = true
         player.preventsDisplaySleepDuringVideoPlayback = false
-        player.actionAtItemEnd = .advance
         guard let wordmark = item("wordmark") else { return }
+        // The queue drops an item that ends while this is `.advance`, so the wordmark, the last
+        // item, must end on `.none`, or the page goes blank 18 s in (round-2 review, measured).
+        player.actionAtItemEnd = .none
         guard moving else {
             player.insert(wordmark, after: nil)
             player.seek(to: CMTime(seconds: 4, preferredTimescale: 600))
             return
         }
         let ident = item("ident")
-        if let ident { player.insert(ident, after: nil) }
+        if let ident {
+            player.insert(ident, after: nil)
+            player.actionAtItemEnd = .advance
+        }
         player.insert(wordmark, after: ident)
         let center = NotificationCenter.default
+        // Once the queue is on the wordmark, an end holds rather than dropping it. Watched on the
+        // current item, not on the ident's end, which can arrive before the queue has moved.
+        itemWatch = player.observe(\.currentItem, options: [.new]) { [weak self] player, _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.run == current, player.currentItem === wordmark else { return }
+                    self.player.actionAtItemEnd = .none
+                }
+            }
+        }
         // The wordmark again from its start when it ends: the loop.
         observers.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: wordmark, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -146,6 +171,7 @@ final class WelcomeReel {
                 observers.append(center.addObserver(forName: name, object: ident, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated {
                         guard let self, self.run == current, self.player.currentItem === ident else { return }
+                        self.player.actionAtItemEnd = .none
                         self.player.advanceToNextItem()
                         self.player.play()
                     }
@@ -155,23 +181,36 @@ final class WelcomeReel {
         player.play()
     }
 
+    /// Something is on the picture and moving: for the UI test that reads the reel 20 s in.
+    var isPlaying: Bool { player.currentItem != nil && player.rate > 0 }
+
     func stop() {
         run += 1
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
+        itemWatch?.invalidate()
+        itemWatch = nil
         player.pause()
         player.removeAllItems()
     }
 }
 
-/// Whether the welcome is due: once per device, in Release builds; a Debug build shows it only
-/// with `-kjwelcome YES`, so the UI tests never meet it.
+/// Whether the welcome is due: once per device, in Release builds. A Debug build shows it only
+/// when asked, so no other UI test meets it: `-kjwelcome YES` always, `-kjwelcome once` as Release
+/// does (with `-kjwelcomereset YES` forgetting it was seen), for the test that it comes only once.
 enum Welcome {
     static let key = "kj.welcomed.v1"
 
     static var due: Bool {
         #if DEBUG
-        return UserDefaults.standard.bool(forKey: "kjwelcome")
+        let defaults = UserDefaults.standard
+        switch defaults.string(forKey: "kjwelcome") {
+        case "YES": return true
+        case "once":
+            if defaults.bool(forKey: "kjwelcomereset") { defaults.removeObject(forKey: key) }
+            return !defaults.bool(forKey: key)
+        default: return false
+        }
         #else
         return !UserDefaults.standard.bool(forKey: key)
         #endif

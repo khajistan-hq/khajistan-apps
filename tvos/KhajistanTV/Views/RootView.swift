@@ -88,7 +88,8 @@ struct RootView: View {
         }
         // A launch from the Top Shelf (khajistan://…) goes where it points: the welcome steps
         // aside for it rather than covering the channel it opens.
-        .onChange(of: model.link == nil, initial: true) { _, none in if !none, model.welcoming { closeWelcome() } }
+        // Not marked seen: a viewer whose first launch is a link still meets it on the next.
+        .onChange(of: model.link == nil, initial: true) { _, none in if !none, model.welcoming { model.welcoming = false } }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)

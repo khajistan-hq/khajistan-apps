@@ -90,7 +90,18 @@ struct RootView: View {
         // A launch from the Top Shelf (khajistan://…) goes where it points: the welcome steps
         // aside for it rather than covering the channel it opens.
         // Not marked seen: a viewer whose first launch is a link still meets it on the next.
-        .onChange(of: model.link == nil, initial: true) { _, none in if !none, model.welcoming { model.welcoming = false } }
+        // The hold on links (welcomeOnScreen) is cleared by the cover's onDismiss. It is also cleared
+        // 1.5 s on, after any dismissal that is coming has run, in case a link ever beats the cover
+        // so that no dismissal comes (round-4 review). Not reproduced: a link set before the first
+        // frame still gets the dismissal (testALinkThatBeatsTheWelcome… passes without this).
+        .onChange(of: model.link == nil, initial: true) { _, none in
+            guard !none, model.welcoming else { return }
+            model.welcoming = false
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                model.welcomeOnScreen = false
+            }
+        }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)

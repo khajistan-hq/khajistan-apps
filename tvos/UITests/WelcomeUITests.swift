@@ -63,8 +63,8 @@ final class WelcomeUITests: XCTestCase {
         var reads: [(String, Double)] = []
         for _ in 0..<30 {
             kjPause(1)
-            let parts = ((picture.value as? String) ?? "stopped").split(separator: " ")
-            reads.append((String(parts[0]), parts.count > 1 ? Double(parts[1]) ?? -1 : -1))
+            let parts = ((picture.value as? String) ?? "").split(separator: " ")
+            reads.append((parts.first.map(String.init) ?? "stopped", parts.count > 1 ? Double(parts[1]) ?? -1 : -1))
         }
         XCTAssertFalse(reads.contains { $0.0 == "stopped" }, "the picture never stops: \(reads)")
         XCTAssertEqual(reads.first?.0, "ident", "the ident plays first: \(reads)")
@@ -133,5 +133,22 @@ final class WelcomeUITests: XCTestCase {
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjwelcome", "once"]
         kjLaunch(app)
         XCTAssertTrue(app.buttons["welcomeStart"].waitForExistence(timeout: 30), "the next plain launch shows the welcome")
+    }
+
+    /// A link in before the first frame (round-4 review): the player still comes up. Measured
+    /// 2026-11-21: this passes with RootView's 1.5 s fallback removed too, so SwiftUI still reports
+    /// the welcome's dismissal on this path; the fallback is a guard for an order not reproduced.
+    func testALinkThatBeatsTheWelcomeStillOpensThePlayer() {
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-seven-channels.json").path
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjwelcome", "YES", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-04T12:00:00+05:00", "-kjopenurl", "khajistan://transmission/7",
+                               "-kjopenurlearly", "YES"]
+        kjLaunch(app)
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "the channel's player is up")
+        XCTAssertEqual(channel.label, "7")
+        XCTAssertFalse(app.buttons["welcomeStart"].exists)
     }
 }

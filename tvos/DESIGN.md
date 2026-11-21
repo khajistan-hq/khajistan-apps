@@ -213,7 +213,9 @@ builds; a Debug build shows it only with `-kjwelcome YES`, so the other UI tests
 (`WelcomeUITests` passes the flag). A launch from the Top Shelf goes where its link points: the
 welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. A
 link that opens a cover of its own (a channel's player) waits until the welcome has finished going,
-or the player is presented under it and dropped. `-kjopenurl <link>` (Debug) opens a link at launch
+or the player is presented under it and dropped; the wait also ends 1.5 s after the link, a guard for a
+link that beat the welcome so that no dismissal came (not reproduced: a link set before the first
+frame still gets one). `-kjopenurl <link>` (Debug) opens a link at launch
 for the tests. The Receiver's first focus on Surf waits for the welcome to close.
 
 - At left, on the skin's ground, inset 80 and 720 wide: **KHAJISTAN** in display type, one body

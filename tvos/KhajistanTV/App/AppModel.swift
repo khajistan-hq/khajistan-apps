@@ -56,6 +56,7 @@ final class AppModel {
     /// is later than `welcoming` turning false. Whatever presents a cover of its own (a channel's
     /// player from a Top Shelf link) or takes the first focus waits for this, or it is presented
     /// under the closing welcome and dropped (round-3 review; testAChannelLinkOverTheWelcome…).
+    /// A link that closes the welcome also clears it 1.5 s on, in case no dismissal ever comes.
     var welcomeOnScreen = Welcome.due
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
@@ -181,6 +182,12 @@ final class AppModel {
         }
         observeTransmissionAccess()
         watchTheSky()
+        #if DEBUG
+        // `-kjopenurlearly YES` with `-kjopenurl`: the link is in before the first frame, as a cold
+        // Top Shelf launch can be, so the welcome never appears and has nothing to dismiss.
+        if UserDefaults.standard.bool(forKey: "kjopenurlearly"),
+           let text = UserDefaults.standard.string(forKey: "kjopenurl"), let url = URL(string: text) { open(url) }
+        #endif
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }

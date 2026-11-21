@@ -174,6 +174,17 @@ final class PicsVidsStore {
         feeds[key] = nil
     }
 
+    /// A new Reel for one region that starts on the video chosen from its shelf; the region's
+    /// shuffled videos load after it. A page in flight is left alone, as `discard` does.
+    func seedReel(with row: PnvRow, region: String) {
+        let key = Self.videosKey(region)
+        guard feeds[key]?.isLoading != true else { return }
+        var feed = PnvFeed()
+        feed.items = [row]
+        feed.seen = [row.media_key]
+        feeds[key] = feed
+    }
+
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
     func setShuffled(_ on: Bool) {
@@ -291,6 +302,15 @@ final class PicsVidsStore {
             } else if rows.count < PnvAPI.pageSize {
                 next.isDone = true
             }
+            #if DEBUG
+            // `-kjreelcap N`: the Reel's feed ends after N videos, so a test reaches its end in a few
+            // presses however many videos a region has. Debug only.
+            let cap = UserDefaults.standard.integer(forKey: "kjreelcap")
+            if videosOnly, cap > 0, next.items.count >= cap {
+                next.items = Array(next.items.prefix(cap))
+                next.isDone = true
+            }
+            #endif
             next.isLoading = false
             feeds[region] = next
             // A walk that just came round from 1 has nothing on screen to ask for it: read on now.

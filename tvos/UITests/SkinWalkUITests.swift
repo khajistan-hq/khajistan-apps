@@ -147,8 +147,8 @@ final class SkinWalkUITests: XCTestCase {
             app = launch(["-kjskin", skin, "-kjtab", "receiver"])
             let toggle = app.buttons["beyondTheAtlas"]
             XCTAssertTrue(toggle.waitForExistence(timeout: 60))
-            // The switch sits at the foot of the sidebar, under the live count.
-            kjFocusFrontFoot(app)
+            // The switch sits over the map.
+            kjFocusAtlasSwitch(app)
             XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
             shot("\(skin)-9-atlas-switch-focused", app)
             app.terminate()

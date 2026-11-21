@@ -96,3 +96,33 @@ struct StillPlan {
 
     var exhausted: Bool { started >= Self.perVisit }
 }
+
+/// The picture inside a frame, with any black bars a broadcaster burned into it cut away, so every
+/// card's still fills its 16:9 box at the same crop (owner, 2026-11-20: Liked "look cluttery";
+/// "same frame, same crop"). Given the mean brightness (0–1) of each row, top to bottom, and of
+/// each column, left to right, it returns the share of the frame to keep as (x, y, width, height),
+/// each 0–1. A row or column brighter than `threshold` is picture.
+///
+/// Bars come in pairs: an axis is cut only when both its ends are dark and the two cuts are about
+/// the same size. A dark night sky at the top, or a channel's logo lighting one pillar, is one-sided
+/// and leaves that axis whole. A frame that would lose more than `maxCut` of a side is a dark
+/// picture, not a letterbox, and is kept whole.
+enum Letterbox {
+    static func content(rows: [Double], columns: [Double], threshold: Double = 0.07, maxCut: Double = 0.4)
+        -> (x: Double, y: Double, width: Double, height: Double) {
+        let whole = (x: 0.0, y: 0.0, width: 1.0, height: 1.0)
+        /// The kept span of one axis, or the whole of it when its dark ends are not a pair of bars.
+        func span(_ values: [Double]) -> (start: Double, length: Double)? {
+            guard let first = values.firstIndex(where: { $0 > threshold }),
+                  let last = values.lastIndex(where: { $0 > threshold }) else { return nil }
+            let count = Double(values.count)
+            let head = Double(first) / count, tail = Double(values.count - 1 - last) / count
+            let length = 1 - head - tail
+            guard length >= 1 - maxCut else { return nil }
+            let paired = head > 0 && tail > 0 && abs(head - tail) <= max(1 / count, 0.25 * max(head, tail))
+            return paired ? (head, length) : (0, 1)
+        }
+        guard !rows.isEmpty, !columns.isEmpty, let v = span(rows), let h = span(columns) else { return whole }
+        return (h.start, v.start, h.length, v.length)
+    }
+}

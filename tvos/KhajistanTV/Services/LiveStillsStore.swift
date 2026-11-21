@@ -208,10 +208,38 @@ final class LiveStills {
         let extent = frame.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
         if brightness(frame) < darkFrame { return nil }
-        let scale = min(1, maxSize.width / extent.width, maxSize.height / extent.height)
-        let scaled = frame.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let picture = frame.cropped(to: content(of: frame))
+        let scale = min(1, maxSize.width / picture.extent.width, maxSize.height / picture.extent.height)
+        let scaled = picture.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         guard let cg = context.createCGImage(scaled, from: scaled.extent.integral) else { return nil }
         return UIImage(cgImage: cg)
+    }
+
+    /// The frame with the black bars a broadcaster burned into it left out (`Letterbox`), read off
+    /// a 96x54 copy: the mean brightness of each row and each column.
+    nonisolated static func content(of frame: CIImage) -> CGRect {
+        let extent = frame.extent
+        let (w, h) = (96, 54)
+        // Moved to the origin and scaled to exactly w x h, so the render reads the buffer's own size.
+        let small = frame.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
+            .concatenating(CGAffineTransform(scaleX: CGFloat(w) / extent.width, y: CGFloat(h) / extent.height)))
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        context.render(small, toBitmap: &pixels, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h),
+                       format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        var rows = [Double](repeating: 0, count: h), columns = [Double](repeating: 0, count: w)
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                let luma = (0.2126 * Double(pixels[i]) + 0.7152 * Double(pixels[i + 1]) + 0.0722 * Double(pixels[i + 2])) / 255
+                rows[y] += luma / Double(w)
+                columns[x] += luma / Double(h)
+            }
+        }
+        // The bitmap's first row is the picture's top; Core Image counts y from the bottom.
+        let keep = Letterbox.content(rows: rows, columns: columns)
+        return CGRect(x: extent.minX + keep.x * extent.width,
+                      y: extent.minY + (1 - keep.y - keep.height) * extent.height,
+                      width: keep.width * extent.width, height: keep.height * extent.height).integral
     }
 
     /// The frame's mean brightness, 0–1, from CIAreaAverage over the whole frame.

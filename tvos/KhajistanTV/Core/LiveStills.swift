@@ -96,3 +96,25 @@ struct StillPlan {
 
     var exhausted: Bool { started >= Self.perVisit }
 }
+
+/// The picture inside a frame, with any black bars a broadcaster burned into it cut away, so every
+/// card's still fills its 16:9 box at the same crop (owner, 2026-11-20: Liked "look cluttery";
+/// "same frame, same crop"). Given the mean brightness (0–1) of each row, top to bottom, and of
+/// each column, left to right, it returns the share of the frame to keep as (x, y, width, height),
+/// each 0–1. A row or column brighter than `threshold` is picture. A frame that would lose more than
+/// `maxCut` of either side is returned whole: that is a dark picture, not a letterbox.
+enum Letterbox {
+    static func content(rows: [Double], columns: [Double], threshold: Double = 0.07, maxCut: Double = 0.4)
+        -> (x: Double, y: Double, width: Double, height: Double) {
+        let whole = (x: 0.0, y: 0.0, width: 1.0, height: 1.0)
+        func span(_ values: [Double]) -> (start: Double, length: Double)? {
+            guard let first = values.firstIndex(where: { $0 > threshold }),
+                  let last = values.lastIndex(where: { $0 > threshold }) else { return nil }
+            let count = Double(values.count)
+            return (Double(first) / count, Double(last - first + 1) / count)
+        }
+        guard !rows.isEmpty, !columns.isEmpty, let v = span(rows), let h = span(columns),
+              v.length >= 1 - maxCut, h.length >= 1 - maxCut else { return whole }
+        return (h.start, v.start, h.length, v.length)
+    }
+}

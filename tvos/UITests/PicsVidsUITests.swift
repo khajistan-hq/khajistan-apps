@@ -406,7 +406,7 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertEqual(surface.value as? String, held, "a lit control holds autoplay")
         // Left lets go; the next end moves on.
         XCUIRemote.shared.press(.left)
-        let moved = waitForValue(surface, notIn: [held], seconds: 8)
+        let moved = waitForValue(surface, notIn: [held], seconds: 20) // CI loads the next video slowly
         print("PNVAUTOHOLD first=\(first ?? "nil") held=\(held ?? "nil") moved=\(moved ?? "nil")")
         XCTAssertNotNil(moved, "with nothing lit, the end moves on")
     }

@@ -42,5 +42,7 @@ end = store.index('\n    /// The file ended:', start)
 harness = harness.replace('// PRODUCTION_WARM', store[start:end].replace('private func warm', 'func warm'))
 pathlib.Path(sys.argv[1]).write_text(harness)
 PY
-swiftc -swift-version 5 "$output_dir/main.swift" -o "$output_dir/pip-tests"
-"$output_dir/pip-tests"
+# Thread Sanitizer: the harness must drive the store on one actor, as production does.
+# A race here once crashed CI with a leaked `send` continuation and a segfault (exit 139).
+swiftc -swift-version 5 -sanitize=thread "$output_dir/main.swift" -o "$output_dir/pip-tests"
+TSAN_OPTIONS=halt_on_error=1 "$output_dir/pip-tests"

@@ -21,7 +21,7 @@ struct ReceiverView: View {
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
-    /// The switch at the foot of the sidebar, where Up from the first shelf lands.
+    /// The switch over the map, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
 
     var body: some View {
@@ -95,6 +95,7 @@ struct ReceiverView: View {
                     VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
+                               aboveMap: AnyView(atlasSwitch),
                                // Focus in the list: the page back at its top, so the map the list
                                // lights is whole, never a sliver under the top bar.
                                listFocused: { toTop(proxy) })
@@ -140,7 +141,7 @@ struct ReceiverView: View {
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
             // Less to read (owner, 2026-10-29: "simplified its too much text", and 2026-11-17):
-            // Surf, one count and the switch. The top bar already names the Receiver.
+            // Surf and one count; the switch is over the map. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
                 .accessibilityElement(children: .combine)
@@ -149,14 +150,19 @@ struct ReceiverView: View {
                 Text(note).kjBody()
                     .accessibilityIdentifier("receiverSignInNote")
             }
-            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
-                .focused($switchFocused)
-                .accessibilityIdentifier("beyondTheAtlas")
-                // The plate's padding is pulled back so the switch sits on the page margin.
-                .padding(.leading, -26)
         }
         .frame(width: 520, alignment: .leading)
         .focusSection()
+    }
+
+    /// Above the map it widens (owner, 2026-11-20: "make the beyond the atlas above the map"), as
+    /// the website's switch sits above its atlas. It was at the foot of the sidebar until then.
+    private var atlasSwitch: some View {
+        HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
+            .focused($switchFocused)
+            .accessibilityIdentifier("beyondTheAtlas")
+            // The plate's padding is pulled back so the switch lines up with the map's edge.
+            .padding(.leading, -26)
     }
 
     private func toTop(_ proxy: ScrollViewProxy) {
@@ -411,6 +417,8 @@ private struct AtlasPanel: View {
     let open: (MapRegion) -> Void
     /// The sidebar, beside the map.
     let leading: AnyView
+    /// Over the map, in its column: the Beyond the atlas switch.
+    var aboveMap: AnyView? = nil
     /// Called as focus comes into the region list from elsewhere.
     var listFocused: () -> Void = {}
     static let topAnchor = "atlasTop"
@@ -426,14 +434,17 @@ private struct AtlasPanel: View {
                 // One top line: Surf level with the list's heading, the map's band beside them.
                 HStack(alignment: .top, spacing: 40) {
                     leading
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let aboveMap { aboveMap.focusSection() }
                     RegionMapView(map: composed, highlighted: listedRegion)
                         .frame(maxWidth: .infinity)
-                        .frame(height: Self.mapHeight)
+                        .frame(height: aboveMap == nil ? Self.mapHeight : Self.mapHeight - Self.switchRow)
                         // For the UI tests: the region the map lights, read as the map's value.
                         .accessibilityElement()
                         .accessibilityLabel("Map")
                         .accessibilityValue(composed.regions.first { $0.id == listedRegion }?.label ?? "")
                         .accessibilityIdentifier("atlasMap")
+                    }
                     regionList(composed)
                 }
                 // Room for a focused plate's lift at the top edge.
@@ -523,7 +534,9 @@ private struct AtlasPanel: View {
     }
 
     static let listWidth: CGFloat = 320
-    static let mapHeight: CGFloat = 640
+    static let mapHeight: CGFloat = 560
+    /// The switch's row over the map: the map gives up this much, so the front keeps its height.
+    static let switchRow: CGFloat = 80
 }
 
 /// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
@@ -723,11 +736,7 @@ private struct LikedShelf: View {
                         Button {
                             playing = Pick(channel: channel, list: list)
                         } label: {
-                            if channel.mediaType == "radio" {
-                                RadioCard(channel: channel)
-                            } else {
-                                PictureCard(channel: channel, still: still)
-                            }
+                            LikedCard(channel: channel, still: still)
                         }
                         .buttonStyle(HouseCardStyle())
                         .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }

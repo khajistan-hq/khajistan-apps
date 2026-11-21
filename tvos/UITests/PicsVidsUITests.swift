@@ -148,6 +148,12 @@ final class PicsVidsUITests: XCTestCase {
             app.launchArguments = ["-kjtab", "picsvids", "-kjskin", skin]
             kjLaunch(app)
             dismissNotice(app)
+            // A video tile opens as a Reel, which hides Save until Right: open a picture.
+            let pictures = app.buttons["pnvkind-image"]
+            XCTAssertTrue(pictures.waitForExistence(timeout: 60), "Pictures is offered")
+            XCTAssertTrue(kjFocus(pictures, app: app), "Pictures takes focus")
+            XCUIRemote.shared.press(.select)
+            kjPause(10)
             let tile = tiles(app).firstMatch
             XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
             XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")

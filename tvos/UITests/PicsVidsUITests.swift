@@ -264,9 +264,54 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20))
     }
 
-    /// The Reel comes round at a stream's end rather than stopping. It walks Anatolia (48 videos
-    /// on 2026-11-14) until an object comes back; the bound is presses, not the region's count.
-    func testReelComesRoundAtTheEndOfASmallRegion() {
+    /// The region with the fewest videos on the day, and how many: Anatolia went from 48 to over
+    /// 500 on 2026-11-20 when one account was added, so a fixed region cannot carry this test.
+    /// Asks what the app asks (pnv_accounts, then a count of each region's videos in pnv_media).
+    private func smallestVideoRegion() throws -> (label: String, videos: Int) {
+        // The app's own public anon key (Config.swift); it reads only what the site serves.
+        let key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFvanlzZWdlZGR6dHN4ZG1oamZiIiwicm9sZSI6ImFub24iLCJpYXQiOjE2Nzc1MjM5MjQsImV4cCI6MTk5MzA5OTkyNH0.iz8hhr1TYYLWk9HyI0b_yxqlzGJgyuXKsBO_2_kuQ94"
+        func ask(_ query: String, count: Bool) throws -> (Data, HTTPURLResponse) {
+            var request = URLRequest(url: URL(string: "https://qojysegeddztsxdmhjfb.supabase.co/rest/v1/" + query)!)
+            request.setValue(key, forHTTPHeaderField: "apikey")
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+            if count { request.setValue("count=exact", forHTTPHeaderField: "Prefer") }
+            var answer: (Data?, URLResponse?, Error?)
+            let done = expectation(description: query)
+            URLSession.shared.dataTask(with: request) { answer = ($0, $1, $2); done.fulfill() }.resume()
+            wait(for: [done], timeout: 30)
+            guard let data = answer.0, let http = answer.1 as? HTTPURLResponse, (200...206).contains(http.statusCode) else {
+                throw XCTSkip("the archive did not answer \(query): \(String(describing: answer.2))")
+            }
+            return (data, http)
+        }
+        struct Account: Decodable { let region_token: String?; let account_key: String }
+        let roster = try JSONDecoder().decode([Account].self, from: ask("pnv_accounts?select=region_token,account_key", count: false).0)
+        // PnvRegions.fold and .label, for the regions the strip names.
+        let labels = ["arabia": "Mashriq", "persia": "Persia", "khorasan": "Khorasan", "indus": "Indus",
+                      "egypt": "Maghreb", "anatolia": "Anatolia", "caucasus": "Caucasus", "qafqaz": "Caucasus", "horn": "Horn of Africa"]
+        var keys: [String: [String]] = [:]
+        for account in roster {
+            guard let raw = account.region_token, !raw.isEmpty else { continue }
+            keys[raw == "egypt-nile" ? "arabia" : raw, default: []].append(account.account_key)
+        }
+        var best: (label: String, videos: Int)?
+        for (token, accountKeys) in keys {
+            guard let label = labels[token] else { continue }
+            let list = accountKeys.map { "\"\($0)\"" }.joined(separator: ",")
+            let query = "pnv_media?select=media_key&kind=eq.video&limit=1&account_key=in.(" + list + ")"
+                .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)!
+            let range = try ask(query, count: true).1.value(forHTTPHeaderField: "Content-Range") ?? ""
+            guard let n = Int(range.split(separator: "/").last ?? ""), n > 1 else { continue }
+            if best == nil || n < best!.videos { best = (label, n) }
+        }
+        return try XCTUnwrap(best, "no region has two or more videos")
+    }
+
+    /// The Reel comes round at a stream's end rather than stopping. It walks the region with the
+    /// fewest videos on the day until an object comes back; the bound is that count plus a margin.
+    func testReelComesRoundAtTheEndOfASmallRegion() throws {
+        let target = try smallestVideoRegion()
+        print("PNVREEL smallest region \(target.label): \(target.videos) videos")
         let app = launch()
         dismissNotice(app)
         let reel = app.buttons["pnvReel"]
@@ -280,17 +325,16 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.down); kjPause(0.5)
         for _ in 0..<3 { XCUIRemote.shared.press(.right); kjPause(0.5) }
         let region = app.descendants(matching: .any)["pnvReelRegion"]
-        for _ in 0..<12 where (region.value as? String)?.lowercased() != "anatolia" {
+        for _ in 0..<12 where (region.value as? String) != target.label {
             XCUIRemote.shared.press(.select); kjPause(3)
         }
-        XCTAssertEqual((region.value as? String)?.lowercased(), "anatolia", "Region steps to Anatolia")
+        XCTAssertEqual(region.value as? String, target.label, "Region steps to \(target.label)")
         XCUIRemote.shared.press(.up); kjPause(1)
         var last = surface.value as? String
         var seen = Set([last].compactMap { $0 })
         var cameRound = false
-        // Until the first object seen twice: the region's end, passed. 200 presses holds until
-        // Anatolia has that many videos.
-        for press in 1...200 {
+        // Until the first object seen twice: the region's end, passed.
+        for press in 1...(target.videos + 20) {
             XCUIRemote.shared.press(.right)
             kjPause(1.2)
             let now = surface.value as? String
@@ -298,7 +342,7 @@ final class PicsVidsUITests: XCTestCase {
             last = now
             if let now, !seen.insert(now).inserted { cameRound = true; break }
         }
-        print("PNVREEL anatolia came round after \(seen.count) distinct")
+        print("PNVREEL \(target.label) came round after \(seen.count) distinct")
         XCTAssertTrue(cameRound, "past the end the stream comes round and shows an object again")
     }
 

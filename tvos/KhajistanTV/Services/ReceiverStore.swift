@@ -41,6 +41,9 @@ final class ReceiverStore {
     /// afresh on it, so no shelf keeps a list read from the other one.
     private(set) var dialID = 0
     @ObservationIgnored private var wholeDial = false
+    /// The whole dial was on hand at some point since the last password change, so a channel
+    /// still playing may be one the public dial does not carry, even after a refresh fell back.
+    @ObservationIgnored private var servedWhole = false
     /// Players open over the Receiver. A dial change found by a refresh waits until none is, so
     /// a channel being watched is not closed by the redraw.
     @ObservationIgnored private var playersOpen = 0
@@ -57,6 +60,7 @@ final class ReceiverStore {
     /// so a list read before sign-in is never kept after it, nor the other way.
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var loading: (password: String?, task: Task<Void, Never>)?
+    @ObservationIgnored private var retry: Task<Void, Never>?
     private let urlSession: URLSession
     /// The preview password, read when the index loads.
     private let previewPassword: @MainActor () -> String?
@@ -132,7 +136,9 @@ final class ReceiverStore {
                 note = Self.refusedNote
             }
             if reply == nil {
-                reply = try await urlSession.data(from: Self.dataURL("receiver-index.json"))
+                // Only a read meant for the whole dial carries the site cookie. A sign-in cancelled
+                // by a sign-out can store its cookie after every delete; this read never sends it.
+                reply = try await urlSession.data(for: dialRequest(Self.dataURL("receiver-index.json"), whole: whole))
             }
             guard let reply else { throw ReceiverStoreError.unreadable }
             let (data, response) = reply
@@ -147,6 +153,7 @@ final class ReceiverStore {
                 throw ReceiverStoreError.unreadable
             }
             guard started == generation, !Task.isCancelled else { return }
+            if whole { servedWhole = true }
             if whole != wholeDial {
                 wholeDial = whole
                 if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
@@ -172,14 +179,26 @@ final class ReceiverStore {
     private static let retryAfter: Duration = .seconds(60)
 
     /// A sign-in that was throttled or did not answer is tried again in a minute, whether or not
-    /// anything on screen asks.
+    /// anything on screen asks. One retry waits at a time.
     private func scheduleRetry(generation started: Int) {
-        Task { [weak self] in
+        retry?.cancel()
+        retry = Task { [weak self] in
             try? await Task.sleep(for: Self.retryAfter)
-            guard let self, started == self.generation else { return }
+            guard !Task.isCancelled, let self, started == self.generation else { return }
             self.indexFetchedAt = nil
             await self.loadIndex()
         }
+    }
+
+    /// Every Receiver read but the sign-in goes through here. The site splits the index, the
+    /// region shards, the withdrawal feeds and the carrier lookup by its password cookie
+    /// (_worker.js DIAL_FILES, ID_FEEDS, /api/frequency), so a read sends and stores the cookie
+    /// only while the whole dial is on hand: a sign-in cancelled by Clear can store its cookie
+    /// after every delete, and no public read then carries it.
+    private func dialRequest(_ url: URL, whole: Bool? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = whole ?? wholeDial
+        return request
     }
 
     private func deleteSiteCookies() {
@@ -213,14 +232,27 @@ final class ReceiverStore {
 
     /// A new or removed preview password: the site cookie goes, the dial on hand goes (so every
     /// shelf is drawn again from the new one), and nothing fetched before this is kept.
-    func credentialDidChange() {
+    /// Returns whether the whole dial was on hand since the last change, so a channel still
+    /// playing from it can be turned off.
+    @discardableResult
+    func credentialDidChange() -> Bool {
+        let wasWhole = servedWhole
+        servedWhole = false
+        // A new password is sent once; one the site refused before is tried again only when
+        // entered again.
+        refused = nil
         deleteSiteCookies()
         generation += 1
         wholeDial = false
         indexFailedAt = nil
+        // Nothing is open over the Receiver while the password changes; a count a player never
+        // gave back must not hold a later redraw.
+        playersOpen = 0
         redraw()
         loading?.task.cancel()
         loading = nil
+        retry?.cancel()
+        retry = nil
         inFlight.values.forEach { $0.cancel() }
         inFlight.removeAll()
         index = nil
@@ -229,6 +261,7 @@ final class ReceiverStore {
         controls = .empty
         controlsFetchedAt = nil
         shards.removeAll()
+        return wasWhole
     }
 
     /// A list or a tune asked for before the index was read for the current password waits for
@@ -273,8 +306,9 @@ final class ReceiverStore {
                 return []
             }
             let session = urlSession
+            let request = dialRequest(url)
             let load = Task { () throws -> [Channel] in
-                let (data, response) = try await session.data(from: url)
+                let (data, response) = try await session.data(for: request)
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard code == 200 else { throw ReceiverStoreError.http(code) }
                 do {
@@ -328,7 +362,7 @@ final class ReceiverStore {
     }
 
     private func fetchShapes(_ file: String) async throws -> RegionShapes {
-        let (data, response) = try await urlSession.data(from: KJConfig.site.appendingPathComponent("data/\(file)"))
+        let (data, response) = try await urlSession.data(for: dialRequest(KJConfig.site.appendingPathComponent("data/\(file)")))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
         do {
@@ -359,7 +393,7 @@ final class ReceiverStore {
         #if DEBUG
         if let fixture = try KJFixtureProtocol.mediaURL(for: channel.mediaType) { return fixture }
         #endif
-        let (data, response) = try await urlSession.data(from: ReceiverRules.carrierURL(streamID: stream.id))
+        let (data, response) = try await urlSession.data(for: dialRequest(ReceiverRules.carrierURL(streamID: stream.id)))
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw ReceiverStoreError.http(code) }
         do {
@@ -377,9 +411,9 @@ final class ReceiverStore {
         let denylistURL = Self.dataURL("denylist.json")
         let offAirURL = Self.dataURL("off-air-suspects.json")
         let healthURL = Self.dataURL("health.json")
-        async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: denylistURL, using: session)
-        async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: offAirURL, using: session)
-        async let health: Health? = Self.fetchOptional(Health.self, from: healthURL, using: session)
+        async let denylist: Denylist? = Self.fetchOptional(Denylist.self, from: dialRequest(denylistURL), using: session)
+        async let offAir: OffAir? = Self.fetchOptional(OffAir.self, from: dialRequest(offAirURL), using: session)
+        async let health: Health? = Self.fetchOptional(Health.self, from: dialRequest(healthURL), using: session)
         let started = generation
         let (denied, suspects, graded) = await (denylist, offAir, health)
         guard !Task.isCancelled, started == generation else { return }
@@ -390,10 +424,10 @@ final class ReceiverStore {
     }
 
     private nonisolated static func fetchOptional<T: Decodable & Sendable>(
-        _ type: T.Type, from url: URL, using session: URLSession
+        _ type: T.Type, from request: URLRequest, using session: URLSession
     ) async -> T? {
         do {
-            let (data, response) = try await session.data(from: url)
+            let (data, response) = try await session.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
             return try JSONDecoder().decode(type, from: data)
         } catch {

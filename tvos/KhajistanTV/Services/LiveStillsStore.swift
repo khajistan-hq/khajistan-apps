@@ -220,9 +220,11 @@ final class LiveStills {
     nonisolated static func content(of frame: CIImage) -> CGRect {
         let extent = frame.extent
         let (w, h) = (96, 54)
-        let small = frame.transformed(by: CGAffineTransform(scaleX: CGFloat(w) / extent.width, y: CGFloat(h) / extent.height))
+        // Moved to the origin and scaled to exactly w x h, so the render reads the buffer's own size.
+        let small = frame.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
+            .concatenating(CGAffineTransform(scaleX: CGFloat(w) / extent.width, y: CGFloat(h) / extent.height)))
         var pixels = [UInt8](repeating: 0, count: w * h * 4)
-        context.render(small, toBitmap: &pixels, rowBytes: w * 4, bounds: small.extent.integral,
+        context.render(small, toBitmap: &pixels, rowBytes: w * 4, bounds: CGRect(x: 0, y: 0, width: w, height: h),
                        format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
         var rows = [Double](repeating: 0, count: h), columns = [Double](repeating: 0, count: w)
         for y in 0..<h {

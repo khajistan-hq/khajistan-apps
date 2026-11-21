@@ -28,6 +28,17 @@ def edge_fade(h, w, share=0.12):
     return np.outer(ramp(h), ramp(w))
 
 
+def bird_matte(peak, threshold=0.03, hole_share=0.004):
+    hard = (peak > threshold).astype(np.uint8)
+    hard = cv2.morphologyEx(hard, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(1 - hard, connectivity=8)
+    edge = set(np.unique(np.concatenate([labels[0], labels[-1], labels[:, 0], labels[:, -1]])).tolist())
+    small = [i for i in range(count) if i not in edge and stats[i, cv2.CC_STAT_AREA] < hole_share * peak.size]
+    solid = (hard | np.isin(labels, small)).astype(np.uint8)
+    solid = cv2.erode(solid, np.ones((3, 3), np.uint8), iterations=2)
+    return cv2.GaussianBlur(solid.astype(np.float32), (7, 7), 0)
+
+
 def composite(frame, ground, mode):
     """frame: HxWx3 floats 0-1 lit on black; ground: 3 floats 0-1. Returns HxWx3 floats 0-1."""
     if mode == "light":
@@ -48,15 +59,10 @@ def composite(frame, ground, mode):
         # the clip ends on the page. Not the bird: it is an object, and its head reaches the top.
         a = a * edge_fade(*a.shape)
     else:
-        # The bird: a step on brightness, its holes filled (dark feathers inside the outline are
-        # bird, not background) and its edge pulled in a pixel, so no black fringe is left.
-        hard = (peak > 0.05).astype(np.uint8)
-        flood = hard.copy()
-        mask = np.zeros((hard.shape[0] + 2, hard.shape[1] + 2), np.uint8)
-        cv2.floodFill(flood, mask, (0, 0), 1)
-        solid = hard | (1 - flood)
-        solid = cv2.erode(solid, np.ones((3, 3), np.uint8))
-        a = cv2.GaussianBlur(solid.astype(np.float32), (5, 5), 0)
+        # The bird: a step on brightness, closed, its small enclosed gaps filled (dark feathers
+        # inside the outline are bird), its edge pulled in two pixels so no dark fringe is left.
+        # Background touching any edge of the frame is never filled, however the bird splits it.
+        a = bird_matte(peak)
 
     a = a[..., None]
     colour = np.clip(frame / np.maximum(a, 1e-3), 0, 1)
@@ -72,13 +78,17 @@ def check():
     assert np.allclose(composite(np.zeros((9, 9, 3)), g, "solid"), g), "black must become the ground"
     white = np.ones((1, 1, 3))
     assert np.allclose(composite(white, g, "light"), 1)
-    bird = np.zeros((40, 40, 3)); bird[10:30, 10:30] = [0.5, 0.3, 0.2]; bird[18:22, 18:22] = 0.01
+    bird = np.zeros((80, 80, 3)); bird[20:60, 20:60] = [0.5, 0.3, 0.2]; bird[38:42, 38:42] = 0.01
     out = composite(bird, g, "solid")
-    assert np.allclose(out[20, 20], 0.01, atol=0.02), "a dark feather inside the bird stays bird"
+    assert np.allclose(out[40, 40], 0.01, atol=0.02), "a small dark gap inside the bird stays bird"
     assert np.allclose(out[2, 2], g), "outside the bird is the ground"
-    assert np.allclose(out[15, 15], [0.5, 0.3, 0.2]), "the bird's body is its own colour"
-    top = np.zeros((40, 40, 3)); top[0:20, 10:30] = [0.9, 0.9, 0.85]
-    assert np.allclose(composite(top, g, "solid")[2, 20], [0.9, 0.9, 0.85]), "a bird at the frame's edge is not faded"
+    assert np.allclose(out[30, 30], [0.5, 0.3, 0.2]), "the bird's body is its own colour"
+    corner = bird.copy(); corner[0:3, 0:3] = 0.5
+    assert np.allclose(composite(corner, g, "solid")[70, 70], g), "a bright corner does not black out the frame"
+    split = np.zeros((80, 80, 3)); split[:, 38:42] = [0.5, 0.3, 0.2]
+    assert np.allclose(composite(split, g, "solid")[40, 70], g), "background cut off by the bird stays ground"
+    top = np.zeros((80, 80, 3)); top[0:40, 20:60] = [0.9, 0.9, 0.85]
+    assert np.allclose(composite(top, g, "solid")[4, 40], [0.9, 0.9, 0.85]), "a bird at the frame's edge is not faded"
     pink = np.full((1, 1, 3), [0.8, 0.2, 0.5])
     ray = np.full((40, 40, 3), 0.5)
     edge = composite(ray, g, "light")
@@ -98,7 +108,7 @@ def render(src, dst, ground, mode):
                             "-s", f"{W}x{H}", "-"], stdout=subprocess.PIPE)
     enc = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
                             "-r", "24", "-i", "-", "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "16",
-                            "-profile:v", "high", "-level", "4.1", "-vf", "scale=out_color_matrix=bt709:out_range=tv",
+                            "-profile:v", "high", "-level", "4.1", "-vf", "scale=out_color_matrix=bt709:out_range=tv,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv",
                             "-pix_fmt", "yuv420p", "-colorspace", "bt709", "-color_primaries", "bt709",
                             "-color_trc", "bt709", "-color_range", "tv", "-movflags", "+faststart",
                             dst], stdin=subprocess.PIPE)
@@ -110,6 +120,11 @@ def render(src, dst, ground, mode):
         enc.stdin.write((composite(f, g, mode) * 255 + 0.5).astype(np.uint8).tobytes())
     enc.stdin.close(); dec.wait()
     if enc.wait() or dec.returncode: sys.exit(f"render failed: {dst}")
+    # Untagged primaries or transfer leave tvOS to guess, and a guess shows as a box on the page.
+    tags = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                           "stream=color_space,color_transfer,color_primaries", "-of", "csv=p=0", dst],
+                          capture_output=True, text=True).stdout.strip()
+    if tags != "bt709,bt709,bt709": sys.exit(f"{dst}: colour tags are {tags!r}, not bt709 throughout")
 
 
 if __name__ == "__main__":

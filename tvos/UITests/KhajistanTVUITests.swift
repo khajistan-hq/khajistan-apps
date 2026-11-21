@@ -72,7 +72,7 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(regionButtons(app).firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
 
         let toggle = app.buttons["beyondTheAtlas"]
-        kjFocusFrontFoot(app)
+        kjFocusAtlasSwitch(app)
         // The switch is kept on the device, so it is read rather than assumed: on for the
         // picture, and off again at the end so later tests see the core map.
         if toggle.exists && toggle.hasFocus {

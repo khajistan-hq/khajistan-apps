@@ -32,7 +32,7 @@ final class LikedShelfUITests: XCTestCase {
         XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix("Al Arabiya"), "newest like first, got \(cards.element(boundBy: 0).label)")
         XCTAssertFalse(cards.element(boundBy: 0).label.contains("Liked"), "no second 'Liked' on a card of the Liked shelf")
 
-        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
+        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch")
         XCUIRemote.shared.press(.down)
         kjPause(6)   // stills arrive one at a time
         XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "one press down from the front lands on Liked, got \(focusedID(app))")
@@ -68,7 +68,7 @@ final class LikedShelfUITests: XCTestCase {
             kjLaunch(app)
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")
-            XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front in \(skin)")
+            XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch in \(skin)")
             XCUIRemote.shared.press(.down)
             kjPause(6)   // stills arrive one at a time
             XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "down lands on Liked in \(skin), got \(focusedID(app))")

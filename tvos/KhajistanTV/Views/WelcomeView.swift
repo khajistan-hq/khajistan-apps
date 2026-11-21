@@ -16,7 +16,8 @@ struct WelcomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var reel = WelcomeReel()
+    /// Made once, on appear: a @State initial value is built again on every init of the view.
+    @State private var reel: WelcomeReel?
     @FocusState private var startFocused: Bool
 
     static let pictureSize = CGSize(width: 1040, height: 585)
@@ -55,9 +56,11 @@ struct WelcomeView: View {
 
             Spacer(minLength: 40)
 
-            PlayerLayerView(player: reel.player)
-                .frame(width: Self.pictureSize.width, height: Self.pictureSize.height)
-                .accessibilityHidden(true)
+            Group {
+                if let reel { PlayerLayerView(player: reel.player) } else { Color.clear }
+            }
+            .frame(width: Self.pictureSize.width, height: Self.pictureSize.height)
+            .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.ground.ignoresSafeArea())
@@ -66,10 +69,16 @@ struct WelcomeView: View {
         .foregroundStyle(palette.ink)
         .defaultFocus($startFocused, true)
         .onExitCommand(perform: done)
-        .onAppear { reel.start(skin: model.skin, moving: !reduceMotion) }
-        // Automatic can turn the skin while the page is up (dawn, dusk): the clips follow it.
-        .onChange(of: model.skin) { _, skin in reel.stop(); reel.start(skin: skin, moving: !reduceMotion) }
-        .onDisappear { reel.stop() }
+        .onAppear {
+            let reel = reel ?? WelcomeReel()
+            self.reel = reel
+            reel.start(skin: model.skin, moving: !reduceMotion)
+        }
+        // Automatic can turn the skin while the page is up (dawn, dusk), and Reduce Motion can be
+        // turned on: the clips follow either.
+        .onChange(of: model.skin) { _, skin in reel?.start(skin: skin, moving: !reduceMotion) }
+        .onChange(of: reduceMotion) { _, still in reel?.start(skin: model.skin, moving: !still) }
+        .onDisappear { reel?.stop() }
     }
 
     /// The sections this build carries, Account aside, each with one plain line.
@@ -90,13 +99,15 @@ struct WelcomeView: View {
     }
 }
 
-/// The ident once, then the wordmark on a loop. Under Reduce Motion the wordmark stands still.
+/// The ident once, then the wordmark on a loop, from one queue: the wordmark is queued behind the
+/// ident, so the handover has no blank beat, and an ident that fails or stalls is skipped. Under
+/// Reduce Motion the wordmark stands still. Every callback checks it belongs to the run that is on,
+/// so a skin change or a dismiss in between never starts a stopped reel.
 @MainActor
 final class WelcomeReel {
     let player = AVQueuePlayer()
-    private var looper: AVPlayerLooper?
-    private var observer: NSObjectProtocol?
-
+    private var observers: [NSObjectProtocol] = []
+    private var run = 0
     private var skin = Skin.day
 
     private func item(_ name: String) -> AVPlayerItem? {
@@ -104,38 +115,50 @@ final class WelcomeReel {
     }
 
     func start(skin: Skin, moving: Bool) {
+        stop()
+        run += 1
+        let current = run
         self.skin = skin
         player.isMuted = true
         player.preventsDisplaySleepDuringVideoPlayback = false
+        player.actionAtItemEnd = .advance
+        guard let wordmark = item("wordmark") else { return }
         guard moving else {
-            if let still = item("wordmark") {
-                player.replaceCurrentItem(with: still)
-                player.seek(to: CMTime(seconds: 4, preferredTimescale: 600))
-            }
+            player.insert(wordmark, after: nil)
+            player.seek(to: CMTime(seconds: 4, preferredTimescale: 600))
             return
         }
-        guard let ident = item("ident") else { loop(); return }
-        player.replaceCurrentItem(with: ident)
-        observer = NotificationCenter.default.addObserver(
-            forName: AVPlayerItem.didPlayToEndTimeNotification, object: ident, queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.loop() }
+        let ident = item("ident")
+        if let ident { player.insert(ident, after: nil) }
+        player.insert(wordmark, after: ident)
+        let center = NotificationCenter.default
+        // The wordmark again from its start when it ends: the loop.
+        observers.append(center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification, object: wordmark, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.run == current else { return }
+                self.player.seek(to: .zero)
+                self.player.play()
+            }
+        })
+        // An ident that cannot play hands over at once.
+        if let ident {
+            for name in [AVPlayerItem.failedToPlayToEndTimeNotification, AVPlayerItem.playbackStalledNotification] {
+                observers.append(center.addObserver(forName: name, object: ident, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.run == current, self.player.currentItem === ident else { return }
+                        self.player.advanceToNextItem()
+                        self.player.play()
+                    }
+                })
+            }
         }
-        player.play()
-    }
-
-    private func loop() {
-        guard let wordmark = item("wordmark") else { return }
-        player.removeAllItems()
-        looper = AVPlayerLooper(player: player, templateItem: wordmark)
         player.play()
     }
 
     func stop() {
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
-        looper?.disableLooping()
-        looper = nil
+        run += 1
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers = []
         player.pause()
         player.removeAllItems()
     }

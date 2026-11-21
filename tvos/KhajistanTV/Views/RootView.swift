@@ -13,8 +13,6 @@ struct RootView: View {
     /// The sections are laid out for the radio bar under them (`underRadioBar`). Set as the bar
     /// comes; once it has gone, cleared only when the viewer moves to another page.
     @State private var underBar = false
-    /// The welcome, the first time the app opens (Welcome.due).
-    @State private var welcoming = Welcome.due
 
     var body: some View {
         let palette = Palette(model.skin)
@@ -29,6 +27,12 @@ struct RootView: View {
         #else
         screens(palette)
         #endif
+    }
+
+    /// The welcome is seen: it does not come again on this device.
+    private func closeWelcome() {
+        UserDefaults.standard.set(true, forKey: Welcome.key)
+        model.welcoming = false
     }
 
     /// A new page with no bar under it is laid out in full.
@@ -79,12 +83,12 @@ struct RootView: View {
             model.radioAway = bar
             reopened = away
         }
-        .fullScreenCover(isPresented: $welcoming) {
-            WelcomeView {
-                UserDefaults.standard.set(true, forKey: Welcome.key)
-                welcoming = false
-            }
+        .fullScreenCover(isPresented: Binding(get: { model.welcoming }, set: { if !$0 { closeWelcome() } })) {
+            WelcomeView(done: closeWelcome)
         }
+        // A launch from the Top Shelf (khajistan://…) goes where it points: the welcome steps
+        // aside for it rather than covering the channel it opens.
+        .onChange(of: model.link == nil, initial: true) { _, none in if !none, model.welcoming { closeWelcome() } }
         .fullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)

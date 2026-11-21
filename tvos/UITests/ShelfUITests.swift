@@ -47,7 +47,7 @@ final class ShelfUITests: XCTestCase {
         }
     }
 
-    /// Down from the foot of the front: the genre shelves first, News leading (2026-11-04), as many as the
+    /// Down from the front (the atlas switch): the genre shelves first, News leading (2026-11-04), as many as the
     /// live lists fill, then the parts of Khajistan. Returns how many genre shelves were crossed.
     private func downPastGenres(_ skin: String, _ app: XCUIApplication) -> Int {
         // The genre shelves arrive after every region list has been read: wait for them, or the
@@ -75,8 +75,8 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(kjFocusRegion(app, "indus"), "\(skin): the walk down the region list reaches Indus")
             XCTAssertEqual(focusedID(app), "region-indus")
             shot("\(skin)-1-receiver-front", app)
-            // The shelves start one press down from the foot of the front.
-            XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
+            // The shelves start one press down from the front.
+            XCTAssertTrue(kjFocusAtlasSwitch(app), "\(skin): focus reaches the Beyond the atlas switch")
 
             // Under the front, the genre shelves (News first), then every part of Khajistan as a
             // tile (owner, 2026-10-29), then Cameras, a plate per region that has them (owner,
@@ -97,10 +97,10 @@ final class ShelfUITests: XCTestCase {
                 press(.up, app: app)
             }
             // Up through the parts of Khajistan and the genre shelves returns to the front: the
-            // sidebar's switch, which sits straight above the left-most card, or the list.
+            // switch over the map, or the list.
             press(.up, times: 2 + genres, app: app)
             let back = focusedID(app)
-            XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
+            XCTAssertTrue(kjOnFront(back), "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
         }
     }
@@ -111,7 +111,7 @@ final class ShelfUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         kjPause(3)
-        XCTAssertTrue(kjFocusFrontFoot(app), "focus must reach the foot of the front")
+        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus must reach the atlas switch")
         _ = downPastGenres("day", app)
         press(.down, app: app)   // past the parts of Khajistan, to Cameras
         let plate = focusedID(app)

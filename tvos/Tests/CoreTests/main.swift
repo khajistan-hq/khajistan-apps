@@ -4932,6 +4932,20 @@ func letterboxCutsBlackBarsAndLeavesDarkPicturesWhole() throws {
     // Negative: a dark scene whose lit part is a small patch is a picture, not a letterbox.
     let night = Letterbox.content(rows: [0, 0, 0, 0, 0.5, 0, 0, 0, 0], columns: Array(repeating: 0.3, count: 16))
     try expect(night == (0, 0, 1, 1))
+    // Negative: a night sky over the top 30% with no bar at the foot is one-sided, so kept whole.
+    let sky = Letterbox.content(rows: [0.02, 0.03, 0.03] + Array(repeating: 0.4, count: 7),
+                                columns: Array(repeating: 0.3, count: 16))
+    try expect(sky == (0, 0, 1, 1), "\(sky)")
+    // Negative: a logo lighting one pillar leaves the axis whole rather than cutting off-centre.
+    // 48 columns, bars of 6 each side, the logo lighting 4 of the right bar's 6.
+    let logo = Letterbox.content(rows: Array(repeating: 0.4, count: 27),
+                                 columns: Array(repeating: 0, count: 6) + Array(repeating: 0.4, count: 36)
+                                     + Array(repeating: 0.2, count: 4) + [0, 0])
+    // The same bars with no logo are a pair and are cut.
+    let bars = Letterbox.content(rows: Array(repeating: 0.4, count: 27),
+                                 columns: Array(repeating: 0, count: 6) + Array(repeating: 0.4, count: 36) + Array(repeating: 0, count: 6))
+    try expectClose(bars.x, 6.0 / 48); try expectClose(bars.width, 36.0 / 48)
+    try expect(logo == (0, 0, 1, 1), "\(logo)")
     // Negative: an all-black frame is returned whole.
     try expect(Letterbox.content(rows: [0, 0], columns: [0, 0]) == (0, 0, 1, 1))
 }

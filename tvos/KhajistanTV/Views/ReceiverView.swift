@@ -23,6 +23,8 @@ struct ReceiverView: View {
     @FocusState private var surfFocused: Bool
     /// The switch over the map, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
+    /// The All · TV · Radio chip focused, if any.
+    @FocusState private var chipFocused: String?
 
     var body: some View {
         @Bindable var model = model
@@ -122,7 +124,9 @@ struct ReceiverView: View {
             .ignoresSafeArea(.container, edges: .bottom)
             // Up from the first shelf lands on the switch, and Back lands on Surf: the page back
             // at its top for either, as for the list, so the front is never left half under the bar.
-            .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
+            // Up from the left-most card of the first shelf lands on the sidebar's chips (straight
+            // above it), and the page goes back to its top for them too.
+            .onChange(of: surfFocused || switchFocused || chipFocused != nil) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
             .defaultFocus($surfFocused, true)
@@ -163,6 +167,7 @@ struct ReceiverView: View {
             .accessibilityIdentifier("beyondTheAtlas")
             // The plate's padding is pulled back so the switch lines up with the map's edge.
             .padding(.leading, -26)
+            .frame(height: AtlasPanel.switchRow, alignment: .topLeading)
     }
 
     private func toTop(_ proxy: ScrollViewProxy) {
@@ -199,9 +204,10 @@ struct ReceiverView: View {
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
-            // The top bar and the list each claim the first focus; this one is placed last.
-            .task {
-                guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+            // The top bar and the list each claim the first focus; this one is placed last. Not
+            // under the welcome: it waits for the welcome to close, or focus is lost under it.
+            .task(id: model.welcoming) {
+                guard !model.welcoming, !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
                 model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true
@@ -242,6 +248,7 @@ struct ReceiverView: View {
                     set(item.0)
                 } label: { Text(item.1).kjKicker() }
                     .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    .focused($chipFocused, equals: item.0)
                     .accessibilityIdentifier("\(id)-\(item.0)")
             }
         }
@@ -513,9 +520,10 @@ private struct AtlasPanel: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        // 50 points a row: the atlas's twelve regions fit the map's band whole,
-                        // with no last row cut flat at its foot (2026-11-17).
-                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
+                        // 44 points a row: the atlas's twelve regions fit the map's band whole,
+                        // with no last row cut flat at its foot (2026-11-17; rows 50 → 44 when the
+                        // band went 640 → 580, 2026-11-20).
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)))
                         .focused($listedRegion, equals: region.id)
                         .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.label)
@@ -534,7 +542,7 @@ private struct AtlasPanel: View {
     }
 
     static let listWidth: CGFloat = 320
-    static let mapHeight: CGFloat = 560
+    static let mapHeight: CGFloat = 580
     /// The switch's row over the map: the map gives up this much, so the front keeps its height.
     static let switchRow: CGFloat = 80
 }

@@ -853,6 +853,15 @@ final class KhajistanUITests: XCTestCase {
         var first: String?
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             first = onScreen(); return first != nil }, object: nil)], timeout: 30) == .completed, "the Reel opens")
+        // A Khajistan TV programme asks a signed-out viewer to sign in and does not play, so it
+        // never ends: swipe past any, as a viewer would, before timing an end.
+        for _ in 0..<6 where first?.hasPrefix("reel-ktv-") == true {
+            app.swipeUp()
+            let was = first
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                first = onScreen(); return first != nil && first != was }, object: nil)], timeout: 15)
+        }
+        XCTAssertFalse(first?.hasPrefix("reel-ktv-") ?? true, "the Reel reaches a video that plays signed out")
         // No touch from here: the page must change on its own.
         let moved = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             let now = onScreen(); return now != nil && now != first }, object: nil)], timeout: 180) == .completed

@@ -841,6 +841,11 @@ struct ReceiverPlayerView: View {
         stopMovingOn()
         // An open guide is the viewer choosing: closing it without a pick starts the move.
         guard isFailed, destination == nil, guideRow == nil, !leaving, !failedAtGate, !failedOffline else { return }
+        #if DEBUG
+        // `-kjnomoveon YES` leaves a dead signal on screen, so a test that counts presses reads
+        // only its own presses, whichever carriers are off air that day.
+        if UserDefaults.standard.bool(forKey: "kjnomoveon") { return }
+        #endif
         movingOnFrom = current.id
         deadHere.insert(current.id)
         let dead = current

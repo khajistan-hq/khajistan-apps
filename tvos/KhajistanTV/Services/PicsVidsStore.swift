@@ -172,6 +172,17 @@ final class PicsVidsStore {
         feeds[key] = nil
     }
 
+    /// A new Reel for one region that starts on the video chosen from its shelf; the region's
+    /// shuffled videos load after it. A page in flight is left alone, as `discard` does.
+    func seedReel(with row: PnvRow, region: String) {
+        let key = Self.videosKey(region)
+        guard feeds[key]?.isLoading != true else { return }
+        var feed = PnvFeed()
+        feed.items = [row]
+        feed.seen = [row.media_key]
+        feeds[key] = feed
+    }
+
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
     func setShuffled(_ on: Bool) {

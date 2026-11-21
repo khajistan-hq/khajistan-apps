@@ -655,7 +655,10 @@ struct PnvViewerView: View {
                 return
             }
             saveNote = nil
-            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id }) else { return }
+            // In the Reel a video not in its feed (a reel seeded while a page was in flight) steps
+            // onto the feed's first.
+            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id })
+                    ?? (videosOnly ? (delta > 0 ? -1 : 0) : nil) else { return }
             index += delta
             if index >= store.feed(feedKey).items.count {
                 // A page that failed blocks loadMore until it is cleared: ask again, or the

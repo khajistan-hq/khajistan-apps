@@ -120,6 +120,7 @@ final class AuthStore {
         let token = session?.accessToken
         clearSession()
         clearPreviewPassword()
+        Task.detached(priority: .utility) { RRPageDisk.purge() }
         guard let token else { return }
         _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
     }

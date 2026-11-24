@@ -29,6 +29,8 @@ final class AuthStore {
     }
     private(set) var previewPassword: String?
     @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
+    /// Called whenever a session ends: Sign out, or a refresh the server refused.
+    @ObservationIgnored var onSessionEnd: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -136,7 +138,6 @@ final class AuthStore {
         let token = session?.accessToken
         clearSession()
         clearPreviewPassword()
-        Task.detached(priority: .utility) { RRPageDisk.purge() }
         guard let token else { return }
         _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
     }
@@ -218,5 +219,6 @@ final class AuthStore {
         session = nil
         pendingFactorId = nil
         Keychain.delete(Account.session)
+        onSessionEnd?()
     }
 }

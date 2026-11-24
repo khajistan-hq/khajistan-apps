@@ -195,6 +195,8 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
+        // No page a signed-in reader opened stays on the device once the session ends.
+        auth.onSessionEnd = { Task.detached(priority: .utility) { RRPageDisk.purge() } }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.browser.clearPreviewSession()
             self?.reading.previewCredentialDidChange()

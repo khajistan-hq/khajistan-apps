@@ -255,6 +255,8 @@ final class AppModel {
         skinPick = Sky.isHonoured(chosen: chosen, band: band, at: now, timeZone: zone) ? resolved : nil
         if resolved != skin { skin = resolved }
         let script = Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone)
+        // The watcher runs every minute; the web view's scripts are replaced only on a change.
+        guard script != skinScript else { return }
         skinScript = script
         madeBrowser?.applySkin(script: script)
     }

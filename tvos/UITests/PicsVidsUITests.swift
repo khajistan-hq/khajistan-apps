@@ -137,7 +137,7 @@ final class PicsVidsUITests: XCTestCase {
         kjScreenshot("pv-05-viewer-next", app: app)
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelves")
-        XCTAssertFalse(surface.exists)
+        XCTAssertTrue(surface.waitForNonExistence(timeout: 15), "and the viewer must be gone")
     }
 
     /// Save and Collection in the viewer, lit by the remote: Down lights Save, Right Collection, Up
@@ -273,7 +273,11 @@ final class PicsVidsUITests: XCTestCase {
         let state = app.staticTexts["pnvViewerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20), "A Khajistan TV row signed out must say what it needs")
         kjPause(4)
-        XCTAssertEqual(state.label, "Sign in to watch Khajistan Transmission.")
+        // The viewer adds "  ·  Select to sign in" once its lit control goes idle (PnvViewerView,
+        // armIdle). A slow run reaches this line after that; both forms are the message.
+        XCTAssertTrue(state.label == "Sign in to watch Khajistan Transmission."
+                      || state.label == "Sign in to watch Khajistan Transmission.  \u{00B7}  Select to sign in",
+                      "a Khajistan TV row signed out must ask for sign-in, got: \(state.label)")
         kjScreenshot("pv-09-ktv-signed-out", app: app)
         XCUIRemote.shared.press(.select)
         // Sign-in opens on the phone panel (QR and code; 2026-10-27), or on email and password

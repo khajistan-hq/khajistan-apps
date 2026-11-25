@@ -116,27 +116,71 @@ extension XCTestCase {
         return target.exists && target.hasFocus
     }
 
+    /// What has focus now, as text that changes when focus moves: its identifier and its frame.
+    func kjFocusKey(_ app: XCUIApplication) -> String {
+        let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        return focused.exists ? "\(focused.identifier)|\(focused.frame)" : ""
+    }
+
+    /// One remote press, then a wait until focus has moved (or `timeout`). On a slow CI runner a
+    /// press takes seconds to land; a fixed pause presses again before it has, and the walk then
+    /// steers from where focus was, not where it is. Returns whether focus moved.
+    @discardableResult
+    func kjPress(_ button: XCUIRemote.Button, app: XCUIApplication, timeout: TimeInterval = 4) -> Bool {
+        let before = kjFocusKey(app)
+        XCUIRemote.shared.press(button)
+        let end = Date().addingTimeInterval(timeout)
+        while Date() < end {
+            kjPause(0.2)
+            let now = kjFocusKey(app)
+            if !now.isEmpty && now != before { kjPause(0.2); return true }
+        }
+        return false
+    }
+
+    /// Reach `tab` in the top bar: up until a top-bar button (`nav-…`) has focus, then along it.
+    /// Never a fixed count of presses: just after launch or a Back, the first presses can land
+    /// before the app takes them.
+    @discardableResult
+    func kjFocusTopBar(_ tab: XCUIElement, app: XCUIApplication) -> Bool {
+        guard kjIntoTopBar(app) else { return false }
+        return kjFocus(tab, app: app)
+    }
+
+    /// Up until a top-bar button has focus, and no sideways press: where Up lands is what some
+    /// tests check (the bar's default focus is the open section's tab).
+    @discardableResult
+    func kjIntoTopBar(_ app: XCUIApplication) -> Bool {
+        let inBar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        for _ in 0..<12 where !inBar.exists { kjPress(.up, app: app) }
+        return inBar.exists
+    }
+
     /// Presses toward `element` until it has focus, steering by where it sits against the focused
     /// control. Returns whether it got there.
     @discardableResult
     func kjFocus(_ element: XCUIElement, app: XCUIApplication, limit: Int = 40) -> Bool {
+        var dead = 0   // presses in a row that moved nothing
         for _ in 0..<limit {
             if element.exists && element.hasFocus { return true }
+            // Focus that will not move is a trap in the app, not a slow press: stop, so the test
+            // fails in seconds and its message can say what holds focus (kjFocusKey).
+            if dead >= 4 { return false }
             let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
             guard element.exists, focused.exists else {
-                XCUIRemote.shared.press(.down)
-                kjPause(0.4)
+                dead = kjPress(.down, app: app) ? 0 : dead + 1
                 continue
             }
             let target = element.frame, here = focused.frame
             let dx = target.midX - here.midX, dy = target.midY - here.midY
             // A different row first (up or down), then along the row.
+            let moved: Bool
             if abs(dy) > max(here.height, target.height) * 0.6 {
-                XCUIRemote.shared.press(dy > 0 ? .down : .up)
+                moved = kjPress(dy > 0 ? .down : .up, app: app)
             } else {
-                XCUIRemote.shared.press(dx > 0 ? .right : .left)
+                moved = kjPress(dx > 0 ? .right : .left, app: app)
             }
-            kjPause(0.4)
+            dead = moved ? 0 : dead + 1
         }
         return element.exists && element.hasFocus
     }

@@ -254,20 +254,38 @@ final class NowNextUITests: XCTestCase {
     }
 
     /// The guide in each skin, for the eye: the tokens do the work, so each is photographed with a
-    /// programme lit and with a channel's cell lit.
+    /// programme lit and with a channel's cell lit. On its own fixture, the lineup of 24 November
+    /// 2026 at 22:10 PKT with all 31 channels on air (scripts/guide-fixture.py cut it from the
+    /// month's file), and with the tests' own video playing as the programme
+    /// (`-kjtransmissionpicture`), so the picture in the window is a moving one.
     func testGuideInEverySkin() {
+        let current = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-11-24.json").path
         for skin in ["day", "grove", "smut"] {
-            let app = open(channel: 5, skin: skin)
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", current,
+                                   "-kjnow", "2026-11-24T22:10:00+05:00", "-kjtransmissionpicture", "YES"]
+            kjLaunch(app)
+            let first = app.buttons["transmission-channel-1"]
+            XCTAssertTrue(first.waitForExistence(timeout: 30), "\(skin): channel 1 has a card")
+            XCTAssertTrue(kjFocus(first, app: app), "\(skin): channel 1's card takes focus")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(any(app, "transmissionChannel").waitForExistence(timeout: 30), "\(skin): channel 1 is on air")
             kjPause(12)
             XCUIRemote.shared.press(.left)
             XCTAssertTrue(any(app, "transmissionGuide").waitForExistence(timeout: 5), "\(skin): the guide opens")
-            kjPause(1)
+            kjPause(1.5)
             kjScreenshot("tv-guide-\(skin)-programme", app: app)
-            XCTAssertTrue(any(app, "guidePictureWindow").exists, "\(skin): the picture window")
+            let window = any(app, "guidePictureWindow")
+            XCTAssertTrue(window.exists, "\(skin): the picture window")
+            // One window, where the guide keeps its place: inside the top band, at the left margin.
+            XCTAssertGreaterThanOrEqual(window.frame.minY, 0, "\(skin): nothing of the picture is above the screen: \(window.frame)")
+            XCTAssertLessThan(window.frame.maxY, app.frame.height * 0.45, "\(skin): the picture is in the top band: \(window.frame)")
+            XCTAssertTrue(litBlock(app, channel: 1).exists, "\(skin): the programme on now is lit")
             XCUIRemote.shared.press(.left)
             kjPause(0.8)
             kjScreenshot("tv-guide-\(skin)-channel", app: app)
-            XCTAssertTrue(any(app, "guide-ch5").isSelected, "\(skin): the channel's cell is lit")
+            XCTAssertTrue(any(app, "guide-ch1").isSelected, "\(skin): the channel's cell is lit")
             app.terminate()
         }
     }

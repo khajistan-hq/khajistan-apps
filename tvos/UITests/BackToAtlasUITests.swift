@@ -51,7 +51,7 @@ final class BackToAtlasUITests: XCTestCase {
         // Back from the top bar is the press that reads the history (the front's content hands
         // Back to tvOS), so press it there.
         XCTAssertTrue(kjIntoTopBar(app), "Up must reach the top bar")
-        XCTAssertTrue(app.buttons["nav-receiver"].hasFocus, "Back is pressed from the top bar's Receiver tab, where Up lands with no sideways press")
+        XCTAssertTrue(app.buttons["nav-receiver"].hasFocus, "Back is pressed from the top bar's Receiver tab")
         XCUIRemote.shared.press(.menu)
         // Transmission takes seconds to draw, so give it the time it would need to come back.
         XCTAssertFalse(transmission.waitForExistence(timeout: 6), "Back on the atlas must not go back to Transmission")

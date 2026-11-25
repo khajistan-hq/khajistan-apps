@@ -116,10 +116,12 @@ extension XCTestCase {
         return target.exists && target.hasFocus
     }
 
-    /// What has focus now, as text that changes when focus moves: its identifier and its frame.
+    /// What has focus now, as text that changes when focus moves: its identifier, label and frame.
+    /// The label is there for a shelf that scrolls under a fixed focus position: two cards with
+    /// no identifier then share a frame.
     func kjFocusKey(_ app: XCUIApplication) -> String {
         let focused = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        return focused.exists ? "\(focused.identifier)|\(focused.frame)" : ""
+        return focused.exists ? "\(focused.identifier)|\(focused.label)|\(focused.frame)" : ""
     }
 
     /// One remote press, then a wait until focus has moved (or `timeout`). On a slow CI runner a

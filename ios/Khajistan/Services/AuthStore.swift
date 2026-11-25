@@ -26,6 +26,8 @@ final class AuthStore {
     }
     private(set) var previewPassword: String?
     @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
+    /// Called whenever a session ends: Sign out, or a refresh the server refused.
+    @ObservationIgnored var onSessionEnd: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -207,5 +209,6 @@ final class AuthStore {
         session = nil
         pendingFactorId = nil
         Keychain.delete(Account.session)
+        onSessionEnd?()
     }
 }

@@ -7,3 +7,9 @@ xcuserdata/
 *.xcarchive
 
 .ci/
+
+# Signing material never belongs in a public repo.
+*.p12
+*.mobileprovision
+*.cer
+*.pem

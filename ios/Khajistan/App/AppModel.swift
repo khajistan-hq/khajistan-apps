@@ -196,6 +196,8 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
+        // No page a signed-in reader opened stays on the device once the session ends.
+        auth.onSessionEnd = { Task.detached(priority: .utility) { RRPageDisk.purge() } }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.browser.clearPreviewSession()
             self?.reading.previewCredentialDidChange()
@@ -261,6 +263,8 @@ final class AppModel {
         skinPick = Sky.isHonoured(chosen: chosen, band: band, at: now, timeZone: zone) ? resolved : nil
         if resolved != skin { skin = resolved }
         let script = Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone)
+        // The watcher runs every minute; the web view's scripts are replaced only on a change.
+        guard script != skinScript else { return }
         skinScript = script
         madeBrowser?.applySkin(script: script)
     }

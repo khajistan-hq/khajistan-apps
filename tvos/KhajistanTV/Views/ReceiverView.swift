@@ -540,7 +540,18 @@ private struct ThemeRow: View {
         }
         .focusSection()
         .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id)
-        .onChange(of: focused) { _, now in if let now { lastFocused = now } }
+        // tvOS does not honour the default from every side: with the atlas switch over the map
+        // (PR 122), Down from it landed on Culture, the theme under it. So the row moves focus
+        // itself on entry, as the CCTV row does: News the first time, then the theme last focused.
+        .onChange(of: focused) { old, now in
+            guard let now else { return }
+            let home = rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id
+            if old == nil, let home, now != home {
+                focused = home
+            } else {
+                lastFocused = now
+            }
+        }
         .task(id: model.extendedAtlas) { await load() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)

@@ -186,7 +186,7 @@ enum Films {
     static func denyText(_ film: Film, status: Int) -> String {
         switch status {
         case 401:
-            return "Sign in to the Khajistan account that holds this film."
+            return "Sign in to the Khajistan account that holds this film, then press Watch the full film again."
         case 403:
             if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again." }
             if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it at screening.khajistan.com, then press Watch the full film again." }

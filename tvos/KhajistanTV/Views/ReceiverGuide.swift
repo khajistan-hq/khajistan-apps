@@ -156,8 +156,9 @@ struct TransmissionGuide: View {
             let width = max(1, geo.size.width - 2 * picture.minX - Self.channelWidth)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top, spacing: 40) {
-                    // The picture's place. The player draws the live picture over it.
-                    Color.black.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
+                    // The picture's place. The player draws its own layer here, black behind a
+                    // picture and the ground behind a dancer or an off-air card.
+                    Color.clear.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
                     panel
                 }
                 .frame(height: picture.height)
@@ -243,13 +244,13 @@ struct TransmissionGuide: View {
             Text(Self.dayLabel(grid.windowStart)).kjSmall().lineLimit(1).minimumScaleFactor(0.7)
                 .padding(.horizontal, 14)
                 .frame(width: Self.channelWidth - Self.gap, height: Self.markHeight - Self.gap, alignment: .leading)
-                .background(palette.band)
+                .background(palette.band, ignoresSafeAreaEdges: [])
                 .padding(.trailing, Self.gap)
             ForEach(grid.marks, id: \.self) { mark in
                 Text(Self.clock(mark)).kjKicker(look.ink).monospacedDigit()
                     .padding(.horizontal, 14)
                     .frame(width: column - Self.gap, height: Self.markHeight - Self.gap, alignment: .leading)
-                    .background(palette.band)
+                    .background(palette.band, ignoresSafeAreaEdges: [])
                     .padding(.trailing, Self.gap)
             }
         }
@@ -338,7 +339,7 @@ private struct ChannelCell: View {
         .frame(height: TransmissionGuide.rowHeight - TransmissionGuide.gap)
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
-        .background(look.ground)
+        .background(look.ground, ignoresSafeAreaEdges: [])
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guide-ch\(number)")
         .accessibilityAddTraits(plate ? .isSelected : [])
@@ -404,9 +405,10 @@ private struct GuideBlock: View {
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .environment(\.palette, look)
+        .foregroundStyle(look.ink)
         // The plate alone, without the 1.03 lift a row takes: a block can be most of the screen
         // wide, and lifted it ran past its own edge.
-        .background(lit ? palette.focusPlate : (slot.isOffAir ? palette.lift.opacity(0) : palette.lift))
+        .background(lit ? palette.focusPlate : (slot.isOffAir ? palette.lift.opacity(0) : palette.lift), ignoresSafeAreaEdges: [])
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((slot.isOffAir ? (times.isEmpty ? "Off air" : "Off air, \(times)") : "\(slot.title ?? ""), \(times) \(StationClock.tzLabel)")
                             + (run.map { _ in ", \(under)" } ?? "")

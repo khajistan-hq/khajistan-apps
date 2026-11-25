@@ -52,10 +52,8 @@ struct TransmissionPlayerView: View {
     @State private var song = ""
     /// The finger on the remote's touch surface, as RemoteSwipeReader last reported it.
     @State private var swipe = SwipeTrack()
-    /// The screen, and where the safe area starts in it: the picture is moved to the guide's
-    /// window in the screen's own points. tvOS's values until the first layout reports them.
-    @State private var screen = CGSize(width: 1920, height: 1080)
-    @State private var safeOrigin = CGPoint(x: 80, y: 60)
+    /// The screen's safe area, handed to the picture's layer as padding of its own (see body).
+    @State private var safeInsets = EdgeInsets(top: 60, leading: 80, bottom: 60, trailing: 80)
     @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
@@ -63,11 +61,7 @@ struct TransmissionPlayerView: View {
     var body: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
-            // Read once laid out: the screen, and where the safe area starts in it.
-            Color.clear.ignoresSafeArea()
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { screen = $0 }
-            Color.clear
-                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { safeOrigin = $0 }
+            Color.clear.onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { safeInsets = $0 }
             // In every phase, off air and tuning too: the guide is how a viewer finds a channel
             // that is on (since #79 it opened only over a picture, and an off-air channel picked
             // from it left no way back to it). It lies under the picture, which shrinks to the
@@ -80,11 +74,19 @@ struct TransmissionPlayerView: View {
             // one layer, and with the guide open that layer is drawn at the size and place of the
             // guide's window. The same player and the same decode: only the layer's transform
             // changes, in one move (CardMotion.panel, a cut under Reduce Motion).
+            // The layer is given the screen's own size and the safe area as padding of its own,
+            // and the real safe area is ignored outside the effect. SwiftUI works the safe area out
+            // from where a view is drawn: scaled directly, everything inside that runs to the
+            // screen's edge was laid out again for the small window's place, and came out short.
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background { palette.ground.ignoresSafeArea() }
-                .scaleEffect(guideGrid == nil ? 1 : pictureWindow.scale, anchor: .topLeading)
-                .offset(guideGrid == nil ? .zero : pictureWindow.offset)
+                .safeAreaPadding(safeInsets)
+                .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                .visualEffect { [window = guideGrid == nil ? nil : pictureWindow] layer, _ in
+                    layer.scaleEffect(window?.scale ?? 1, anchor: .topLeading).offset(window?.offset ?? .zero)
+                }
+                .ignoresSafeArea()
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier(guideGrid == nil ? "transmissionPicture" : "guidePictureWindow")
             // On air the focus target sits inside the picture's layers, under the strip, so the
@@ -508,7 +510,8 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// The lit programme's kind, where it is from and its year, as the schedule gives them.
+    /// The lit programme's kind line, in the schedule's own words ("Afghan news footage"); a
+    /// record without one reads its kind and where it is from.
     private func guideKind(_ grid: GuideGrid) -> String? {
         guard !grid.onChannel, guideRows.indices.contains(grid.row) else { return nil }
         let row = guideRows[grid.row]
@@ -516,17 +519,18 @@ struct TransmissionPlayerView: View {
         // A second in, so the reading is of this programme and not the one that ended as it began.
         let at = max(row.slots[index].start, grid.now).addingTimeInterval(1)
         guard let programme = store.nowOn(channel: row.number, at: at)?.programme else { return nil }
-        let parts = [nonEmpty(programme.work_kind), nonEmpty(programme.country), programme.year.map(String.init)].compactMap { $0 }
+        if let line = nonEmpty(programme.kind_line) { return line }
+        let parts = [nonEmpty(programme.work_kind), nonEmpty(programme.country)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
 
     /// Where the picture sits while the guide is open: the scale and the offset that carry the
-    /// full screen onto TransmissionGuide.pictureRect. The layer is laid out in the safe area and
-    /// scaled about its own top left corner, hence the safe area's origin in the sum.
+    /// full screen onto TransmissionGuide.pictureRect, scaled about the screen's top left corner.
     private var pictureWindow: (scale: CGFloat, offset: CGSize) {
+        // The screen's own size, which on an Apple TV is always 1920 by 1080 points.
+        let screen = UIScreen.main.bounds.size
         let rect = TransmissionGuide.pictureRect(in: screen)
-        let scale = rect.width / max(1, screen.width)
-        return (scale, CGSize(width: rect.minX - safeOrigin.x * (1 - scale), height: rect.minY - safeOrigin.y * (1 - scale)))
+        return (rect.width / max(1, screen.width), CGSize(width: rect.minX, height: rect.minY))
     }
 
     /// The finger on the touch surface (RemoteSwipeReader). Watching, a swipe up or down opens the

@@ -229,11 +229,15 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   open under the sign-on's cover.
   - **Top band**, 38% of the height. At left the picture plays on in a 16:9 window, 34% of the
     width: the player's own layer, drawn at the window's size and place (one player, one decode).
+    The layer is the screen's size with the safe area as its own padding, and what fills it does
+    so by that padding, never by ignoring the safe area: SwiftUI works the safe area out from
+    where a view is drawn, and in the small window an ignoring view grew out to the screen's corner.
     A sound-only programme shows its dancer there and an off-air channel its card, since the
     window is the full screen made small. Beside it: KHAJISTAN TRANSMISSION and the PKT clock on
-    one line; the lit cell's title (52pt); one line of facts (its times, what kind of thing it is,
-    where it is from, its year, Channel N); then the channel's own line from the schedule. A
-    channel's own cell reads *Channel 5 · Mehfil* over that line.
+    one line; the lit cell's title (52pt); one line of facts (its times, the schedule's kind
+    line such as *Iranian film trailers*, Channel N); then the channel's own line from the
+    schedule. A channel's own cell reads *Channel 5 · Mehfil* over that line. Every line in the
+    guide is ink at full strength: the faint tier read as grey by day (owner, 2026-11-24).
   - **Header**: the station day over the channels, then three half hours, each a band plate.
   - **Rows**, seven at a time: the channel's cell on a band plate (number, mark, name on up to
     two lines, ● LIVE on the one tuned while something is on it), then a block per programme as
@@ -247,8 +251,9 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
     show's name, then *12 songs · now Jugni* (*programmes* where they are not songs; the one on
     air is kept current every half minute). Anything under a minute is part of the block before
     it, except a programme after an off-air stretch, which keeps its own block. A block still
-    narrower than a readable cell is folded into its narrower neighbour and reads *+N* (owner,
-    2026-11-18: "words are cutoff and not readable in the guide").
+    narrower than a readable cell is folded into its narrower neighbour (owner, 2026-11-18:
+    "words are cutoff and not readable in the guide"); the cell reads *and 1 more* after its
+    title where both fit whole, and the title alone where they do not.
   - **Moving.** Up and Down change the row and keep the moment; a swipe moves one row at 120
     points of travel and one more per 200 after, and stops when the finger lifts. Right lights
     the next programme, as far as twelve hours ahead, and the window follows in half hours. Left

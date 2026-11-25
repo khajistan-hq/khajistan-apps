@@ -474,7 +474,9 @@ private struct HousePlate<Face: View>: View {
             .padding(padding)
             .environment(\.palette, look)
             .foregroundStyle(look.ink)
-            .background(plate)
+            // Never into the safe area: a Color background grows into it wherever the control
+            // touches its edge, and the welcome's Start plate ran to the screen's edge (2026-11-20).
+            .background(plate, ignoresSafeAreaEdges: [])
             .scaleEffect(isFocused ? 1.03 : 1)
             .kjFocusMotion(value: isFocused)
     }

@@ -107,13 +107,18 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 - **Front = the map** (simplified 2026-11-17, owner: "simplify home page", three choices made
   that day). Left: **Surf** (focused at launch), one row of chips **All · TV · Radio**, the
-  **Live now** figure from `receiver-index.json`, and the *Beyond the atlas* switch with no second
-  line. No RECEIVER title: the top bar underlines the section. Middle: the map from
+  **Live now** figure from `receiver-index.json`. No RECEIVER title: the top bar underlines the section. Middle: the map from
   `/data/region-shapes.json` (and `-extended.json` with the switch on), drawn as the website
   draws it — fills from the data (`#050505` → mapTint, `#006F00` → mapDeep), the people's
   regions hatched (9pt stripes at 45°, black at 32%), regions with no channels at 48%, the
-  extensions in mapTint at 50%, labels in yellow with a black halo, the native name beneath,
-  the live count under that. The map is a picture, not a control. Right: **Regions A–Z**, every
+  extensions in mapTint at 50%. **No names on the map at rest** (owner, 2026-11-20: the front was
+  "too busy and visually cluttery"): the list beside it names every region that opens channels, and
+  a region with none opens nothing, so its name is not needed. The map is a picture, not a control. Over the map, in
+  its column, the *Beyond the atlas* switch with no second line (owner, 2026-11-20: "make the beyond
+  the atlas above the map", as the website's switch sits over its atlas; it was at the foot of the
+  sidebar until then); the map gives up the switch's 80pt row. The band
+  is 580 (640 until 2026-11-20, "too much dead space"), and the list's rows are 44pt so the atlas's
+  twelve regions still fit it whole. Right: **Regions A–Z**, every
   region with channels and its live count; the row focused lights its region on the map (a
   3.5pt yellow outline, its label on a yellow plate with black text), and Select opens it. The
   list is the front's one way to a region: the picture strip that ran under the map (2026-10-29)
@@ -138,11 +143,17 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
-  accessible"): the first shelf under the map, so a liked channel is one press down from the switch at
-  the foot of the sidebar and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
+  accessible"): the first shelf under the map, so a liked channel is one press down from the front and
+  one Select away. Up from the shelf lands on whatever stands straight above the card: the switch
+  over the map, or the list; from the left-most card it can be the sidebar's chips, and the page
+  goes back to its top for them as for Surf and the switch. The account's likes from `passport_saves` (`channel:` refs, the ones the
   player's Like and the website's heart write, read at launch and at sign-in; a like made on this
-  TV shows at once), newest first, as live cards: picture cards for
-  television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
+  TV shows at once), newest first, as **Liked cards** (owner, 2026-11-20: the shelf "looks cluttery"; "same frame,
+  same crop"): every card one 420x236 box, the still filling it at one crop (scaled to fill, the
+  black bars a broadcaster burned in already cut away, see Stills), nothing written over it, and the
+  name on one line under it in ink. Radio's box is the plate with the name alone (40pt), no kicker
+  and no sound line, and its name line is left empty so the shelf keeps one height. Before a still
+  arrives the box is the lift plate. No heart on these cards; the shelf's name
   says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
   filter. The count says *live*, as the themes do: a liked channel that is off air or gone
@@ -170,7 +181,12 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   shelf holds its place with the index's count until they land.
 - **Stills** (Services/LiveStillsStore.swift, shared with the phone): taken on the device from the
   carrier the player tunes (the receiver's resolver, the player's User-Agent, no Referer, no proxy),
-  one at a time on a muted player of its own at the stream's lowest picture (at most 480x270), at
+  one at a time on a muted player of its own at the stream's lowest picture (at most 480x270),
+  with any black bars cut away first (`Letterbox`, read off a 96x54 copy's row and column
+  brightness). Bars come in pairs: an axis is cut only when both ends are dark and the two cuts
+  are about the same size, so a night sky at the top or a logo lit in one pillar leaves it whole;
+  a frame that would lose more than 40% of a side is a dark picture and kept whole. (Only the Liked
+  cards fill their box with the crop; the other picture cards still fit the still on black.) At
   least 1.5 s apart and twelve a page visit, for the cards nearest focus; the hero's own frame
   becomes its card's still. Never while the hero is starting up, never on an expensive or
   constrained connection. Kept in memory only, about 12 MB at most, oldest out first, retaken after
@@ -214,6 +230,35 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   It is the one black in the app, and only around a moving picture; radio, the overlay, the
   tuning ground and every other screen keep the skin. The other black is an edge, never a
   ground: the map labels' halo, and the channel number's dot edge over a picture (Transmission).
+
+## Welcome
+
+The first time the app opens (owner, 2026-11-20: "a landing page ... to intro what the app is",
+with the Higgsfield clips), before the Receiver: once per device (`kj.welcomed.v1`), in Release
+builds; a Debug build shows it only with `-kjwelcome YES`, so the other UI tests never meet it
+(`WelcomeUITests` passes the flag). A launch from the Top Shelf goes where its link points: the
+welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. A
+link that opens a cover of its own (a channel's player) waits until the welcome has finished going,
+or the player is presented under it and dropped; if the welcome never appeared, the wait also ends 1.5 s
+after the link, a guard for a cover never shown reporting no dismissal (not reproduced: a link set
+before the first frame still gets one); a welcome that did appear is waited for however long it
+takes to go. `-kjopenurl <link>` (Debug) opens a link at launch
+for the tests. The Receiver's first focus on Surf waits for the welcome to close.
+
+- At left, on the skin's ground, inset 80 and 720 wide: **KHAJISTAN** in display type, one body
+  line (live television and radio from the Indus to the Maghreb, and the station), then a row per
+  section this build carries, Account aside: the section's name (name type) and one plain line in
+  small faint type. The Receiver's line carries the live count when the index has loaded. No
+  kicker above the headline. Then **Start**, the one action, a solid plate, focused at once.
+  Menu does what Start does, and does not leave the app.
+- At right, 1040x585 running to the screen's edge, on the page's own ground with no black (owner,
+  2026-11-20: "no black backgroiund"): the pigeon's sign-on ident once (10 s), then the jewelled
+  wordmark on a loop, muted, from one queue so the handover has no blank beat; the wordmark, last in the queue, ends
+  held (`.none`) and is sought back to its start, since an item that ends on `.advance` is dropped
+  and the picture goes blank 18 s in; an ident that fails or stalls hands over at once. Each clip is rendered onto each skin's ground and the file for the
+  skin on screen is played; it follows the skin if Automatic turns it while the page is up. Under Reduce Motion, the wordmark still.
+  Both are house chrome under the Higgsfield rulings of 2026-10-04 (the pigeon) and 2026-11-15
+  (the wordmark loops), never a holding.
 
 ## Khajistan Transmission
 
@@ -667,5 +712,12 @@ the master everywhere). The flights, `flight-<name>-<720|1080|2160>.mov`, are re
 `scripts/flights/render_flight.py` from the Higgsfield masters (owner-local, `output/Higgsfield
 Assets/Khajistan Flights 2026-10-05/`): the backdrop plate per pixel, alpha unmixed against it,
 the generator's colourless shadows and its bright edge halo removed, colour premultiplied. The
-app draws the ground, so one file serves all three skins. The rainbow TV bug is NOT used: it is not on
+app draws the ground, so one file serves all three skins. `welcome-<ident|wordmark>-<skin>.mp4` are the website's `assets/tv/khajistan-signon-ident.mp4`
+and `khajistan-wordmark-jeweled.mp4`, rendered onto each skin's ground by
+`scripts/welcome/render_welcome.py` (opaque H.264, 1280x720, BT.709 matrix, primaries and
+transfer, which the script refuses to write without): the wordmark's grey vignette floored to no
+light and its glow added to the ground, the letters solid, the light fading out toward the clip's
+edges; the bird keyed on brightness, closed, its small enclosed gaps filled, background that
+touches any edge never filled, its edge pulled in two pixels. `--check` proves both ways, including
+a bright corner and a bird that splits the background. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

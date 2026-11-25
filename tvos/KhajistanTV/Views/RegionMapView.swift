@@ -3,8 +3,8 @@ import UIKit
 
 /// The receiver's map, drawn as the website draws it at /open-frequencies: the shapes from the
 /// shape files in the two house greens, the people's regions hatched, regions with no channels
-/// dimmed, labels in yellow with a black halo, and the focused region outlined with its label on
-/// a yellow plate. One Canvas draws all of it. The map is a picture, not a control: the remote
+/// dimmed, and the focused region outlined with its label on a yellow plate. No label is drawn at
+/// rest (2026-11-20): the list beside the map names every region. One Canvas draws all of it. The map is a picture, not a control: the remote
 /// walks the strip of regions under it (ReceiverView), because tvOS moves focus only to a target
 /// lying straight along the press, and from most labels on a map there is none. On the owner's
 /// Apple TV focus stuck on one region (2026-10-05).
@@ -247,8 +247,10 @@ private struct RegionMapPainter {
         guard layout.scale > 0 else { return }
         switch mode {
         case .base:
+            // No names at rest (owner, 2026-11-20: the front was "too busy and visually
+            // cluttery"): the list beside the map names every region, so the map is shapes only,
+            // and the one region lit from the list carries its name on the plate.
             paintShapes(context)
-            paintLabels(context)
         case .focus:
             paintOutline(context)
             if let focusedID, let label = layout.labels.first(where: { $0.region.id == focusedID }) {

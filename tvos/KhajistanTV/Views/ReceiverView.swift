@@ -18,8 +18,11 @@ struct ReceiverView: View {
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
-    /// The switch at the foot of the sidebar ("Beyond the atlas").
+    /// The switch over the map, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
+    /// Focus is on the All · TV · Radio row. Set only as focus enters or leaves the row (ChipRow),
+    /// so a step along it does not re-run the front.
+    @State private var chipsFocused = false
 
     var body: some View {
         @Bindable var model = model
@@ -96,6 +99,7 @@ struct ReceiverView: View {
                     VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
+                               aboveMap: AnyView(atlasSwitch),
                                // Focus in the list: the page back at its top, so the map the list
                                // lights is whole, never a sliver under the top bar.
                                listFocused: { toTop(proxy) })
@@ -133,10 +137,10 @@ struct ReceiverView: View {
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
-            // Up from the first shelf and Back both land on Surf, and Down from Surf reaches the
-            // switch: the page back at its top for either, as for the list, so the front is never
-            // left half under the bar.
-            .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
+            // Up from the first shelf and Back both land on Surf (owner, 2026-11-18), and Down from
+            // Surf reaches the switch over the map: the page back at its top for any of them, and
+            // for the sidebar's chips, so the front is never left half under the bar.
+            .onChange(of: surfFocused || switchFocused || chipsFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
             // Launch focus. The front's own default (above) is for focus coming back in from the
@@ -159,7 +163,7 @@ struct ReceiverView: View {
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
             // Less to read (owner, 2026-10-29: "simplified its too much text", and 2026-11-17):
-            // Surf, one count and the switch. The top bar already names the Receiver.
+            // Surf and one count; the switch is over the map. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
                 .accessibilityElement(children: .combine)
@@ -168,14 +172,20 @@ struct ReceiverView: View {
                 Text(note).kjBody()
                     .accessibilityIdentifier("receiverSignInNote")
             }
-            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
-                .focused($switchFocused)
-                .accessibilityIdentifier("beyondTheAtlas")
-                // The plate's padding is pulled back so the switch sits on the page margin.
-                .padding(.leading, -26)
         }
         .frame(width: 520, alignment: .leading)
         .focusSection()
+    }
+
+    /// Above the map it widens (owner, 2026-11-20: "make the beyond the atlas above the map"), as
+    /// the website's switch sits above its atlas. It was at the foot of the sidebar until then.
+    private var atlasSwitch: some View {
+        HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
+            .focused($switchFocused)
+            .accessibilityIdentifier("beyondTheAtlas")
+            // The plate's padding is pulled back so the switch lines up with the map's edge.
+            .padding(.leading, -26)
+            .frame(height: AtlasPanel.switchRow, alignment: .topLeading)
     }
 
     private func toTop(_ proxy: ScrollViewProxy) {
@@ -212,9 +222,10 @@ struct ReceiverView: View {
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
-            // The top bar and the list each claim the first focus; this one is placed last.
-            .task {
-                guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+            // The top bar and the list each claim the first focus; this one is placed last. Not
+            // under the welcome: it waits for the welcome to close, or focus is lost under it.
+            .task(id: model.welcomeOnScreen) {
+                guard !model.welcomeOnScreen, !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
                 model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true
@@ -249,17 +260,7 @@ struct ReceiverView: View {
     private var scope: ShuffleScope { model.extendedAtlas ? .everywhere : .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
-        HStack(spacing: 4) {
-            ForEach(items, id: \.0) { item in
-                Button {
-                    set(item.0)
-                } label: { Text(item.1).kjKicker() }
-                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
-                    .accessibilityIdentifier("\(id)-\(item.0)")
-            }
-        }
-        // The tabs' plate padding is pulled back so their text sits on the page margin.
-        .padding(.leading, -22)
+        ChipRow(items: items, current: current, id: id, set: set) { chipsFocused = $0 }
     }
 
     private func shuffle() async {
@@ -363,6 +364,8 @@ private struct AtlasPanel: View {
     let open: (MapRegion) -> Void
     /// The sidebar, beside the map.
     let leading: AnyView
+    /// Over the map, in its column: the Beyond the atlas switch.
+    var aboveMap: AnyView? = nil
     /// Called as focus comes into the region list from elsewhere.
     var listFocused: () -> Void = {}
     static let topAnchor = "atlasTop"
@@ -378,14 +381,17 @@ private struct AtlasPanel: View {
                 // One top line: Surf level with the list's heading, the map's band beside them.
                 HStack(alignment: .top, spacing: 40) {
                     leading
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let aboveMap { aboveMap.focusSection() }
                     RegionMapView(map: composed, highlighted: listedRegion)
                         .frame(maxWidth: .infinity)
-                        .frame(height: Self.mapHeight)
+                        .frame(height: aboveMap == nil ? Self.mapHeight : Self.mapHeight - Self.switchRow)
                         // For the UI tests: the region the map lights, read as the map's value.
                         .accessibilityElement()
                         .accessibilityLabel("Map")
                         .accessibilityValue(composed.regions.first { $0.id == listedRegion }?.label ?? "")
                         .accessibilityIdentifier("atlasMap")
+                    }
                     regionList(composed)
                 }
                 // Room for a focused plate's lift at the top edge.
@@ -454,9 +460,10 @@ private struct AtlasPanel: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        // 50 points a row: the atlas's twelve regions fit the map's band whole,
-                        // with no last row cut flat at its foot (2026-11-17).
-                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
+                        // 44 points a row: the atlas's twelve regions fit the map's band whole,
+                        // with no last row cut flat at its foot (2026-11-17; rows 50 → 44 when the
+                        // band went 640 → 580, 2026-11-20).
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)))
                         .focused($listedRegion, equals: region.id)
                         .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.label)
@@ -475,7 +482,9 @@ private struct AtlasPanel: View {
     }
 
     static let listWidth: CGFloat = 320
-    static let mapHeight: CGFloat = 640
+    static let mapHeight: CGFloat = 580
+    /// The switch's row over the map: the map gives up this much, so the front keeps its height.
+    static let switchRow: CGFloat = 80
 }
 
 /// Live channels by theme across the atlas, as one row of names with no pictures (owner,
@@ -564,7 +573,18 @@ private struct ThemeRow: View {
         }
         .focusSection()
         .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id)
-        .onChange(of: focused) { _, now in if let now { lastFocused = now } }
+        // tvOS does not honour the default from every side: with the atlas switch over the map
+        // (2026-11-20), Down from it landed on Culture, the theme under it. So the row moves focus
+        // itself on entry, as the CCTV row does: News the first time, then the theme last focused.
+        .onChange(of: focused) { old, now in
+            guard let now else { return }
+            let home = rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id
+            if old == nil, let home, now != home {
+                focused = home
+            } else {
+                lastFocused = now
+            }
+        }
         .task(id: model.extendedAtlas) { await load() }
         .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
@@ -690,11 +710,7 @@ private struct LikedShelf: View {
                         Button {
                             playing = Pick(channel: channel, list: list)
                         } label: {
-                            if channel.mediaType == "radio" {
-                                RadioCard(channel: channel)
-                            } else {
-                                PictureCard(channel: channel, still: still)
-                            }
+                            LikedCard(channel: channel, still: still)
                         }
                         .buttonStyle(HouseCardStyle())
                         .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
@@ -869,5 +885,32 @@ private struct CCTVRow: View {
             .id(Self.anchor)
             .accessibilityIdentifier(Self.anchor)
         }
+    }
+}
+
+/// The front's All · TV · Radio row, with its own focus, so a step along it is the row's business
+/// and only entering or leaving it reaches the front (`onFocus`).
+private struct ChipRow: View {
+    let items: [(String, String)]
+    let current: String
+    let id: String
+    let set: (String) -> Void
+    let onFocus: (Bool) -> Void
+    @FocusState private var focused: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.0) { item in
+                Button {
+                    set(item.0)
+                } label: { Text(item.1).kjKicker() }
+                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    .focused($focused, equals: item.0)
+                    .accessibilityIdentifier("\(id)-\(item.0)")
+            }
+        }
+        // The tabs' plate padding is pulled back so their text sits on the page margin.
+        .padding(.leading, -22)
+        .onChange(of: focused != nil) { _, on in onFocus(on) }
     }
 }

@@ -90,10 +90,16 @@ extension XCTestCase {
         return focused.exists
     }
 
-    /// Reach the foot of the front: the Beyond the atlas switch, at the bottom of the sidebar. One
-    /// press down from it lands on the first shelf under the front (Liked, or News).
+    /// Focus is on the Receiver's front: the list, the switch over the map, or the sidebar (Surf
+    /// and its All · TV · Radio chips, straight above the left-most card of the first shelf).
+    func kjOnFront(_ id: String) -> Bool {
+        id.hasPrefix("region-") || id == "beyondTheAtlas" || id == "shuffle" || id.hasPrefix("shuffle-medium-")
+    }
+
+    /// Reach the Beyond the atlas switch, over the map (it was at the foot of the sidebar until
+    /// 2026-11-20). Up from the first shelf under the front (Liked, or News) lands on it.
     @discardableResult
-    func kjFocusFrontFoot(_ app: XCUIApplication) -> Bool {
+    func kjFocusAtlasSwitch(_ app: XCUIApplication) -> Bool {
         let toggle = app.buttons["beyondTheAtlas"]
         guard toggle.waitForExistence(timeout: 30) else { return false }
         return kjFocus(toggle, app: app)

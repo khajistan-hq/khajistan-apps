@@ -50,6 +50,18 @@ final class AppModel {
     /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
     /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
     var surfFocusedOnce = false
+    /// The welcome is asked for (Welcome.due at launch); false once it is closed.
+    var welcoming = Welcome.due
+    /// The welcome is still on screen: true until its cover has finished going (onDismiss), which
+    /// is later than `welcoming` turning false. Whatever presents a cover of its own (a channel's
+    /// player from a Top Shelf link) or takes the first focus waits for this, or it is presented
+    /// under the closing welcome and dropped (round-3 review; testAChannelLinkOverTheWelcome…).
+    /// A link that closes the welcome before it ever appeared also clears it 1.5 s on, as no
+    /// dismissal may come for a cover never shown.
+    var welcomeOnScreen = Welcome.due
+    /// The welcome's page has appeared (WelcomeView.onAppear): from then on only its dismissal
+    /// clears `welcomeOnScreen`.
+    var welcomeAppeared = false
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
     /// A Transmission channel playing in the picture-in-picture window. The store keeps the
@@ -198,6 +210,12 @@ final class AppModel {
         }
         observeTransmissionAccess()
         watchTheSky()
+        #if DEBUG
+        // `-kjopenurlearly YES` with `-kjopenurl`: the link is in before the first frame, as a cold
+        // Top Shelf launch can be, so the welcome never appears and has nothing to dismiss.
+        if UserDefaults.standard.bool(forKey: "kjopenurlearly"),
+           let text = UserDefaults.standard.string(forKey: "kjopenurl"), let url = URL(string: text) { open(url) }
+        #endif
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }

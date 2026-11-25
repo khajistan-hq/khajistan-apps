@@ -250,6 +250,28 @@ final class PicsVidsUITests: XCTestCase {
 
     /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and
     /// says what it needs; the other plays.
+    /// Up from a tile far to the right on the top shelf reaches the page's controls. The control
+    /// row covered only the left of the screen, so tvOS found nothing above a right-hand tile
+    /// and Up did nothing (CI, 2026-11-25: focus held by a tile at x 1134 for 4 presses).
+    func testUpFromARightHandTileReachesTheControls() {
+        let app = launch()
+        dismissNotice(app)
+        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 60))
+        kjPause(6)
+        for _ in 0..<6 where !focusedTile(app).exists { kjPress(.down, app: app) }
+        XCTAssertTrue(focusedTile(app).exists, "a tile on the top shelf takes focus")
+        let shuffle = app.buttons["pnvShuffle"]
+        XCTAssertTrue(shuffle.exists)
+        // Right along the top shelf until the focused tile sits wholly to the right of the controls.
+        for _ in 0..<12 where focusedTile(app).frame.minX < shuffle.frame.maxX + 40 { kjPress(.right, app: app) }
+        let from = focusedTile(app)
+        XCTAssertGreaterThan(from.frame.minX, shuffle.frame.maxX, "the walk reaches a tile right of the controls; at \(from.frame)")
+        let tileID = from.identifier
+        kjPress(.up, app: app)
+        let now = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch.identifier
+        XCTAssertTrue(now.hasPrefix("pnvkind-") || now == "pnvShuffle", "Up from \(tileID) reaches the controls, got \(now)")
+    }
+
     func testVideoAndKhajistanTVRow() {
         let app = launch()
         dismissNotice(app)

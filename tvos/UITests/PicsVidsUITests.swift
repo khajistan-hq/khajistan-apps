@@ -136,8 +136,13 @@ final class PicsVidsUITests: XCTestCase {
         kjPause(6)
         kjScreenshot("pv-05-viewer-next", app: app)
         XCUIRemote.shared.press(.menu)
+        // When the chosen tile is a video the viewer is a Reel, where the Right press above lit
+        // Save (PnvViewerView.reelMove) and it stays lit for 10 s. Menu then lets go of that
+        // control and the viewer stays, by design (onExitCommand); the next Menu leaves. Which
+        // kind the walk ends on depends on the shelves, so both are handled.
+        if !surface.waitForNonExistence(timeout: 5) { XCUIRemote.shared.press(.menu) }
+        XCTAssertTrue(surface.waitForNonExistence(timeout: 15), "Menu must close the viewer (twice at most: once to let go of a lit control)")
         XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelves")
-        XCTAssertTrue(surface.waitForNonExistence(timeout: 15), "and the viewer must be gone")
     }
 
     /// Save and Collection in the viewer, lit by the remote: Down lights Save, Right Collection, Up

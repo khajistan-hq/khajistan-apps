@@ -248,8 +248,6 @@ final class PicsVidsUITests: XCTestCase {
         kjScreenshot("pv-07-pictures", app: app)
     }
 
-    /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and
-    /// says what it needs; the other plays.
     /// Up from a tile far to the right on the top shelf reaches the page's controls. The control
     /// row covered only the left of the screen, so tvOS found nothing above a right-hand tile
     /// and Up did nothing (CI, 2026-11-25: focus held by a tile at x 1134 for 4 presses).
@@ -267,11 +265,29 @@ final class PicsVidsUITests: XCTestCase {
         let from = focusedTile(app)
         XCTAssertGreaterThan(from.frame.minX, shuffle.frame.maxX, "the walk reaches a tile right of the controls; at \(from.frame)")
         let tileID = from.identifier
-        kjPress(.up, app: app)
+        // A press that reports no move may only be slow: give it time before reading focus.
+        if !kjPress(.up, app: app) { kjPause(3) }
         let now = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch.identifier
         XCTAssertTrue(now.hasPrefix("pnvkind-") || now == "pnvShuffle", "Up from \(tileID) reaches the controls, got \(now)")
     }
 
+    /// Down from the bar's right-hand end lands on the first control, Everything. The control row
+    /// spans the page, so this holds only while the page's default focus outranks the nearest
+    /// button, which under the bar's right end is Shuffle.
+    func testDownFromTheBarsRightEndLandsOnEverything() {
+        let app = launch()
+        dismissNotice(app)
+        XCTAssertTrue(app.buttons["pnvkind-all"].waitForExistence(timeout: 60))
+        kjPause(4)
+        XCTAssertTrue(kjIntoTopBar(app), "Up reaches the top bar")
+        for _ in 0..<8 where kjPress(.right, app: app) {}
+        kjPress(.down, app: app)
+        kjPause(1)
+        XCTAssertTrue(app.buttons["pnvkind-all"].hasFocus, "Down from the bar lands on Everything, got \(kjFocusKey(app))")
+    }
+
+    /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and
+    /// says what it needs; the other plays.
     func testVideoAndKhajistanTVRow() {
         let app = launch()
         dismissNotice(app)

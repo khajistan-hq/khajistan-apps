@@ -96,7 +96,9 @@ final class ShelfUITests: XCTestCase {
                            "\(skin): Home carries no Screening Room or Transmission shelf, passed \(passed)")
             shot("\(skin)-2-receiver-cameras-shelf", app)
             press(.down, app: app)
-            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): nothing sits below CCTV, got \(focusedID(app))")
+            // Liked sits under CCTV for an account with likes; nothing else does.
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-") || focusedID(app).hasPrefix("liked-"),
+                          "\(skin): only Liked may sit below CCTV, got \(focusedID(app))")
             // Up through the shelves and the Themes row returns to the front: the sidebar's
             // switch, or the list.
             for _ in 0..<16 where !(focusedID(app).hasPrefix("region-") || focusedID(app) == "beyondTheAtlas") { press(.up, app: app) }

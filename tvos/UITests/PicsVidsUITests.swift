@@ -135,9 +135,18 @@ final class PicsVidsUITests: XCTestCase {
         XCUIRemote.shared.press(.right)
         kjPause(6)
         kjScreenshot("pv-05-viewer-next", app: app)
+        // When the chosen tile is a video the viewer is a Reel, where the Right press above lit
+        // Save (PnvViewerView.reelMove; DESIGN.md: "Right lights Save … Left walks back and lets
+        // go"). With a control lit, Menu lets go of it and the viewer stays, by design. Left lets
+        // go first, so the one Menu below is always the Menu that leaves. Which kind the walk
+        // ends on depends on the shelves. The label is Debug-only, as these tests are.
+        let wasReel = surface.label == "video"
+        if wasReel { XCUIRemote.shared.press(.left); kjPause(1) }
+        print("PNVCLOSE " + (wasReel ? "reel: Left, then Menu" : "picture: Menu"))
         XCUIRemote.shared.press(.menu)
-        XCTAssertTrue(tiles(app).firstMatch.waitForExistence(timeout: 20), "Menu must come back to the shelves")
-        XCTAssertFalse(surface.exists)
+        XCTAssertTrue(surface.waitForNonExistence(timeout: 15), "one Menu must close the viewer")
+        // A tile existing proves nothing (the shelves sit behind the viewer): focus must be on one.
+        XCTAssertTrue(focusedTile(app).waitForExistence(timeout: 20), "Menu must come back to the shelves, with a tile in focus")
     }
 
     /// Save and Collection in the viewer, lit by the remote: Down lights Save, Right Collection, Up
@@ -273,7 +282,12 @@ final class PicsVidsUITests: XCTestCase {
         let state = app.staticTexts["pnvViewerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20), "A Khajistan TV row signed out must say what it needs")
         kjPause(4)
-        XCTAssertEqual(state.label, "Sign in to watch Khajistan Transmission.")
+        // In a Reel the line carries "  ·  Select to sign in" whenever no control is lit
+        // (PnvViewerView reelOverlay), which is the state right after Select. The exact compare
+        // this replaces predates that suffix. Both forms are the message.
+        XCTAssertTrue(state.label == "Sign in to watch Khajistan Transmission."
+                      || state.label == "Sign in to watch Khajistan Transmission.  \u{00B7}  Select to sign in",
+                      "a Khajistan TV row signed out must ask for sign-in, got: \(state.label)")
         kjScreenshot("pv-09-ktv-signed-out", app: app)
         XCUIRemote.shared.press(.select)
         // Sign-in opens on the phone panel (QR and code; 2026-10-27), or on email and password

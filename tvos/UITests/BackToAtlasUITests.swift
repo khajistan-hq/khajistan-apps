@@ -8,16 +8,14 @@ final class BackToAtlasUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         for section in ["Transmission", "Pics/Vids", "Account"] {
-            // Up into the top bar, then right until the section is focused, then open it.
-            for _ in 0..<4 { XCUIRemote.shared.press(.up) }
+            // Up into the top bar, then along it until the section is focused, then open it.
             let tab = app.buttons.matching(NSPredicate(format: "label ==[c] %@", section)).firstMatch
-            XCTAssertTrue(tab.waitForExistence(timeout: 10), "the top bar must offer \\(section)")
-            for _ in 0..<6 where !tab.hasFocus { XCUIRemote.shared.press(.right) }
-            XCTAssertTrue(tab.hasFocus, "\\(section) must take focus in the top bar")
+            XCTAssertTrue(tab.waitForExistence(timeout: 10), "the top bar must offer \(section)")
+            XCTAssertTrue(kjFocusTopBar(tab, app: app), "\(section) must take focus in the top bar")
             XCUIRemote.shared.press(.select)
-            XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 3), "\\(section) must replace the atlas")
+            XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 3), "\(section) must replace the atlas")
             XCUIRemote.shared.press(.menu)
-            XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "Back from \\(section) must return to the atlas")
+            XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "Back from \(section) must return to the atlas")
         }
     }
 
@@ -29,13 +27,9 @@ final class BackToAtlasUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
         func open(_ section: String) {
-            for _ in 0..<4 { XCUIRemote.shared.press(.up) }
             let tab = app.buttons.matching(NSPredicate(format: "label ==[c] %@", section)).firstMatch
             XCTAssertTrue(tab.waitForExistence(timeout: 10), "the top bar must offer \(section)")
-            // The tab may sit either side of the focus: walk to the left end, then right.
-            for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.left) }
-            for _ in 0..<8 where !tab.hasFocus { XCUIRemote.shared.press(.right) }
-            XCTAssertTrue(tab.hasFocus, "\(section) must take focus in the top bar")
+            XCTAssertTrue(kjFocusTopBar(tab, app: app), "\(section) must take focus in the top bar")
             XCUIRemote.shared.press(.select)
         }
         open("Transmission")
@@ -56,8 +50,7 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "the top bar returns to the atlas")
         // Back from the top bar is the press that reads the history (the front's content hands
         // Back to tvOS), so press it there.
-        for _ in 0..<4 { XCUIRemote.shared.press(.up) }
-        kjPause(0.5)
+        XCTAssertTrue(kjIntoTopBar(app), "Up must reach the top bar")
         XCTAssertTrue(app.buttons["nav-receiver"].hasFocus, "Back is pressed from the top bar's Receiver tab")
         XCUIRemote.shared.press(.menu)
         // Transmission takes seconds to draw, so give it the time it would need to come back.
@@ -118,9 +111,8 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertTrue(focused.exists, "a region must take focus in the list")
         XCUIRemote.shared.press(.select)
         XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 5), "the region page must replace the map")
-        for _ in 0..<8 { XCUIRemote.shared.press(.up) }
-        XCTAssertTrue(app.buttons["Receiver"].hasFocus || app.buttons.matching(NSPredicate(format: "hasFocus == true AND label ==[c] 'Receiver'")).firstMatch.exists,
-                      "focus must reach the top bar")
+        XCTAssertTrue(kjIntoTopBar(app), "focus must reach the top bar")
+        XCTAssertTrue(app.buttons["nav-receiver"].hasFocus, "Up from a region page lands on the Receiver tab")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 15), "Back must pop to the map")
         XCTAssertEqual(app.state, .runningForeground, "and must not leave the app")

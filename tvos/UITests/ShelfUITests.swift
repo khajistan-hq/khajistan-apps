@@ -236,7 +236,7 @@ final class ShelfUITests: XCTestCase {
             kjPause(2)
             shot("pv-\(skin)-3-lower-shelves", app)
             // The one filter, above the shelves: Videos narrows every shelf.
-            XCTAssertTrue(kjFocus(app.buttons["pnvkind-video"], app: app), "\(skin): Videos takes focus")
+            XCTAssertTrue(kjFocus(app.buttons["pnvkind-video"], app: app), "\(skin): Videos takes focus; focus is held by \(kjFocusKey(app))")
             XCUIRemote.shared.press(.select)
             kjPause(8)
             shot("pv-\(skin)-4-videos", app)

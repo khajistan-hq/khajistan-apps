@@ -706,6 +706,8 @@ struct TransmissionPlayerView: View {
 
     private func closeGuide() {
         withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideGrid = nil }
+        // A finger still down when the guide closes has done its work: it does not open it again.
+        swipe.opened = true
         wake()
     }
 

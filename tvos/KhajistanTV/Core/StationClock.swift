@@ -668,8 +668,9 @@ enum StationClock {
     /// A programme a run counts as a song: sound with no picture, or a kind that is sung.
     /// ponytail: a word list over `work_kind`; a `song` flag from the builder would replace it.
     static func isSong(_ programme: Programming.Programme?) -> Bool {
-        if programme?.audio_only == true { return true }
         let kind = (programme?.work_kind ?? "").lowercased()
+        // A kind that is named decides: a mushaira reading or film dialogue is sound and not a song.
+        if kind.isEmpty { return programme?.audio_only == true }
         return ["song", "naat", "nasheed", "qawwali", "ghazal"].contains { kind.contains($0) }
     }
 

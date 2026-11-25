@@ -796,6 +796,20 @@ func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil,
                           work_kind: nil, country: nil, description: nil, subtitle_url: nil)
 }
 
+func songRunRules() throws {
+    func made(_ kind: String?, sound: Bool?) -> Programming.Programme {
+        Programming.Programme(id: "a", title: "a", seconds: 300, nominal_minutes: nil, clean_start: nil, clean_end: nil,
+                              show: nil, channel: 1, play_url: nil, audio_only: sound, custodian: nil, transfer: nil,
+                              work_kind: kind, country: nil, description: nil, subtitle_url: nil)
+    }
+    // A run says "songs" only for what is sung: a mushaira reading with no picture is a programme.
+    try expect(StationClock.isSong(made("Film song", sound: true)))
+    try expect(StationClock.isSong(made(nil, sound: true)))
+    try expect(!StationClock.isSong(made("Mushaira", sound: true)))
+    try expect(!StationClock.isSong(made("Film dialogue", sound: true)))
+    try expect(!StationClock.isSong(made(nil, sound: nil)))
+}
+
 func runSecondsRules() throws {
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, nominal: 10)), 600)
     try expectEqual(StationClock.runSeconds(makeProgramme("a", seconds: 600, cleanStart: 20, cleanEnd: 10)), 570)
@@ -2379,6 +2393,7 @@ let tests: [(String, () throws -> Void)] = [
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("song run rules", songRunRules),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),

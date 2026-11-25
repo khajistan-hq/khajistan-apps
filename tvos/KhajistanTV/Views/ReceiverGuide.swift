@@ -94,18 +94,23 @@ struct ReceiverGuide: View {
     }
 }
 
-/// Transmission's guide: a time grid, as a live TV app lays its schedule out (owner, 2026-11-17:
-/// "it needs to be showing schedule on an hourly basis"). Channels run down the side, two hours
-/// run across under half-hour marks, and each programme is a block as long as it airs. One block
-/// is lit; Up and Down change the channel, Left and Right the programme (GuideGrid). It rises from
-/// the bottom over the picture as the Receiver's does (owner, 2026-11-14).
+/// Transmission's guide: the whole screen, laid out as a television guide channel was in the
+/// early 2000s (owner, 2026-11-24: "Full screen with smaller video icon", "in the khajistan
+/// palate"). The picture plays on in a small window at top left (the player's own picture, moved
+/// there by TransmissionPlayerView: this view only keeps its place), the lit cell is described
+/// beside it, and under them runs the time grid of 2026-11-17: a header of three half hours, a
+/// row per channel, a cell for the channel and a block per programme as long as it airs.
+/// Every cell is a filled plate with a gap round it; nothing is outlined. One cell is lit; Up and
+/// Down change the channel, Left and Right walk the channel's cell and its programmes (GuideGrid).
 struct TransmissionGuide: View {
     struct Row: Hashable {
         let number: Int
         let name: String
+        /// The channel's own line from the schedule (ChannelInfo.line).
+        let line: String?
         let soundOnly: Bool
         /// The programme on air now, as the strip's headline names it: a run of short items is
-        /// named for its show, and the guide's headline adds this to it.
+        /// named for its show, and its block adds this to it.
         var onNow: String?
         /// What the channel airs from the half hour now is in, filled as the row comes into view.
         /// Empty while the month it needs is not held: the row reads Loading.
@@ -114,6 +119,8 @@ struct TransmissionGuide: View {
     let rows: [Row]
     let current: Int
     let grid: GuideGrid
+    /// The lit programme's kind line from the schedule ("Qawwali · Pakistan · 1984"), if any.
+    let kind: String?
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -124,66 +131,100 @@ struct TransmissionGuide: View {
     static let cellWidth = CGFloat(GuideGrid.cellPoints)
     static let rowHeight: CGFloat = 80
     static let markHeight: CGFloat = 40
+    /// The space between two plates, which is all that separates them.
+    static let gap: CGFloat = 4
+    /// The channels on screen at once, under the top band.
+    static let rowCount = 7
+    /// The top band's share of the screen's height: the picture window and the lit cell's words.
+    static let bandShare: CGFloat = 0.38
+
+    /// Where the picture window sits on a screen of `size`, in the screen's own points: 16:9, as
+    /// tall as the top band under its margin. The player moves its picture to exactly this.
+    static func pictureRect(in size: CGSize) -> CGRect {
+        let top: CGFloat = 40
+        let height = max(1, size.height * bandShare - top)
+        return CGRect(x: KJLayout.inset, y: top, width: height * 16 / 9, height: height)
+    }
 
     private var keys: [GuideKey] {
-        ReceiverGuide.window(count: rows.count, lit: grid.row).map { GuideKey(index: $0, id: "ch\(rows[$0].number)") }
+        ReceiverGuide.window(count: rows.count, lit: grid.row, rows: Self.rowCount).map { GuideKey(index: $0, id: "ch\(rows[$0].number)") }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 16) {
-                Kicker("Guide \u{00B7} Khajistan Transmission \u{00B7} \(Self.dayLabel(grid.windowStart)) \u{00B7} \(StationClock.tzLabel)")
-                headline
-                GeometryReader { geo in
-                    let width = max(1, geo.size.width - Self.channelWidth)
-                    VStack(alignment: .leading, spacing: 0) {
-                        marks(width: width)
-                        ForEach(keys, id: \.self) { key in
-                            row(rows[key.index], lit: key.index == grid.row, width: width)
-                        }
-                    }
+        GeometryReader { geo in
+            let picture = Self.pictureRect(in: geo.size)
+            let width = max(1, geo.size.width - 2 * picture.minX - Self.channelWidth)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 40) {
+                    // The picture's place. The player draws the live picture over it.
+                    Color.black.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
+                    panel
                 }
-                .frame(height: Self.markHeight + Self.rowHeight * CGFloat(keys.count))
+                .frame(height: picture.height)
+                .padding(.bottom, 12)
+                marks(width: width)
+                ForEach(keys, id: \.self) { key in
+                    row(rows[key.index], lit: key.index == grid.row, width: width)
+                }
             }
-            .padding(.horizontal, KJLayout.inset)
-            .padding(.top, 24)
-            .padding(.bottom, 48)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.ground, ignoresSafeAreaEdges: .all)
+            .padding(.horizontal, picture.minX)
+            .padding(.top, picture.minY)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: grid)
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transmissionGuide")
         }
+        .background(palette.ground)
+        .ignoresSafeArea()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("transmissionGuide")
         .allowsHitTesting(false)
     }
 
-    /// The lit programme in full, over the grid: a short programme's block is too narrow for its
-    /// title. Its name, then the channel and its times; off air, when the channel is back.
-    private var headline: some View {
+    /// Beside the picture: the station and the clock, then the lit cell. A programme reads its
+    /// title, then its times, what kind of thing it is and its channel; a channel's own cell reads
+    /// "Channel 5 · Mehfil". Under either, the channel's line from the schedule.
+    private var panel: some View {
         let row = rows.indices.contains(grid.row) ? rows[grid.row] : nil
-        let slot = row.flatMap { r in grid.lit(in: r.slots).map { r.slots[$0] } }
-        let channel = row?.name ?? ""
-        // Nothing read at or after the lit moment (not read yet, or the month after not held): the
-        // row is waiting for its reading, never off air.
-        let loading = slot == nil
-        var parts = [channel]
+        let slot = grid.onChannel ? nil : row.flatMap { r in grid.lit(in: r.slots).map { r.slots[$0] } }
+        let channel = row.map { "Channel \($0.number) \u{00B7} \(ChannelCell.short($0.name, number: $0.number))" } ?? ""
+        var title = channel
+        var facts: [String?] = []
         if let slot, slot.isOffAir {
-            parts.append(Self.back(slot, now: grid.now).map { "back at \($0)" } ?? "off air")
+            title = "Off air"
+            facts = [Self.back(slot, now: grid.now).map { "back at \($0)" }, channel]
         } else if let slot {
-            parts.append("\(Self.clock(slot.start))\u{2013}\(Self.clock(slot.end)) \(StationClock.tzLabel)")
-            // A run is named for its show; the programme on air inside it is named too.
-            if slot.grouped, slot.contains(grid.now), let onNow = row?.onNow, !onNow.isEmpty, onNow != slot.title {
-                parts.append("now: \(onNow)")
+            title = slot.title ?? ""
+            let onAir = slot.grouped && slot.contains(grid.now) ? row?.onNow : nil
+            facts = ["\(Self.clock(slot.start))\u{2013}\(Self.clock(slot.end)) \(StationClock.tzLabel)",
+                     slot.grouped ? slot.itemsLabel : nil,
+                     onAir.flatMap { $0.isEmpty || $0 == slot.title ? nil : "now \($0)" },
+                     kind, row.map { "Channel \($0.number)" }]
+        } else if !grid.onChannel {
+            // Nothing read at or after the lit moment (not read yet, or the month after not held):
+            // the row is waiting for its reading, never off air.
+            title = "Loading"
+            facts = [channel]
+        }
+        let line = facts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Kicker("Khajistan Transmission")
+                Spacer(minLength: 16)
+                Kicker("\(Self.clock(grid.now)) \(StationClock.tzLabel)").monospacedDigit()
             }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).kjName(52).lineLimit(2).minimumScaleFactor(0.7)
+                if !line.isEmpty { Text(line).kjSmall(faint: true).lineLimit(2) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("guideHeadline")
+            if let about = row?.line, !about.isEmpty {
+                Text(about).kjBody().lineLimit(4)
+                    .accessibilityIdentifier("guideChannelLine")
+            }
+            Spacer(minLength: 0)
         }
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(loading ? "Loading" : (slot?.title ?? "Off air")).kjName(32).lineLimit(1)
-            Text(parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")).kjSmall(faint: true).lineLimit(1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("guideHeadline")
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// When an off-air stretch ends, with its day when that is not today (GuideSlot.back).
@@ -194,45 +235,46 @@ struct TransmissionGuide: View {
         CGFloat(date.timeIntervalSince(grid.windowStart) / GuideGrid.span) * width
     }
 
-    /// The half-hour marks, each over the place its time falls.
+    /// The header: the station day over the channels, then a band plate per half hour.
     private func marks(width: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
+        let look = palette.onBandPlate
+        let column = width / CGFloat(max(1, grid.marks.count))
+        return HStack(spacing: 0) {
+            Text(Self.dayLabel(grid.windowStart)).kjSmall().lineLimit(1).minimumScaleFactor(0.7)
+                .padding(.horizontal, 14)
+                .frame(width: Self.channelWidth - Self.gap, height: Self.markHeight - Self.gap, alignment: .leading)
+                .background(palette.band)
+                .padding(.trailing, Self.gap)
             ForEach(grid.marks, id: \.self) { mark in
-                Text(Self.clock(mark)).kjSmall(faint: true).monospacedDigit()
-                    .offset(x: Self.channelWidth + x(mark, width: width) + 12)
+                Text(Self.clock(mark)).kjKicker(look.ink).monospacedDigit()
+                    .padding(.horizontal, 14)
+                    .frame(width: column - Self.gap, height: Self.markHeight - Self.gap, alignment: .leading)
+                    .background(palette.band)
+                    .padding(.trailing, Self.gap)
             }
-            nowMark(width: width)
         }
-        .frame(height: Self.markHeight, alignment: .topLeading)
+        .environment(\.palette, look)
+        .foregroundStyle(look.ink)
+        .frame(height: Self.markHeight, alignment: .top)
         .accessibilityHidden(true)
     }
 
-    /// Now, as a short accent bar under the time marks while it is in the window. Not a line
-    /// through the rows: an off-air stretch has no plate, and a line crossed its words.
-    @ViewBuilder
-    private func nowMark(width: CGFloat) -> some View {
-        let at = x(grid.now, width: width)
-        if at >= 0, at <= width {
-            Rectangle().fill(palette.accent)
-                .frame(width: 4, height: 12)
-                .offset(x: Self.channelWidth + at - 2, y: Self.markHeight - 12)
-                .accessibilityHidden(true)
-        }
-    }
-
     private func row(_ row: Row, lit: Bool, width: CGFloat) -> some View {
-        let litSlot = lit ? grid.lit(in: row.slots) : nil
+        let litSlot = lit && !grid.onChannel ? grid.lit(in: row.slots) : nil
         let cells = grid.cells(row.slots, minimum: Double(Self.cellWidth / width) * GuideGrid.span)
         return HStack(spacing: 0) {
             // LIVE marks the channel tuned, while something is on it.
             let onNow = row.slots.first { $0.contains(grid.now) }.map { !$0.isOffAir } ?? false
+            // The channel's cell is the lit one when Left reached it, or when the row's time holds
+            // nothing to light.
             ChannelCell(number: row.number, name: row.name, soundOnly: row.soundOnly,
-                        live: row.number == current && onNow, lit: lit, plate: lit && litSlot == nil)
-                .frame(width: Self.channelWidth, alignment: .leading)
+                        live: row.number == current && onNow, plate: lit && litSlot == nil)
+                .frame(width: Self.channelWidth - Self.gap, alignment: .leading)
+                .padding(.trailing, Self.gap)
             ZStack(alignment: .topLeading) {
                 if cells.isEmpty {
                     Text("Loading").kjSmall(faint: true).padding(.horizontal, 14)
-                        .frame(height: Self.rowHeight - 8, alignment: .leading)
+                        .frame(height: Self.rowHeight - Self.gap, alignment: .leading)
                 }
                 // Keyed by start, so a block keeps its place and its text when the rows are read again.
                 ForEach(cells, id: \.start) { cell in
@@ -243,8 +285,8 @@ struct TransmissionGuide: View {
                     let named = lit ? litSlot ?? cell.lead : cell.lead
                     GuideBlock(slot: row.slots[named], more: cell.more(naming: named, in: row.slots),
                                start: cell.start, end: cell.end, lit: lit,
-                               windowStart: grid.windowStart, now: grid.now)
-                        .frame(width: max(0, right - left - 6), height: Self.rowHeight - 8, alignment: .leading)
+                               windowStart: grid.windowStart, now: grid.now, onNow: row.onNow)
+                        .frame(width: max(0, right - left - Self.gap), height: Self.rowHeight - Self.gap, alignment: .leading)
                         .offset(x: left)
                         .accessibilityIdentifier("guide-ch\(row.number)-\(cell.first)")
                 }
@@ -264,19 +306,19 @@ struct TransmissionGuide: View {
     static func dayLabel(_ date: Date) -> String { StationClock.dayName(date) }
 }
 
-/// A channel on the guide's side: its number, its mark and its name, LIVE on the one tuned.
+/// A channel's own cell at the left of its row, on a band plate: its number, its mark and its
+/// name, LIVE on the one tuned. Lit, it takes the lit plate (Palette.litAmongBands).
 private struct ChannelCell: View {
     let number: Int
     let name: String
     let soundOnly: Bool
     let live: Bool
-    let lit: Bool
-    /// The lit row whose time holds nothing to light: the cell takes the plate itself.
+    /// The cell itself is the lit one, not a programme on its row.
     let plate: Bool
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let look = plate ? palette.onFocusPlate : palette
+        let look = plate ? palette.litAmongBands : palette.onBandPlate
         HStack(spacing: 16) {
             Text("\(number)").kjKicker().monospacedDigit().frame(width: 44, alignment: .trailing)
             MediumMark(medium: soundOnly ? "radio" : "tv", size: 40)
@@ -293,13 +335,13 @@ private struct ChannelCell: View {
             Spacer(minLength: 8)
         }
         .padding(.horizontal, 12)
-        .frame(height: TransmissionGuide.rowHeight - 8)
+        .frame(height: TransmissionGuide.rowHeight - TransmissionGuide.gap)
         .environment(\.palette, look)
         .foregroundStyle(look.ink)
-        .background(plate ? palette.focusPlate : palette.focusPlate.opacity(0))
+        .background(look.ground)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("guide-ch\(number)")
-        .accessibilityAddTraits(lit ? .isSelected : [])
+        .accessibilityAddTraits(plate ? .isSelected : [])
     }
 
     /// The name wrapped at `size`, as tall as it needs, or cut at two lines.
@@ -320,7 +362,8 @@ private struct ChannelCell: View {
 }
 
 /// One programme in the grid, or a stretch off air: its title and its times. The lit block takes
-/// the focus plate, a programme the lift plate, off air no plate at all.
+/// the focus plate, a programme the lift plate, off air no plate at all. A run of short
+/// programmes reads its show, then how many it holds and the one on air.
 private struct GuideBlock: View {
     /// The slot the cell is named for: the lit one, or the one that takes most of the cell.
     let slot: GuideSlot
@@ -333,25 +376,30 @@ private struct GuideBlock: View {
     /// The window's left edge: times that begin before it are marked "‹".
     let windowStart: Date
     let now: Date
+    /// The programme on air on this channel, for a run that is airing.
+    let onNow: String?
     @Environment(\.palette) private var palette
 
     var body: some View {
         let look = lit ? palette.onFocusPlate : palette
-        // Off air reads when the channel is back, not a running time.
         // A lone off-air stretch reads when the channel is back. Otherwise the times: the lit
         // programme's own, or the whole cell's when others are folded in.
         let (from, to) = lit || more == 0 ? (slot.start, slot.end) : (start, end)
         let times = slot.isOffAir && more == 0
             ? slot.back(now: now, short: true).map { "back at \($0)" } ?? ""
             : "\(TransmissionGuide.clock(from))\u{2013}\(TransmissionGuide.clock(to))"
+        // A run: "12 songs · now Jugni" under the show's name, in place of the times, which the
+        // panel over the grid carries while the run is lit.
+        let run = slot.grouped ? slot.runLabel(onNow: slot.contains(now) ? onNow : nil) : nil
+        let under = run.map { String($0.dropFirst((slot.title ?? "").count + 3)) }
+            ?? (from < windowStart && !(slot.isOffAir && more == 0) ? "\u{2039} \(times)" : times)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Text(slot.title ?? "Off air").kjName(24).lineLimit(1)
                     .foregroundStyle(slot.isOffAir && !lit ? look.faint : look.ink)
                 if more > 0 { Text("+\(more)").kjName(24).fixedSize() }
             }
-            Text(from < windowStart && !(slot.isOffAir && more == 0) ? "\u{2039} \(times)" : times)
-                .kjSmall(faint: true).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            Text(under).kjSmall(faint: true).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -361,6 +409,7 @@ private struct GuideBlock: View {
         .background(lit ? palette.focusPlate : (slot.isOffAir ? palette.lift.opacity(0) : palette.lift))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel((slot.isOffAir ? (times.isEmpty ? "Off air" : "Off air, \(times)") : "\(slot.title ?? ""), \(times) \(StationClock.tzLabel)")
+                            + (run.map { _ in ", \(under)" } ?? "")
                             + (more > 0 ? ", and \(more) more" : ""))
         .accessibilityAddTraits(lit ? .isSelected : [])
     }

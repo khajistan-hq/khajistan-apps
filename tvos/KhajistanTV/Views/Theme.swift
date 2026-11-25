@@ -93,6 +93,18 @@ struct Palette: Equatable {
         replacing(ground: focusPlate, ink: onFocus, accent: onFocus, faint: onFocus.opacity(0.85))
     }
 
+    /// What sits on a band plate (the guide's channel cells and time header): onBand text.
+    var onBandPlate: Palette {
+        replacing(ground: band, ink: onBand, accent: onBand, faint: onBand.opacity(0.85))
+    }
+
+    /// A band plate lit by the remote. The focus plate, except by day, where the focus plate IS
+    /// the band and a lit cell among band plates would look like its neighbours: there it is the
+    /// ink plate with the ground's colour as text, which is what Grove and Smut's focus plate is.
+    var litAmongBands: Palette {
+        focusPlate == band ? replacing(ground: ink, ink: ground, accent: ground, faint: ground.opacity(0.85)) : onFocusPlate
+    }
+
     /// A pressed control: the lift plate under the page's own ink.
     fileprivate var onPressPlate: Palette {
         replacing(ground: lift)

@@ -9,9 +9,11 @@ import SwiftUI
 /// A programme that carries a prepared subtitle file (`subtitle_url`) shows it, on by default as on
 /// the website, and the strip ends in the Subtitles control: right moves to it, left comes back.
 ///
-/// The strip also carries Guide and PiP, as the Receiver's does. The guide rises from the bottom
-/// with every channel and what is on it now; picture in picture keeps the channel playing in a
-/// corner while the viewer browses, handovers included.
+/// The strip also carries Guide and PiP, as the Receiver's does. The guide takes the whole screen
+/// and the picture plays on in a small window at its top left (TransmissionGuide); a swipe up or
+/// down on the remote's touch surface opens it, where a press of Up or Down changes channel
+/// (RemoteGesture). Picture in picture keeps the channel playing in a corner while the viewer
+/// browses, handovers included.
 struct TransmissionPlayerView: View {
     /// The channel the viewer chose. The store holds the channel now on air, which Up and Down change.
     let channel: Int
@@ -48,6 +50,12 @@ struct TransmissionPlayerView: View {
     @State private var stripHeight: CGFloat = 0
     /// The song playing inside the programme, from songs.json (HouseSongs), or "".
     @State private var song = ""
+    /// The finger on the remote's touch surface, as RemoteSwipeReader last reported it.
+    @State private var swipe = SwipeTrack()
+    /// The screen, and where the safe area starts in it: the picture is moved to the guide's
+    /// window in the screen's own points. tvOS's values until the first layout reports them.
+    @State private var screen = CGSize(width: 1920, height: 1080)
+    @State private var safeOrigin = CGPoint(x: 80, y: 60)
     @FocusState private var focus: PlayerFocus?
 
     private var store: TransmissionStore { model.transmission }
@@ -55,20 +63,37 @@ struct TransmissionPlayerView: View {
     var body: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
+            // Read once laid out: the screen, and where the safe area starts in it.
+            Color.clear.ignoresSafeArea()
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { screen = $0 }
+            Color.clear
+                .onGeometryChange(for: CGPoint.self) { $0.frame(in: .global).origin } action: { safeOrigin = $0 }
+            // In every phase, off air and tuning too: the guide is how a viewer finds a channel
+            // that is on (since #79 it opened only over a picture, and an off-air channel picked
+            // from it left no way back to it). It lies under the picture, which shrinks to the
+            // guide's window and uncovers it.
+            if let guideGrid {
+                TransmissionGuide(rows: guideRows, current: store.channelNumber, grid: guideGrid, kind: guideKind(guideGrid))
+                    .transition(.opacity)
+            }
+            // The whole of what the channel shows (the picture, the dancer, the off-air card) is
+            // one layer, and with the guide open that layer is drawn at the size and place of the
+            // guide's window. The same player and the same decode: only the layer's transform
+            // changes, in one move (CardMotion.panel, a cut under Reduce Motion).
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { palette.ground.ignoresSafeArea() }
+                .scaleEffect(guideGrid == nil ? 1 : pictureWindow.scale, anchor: .topLeading)
+                .offset(guideGrid == nil ? .zero : pictureWindow.offset)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(guideGrid == nil ? "transmissionPicture" : "guidePictureWindow")
             // On air the focus target sits inside the picture's layers, under the strip, so the
             // Subtitles control in the strip can take focus; a view covered by the picture cannot.
             if holdsFocus && !isOnAir {
                 focusTarget
             }
-            // Over every phase, off air and tuning too: the guide is how a viewer finds a channel
-            // that is on (since #79 it opened only over a picture, and an off-air channel picked
-            // from it left no way back to it).
-            if let guideGrid {
-                TransmissionGuide(rows: guideRows, current: store.channelNumber, grid: guideGrid)
-                    .transition(.move(edge: .bottom))
-            }
             StationClipLayer(clips: model.clips)
+            RemoteSwipeReader(onPan: pan).frame(width: 0, height: 0).accessibilityHidden(true)
         }
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
@@ -219,6 +244,7 @@ struct TransmissionPlayerView: View {
                 next: store.upcoming(channel: store.channelNumber, at: TransmissionStore.now(), count: 1).first,
                 overlayVisible: overlayVisible
             )
+            .opacity(guideGrid == nil ? 1 : 0)
         }
     }
 
@@ -291,7 +317,8 @@ struct TransmissionPlayerView: View {
     }
 
     private var stripShown: Bool {
-        guard overlayVisible else { return false }
+        // The strip belongs to the full screen: in the guide's small window it would be a smudge.
+        guard overlayVisible, guideGrid == nil else { return false }
         // A schedule file (DEBUG, UI tests) plays no picture; its strip shows as a playing one does.
         if store.isScheduleFile { return true }
         switch store.player.state {
@@ -434,11 +461,11 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Select on the picture: tunes the lit guide row, works the lit control, or, with the strip
-    /// up, lights its first control (the Receiver's rule).
+    /// Select on the picture: in the guide, the lit cell (selectInGuide); else it works the lit
+    /// control or, with the strip up, lights its first control (the Receiver's rule).
     private func selectOnSurface() {
         if let guideGrid {
-            if guideRows.indices.contains(guideGrid.row) { pick(guideRows[guideGrid.row].number) }
+            selectInGuide(guideGrid)
             return
         }
         switch armed {
@@ -460,9 +487,74 @@ struct TransmissionPlayerView: View {
         store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
     }
 
-    /// Every channel down the side and two hours across, the tuned channel lit at now.
+    /// Select in the guide. On a channel's own cell the window tunes to that channel and the
+    /// guide stays, so the viewer sees it beside its description (owner, 2026-11-24: "show
+    /// description of a channel on click"). On the programme on now the channel is tuned and the
+    /// guide closes. A later programme, or a stretch off air, is only lit and described.
+    private func selectInGuide(_ grid: GuideGrid) {
+        guard guideRows.indices.contains(grid.row) else { return }
+        let row = guideRows[grid.row]
+        if !grid.onChannel, let index = grid.lit(in: row.slots) {
+            let slot = row.slots[index]
+            if !slot.isOffAir, slot.contains(grid.now) { pick(row.number) }
+            return
+        }
+        guard !switching, row.number != store.channelNumber, holdsFocus else { return }
+        switching = true
+        Task {
+            // No bird: it flies over the whole screen, and here only the window changes.
+            await switchUnderThePigeon(to: row.number, bird: false)
+            switching = false
+        }
+    }
+
+    /// The lit programme's kind, where it is from and its year, as the schedule gives them.
+    private func guideKind(_ grid: GuideGrid) -> String? {
+        guard !grid.onChannel, guideRows.indices.contains(grid.row) else { return nil }
+        let row = guideRows[grid.row]
+        guard let index = grid.lit(in: row.slots), !row.slots[index].isOffAir else { return nil }
+        // A second in, so the reading is of this programme and not the one that ended as it began.
+        let at = max(row.slots[index].start, grid.now).addingTimeInterval(1)
+        guard let programme = store.nowOn(channel: row.number, at: at)?.programme else { return nil }
+        let parts = [nonEmpty(programme.work_kind), nonEmpty(programme.country), programme.year.map(String.init)].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// Where the picture sits while the guide is open: the scale and the offset that carry the
+    /// full screen onto TransmissionGuide.pictureRect. The layer is laid out in the safe area and
+    /// scaled about its own top left corner, hence the safe area's origin in the sum.
+    private var pictureWindow: (scale: CGFloat, offset: CGSize) {
+        let rect = TransmissionGuide.pictureRect(in: screen)
+        let scale = rect.width / max(1, screen.width)
+        return (scale, CGSize(width: rect.minX - safeOrigin.x * (1 - scale), height: rect.minY - safeOrigin.y * (1 - scale)))
+    }
+
+    /// The finger on the touch surface (RemoteSwipeReader). Watching, a swipe up or down opens the
+    /// guide. In the guide it moves the lit row by distance (RemoteGesture.rows), and stops when
+    /// the finger does. The move commands tvOS sends for the same swipe are told apart in `move`.
+    private func pan(_ state: UIGestureRecognizer.State, _ travel: CGPoint) {
+        if state == .began {
+            swipe.rowsMoved = 0
+            swipe.opened = false
+        }
+        // Up and down only: a sideways swipe is left to the move commands.
+        guard abs(travel.y) > abs(travel.x) else { return }
+        swipe.last = .init(travel: Double(travel.y), at: ProcessInfo.processInfo.systemUptime)
+        let rows = RemoteGesture.rows(travel: Double(travel.y))
+        if let grid = guideGrid {
+            // The swipe that opened the guide moves nothing in it.
+            guard !swipe.opened, rows != swipe.rowsMoved else { return }
+            moveGuide(rows: rows - swipe.rowsMoved, grid: grid)
+            swipe.rowsMoved = rows
+        } else if rows != 0, !swipe.opened {
+            swipe.opened = true
+            openGuide()
+        }
+    }
+
+    /// Every channel down the side and three half hours across, the tuned channel lit at now.
     private func openGuide() {
-        guard guideOffered else { return }
+        guard guideOffered, guideGrid == nil else { return }
         hideTask?.cancel()
         armed = nil
         let now = TransmissionStore.now()
@@ -471,7 +563,7 @@ struct TransmissionPlayerView: View {
         guideStale = []
         let months = store.guideMonths
         guideRows = store.channelNumbers.map { number in
-            .init(number: number, name: store.channelName(number),
+            .init(number: number, name: store.channelName(number), line: store.channelLine(number),
                   soundOnly: store.nowOn(channel: number, at: now)?.programme?.audio_only == true,
                   onNow: StationClock.nowName(months, channel: number, at: now), slots: [])
         }
@@ -499,7 +591,7 @@ struct TransmissionPlayerView: View {
     private func fillGuide(around row: Int, now: Date) {
         let count = guideRows.count
         guard count > 0 else { return }
-        let shown = ReceiverGuide.window(count: count, lit: row)
+        let shown = ReceiverGuide.window(count: count, lit: row, rows: TransmissionGuide.rowCount)
         guard let first = shown.first, let last = shown.last else { return }
         let wanted = Set(shown + [(first - 1 + count) % count, (last + 1) % count])
             .filter { (guideRows[$0].slots.isEmpty || guideStale.contains($0)) && !guideFilling.contains($0) }
@@ -550,7 +642,7 @@ struct TransmissionPlayerView: View {
         let end = Self.guideEnd(grid.now)
         // Half an hour of slack: rows are read to the end as it stood when they were read, and the
         // half-hour refill moves that on.
-        return ReceiverGuide.window(count: guideRows.count, lit: grid.row).contains { index in
+        return ReceiverGuide.window(count: guideRows.count, lit: grid.row, rows: TransmissionGuide.rowCount).contains { index in
             (guideRows[index].slots.last?.end ?? .distantPast) < end.addingTimeInterval(-GuideGrid.step)
         }
     }
@@ -574,12 +666,23 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// The remote inside the guide: Up and Down the channel, Left and Right the programme.
+    /// The lit row moves `rows` channels, round the list.
+    private func moveGuide(rows: Int, grid: GuideGrid) {
+        var grid = grid
+        grid.move(rows: rows, count: guideRows.count)
+        fillGuide(around: grid.row, now: grid.now)
+        guideGrid = grid
+    }
+
+    /// The remote inside the guide: Up and Down the channel, Left and Right along the row, from
+    /// the channel's own cell through its programmes. A swipe up or down has already moved the
+    /// rows by its distance (pan), so the move command tvOS sends for it is dropped here.
     private func moveInGuide(_ direction: MoveCommandDirection, grid: GuideGrid) {
         var grid = grid
         switch direction {
-        case .up: grid.move(rows: -1, count: guideRows.count)
-        case .down: grid.move(rows: 1, count: guideRows.count)
+        case .up, .down:
+            guard movedBy == .press else { return }
+            grid.move(rows: direction == .up ? -1 : 1, count: guideRows.count)
         case .left: if guideRows.indices.contains(grid.row) { grid.earlier(on: guideRows[grid.row].slots) }
         case .right: if guideRows.indices.contains(grid.row) { grid.later(on: guideRows[grid.row].slots) }
         default: return
@@ -862,6 +965,12 @@ struct TransmissionPlayerView: View {
             break
         }
         guard direction == .up || direction == .down else { return }
+        // A swipe up or down on the touch surface opens the guide; a press of Up or Down changes
+        // channel (owner, 2026-11-24). The swipe itself has usually opened it already (pan).
+        if movedBy == .swipe {
+            openGuide()
+            return
+        }
         armed = nil
         guard holdsFocus, !switching else { return }
         switching = true
@@ -880,10 +989,10 @@ struct TransmissionPlayerView: View {
     /// over it, and cuts in under the bird, as in the Receiver (owner, 2026-10-06): the moment the
     /// channel plays, with the bird flying on over it (2026-10-07).
     /// A channel off air, or one that needs a sign-in, is tuned the ordinary way under the bird.
-    private func switchUnderThePigeon(to target: Int) async {
+    private func switchUnderThePigeon(to target: Int, bird: Bool = true) async {
         let pigeon = model.pigeon
         let key = "transmission-\(target)"
-        if !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
+        if bird, !UIAccessibility.isReduceMotionEnabled, let pick = pigeon.pick(expected: TuneTimes.expected(key, fallback: 2.5)) {
             await pigeon.arm(pick)
             guard !left else { return }
             pigeon.start()
@@ -918,6 +1027,11 @@ struct TransmissionPlayerView: View {
             await store.tune(channel: target)
         }
         await quiet
+    }
+
+    /// Whether an Up or Down move command came from a swipe on the touch surface or from a press.
+    private var movedBy: RemoteGesture.Kind {
+        RemoteGesture.classify(moveAt: ProcessInfo.processInfo.systemUptime, lastPan: swipe.last)
     }
 
     /// Pauses a picture that is playing. Anything else joins the channel again, live: a paused
@@ -989,4 +1103,14 @@ struct TransmissionPlayerView: View {
             }
         }
     }
+}
+
+/// The finger's last travel on the touch surface and what this touch has already done. A class
+/// held in state: it changes on every pan report and must not redraw the screen.
+private final class SwipeTrack {
+    var last: RemoteGesture.Pan?
+    /// Rows the guide has moved for the touch under way.
+    var rowsMoved = 0
+    /// This touch opened the guide: it does nothing more.
+    var opened = false
 }

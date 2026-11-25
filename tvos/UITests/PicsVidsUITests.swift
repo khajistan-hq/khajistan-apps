@@ -285,7 +285,10 @@ final class PicsVidsUITests: XCTestCase {
         let tab = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
         XCTAssertTrue(tab.exists, "focus is still in the top bar, got \(kjFocusKey(app))")
         XCTAssertGreaterThan(tab.frame.midX, app.buttons["pnvShuffle"].frame.maxX, "the bar item sits right of Shuffle; on \(kjFocusKey(app))")
-        kjPress(.down, app: app)
+        // And it is the bar's last item: a slow Right must not read as the end of the bar.
+        let lastX = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-'")).allElementsBoundByIndex.map(\.frame.midX).max() ?? 0
+        XCTAssertEqual(tab.frame.midX, lastX, accuracy: 1, "the walk ends on the bar's last item; on \(kjFocusKey(app))")
+        if !kjPress(.down, app: app) { kjPause(3) }
         kjPause(1)
         XCTAssertTrue(app.buttons["pnvkind-all"].hasFocus, "Down from the bar lands on Everything, got \(kjFocusKey(app))")
     }

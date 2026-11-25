@@ -280,7 +280,11 @@ final class PicsVidsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["pnvkind-all"].waitForExistence(timeout: 60))
         kjPause(4)
         XCTAssertTrue(kjIntoTopBar(app), "Up reaches the top bar")
-        for _ in 0..<8 where kjPress(.right, app: app) {}
+        for _ in 0..<8 { if !kjPress(.right, app: app) { break } }
+        // The walk must end right of the controls, or Down proves nothing about the nearest button.
+        let tab = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        XCTAssertTrue(tab.exists, "focus is still in the top bar, got \(kjFocusKey(app))")
+        XCTAssertGreaterThan(tab.frame.midX, app.buttons["pnvShuffle"].frame.maxX, "the bar item sits right of Shuffle; on \(kjFocusKey(app))")
         kjPress(.down, app: app)
         kjPause(1)
         XCTAssertTrue(app.buttons["pnvkind-all"].hasFocus, "Down from the bar lands on Everything, got \(kjFocusKey(app))")

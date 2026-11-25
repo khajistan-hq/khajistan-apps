@@ -3,7 +3,7 @@
 **For the next agent.** Read this file whole, then `DECISIONS.md` (the rules this work keeps),
 `CONTRACTS.md` (what each room reads), `STAGES.md` (the ledger) and `TEST_MATRIX.md` (how to
 prove it). Do not re-derive what is written here; check it against the code, then continue.
-Release, store and compliance work is a separate set: `docs/handoffs/2026-10-13-apps-lane/`.
+Release, store and compliance work is a separate set, kept outside this repository.
 
 ## Where the work is
 

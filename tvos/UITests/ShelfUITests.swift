@@ -94,6 +94,7 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down reaches CCTV, got \(focusedID(app))")
             XCTAssertFalse(passed.contains { $0.hasPrefix("film-") || $0.hasPrefix("home-transmission-") },
                            "\(skin): Home carries no Screening Room or Transmission shelf, passed \(passed)")
+            XCTAssertFalse(passed.contains { $0.hasPrefix("liked-") }, "\(skin): Liked is not above CCTV, passed \(passed)")
             shot("\(skin)-2-receiver-cameras-shelf", app)
             press(.down, app: app)
             // Liked sits under CCTV for an account with likes; nothing else does.

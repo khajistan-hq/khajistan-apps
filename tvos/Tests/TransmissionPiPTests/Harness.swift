@@ -45,6 +45,7 @@ final class TransmissionStore {
     // PRODUCTION_ACCESS_INVALIDATION
     // PRODUCTION_WARM
 }
+struct ScheduleCache { static let shared = ScheduleCache(); func clear() {} }
 enum StationClock {
     struct Programme { let play_url = "signed" }
     struct Air { let programme: Programme? = Programme() }
@@ -70,6 +71,7 @@ final class AuthStore {
     var accessGeneration = 0
     private var observers: [() -> Void] = []
     var onPreviewPasswordChange: (() -> Void)?
+    var previewPassword: String?
     func observeAccess(_ observer: @escaping () -> Void) -> UUID {
         observers.append(observer)
         return UUID()
@@ -82,6 +84,10 @@ final class AuthStore {
 final class ReadingStore {
     var invalidations = 0
     func previewCredentialDidChange() { invalidations += 1 }
+}
+final class ReceiverStore {
+    var credentialChanges = 0
+    func credentialDidChange() { credentialChanges += 1 }
 }
 final class PictureInPicture {
     var onStart: (() -> Void)?
@@ -100,6 +106,8 @@ final class AppModel {
     let transmission = TransmissionStore()
     var auth: AuthStore { transmission.auth }
     let reading = ReadingStore()
+    let receiver = ReceiverStore()
+    var receiverPath: [Int] = []
     let publicReceiver = PlayerController()
     var section = Section.transmission
     var link: Link?

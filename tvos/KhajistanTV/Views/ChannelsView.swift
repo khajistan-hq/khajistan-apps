@@ -13,6 +13,7 @@ struct ChannelsView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
+    @Environment(\.underRadioBar) private var underRadioBar
     @State private var channels: [Channel] = []
     @State private var cameraChannels: [Channel] = []
     @State private var mainLoaded = false
@@ -64,7 +65,8 @@ struct ChannelsView: View {
                 channel: heroChannel,
                 preview: preview,
                 still: heroChannel.flatMap { model.stills.image(for: $0.id) },
-                countries: countries
+                countries: countries,
+                compact: underRadioBar
             )
             .padding(.horizontal, KJLayout.inset)
             .padding(.top, 24)
@@ -95,6 +97,7 @@ struct ChannelsView: View {
             if let id { heroId = id }
             follow()
         }
+        .onChange(of: underRadioBar) { _, _ in follow() }
         .onChange(of: playing == nil) { _, free in
             // One signal at a time: the hero and the stills give way to the player.
             if free { follow() } else { model.stills.endVisit(); preview.stop(stills: model.stills) }
@@ -132,7 +135,8 @@ struct ChannelsView: View {
     /// player covers the page), and asks for stills of the cards nearest focus.
     private func follow() {
         guard playing == nil else { return }
-        let onCard = focusedId != nil || heroId == nil
+        // No picture plays where the shrunk hero has none to show it in.
+        let onCard = (focusedId != nil || heroId == nil) && !underRadioBar
         preview.show(onCard ? heroChannel : nil, receiver: model.receiver, stills: model.stills)
         model.stills.want(nearFocus)
     }
@@ -190,6 +194,9 @@ struct ChannelsView: View {
             // The site's switch calls a film medium On Demand (open-frequencies.html, data-medium="vod").
             FilmShelf(title: "On Demand", count: "\(films.count) \(films.count == 1 ? "film" : "films")", films: films)
                 .accessibilityIdentifier("shelf-vod")
+                // The last shelf: Down from it goes to the small radio bar. Its cards shrink to fit
+                // above the bar (underRadioBar); this sends focus there even if a card still reaches it.
+                .onMoveCommand { if $0 == .down, model.radioBarUp { model.radioBarFocusRequests += 1 } }
         case "camera":
             cameraShelf
         default:

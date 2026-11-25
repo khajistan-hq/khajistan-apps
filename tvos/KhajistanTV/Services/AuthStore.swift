@@ -130,9 +130,12 @@ final class AuthStore {
     }
 
     /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
+    /// The preview password goes too: an Apple TV is shared, so the next viewer starts with nothing
+    /// saved (owner, 2026-11-14). A refused refresh keeps it; only a chosen sign-out clears it.
     func signOut() async {
         let token = session?.accessToken
         clearSession()
+        clearPreviewPassword()
         guard let token else { return }
         _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
     }
@@ -141,7 +144,7 @@ final class AuthStore {
     /// the session is dropped, because a refresh token is not worth keeping once refused.
     func validAccessToken() async throws -> String {
         guard let current = session else {
-            throw AuthError.server("Sign in to watch Khajistan TV.")
+            throw AuthError.server("Sign in to watch Khajistan Transmission.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
         // One refresh at a time: every caller waits on the same request. Parallel refreshes sent

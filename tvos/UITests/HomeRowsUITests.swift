@@ -54,9 +54,7 @@ final class HomeRowsUITests: XCTestCase {
         // and Pics/Vids only for Friends; its doors shelf shows only with two doors or more.
         var required = ["themes"]
         #if !KJ_APP_STORE
-        required += ["doors", "reading", "picsvids"]
-        #elseif KJ_FRIENDS
-        required += ["doors", "picsvids"]
+        required += ["reading"]
         #endif
         for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
@@ -65,6 +63,10 @@ final class HomeRowsUITests: XCTestCase {
         // 2026-11-19).
         XCTAssertFalse(reached.contains("films") || reached.contains("transmission"), "Home carries no film or Transmission shelf; reached \(reached)")
         XCTAssertEqual(reached.last, "cameras", "CCTV is the last shelf; reached \(reached)")
+        // Off Home since 2026-11-21 (owner): the shelf of every part of Khajistan, and Pics/Vids.
+        for gone in ["doors", "picsvids"] {
+            XCTAssertFalse(reached.contains(gone), "no \(gone) shelf on Home; reached \(reached)")
+        }
 
         // Up walks back to the front.
         for _ in 0..<26 where !focusedID(app).hasPrefix("region-") && focusedID(app) != "beyondTheAtlas" {

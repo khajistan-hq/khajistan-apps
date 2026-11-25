@@ -9,10 +9,6 @@ struct PicsVidsView: View {
     @Environment(AppModel.self) private var model
     @State private var viewing: Viewing?
     @State private var dontAskAgain = false
-    /// The Reel's first page on its way, or why it did not come.
-    @State private var reelTask: Task<Void, Never>?
-    @State private var reelNote: String?
-    private static let reelLoading = "Loading\u{2026}"
     @FocusState private var focus: Focus?
 
     private enum Focus: Hashable { case noticeOK, firstTab }
@@ -49,17 +45,10 @@ struct PicsVidsView: View {
         // A new hand if the page was left, dealt before the shelves' first loads ask.
         .onAppear { store.dealIfLeft() }
         .task { await store.start() }
-        // Left before the Reel's page came: the viewer must not open by itself later.
         .onDisappear {
-            reelTask?.cancel(); reelNote = nil
             // Left for another section (not for an object opened over the page): the next visit
             // deals again (owner, 2026-11-14: "shuffle everytime").
             if viewing == nil { store.pageLeft() }
-        }
-        // Only the outcome is announced; the Loading line stays on screen for sight and is
-        // reachable by VoiceOver's own exploring, as plain text.
-        .onChange(of: reelNote) {
-            if let reelNote, reelNote != Self.reelLoading { AccessibilityNotification.Announcement(reelNote).post() }
         }
         .task(id: model.auth.email) { await model.saves.load() }
         // Back from the background (the app left on this page overnight): a new deal too.
@@ -137,48 +126,13 @@ struct PicsVidsView: View {
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .padding(.leading, 28)
             .accessibilityIdentifier("pnvShuffle")
-            // Every region as one endless reel, from its first object (owner, 2026-11-14). Region
-            // and Shuffle are changed inside it.
-            Button {
-                // A second press while the first page loads waits on the same load.
-                guard reelTask == nil else { return }
-                reelNote = Self.reelLoading
-                reelTask = Task {
-                    defer { reelTask = nil }
-                    // Videos only, every region (owner, 2026-11-14: "reel just needs to be of videos").
-                    let all = PicsVidsStore.videosKey(PicsVidsStore.allRegions)
-                    // A new hand on every press, not the reel the last press dealt.
-                    store.discard(all)
-                    // retry clears a failed load first; a feed that failed once would refuse loadMore.
-                    // Twice: a kind tab pressed meanwhile starts the shelves over, and the first ask
-                    // then comes back with nothing, not done and no error.
-                    // A real failure (an error on the feed) is not asked again: its note shows at once.
-                    for pass in 0..<2 where store.feed(all).items.isEmpty && !store.feed(all).isDone && !Task.isCancelled
-                        && (pass == 0 || store.feed(all).error == nil) {
-                        await store.retry(region: all)
-                        // Another caller's load may be the one in flight.
-                        while store.feed(all).items.isEmpty, store.feed(all).isLoading, !Task.isCancelled {
-                            try? await Task.sleep(for: .milliseconds(150))
-                        }
-                    }
-                    guard !Task.isCancelled else { return }
-                    if let first = store.feed(all).items.first {
-                        reelNote = nil
-                        viewing = Viewing(row: first, region: PicsVidsStore.allRegions, videosOnly: true)
-                    } else {
-                        reelNote = store.feed(all).error ?? "Nothing filed yet."
-                    }
-                }
-            } label: {
-                Label("Reel", systemImage: "play.rectangle.on.rectangle").kjKicker()
-            }
-            .buttonStyle(HouseTabStyle(isCurrent: false))
-            .padding(.leading, 12)
-            .accessibilityIdentifier("pnvReel")
-            if let reelNote { Text(reelNote).kjSmall(faint: true).accessibilityIdentifier("pnvReelNote") }
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)
+        // The section spans the page, so Up from a tile anywhere on the top shelf lands here.
+        // Hugging its buttons, it covered only the left: Up from a right-hand tile found nothing
+        // above it and went to the top bar, or nowhere (UI test, 2026-11-25).
+        .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
     }
 
@@ -221,15 +175,24 @@ struct PicsVidsView: View {
                 // visit (owner, 2026-11-14: "the same photos are just there and look boring").
                 PnvRegionShelf(region: PicsVidsStore.allRegions, title: "All regions",
                                tileHeight: PnvRegionShelf.largeTileHeight) { row in
-                    viewing = Viewing(row: row, region: PicsVidsStore.allRegions)
+                    open(row, region: PicsVidsStore.allRegions)
                 }
                 ForEach(store.regions, id: \.self) { region in
                     PnvRegionShelf(region: region) { row in
-                        viewing = Viewing(row: row, region: region)
+                        open(row, region: region)
                     }
                 }
             }
         }
+    }
+
+    /// A video opens as the Reel of its shelf's region: it plays first, then that region's videos
+    /// follow by themselves, Up and Down between them (owner, 2026-11-20: every region's row works
+    /// as the Reel did, and the Reel button goes). A picture opens as before.
+    private func open(_ row: PnvRow, region: String) {
+        guard row.isVideo else { viewing = Viewing(row: row, region: region); return }
+        store.seedReel(with: row, region: region)
+        viewing = Viewing(row: row, region: region, videosOnly: true)
     }
 
     private func problem(_ message: String) -> some View {

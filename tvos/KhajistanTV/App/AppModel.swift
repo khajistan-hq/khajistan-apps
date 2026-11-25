@@ -41,6 +41,12 @@ final class AppModel {
     /// A radio channel left playing when its player closed: Sonos's small player, under every
     /// screen, until it is turned off or another signal starts.
     var radioAway: RadioAway?
+    /// The small player shows under the sections (in picture-in-picture it has its own window).
+    /// Pages shrink their tallest parts while it does, so Down can still reach its Off.
+    var radioBarUp: Bool { radioAway.map { $0.pip == nil } ?? false }
+    /// Moves when a page asks the small radio bar to take focus: Down from a shelf whose cards are
+    /// taller than the room left above the bar finds nothing below them on its own.
+    var radioBarFocusRequests = 0
     /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
     /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
     var surfFocusedOnce = false
@@ -113,7 +119,7 @@ final class AppModel {
     init() {
         let auth = AuthStore()
         self.auth = auth
-        self.receiver = ReceiverStore()
+        self.receiver = ReceiverStore { [weak auth] in auth?.previewPassword }
         self.stills = LiveStills(receiver: receiver)
         self.transmission = TransmissionStore(auth: auth)
         // The station clock's server reading starts now, alongside everything else launch fetches.
@@ -161,6 +167,9 @@ final class AppModel {
         }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
+            // The dial changes with the password: a region page open on the old one goes too.
+            self?.receiverPath = []
+            self?.receiver.credentialDidChange()
             self?.invalidateTransmissionAccess()
         }
         observeTransmissionAccess()

@@ -1,4 +1,6 @@
+import AVFoundation
 import SwiftUI
+import VideoToolbox
 
 /// One Pics/Vids object, full screen. A picture is fitted whole, never cropped. A video plays in
 /// AVPlayer; a Khajistan TV row goes through tv-play and needs the viewer's account, which the
@@ -6,7 +8,9 @@ import SwiftUI
 /// (loading its next page at its end, and coming round to its first once it has given everything,
 /// so a stream never ends); play/pause pauses a video; menu goes back. Down lights Save,
 /// as the website's heart, and Right from it Collection, as Cosmos files a block; Select works the
-/// one lit, Up or Menu lets go. On a stream, Right goes on to Shuffle (deals the stream again
+/// one lit, Up or Menu lets go. The Reel moves as Transmission does instead: Up the next video,
+/// Down the one before (from the first it comes round to the last loaded), Right lights Save and walks the controls, Left
+/// walks back and lets go. On a stream, Right goes on to Shuffle (deals the stream again
 /// from a random place, the site's Shuffle; on the Apple TV it stays on) and Region (steps All
 /// regions, then west to east; the Reel passes over a region with no videos). Lit by the remote, never focused, as the Receiver's strip is.
 struct PnvViewerView: View {
@@ -21,9 +25,31 @@ struct PnvViewerView: View {
     @State private var overlayVisible = true
     @State private var showSignIn = false
     @State private var hideTask: Task<Void, Never>?
+    /// In the Reel, lets go of a lit control left alone for `reelArmIdle`, so a remote put down
+    /// after one Right does not hold the Reel on one video for good.
+    @State private var releaseTask: Task<Void, Never>?
+    /// Debug only: the `-kjfakeend` loop, cancelled with everything else when the viewer goes.
+    @State private var fakeEndTask: Task<Void, Never>?
+    private static let reelArmIdle: Duration = .seconds(10)
     @State private var loadTask: Task<Void, Never>?
     @State private var stepTask: Task<Void, Never>?
-    /// A new region or deal loading: its own task, so a Left or Right press cannot cancel it.
+    /// The step running now, if any: an end notice does not cancel a press still waiting on a page.
+    @State private var stepping: UUID?
+    /// In the Reel, broken videos skipped in a row (at most two), the last one skipped, and the
+    /// skip's timer, as on the iPhone (owner, 2026-11-19: the Reel plays on by itself).
+    @State private var skips = 0
+    /// Undecodable videos skipped in a row. Apart from `skips`, because a VP9 file starts playing
+    /// (sound over black) before its codec is read, and play resets `skips`.
+    @State private var codecSkips = 0
+    /// The way the last step went, so a broken video is skipped in that direction: Down onto one
+    /// goes on back, not forward to the video just left.
+    @State private var lastDelta = 1
+    /// VoiceOver's state, followed live, so the Reel's strip comes and goes with it.
+    @State private var voiceOver = UIAccessibility.isVoiceOverRunning
+    @State private var skipped: String?
+    @State private var skipTask: Task<Void, Never>?
+    /// A new region or deal loading: its own task, so a step (Left or Right; Up or Down in the
+    /// Reel) cannot cancel it.
     @State private var restartTask: Task<Void, Never>?
     /// True from a restart until the new deal's first object is shown: the object in `current`
     /// belongs to the old deal, so nothing of it is drawn.
@@ -44,7 +70,7 @@ struct PnvViewerView: View {
         case failed(String)
     }
 
-    /// The shelf the object was chosen from: left and right step through its region's stream, or
+    /// The shelf the object was chosen from: left and right (Up and Down in the Reel) step through its region's stream, or
     /// through the saved list it was opened from.
     /// The region the stream is read from: "" is every region. Changed in place from the strip.
     @State private var region: String
@@ -94,6 +120,7 @@ struct PnvViewerView: View {
             overlay(palette)
             // The focus target: it draws nothing and holds focus so the remote's presses land.
             Button {
+                defer { armIdle() }
                 switch armed {
                 // Between deals the object in `current` is not on screen: nothing acts on it.
                 case .save: wake(); if !stranded { toggleSave() }
@@ -109,11 +136,16 @@ struct PnvViewerView: View {
             .accessibilityIdentifier("pnvViewerSurface")
             // The object on show, for UI tests that walk the stream.
             .accessibilityValue(stranded ? "" : current.media_key)
+            #if DEBUG
+            // The kind on show, for the test that the Reel shows only video. Debug only.
+            .accessibilityLabel(current.isVideo ? "video" : "picture")
+            #endif
         }
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .onMoveCommand { direction in
             wake()
+            if videosOnly { reelMove(direction); armIdle(); return }
             if let lit = armed, let index = controls.firstIndex(of: lit) {
                 switch direction {
                 case .right where index + 1 < controls.count: armed = controls[index + 1]
@@ -132,6 +164,7 @@ struct PnvViewerView: View {
         }
         .onPlayPauseCommand {
             wake()
+            armIdle()
             if current.isVideo && phase == .ready { controller.toggle() }
         }
         .onExitCommand {
@@ -144,8 +177,33 @@ struct PnvViewerView: View {
             dismiss()
         }
         .onChange(of: phase) { wake() }
-        .onChange(of: controller.state) { wake() }
+        // Lighting or letting go of a control starts or stops its idle timer; so does a panel
+        // closing over a lit Collection.
+        .onChange(of: armed) { armIdle() }
+        .onChange(of: showCollections) { armIdle() }
+        .onChange(of: showSignIn) { armIdle() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in
+            voiceOver = UIAccessibility.isVoiceOverRunning
+            wake()
+        }
+        .onChange(of: controller.state) {
+            wake()
+            // A video that fails in the player (a dead file, a start that times out) never ends.
+            if controller.state.isFailed { skipBroken(current.id) }
+            if controller.state == .playing { skips = 0 }
+        }
         .task { show(current) }
+        #if DEBUG
+        // `-kjwakepulse YES`: wake() every 2 s with no press, as a short clip's loop does, so a
+        // test can prove the lit control's idle timer is not restarted by it. Debug only.
+        .task {
+            guard UserDefaults.standard.string(forKey: "kjwakepulse") == "YES" else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                wake()
+            }
+        }
+        #endif
         .onDisappear { stopEverything() }
         .fullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
@@ -168,6 +226,64 @@ struct PnvViewerView: View {
     // MARK: - Overlay
 
     private func overlay(_ palette: Palette) -> some View {
+        Group {
+            if videosOnly { reelOverlay(palette) } else { fullOverlay(palette) }
+        }
+        .opacity(overlayVisible ? 1 : 0)
+        .animation(.easeOut(duration: 0.25), value: overlayVisible)
+    }
+
+    /// The Reel gives the screen to the video (owner, 2026-11-20: the bars "taking attention away
+    /// from the video"). No status band and no full-width panel: one short line on a ground plate
+    /// that hugs it, bottom left, the account and the region. The controls come up only when Right
+    /// lights them; a state (loading, paused, a failure) takes the line's place.
+    private func reelOverlay(_ palette: Palette) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Spacer(minLength: 0)
+            // Shown only while lit; always there for VoiceOver, whose swipes are not move commands.
+            if stripUp {
+                saveControls
+            }
+            Group {
+                if phase == .needsSignIn {
+                    // With a control lit, Select works that control and not the sign-in.
+                    Text((stateText ?? "") + (armed == nil ? "  \u{00B7}  Select to sign in" : ""))
+                        .lineLimit(2)
+                        .accessibilityIdentifier("pnvViewerState")
+                } else if let state = stateText {
+                    Text(state).lineLimit(2).accessibilityIdentifier("pnvViewerState")
+                } else if !stranded {
+                    HStack(spacing: 18) {
+                        Text(reelLine).lineLimit(1)
+                        // The cue for the controls, a hint for the eye and not content to be read.
+                        if !stripUp { Text("\u{2192} Save").accessibilityHidden(true) }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("pnvReelLine")
+                }
+            }
+            .kjSmall()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(palette.ground)
+            // A long failure message wraps rather than growing back into a full-width bar.
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .padding(.leading, KJLayout.inset)
+        .padding(.bottom, 48)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+    }
+
+    /// The Reel's control strip is up: a control is lit, or VoiceOver is on.
+    private var stripUp: Bool { armed != nil || voiceOver }
+
+    /// "@account · Region"; no region when the object carries none (never the filter's name).
+    private var reelLine: String {
+        let place = store.regionToken(for: current).map(PnvRegions.label)
+        return "@" + store.accountHandle(for: current) + (place.map { " \u{00B7} " + $0 } ?? "")
+    }
+
+    private func fullOverlay(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
             StatusBand(leading: ["Khajistan Pics/Vids", stranded ? regionName : "@" + store.accountHandle(for: current)],
                        trailing: stranded ? [] : [current.isVideo ? "Video" : "Picture"])
@@ -175,8 +291,6 @@ struct PnvViewerView: View {
             panel
                 .background(palette.ground, ignoresSafeAreaEdges: [.horizontal, .bottom])
         }
-        .opacity(overlayVisible ? 1 : 0)
-        .animation(.easeOut(duration: 0.25), value: overlayVisible)
     }
 
     private var panel: some View {
@@ -204,13 +318,38 @@ struct PnvViewerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Save and Collection, lit by the remote: Down lights Save, Right Collection. Said once in
-    /// place while nothing is lit, as the Receiver's strip cues its controls.
+    /// The Reel moves as Transmission does (owner, 2026-11-20): Up is the next video, Down the one
+    /// before, as Channel Up and Down. Right lights the controls and walks them; Left walks back
+    /// and lets go from Save. Up or Down with a control lit lets go and moves.
+    private func reelMove(_ direction: MoveCommandDirection) {
+        switch direction {
+        case .up, .down:
+            armed = nil
+            codecSkips = 0
+            step(by: direction == .up ? 1 : -1)
+        case .right:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                if index + 1 < controls.count { armed = controls[index + 1] }
+            } else {
+                armed = .save
+            }
+        case .left:
+            if let lit = armed, let index = controls.firstIndex(of: lit) {
+                armed = index > 0 ? controls[index - 1] : nil
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    /// Save and Collection, lit by the remote: Down lights Save, Right Collection (in the Reel Right
+    /// lights Save, and the strip shows only while one is lit). Said once in place while nothing
+    /// is lit, as the Receiver's strip cues its controls.
     private var saveControls: some View {
         // Between deals there is no object on screen to have saved.
         let saved = !stranded && model.saves.isSaved(pnvKey: current.media_key)
         return HStack(spacing: 14) {
-            StripChipStyle.face(Text((armed == nil ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
+            StripChipStyle.face(Text((armed == nil && !videosOnly ? "\u{2193} " : "") + (saved ? "Saved" : "Save")), isOn: saved, selected: armed == .save)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityAddTraits(armed == .save ? .isSelected : [])
                 .accessibilityLabel(saved ? "Saved" : "Save")
@@ -260,6 +399,12 @@ struct PnvViewerView: View {
     private func restart(_ change: () -> Void) {
         stepTask?.cancel()
         restartTask?.cancel()
+        skipTask?.cancel()
+        // A new hand or region starts the count of broken videos skipped in a row again.
+        skips = 0
+        codecSkips = 0
+        lastDelta = 1
+        skipped = nil
         // The object on screen stops now, not when the new deal arrives.
         loadTask?.cancel()
         controller.stop()
@@ -352,9 +497,12 @@ struct PnvViewerView: View {
         wake()
         let key = row.id
         loadTask = Task {
-            Task { @MainActor in
-                let text = await store.caption(for: row)
-                if current.id == key { caption = text }
+            // The Reel shows no caption, so it does not ask for one.
+            if !videosOnly {
+                Task { @MainActor in
+                    let text = await store.caption(for: row)
+                    if current.id == key { caption = text }
+                }
             }
             if row.isVideo {
                 model.silenceRadio()
@@ -383,21 +531,100 @@ struct PnvViewerView: View {
             let url = try await store.playableURL(for: row)
             try Task.checkCancellation()
             guard current.id == key else { return }
-            // A clip loops, as a reel does; a Khajistan TV programme plays once.
+            // In the Reel the next video starts by itself when one ends (owner, 2026-11-19: reel
+            // should auto play the next video), Khajistan TV programmes included. Opened from a
+            // shelf, a clip loops and a Khajistan TV programme plays once, as before.
             // Weak: the controller stores this closure, so a strong capture kept every viewer's player alive.
             controller.onEnded = { [weak controller] in
-                guard !row.isKtv, let controller else { return }
+                // A late end notice for a video already left behind does not step a second time.
+                // VoiceOver loops the video instead, so the object does not change under the reader;
+                // a press still waiting on the next page is left to finish.
+                // A lit control loops the video too, so Select never acts on one the viewer did
+                // not choose.
+                // VoiceOver and Switch Control loop too, as on the iPhone.
+                if videosOnly, OverlayTiming.hidesItself, armed == nil {
+                    // A video that played to its end was decodable: the undecodable run is over.
+                    if current.id == key, stepping == nil { codecSkips = 0; step(by: 1) }
+                    return
+                }
+                guard videosOnly || !row.isKtv, let controller else { return }
                 controller.player.seek(to: .zero)
                 controller.resume()
             }
             controller.attach(url: url, seekTo: nil, title: "@" + store.accountHandle(for: row), subtitle: "Khajistan", isLive: false)
+            let asset = controller.player.currentItem?.asset
+            #if DEBUG
+            // `-kjfakeend N`: the video "ends" every N s of play, so a test can see what an end
+            // does under a lit control without waiting on a real clip's length. Debug only.
+            if let seconds = Int(UserDefaults.standard.string(forKey: "kjfakeend") ?? "") {
+                fakeEndTask?.cancel()
+                fakeEndTask = Task { @MainActor [weak controller] in
+                    while let controller, current.id == key, !Task.isCancelled {
+                        try? await Task.sleep(for: .seconds(seconds))
+                        if current.id == key { controller.onEnded?() }
+                    }
+                }
+            }
+            #endif
             phase = .ready
+            // A VP9 or AV1 file loads and plays its sound over a black picture on a device with no
+            // decoder for it (the Apple TV HD has neither): say so, and in the Reel skip it. Read
+            // after `.ready`, so a slow or empty track list never holds the viewer on Loading.
+            guard let asset, await Self.cannotDecode(asset) else { return }
+            guard !Task.isCancelled, current.id == key else { return }
+            controller.stop()
+            phase = .failed("This video cannot play on this Apple TV.")
+            // VP9 files sit together by account, so these do not stop the Reel after two.
+            skipBroken(key, codec: true)
         } catch PnvPlaybackError.needsSignIn {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .needsSignIn
         } catch {
             guard !Task.isCancelled, current.id == key else { return }
             phase = .failed(error.localizedDescription)
+            skipBroken(key)
+        }
+    }
+
+    /// Whether the asset's picture is in a codec this device has no decoder for. Only VP9 and AV1
+    /// are asked about: every Apple device decodes H.264 and HEVC, and VideoToolbox answers for
+    /// the hardware. Read off the player's own asset, so nothing extra is downloaded.
+    nonisolated static func cannotDecode(_ asset: AVAsset) async -> Bool {
+        #if DEBUG
+        // `-kjundecodable YES`: every video reads as undecodable, so a test can see the message
+        // and the skip without a VP9 file or an Apple TV HD. Debug only.
+        if UserDefaults.standard.string(forKey: "kjundecodable") == "YES" { return true }
+        #endif
+        guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+              let formats = try? await track.load(.formatDescriptions) else { return false }
+        let vp9: FourCharCode = 0x7670_3039, av1: FourCharCode = 0x6176_3031 // 'vp09', 'av01'
+        return formats.contains { format in
+            let codec = CMFormatDescriptionGetMediaSubType(format)
+            return (codec == vp9 || codec == av1) && !VTIsHardwareDecodeSupported(codec)
+        }
+    }
+
+    /// In the Reel a video that cannot play shows its error for a moment, then the next one plays.
+    /// Only while it is still on screen, once per object, and not three in a row.
+    private func skipBroken(_ key: String, codec: Bool = false) {
+        guard videosOnly, OverlayTiming.hidesItself, skipped != key else { return }
+        // VP9 files sit together by account: eight undecodable ones in a row before the Reel stops.
+        if codec {
+            guard codecSkips < 8 else { return }
+            codecSkips += 1
+        } else {
+            guard skips < 2 else { return }
+            skips += 1
+        }
+        skipped = key
+        skipTask?.cancel()
+        skipTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            // A lit control holds the skip as it holds autoplay; it goes on once the control lets go.
+            while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
+            if !Task.isCancelled, current.id == key {
+                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta))
+            }
         }
     }
 
@@ -405,10 +632,22 @@ struct PnvViewerView: View {
     private func step(by delta: Int) {
         // While a new deal loads there is no neighbour yet; the press waits for nothing.
         guard restartTask == nil else { return }
-        // A deal that came back empty or failed: Left or Right asks for it again.
+        // A deal that came back empty or failed: a step (Left or Right; Up or Down in the Reel)
+        // asks for it again.
         if stranded { restart {}; return }
+        // Down on the Reel's first video comes round to the last one loaded (owner, 2026-11-20:
+        // "it should work both ways"), as Channel Down does on channel 1. With nothing else
+        // loaded there is nowhere to go: leave its pending skip alone.
+        if videosOnly, delta < 0, store.feed(feedKey).items.count < 2,
+           store.feed(feedKey).items.first?.id == current.id { return }
         stepTask?.cancel()
+        skipTask?.cancel()
+        skipped = nil
+        lastDelta = delta < 0 ? -1 : 1
+        let mine = UUID()
+        stepping = mine
         stepTask = Task {
+            defer { if stepping == mine { stepping = nil } }
             if let list {
                 guard let index = list.firstIndex(where: { $0.id == current.id }), list.indices.contains(index + delta) else { return }
                 saveNote = nil
@@ -416,7 +655,10 @@ struct PnvViewerView: View {
                 return
             }
             saveNote = nil
-            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id }) else { return }
+            // In the Reel a video not in its feed (a reel seeded while a page was in flight) steps
+            // onto the feed's first.
+            guard var index = store.feed(feedKey).items.firstIndex(where: { $0.id == current.id })
+                    ?? (videosOnly ? (delta > 0 ? -1 : 0) : nil) else { return }
             index += delta
             if index >= store.feed(feedKey).items.count {
                 // A page that failed blocks loadMore until it is cleared: ask again, or the
@@ -430,7 +672,9 @@ struct PnvViewerView: View {
             let items = store.feed(feedKey).items
             guard !Task.isCancelled, !items.isEmpty else { return }
             // The stream never ends: past its last object it comes round to its first, once the
-            // feed has given everything; Left from the first stays put.
+            // feed has given everything. Left from the first stays put on a shelf; Down in the
+            // Reel comes round to the last loaded.
+            if index < 0, videosOnly { index = items.count - 1 }
             if index >= items.count {
                 guard store.feed(feedKey).isDone else { return }
                 index = 0
@@ -443,9 +687,27 @@ struct PnvViewerView: View {
     private func stopEverything() {
         loadTask?.cancel()
         stepTask?.cancel()
+        skipTask?.cancel()
         restartTask?.cancel()
         hideTask?.cancel()
+        releaseTask?.cancel()
+        fakeEndTask?.cancel()
         controller.stop()
+    }
+
+    /// In the Reel, starts the lit control's idle timer again. Called on presses and on a control
+    /// lighting or a panel closing, never from wake(): a looping clip's state changes would
+    /// restart it on every loop and the control would never let go.
+    private func armIdle() {
+        releaseTask?.cancel()
+        // Never under VoiceOver or Switch Control, whose users may need longer between presses.
+        guard videosOnly, OverlayTiming.hidesItself, armed != nil, !showCollections, !showSignIn else { return }
+        releaseTask = Task {
+            try? await Task.sleep(for: Self.reelArmIdle)
+            guard !Task.isCancelled, armed != nil, !showCollections, !showSignIn else { return }
+            armed = nil
+            wake()
+        }
     }
 
     /// Shows the overlay. Once the object is showing (a picture, or a video that is playing) it

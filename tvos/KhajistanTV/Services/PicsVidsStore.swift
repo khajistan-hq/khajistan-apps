@@ -172,6 +172,17 @@ final class PicsVidsStore {
         feeds[key] = nil
     }
 
+    /// A new Reel for one region that starts on the video chosen from its shelf; the region's
+    /// shuffled videos load after it. A page in flight is left alone, as `discard` does.
+    func seedReel(with row: PnvRow, region: String) {
+        let key = Self.videosKey(region)
+        guard feeds[key]?.isLoading != true else { return }
+        var feed = PnvFeed()
+        feed.items = [row]
+        feed.seen = [row.media_key]
+        feeds[key] = feed
+    }
+
     /// Shuffle on deals again from a new random place; off goes back to the feed's own order.
     /// Either way every shelf starts over, as a new kind does.
     func setShuffled(_ on: Bool) {
@@ -227,6 +238,9 @@ final class PicsVidsStore {
         let videosOnly = region.hasPrefix(Self.videosPrefix)
         let place = videosOnly ? String(region.dropFirst(Self.videosPrefix.count)) : region
         let kind = videosOnly ? PnvKind.video : self.kind
+        // The Reel's feed is always shuffled (owner, 2026-11-19: "only shuffle the reel"), whatever the
+        // grid's Shuffle says, so opening the Reel never re-deals the grid.
+        let shuffled = self.shuffled || videosOnly
         // No roster, or a region nobody is filed under: nothing to ask for.
         guard let keys = PnvAPI.accountKeys(roster: roster, region: place == Self.allRegions ? nil : place) else {
             feed.isDone = true
@@ -286,6 +300,15 @@ final class PicsVidsStore {
             } else if rows.count < PnvAPI.pageSize {
                 next.isDone = true
             }
+            #if DEBUG
+            // `-kjreelcap N`: the Reel's feed ends after N videos, so a test reaches its end in a few
+            // presses however many videos a region has. Debug only.
+            let cap = UserDefaults.standard.integer(forKey: "kjreelcap")
+            if videosOnly, cap > 0, next.items.count >= cap {
+                next.items = Array(next.items.prefix(cap))
+                next.isDone = true
+            }
+            #endif
             next.isLoading = false
             feeds[region] = next
             // A walk that just came round from 1 has nothing on screen to ask for it: read on now.
@@ -330,6 +353,23 @@ final class PicsVidsStore {
     /// The address to play. A Khajistan TV row goes through tv-play with the viewer's session, as
     /// the Transmission page does; every other row is a plain file.
     func playableURL(for row: PnvRow) async throws -> URL {
+        #if DEBUG
+        // `-kjbrokenvideos YES`: every video fails before it plays; `-kjbrokenvideos dead`: every
+        // video is handed to the player at an address that answers nothing, so it fails inside the
+        // player. Tests prove the Reel skips either kind, and stops after two in a row. Debug only.
+        switch UserDefaults.standard.string(forKey: "kjbrokenvideos") {
+        case "YES": throw PnvPlaybackError.unavailable
+        case "dead" where row.isVideo: return URL(string: "http://127.0.0.1:9/kj-dead.mp4")!
+        // `second`: only the second video of a Reel deal fails, so a test can step onto it from
+        // either side and see which way it is skipped.
+        case "second" where feeds.contains { $0.key.hasPrefix(Self.videosPrefix) && $0.value.items.dropFirst().first?.id == row.id }:
+            throw PnvPlaybackError.unavailable
+        // `first`: only the first video of a Reel deal fails, for the skip forward from it.
+        case "first" where feeds.contains { $0.key.hasPrefix(Self.videosPrefix) && $0.value.items.first?.id == row.id }:
+            throw PnvPlaybackError.unavailable
+        default: break
+        }
+        #endif
         guard let full = PnvMedia.full(row) else { throw PnvPlaybackError.unavailable }
         guard row.isKtv else { return full }
         guard auth.isSignedIn else { throw PnvPlaybackError.needsSignIn }

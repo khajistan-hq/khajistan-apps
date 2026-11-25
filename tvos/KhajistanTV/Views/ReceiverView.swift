@@ -41,8 +41,9 @@ struct ReceiverView: View {
         .onChange(of: mediumRaw) { cancelSurf() }
         .onChange(of: model.extendedAtlas) { cancelSurf() }
         .onChange(of: model.receiverPath) { cancelSurf() }
-        // The id restarts the load when the switch moves, so the map follows it.
-        .task(id: model.extendedAtlas) { await load() }
+        // The id restarts the load when the switch moves, so the map follows it, and when the
+        // preview password changes, which decides whether the whole dial is served.
+        .task(id: DialKey(extended: model.extendedAtlas, password: model.auth.previewPassword)) { await load() }
         // Nothing plays until it is chosen (owner, 2026-10-29: "it goes straight to playing a
         // channel, which is not what I want. I need to be able to select a channel and then play
         // it"). Surf is focused at launch, so a channel is still one press away.
@@ -50,6 +51,11 @@ struct ReceiverView: View {
         .task(id: model.auth.previewPassword) { await model.films.load() }
         // Read again when the index lands: a link that opened the app arrives before it.
         .task(id: PendingLink(link: model.link, indexReady: model.receiver.index != nil)) { follow(model.link) }
+    }
+
+    private struct DialKey: Hashable {
+        let extended: Bool
+        let password: String?
     }
 
     private struct PendingLink: Hashable {
@@ -94,12 +100,8 @@ struct ReceiverView: View {
                                // lights is whole, never a sliver under the top bar.
                                listFocused: { toTop(proxy) })
                         .padding(.bottom, 12)
-                    // In a stack of their own with no spacing: a front with no likes has no gap
-                    // where the shelf would be. The shelf brings its own 12 points above it.
-                    LikedShelf()
                     }
                     ThemeRow()
-                    HomeSections()
                     // Transmission and the Screening Room are not shelves here: each has its own
                     // door in the top bar (owner, 2026-11-19: "remov khajistan transmission and
                     // screening room from the home page of the apple tv").
@@ -109,6 +111,10 @@ struct ReceiverView: View {
                     CCTVRow(index: index) {
                         withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(CCTVRow.anchor, anchor: .bottom) }
                     }
+                    // Last on the page (owner, 2026-11-21: "put liked video at the botton of the
+                    // page"). No likes, no shelf; its 12 points on top of the stack's 12 are kept
+                    // off with -12, so it sits as any other shelf does.
+                    LikedShelf().padding(.top, -12)
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
@@ -144,6 +150,12 @@ struct ReceiverView: View {
             // Surf, one count and the switch. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("receiverLiveNow")
+            if let note = model.receiver.signInNote {
+                Text(note).kjBody()
+                    .accessibilityIdentifier("receiverSignInNote")
+            }
             HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
                 .focused($switchFocused)
                 .accessibilityIdentifier("beyondTheAtlas")
@@ -584,8 +596,8 @@ private struct ThemeRow: View {
     }
 }
 
-/// The channels the account liked, newest first, the first shelf under the map, so a liked channel
-/// is one press down and one Select from the front (owner, 2026-11-08: "add liked channels on
+/// The channels the account liked, newest first, the last shelf on Home (owner, 2026-11-21: "put
+/// liked video at the botton of the page"; it was the first under the map until then) (owner, 2026-11-08: "add liked channels on
 /// homepage for an account so they are easily accessible"). The likes are the account's
 /// `passport_saves`, the same the website's heart and the player's Like write, so a like made on
 /// any device is here. Signed out, or with nothing liked, there is no shelf. Up and down in the

@@ -215,7 +215,8 @@ struct TransmissionGuide: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 Text(title).kjName(52).lineLimit(2).minimumScaleFactor(0.7)
-                if !line.isEmpty { Text(line).kjSmall(faint: true).lineLimit(2) }
+                // Full-strength ink: the faint tier read as grey by day (owner, 2026-11-24).
+                if !line.isEmpty { Text(line).kjSmall().lineLimit(2) }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("guideHeadline")
@@ -274,7 +275,7 @@ struct TransmissionGuide: View {
                 .padding(.trailing, Self.gap)
             ZStack(alignment: .topLeading) {
                 if cells.isEmpty {
-                    Text("Loading").kjSmall(faint: true).padding(.horizontal, 14)
+                    Text("Loading").kjSmall().padding(.horizontal, 14)
                         .frame(height: Self.rowHeight - Self.gap, alignment: .leading)
                 }
                 // Keyed by start, so a block keeps its place and its text when the rows are read again.
@@ -395,12 +396,19 @@ private struct GuideBlock: View {
         let under = run.map { String($0.dropFirst((slot.title ?? "").count + 3)) }
             ?? (from < windowStart && !(slot.isOffAir && more == 0) ? "\u{2039} \(times)" : times)
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
+            // The others folded into the cell are said in words, and only where the title and
+            // the words both fit whole; a bare "+1" told a viewer nothing (owner, 2026-11-24).
+            ViewThatFits(in: .horizontal) {
+                if more > 0 {
+                    HStack(spacing: 10) {
+                        Text(slot.title ?? "Off air").kjName(24).lineLimit(1).fixedSize()
+                        Text("and \(more) more").kjSmall().lineLimit(1).fixedSize()
+                    }
+                }
                 Text(slot.title ?? "Off air").kjName(24).lineLimit(1)
-                    .foregroundStyle(slot.isOffAir && !lit ? look.faint : look.ink)
-                if more > 0 { Text("+\(more)").kjName(24).fixedSize() }
             }
-            Text(under).kjSmall(faint: true).monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            // Ink at full strength on every line: no dimmed tier in the grid (owner, 2026-11-24).
+            Text(under).kjSmall().monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

@@ -376,6 +376,14 @@ struct PnvReelsView: View {
                 if !UIAccessibility.isVideoAutoplayEnabled { controller.pause() }
                 owner = key
                 phase = .ready
+                #if DEBUG
+                // `-kjfakeend N`: the video "ends" N s after it starts, so a test of what an end does
+                // does not wait on a live clip's length (a kabaddi match ran past 180 s). Debug only.
+                if let seconds = Int(UserDefaults.standard.string(forKey: "kjfakeend") ?? "") {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    if !Task.isCancelled, currentId == key { controller.onEnded?() }
+                }
+                #endif
             } catch PnvPlaybackError.needsSignIn {
                 if !Task.isCancelled { phase = .needsSignIn }
             } catch {

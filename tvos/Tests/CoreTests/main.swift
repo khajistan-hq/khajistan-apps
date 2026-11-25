@@ -3473,11 +3473,9 @@ func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
 }
 
 func pnvReelSkipsInTheDirectionOfThePress() throws {
-    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: false), 1)
-    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: false), -1)
-    // Nothing behind the first video: a broken one there is skipped forward.
-    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1, isFirst: true), 1)
-    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1, isFirst: true), 1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1), 1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1), -1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 0), 1)
 }
 
 func pnvAccountKeysFollowTheRosterAndTheFold() throws {
@@ -4128,10 +4126,11 @@ func vodTokenRequestAndAnswer() throws {
 /// denyText(): the site's words, by status and by what a SKU can actually charge.
 func vodDenyText() throws {
     let rentable = try film(#"{"handle":"a","title":"A","rent":6,"licence_price":1200}"#)
-    try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film.")
-    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it here.")
+    try expectEqual(Films.denyText(try film(#"{"handle":"a","title":"A","rent":3}"#), status: 403), "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again.", "the $3 films rent too")
+    try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film, then press Watch the full film again.")
+    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again.")
     let buyOnly = try film(#"{"handle":"a","title":"A","rent":7,"buy":20}"#)
-    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it here.",
+    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it at screening.khajistan.com, then press Watch the full film again.",
                     "a rent with no SKU at its price does not say rent")
     let licensed = try film(#"{"handle":"a","title":"A","licence_price":1200}"#)
     try expectEqual(Films.denyText(licensed, status: 403), "This film is licensed rather than sold. Screening and institutional terms are by inquiry.")

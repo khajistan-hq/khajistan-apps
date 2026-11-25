@@ -168,10 +168,10 @@ enum Films {
     // MARK: - What the receiver says
 
     /// The SKUs that can charge a price, keyed by price: open-frequencies.js VARIANTS, which
-    /// mirrors screening-room.html and film.html. No SKU at a price, no "Rent it here". A core
+    /// mirrors screening-room.html and film.html. No SKU at a price, no "Rent it at". A core
     /// test reads the site's own table and fails when this copy falls out of step.
     static let variants: [String: [Int: String]] = [
-        "rent": [6: "50071506125014"],
+        "rent": [6: "50071506125014", 3: "68066719662294"],
         "buy": [20: "50071508844758", 14: "50074714013910"],
     ]
 
@@ -188,8 +188,8 @@ enum Films {
         case 401:
             return "Sign in to the Khajistan account that holds this film."
         case 403:
-            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it here." }
-            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it here." }
+            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again." }
+            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it at screening.khajistan.com, then press Watch the full film again." }
             if film.licence_price != nil { return "This film is licensed rather than sold. Screening and institutional terms are by inquiry." }
             return "This film is not on your Khajistan account yet."
         default:

@@ -78,13 +78,11 @@ final class ShelfUITests: XCTestCase {
             // The shelves start one press down from the foot of the front.
             XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
 
-            // Under the front, the Themes row (News first), then every part of Khajistan as a
-            // tile (owner, 2026-10-29), then the rest, and CCTV last, a name per region that has
-            // cameras (owner, 2026-11-19). Transmission and the Screening Room are not on Home.
+            // Under the front, the Themes row (News first), then the rest, and CCTV last, a name
+            // per region that has cameras (owner, 2026-11-19). Transmission and the Screening Room
+            // are not on Home; neither is the shelf of every part of Khajistan (owner, 2026-11-21).
             _ = downPastGenres(skin, app)
-            XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the themes lands on the parts of Khajistan, got \(focusedID(app))")
-            kjPause(1)
-            shot("\(skin)-2-receiver-doors-shelf", app)
+            XCTAssertFalse(focusedID(app).hasPrefix("home-door-"), "\(skin): the parts-of-Khajistan shelf is off Home, got \(focusedID(app))")
             // CCTV is the foot of the page: down walks every shelf to it. Each id passed on the way
             // is kept: none is a film or a Transmission channel (owner, 2026-11-19).
             kjPause(6)   // the later shelves land

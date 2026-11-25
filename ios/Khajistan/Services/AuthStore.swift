@@ -143,7 +143,7 @@ final class AuthStore {
         if UserDefaults.standard.bool(forKey: "kjtestsignedout") { throw AuthStoreError.unavailable }
         #endif
         guard let current = session else {
-            throw AuthError.server("Sign in to watch Khajistan TV.")
+            throw AuthError.server("Sign in to watch Khajistan Transmission.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
         // One refresh at a time: every caller waits on the same request. Parallel refreshes sent

@@ -1023,6 +1023,7 @@ struct RadioBar: View {
     @Environment(\.palette) private var palette
     /// The song while the radio plays on under the screens (NowPlaying).
     @State private var song = ""
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         let state = away.controller.state
@@ -1049,6 +1050,7 @@ struct RadioBar: View {
             .buttonStyle(OnBandStyle())
             .accessibilityHint("Opens the channel full screen")
             .accessibilityIdentifier("radioBarName")
+            .focused($nameFocused)
             // Play tunes the station afresh, full screen, as the player's own Play does: a live
             // signal paused or stopped is not the live signal any more.
             Button {
@@ -1078,6 +1080,7 @@ struct RadioBar: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("radioBar")
+        .onChange(of: model.radioBarFocusRequests) { nameFocused = true }
         .task(id: away.channel.id) {
             song = ""
             await NowPlaying.watch(away.channel.id, active: { away.controller.state == .playing }) { song = $0 }

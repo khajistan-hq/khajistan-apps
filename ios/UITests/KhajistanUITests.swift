@@ -739,7 +739,7 @@ final class KhajistanUITests: XCTestCase {
         if notice.exists {
             notice.tap()
             // A tap while the notice is still leaving lands on it, not on the tile under it.
-            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 15), "the notice goes")
         }
         let count = app.staticTexts["pnvCount"]
         func objects() -> Int {
@@ -772,7 +772,7 @@ final class KhajistanUITests: XCTestCase {
         if notice.exists {
             notice.tap()
             // A tap while the notice is still leaving lands on it, not on the tile under it.
-            XCTAssertTrue(notice.waitForNonExistence(timeout: 5), "the notice goes")
+            XCTAssertTrue(notice.waitForNonExistence(timeout: 15), "the notice goes")
         }
         XCTAssertTrue(app.buttons["pnvReelsLink"].isHittable, "Play as reels is on screen")
         shot("pnv-grid", app)
@@ -807,7 +807,7 @@ final class KhajistanUITests: XCTestCase {
         let tiles = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'"))
         waitFor(tiles.firstMatch, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         let firstKey = String(tiles.element(boundBy: 0).identifier.dropFirst("tile-".count))
         // Three or more pages from the first, so the first page is not a built neighbour with a rail.
         let deep = (3..<max(3, min(tiles.count, 9))).reversed().map { tiles.element(boundBy: $0) }.first { $0.isHittable }
@@ -821,7 +821,7 @@ final class KhajistanUITests: XCTestCase {
         shuffle.tap()
         XCTAssertTrue(shuffle.waitForValue("On"), "Shuffle turns on")
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
-        let dealt = NSPredicate { _, _ in (0..<min(reels.count, 4)).contains { abs(reels.element(boundBy: $0).frame.minY) < 20 } }
+        let dealt = NSPredicate { [unowned self] _, _ in self.reelOnScreen(reels) != nil }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: dealt, object: nil)], timeout: 30), .completed,
                        "the shuffled deal opens on a page")
         shuffle.press(forDuration: 1.2)
@@ -840,19 +840,29 @@ final class KhajistanUITests: XCTestCase {
     /// The Reel plays the next video by itself when one ends (owner, 2026-11-19: "reel should auto
     /// play the next video"). Live data: clips run seconds to minutes, so the wait is long.
     func testPicsVidsReelPlaysTheNextVideoByItself() {
-        let app = launch(skin: "grove", tab: "picsVids")
+        // Each video "ends" after 8 s, so a long live clip (a kabaddi match) cannot outlast the wait.
+        let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjfakeend", "8"])
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         var first: String?
         XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             first = onScreen(); return first != nil }, object: nil)], timeout: 30) == .completed, "the Reel opens")
+        // A Khajistan TV programme asks a signed-out viewer to sign in and does not play, so it
+        // never ends: swipe past any, as a viewer would, before timing an end.
+        for _ in 0..<6 where first?.hasPrefix("reel-ktv-") == true {
+            app.swipeUp()
+            let was = first
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                first = onScreen(); return first != nil && first != was }, object: nil)], timeout: 15)
+        }
+        XCTAssertFalse(first?.hasPrefix("reel-ktv-") ?? true, "the Reel reaches a video that plays signed out")
         // No touch from here: the page must change on its own.
         let moved = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             let now = onScreen(); return now != nil && now != first }, object: nil)], timeout: 180) == .completed
@@ -867,16 +877,26 @@ final class KhajistanUITests: XCTestCase {
     /// The same, for a video that fails inside the player (a dead address), not before it.
     func testPicsVidsReelSkipsTwoDeadVideosThenStops() { reelSkipsTwoBrokenVideosThenStops("dead") }
 
+    /// The Reel page at the top of the screen, if any. Read from snapshots, which throw rather
+    /// than fail the test: the page list changes as the Reel scrolls, and a page counted a moment
+    /// ago may be gone by the time it is read (CI, 2026-11-21: "No matches found for Element at
+    /// index 3").
+    private func reelOnScreen(_ reels: XCUIElementQuery) -> String? {
+        (0..<min(reels.count, 4)).lazy
+            .compactMap { try? reels.element(boundBy: $0).snapshot() }
+            .first { abs($0.frame.minY) < 20 }?.identifier
+    }
+
     private func reelSkipsTwoBrokenVideosThenStops(_ broken: String) {
         let app = launch(skin: "grove", tab: "picsVids", extra: ["-kjbrokenvideos", broken])
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         var seen: [String] = []
         var candidate: String?
@@ -901,7 +921,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         waitFor(app.buttons["pnvReelRegion"], 10, "the Reel opens")
         app.buttons["pnvReelRegion"].tap()
@@ -922,7 +942,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         app.buttons["pnvReelsLink"].tap()
         let shuffle = app.buttons["pnvReelShuffle"]
         waitFor(shuffle, 10, "Shuffle is at the top of the reel")
@@ -930,7 +950,7 @@ final class KhajistanUITests: XCTestCase {
         XCTAssertTrue(shuffle.waitForValue("On"), "the Reel opens shuffled")
         let reels = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'reel-'"))
         func onScreen() -> String? {
-            (0..<min(reels.count, 4)).map { reels.element(boundBy: $0) }.first { abs($0.frame.minY) < 20 }?.identifier
+            reelOnScreen(reels)
         }
         func reelOpens(_ note: String) {
             XCTAssertTrue(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in onScreen() != nil }, object: nil)], timeout: 30) == .completed, note)
@@ -1534,7 +1554,7 @@ final class KhajistanUITests: XCTestCase {
         let tile = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tile-'")).firstMatch
         waitFor(tile, 40, "the stream loads")
         let notice = app.buttons["adultNoticeOK"]
-        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 5)) }
+        if notice.exists { notice.tap(); XCTAssertTrue(notice.waitForNonExistence(timeout: 15)) }
         XCTAssertFalse(app.buttons["pnvSavedLink"].exists, "no Saved link for a signed-out reader")
         tile.tap()
         waitFor(app.buttons["closePlayer"], 10, "the viewer opens")

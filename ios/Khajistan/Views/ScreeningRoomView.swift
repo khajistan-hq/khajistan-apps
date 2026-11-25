@@ -284,7 +284,8 @@ struct FilmScreen: View {
             VStack(spacing: 4) {
                 Text(Films.displayTitle(film)).font(.system(.title2, weight: .bold)).multilineTextAlignment(.center)
                     .accessibilityAddTraits(.isHeader)
-                let line = [film.year.map(String.init), film.runtime_minutes.map(Self.runtime), film.country]
+                // The year is in the title, "Jism (2006)" (owner, 2026-11-20), so not on this line.
+                let line = [film.runtime_minutes.map(Self.runtime), film.country]
                     .compactMap { $0?.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
                 if !line.isEmpty { Text(line).kjSmall(faint: true).multilineTextAlignment(.center) }
                 if let languages = film.languages?.text, !languages.isEmpty {
@@ -355,7 +356,6 @@ struct FilmScreen: View {
             ShelfHeader(title: "Information")
             if let publisher = film.publisher, !publisher.isEmpty { InfoRow(label: "Publisher", value: publisher) }
             if let country = film.country, !country.isEmpty { InfoRow(label: "Country", value: country) }
-            if let year = film.year { InfoRow(label: "Year", value: String(year)) }
             if let minutes = film.runtime_minutes { InfoRow(label: "Running time", value: Self.runtime(minutes)) }
             if let languages = film.languages?.text, !languages.isEmpty { InfoRow(label: "Languages", value: languages) }
             if film.licence_price != nil {

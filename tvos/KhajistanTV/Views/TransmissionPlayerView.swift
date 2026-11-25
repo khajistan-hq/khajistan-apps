@@ -76,13 +76,18 @@ struct TransmissionPlayerView: View {
             // changes, in one move (CardMotion.panel, a cut under Reduce Motion).
             // The layer is given the screen's own size and the safe area as padding of its own,
             // and the real safe area is ignored outside the effect. SwiftUI works the safe area out
-            // from where a view is drawn: scaled directly, everything inside that runs to the
-            // screen's edge was laid out again for the small window's place, and came out short.
+            // from where a view is drawn, so a view that ignores it grows, in the small window, from
+            // the window out to the screen's corner: a second black shape behind the picture. The
+            // picture, its black and the grounds therefore fill the layer by its own padding
+            // (FillsPictureLayer) and never ask about the safe area.
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background { palette.ground.ignoresSafeArea() }
+                .background { palette.ground.modifier(fill) }
                 .safeAreaPadding(safeInsets)
                 .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+                // Nothing of the layer is drawn outside it: in the window, the dancer's canvas
+                // and the strip's band would otherwise run on to the screen's edge.
+                .clipped()
                 .visualEffect { [window = guideGrid == nil ? nil : pictureWindow] layer, _ in
                     layer.scaleEffect(window?.scale ?? 1, anchor: .topLeading).offset(window?.offset ?? .zero)
                 }
@@ -222,19 +227,19 @@ struct TransmissionPlayerView: View {
                 }
             } else {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
-                Color.black.ignoresSafeArea()
+                Color.black.modifier(fill)
                 // Both signals keep a layer of their own; the cut is which one shows.
                 PlayerLayerView(player: store.playerA.player, onLayer: pip.bind)
-                    .ignoresSafeArea()
+                    .modifier(fill)
                     .opacity(store.aIsFront ? 1 : 0)
                 PlayerLayerView(player: store.playerB.player, onLayer: pip.bind)
-                    .ignoresSafeArea()
+                    .modifier(fill)
                     .opacity(store.aIsFront ? 0 : 1)
             }
             if store.player.state == .tuning {
                 // The ground covers the picture while the signal is on its way; the loader itself
                 // sits in the overlay, between the band and the panel.
-                palette.ground.ignoresSafeArea()
+                palette.ground.modifier(fill)
             }
             focusTarget
             overlay(air)
@@ -523,6 +528,10 @@ struct TransmissionPlayerView: View {
         let parts = [nonEmpty(programme.work_kind), nonEmpty(programme.country)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
     }
+
+    /// Fills the picture's layer edge to edge, by undoing the safe-area padding the layer gives
+    /// its content. Used in place of ignoresSafeArea (see body).
+    private var fill: FillsPictureLayer { FillsPictureLayer(insets: safeInsets) }
 
     /// Where the picture sits while the guide is open: the scale and the offset that carry the
     /// full screen onto TransmissionGuide.pictureRect, scaled about the screen's top left corner.
@@ -1117,4 +1126,13 @@ private final class SwipeTrack {
     var rowsMoved = 0
     /// This touch opened the guide: it does nothing more.
     var opened = false
+}
+
+/// Grows a view by the picture layer's own padding, so it fills the layer whatever part of the
+/// screen the layer is drawn on.
+private struct FillsPictureLayer: ViewModifier {
+    let insets: EdgeInsets
+    func body(content: Content) -> some View {
+        content.padding(EdgeInsets(top: -insets.top, leading: -insets.leading, bottom: -insets.bottom, trailing: -insets.trailing))
+    }
 }

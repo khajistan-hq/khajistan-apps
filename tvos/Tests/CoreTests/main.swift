@@ -2115,10 +2115,10 @@ func guideTimelineSynthetic() throws {
     try expectEqual(slots.first?.end, pkt(2026, 10, 10, 6, 10))
     try expectEqual(slots.first?.title, "Show A")   // no display title: the show's name, as Now prints it
     // One (4.5 min) and the untitled one (5 min) are short, side by side in one strip: one block.
-    try expectEqual(slots[1], GuideSlot(start: pkt(2026, 10, 10, 6, 10), end: pkt(2026, 10, 10, 6, 19, 30), title: "Show A", grouped: true))
+    try expectEqual(slots[1], GuideSlot(start: pkt(2026, 10, 10, 6, 10), end: pkt(2026, 10, 10, 6, 19, 30), title: "Show A", grouped: true, items: 2))
     // Sixty one-minute programmes of Show B: one block for the strip.
     let seven = try require(slots.firstIndex { $0.start == pkt(2026, 10, 10, 7, 0) })
-    try expectEqual(slots[seven], GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
+    try expectEqual(slots[seven], GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
     try expectEqual(slots[seven - 1].end, pkt(2026, 10, 10, 7, 0))
     // One dark stretch from 08:00 to 23:00, not one per reading.
     let dark = slots.filter(\.isOffAir)
@@ -2137,10 +2137,10 @@ func guideTimelineSynthetic() throws {
     // Read to 07:30, the run of one-minute programmes is finished to its strip's end, 08:00: its end
     // is the run's own, not the edge of what was read.
     try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 50), to: pkt(2026, 10, 10, 7, 30)).last,
-                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
     // Opened inside the run of one-minute programmes, the run still starts at 07:00.
     try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 7, 40), to: pkt(2026, 10, 10, 8, 30)).first,
-                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true))
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
     // Asked from inside a programme, the first block starts when the programme did.
     let mid = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 5), to: pkt(2026, 10, 10, 6, 20))
     try expectEqual(mid.first?.start, pkt(2026, 10, 10, 6, 0))
@@ -2191,11 +2191,11 @@ func guideTimelineJoinsWhatCannotBeSeen() throws {
     let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 12, 0), to: pkt(2026, 11, 8, 14, 0), every: 11)
     try expectEqual(slots.map(\.title), ["Long", "Long Two", "Show One", "Show One"])
     try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 30, 30))   // the 30 s sting is inside "Long"
-    try expectEqual(slots[2], GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true))
-    try expectEqual(slots[3], GuideSlot(start: pkt(2026, 11, 8, 13, 30), end: pkt(2026, 11, 8, 14, 0), title: "Show One", grouped: true))
+    try expectEqual(slots[2], GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true, items: 6))
+    try expectEqual(slots[3], GuideSlot(start: pkt(2026, 11, 8, 13, 30), end: pkt(2026, 11, 8, 14, 0), title: "Show One", grouped: true, items: 6))
     // Read to 13:15, the run is finished to its strip's end, 13:30, and not on into the next strip.
     let short = StationClock.timeline([p], channel: 1, from: pkt(2026, 11, 8, 12, 50), to: pkt(2026, 11, 8, 13, 15))
-    try expectEqual(short.last, GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true))
+    try expectEqual(short.last, GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true, items: 6))
 }
 
 /// Off air must never cover something on: a programme under a minute right after an off-air
@@ -2418,13 +2418,13 @@ func guideGridMoves() throws {
     var g = GuideGrid(row: 3, now: now)
     try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
     try expectEqual(g.lit(in: s), 0)                      // A is on now
-    try expectEqual(g.marks.count, 4)
+    try expectEqual(g.marks.count, 3)
     g.later(on: s); try expectEqual(g.lit(in: s), 1); try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 20))
     try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
     g.later(on: s); try expectEqual(g.lit(in: s), 2)      // the dark stretch is a block too
     g.later(on: s); try expectEqual(g.lit(in: s), 3)
     // 18:00 is past the window's last half hour: the window follows in half hours.
-    try expectEqual(g.windowStart, pkt(2026, 11, 17, 17, 0))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 17, 30))
     try expect(g.cursor < g.windowEnd.addingTimeInterval(-GuideGrid.step), "the lit start is not in view")
     g.later(on: s); try expectEqual(g.lit(in: s), 3)      // nothing after C: Right stays
     g.earlier(on: s); try expectEqual(g.lit(in: s), 2); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
@@ -2432,13 +2432,24 @@ func guideGridMoves() throws {
     g.earlier(on: s); g.earlier(on: s); try expectEqual(g.lit(in: s), 0)
     // Never before now: A began at 11:00, the cursor and the window stay at now's half hour.
     try expectEqual(g.cursor, now); try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
-    g.earlier(on: s); try expectEqual(g.cursor, now)
+    // Left from the programme on now is the channel's own cell; Up and Down keep it, Right leaves
+    // it for the programme on now, and Left on it stays.
+    try expect(!g.onChannel, "two Lefts reach the programme on now, not the channel cell")
+    g.earlier(on: s); try expectEqual(g.cursor, now); try expect(g.onChannel, "Left from the programme on now")
+    g.earlier(on: s); try expect(g.onChannel, "Left on the channel cell stays")
+    g.move(rows: 1, count: 4); g.move(rows: -1, count: 4); try expect(g.onChannel, "Up and Down keep the channel cell")
+    g.later(on: s); try expect(!g.onChannel, "Right leaves the channel cell"); try expectEqual(g.lit(in: s), 0)
     // The clock moves on with the guide open: the lit moment and the window follow now.
     g.refresh(now: pkt(2026, 11, 17, 12, 40))
     try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 40)); try expectEqual(g.lit(in: s), 1)
     try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 30))
     // A later lit moment stays where it is.
     g.later(on: s); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
+    // A row whose first programme is later than now: Left lights nothing new, so it is the
+    // channel cell at once, with the moment back at now.
+    var back = GuideGrid(row: 0, now: now)
+    back.cursor = pkt(2026, 11, 17, 18, 30)
+    back.earlier(on: [s[3]]); try expectEqual(back.cursor, now); try expect(back.onChannel, "no programme before: the channel cell")
     g.refresh(now: pkt(2026, 11, 17, 12, 45)); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
     // Up and Down keep the moment and go round the list.
     g.move(rows: 1, count: 4); try expectEqual(g.row, 0)
@@ -2455,11 +2466,75 @@ func guideGridMoves() throws {
     e.later(on: []); e.earlier(on: []); try expectEqual(e.cursor, now)
 }
 
+/// A swipe on the touch surface and a press of an arrow reach the screen as the same move command;
+/// the finger's travel tells them apart (RemoteGesture). Both directions, and the near misses.
+func remoteGestureTellsASwipeFromAPress() throws {
+    let t = 1000.0
+    // The finger travelled and the move came straight after: a swipe, up or down.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - 0.05)), .swipe)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: -400, at: t - 0.05)), .swipe)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: RemoteGesture.threshold, at: t - RemoteGesture.window)), .swipe)
+    // A press: no finger seen at all, or the thumb settling a little as it clicks.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: nil), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 12, at: t - 0.02)), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: -(RemoteGesture.threshold - 1), at: t)), .press)
+    // A swipe long before the press does not make the press a swipe.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - 3)), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - RemoteGesture.window - 0.01)), .press)
+    // Rows by distance: none under the threshold, one at it, one more per rowTravel, signed.
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold - 1), 0)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold), 1)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold + RemoteGesture.rowTravel - 1), 1)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold + RemoteGesture.rowTravel), 2)
+    try expectEqual(RemoteGesture.rows(travel: -(RemoteGesture.threshold + 2 * RemoteGesture.rowTravel)), -3)
+    try expectEqual(RemoteGesture.rows(travel: 0), 0)
+    // Every travel classify calls a swipe has moved at least one row, so a swipe in the guide is
+    // never swallowed with nothing moved.
+    for travel in stride(from: -900.0, through: 900, by: 7) {
+        let swipe = RemoteGesture.classify(moveAt: t, lastPan: .init(travel: travel, at: t)) == .swipe
+        try expectEqual(swipe, RemoteGesture.rows(travel: travel) != 0, "travel \(travel)")
+    }
+}
+
+/// A run of short programmes is one block that says how many it holds and which is on air: a row
+/// of five-minute songs is not a row of slivers (owner, 2026-11-24).
+func guideRunsCountTheirSongs() throws {
+    func schedule(_ extra: String) throws -> Programming {
+        try decode(Programming.self, """
+        {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+         "shows":{"s1":{"slug":"s1","name":"Geet Mala"}},
+         "programme_order":["A","B","C","L"],
+         "programmes":{"A":{"id":"A","title":"a","display_title":"Jugni","seconds":300\(extra)},
+                       "B":{"id":"B","title":"b","display_title":"Lathe Di Chadar","seconds":300\(extra)},
+                       "C":{"id":"C","title":"c","display_title":"Chan Kithan","seconds":300\(extra)},
+                       "L":{"id":"L","title":"l","display_title":"The Feature","seconds":1800}},
+         "days":[{"date":"2026-11-08","channels":{"c":[
+           {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1,2]},
+           {"start":"12:30","start_minute":750,"minutes":30,"show":"s1","programmes":[3]}]}}]}
+        """)
+    }
+    let from = pkt(2026, 11, 8, 12, 0), to = pkt(2026, 11, 8, 13, 0)
+    let songs = StationClock.timeline([try schedule(#","work_kind":"Folk song""#)], channel: 1, from: from, to: to)
+    // Six five-minute songs (the roster of three goes round) are one block; the half-hour feature keeps its own.
+    try expectEqual(songs.map(\.title), ["Geet Mala", "The Feature"])
+    try expectEqual(songs[0].items, 6); try expect(songs[0].grouped && songs[0].songs, "a run of songs")
+    try expectEqual(songs[0].runLabel(onNow: "Jugni"), "Geet Mala \u{00B7} 6 songs \u{00B7} now Jugni")
+    try expectEqual(songs[0].runLabel(onNow: nil), "Geet Mala \u{00B7} 6 songs")           // not on air: no "now"
+    try expectEqual(songs[0].runLabel(onNow: "Geet Mala"), "Geet Mala \u{00B7} 6 songs")   // never the show twice
+    try expect(!songs[1].grouped && songs[1].items == 1, "a programme of ten minutes or more is its own block")
+    // Opened inside the run, the count is still the whole run's.
+    try expectEqual(StationClock.timeline([try schedule(#","audio_only":true"#)], channel: 1, from: pkt(2026, 11, 8, 12, 17), to: to).first?.itemsLabel, "6 songs")
+    // Short items that are not songs are counted as programmes (the near miss).
+    let items = StationClock.timeline([try schedule(#","work_kind":"Television programme""#)], channel: 1, from: from, to: to)
+    try expectEqual(items[0].runLabel(onNow: "Jugni"), "Geet Mala \u{00B7} 6 programmes \u{00B7} now Jugni")
+    try expect(StationClock.isSong(nil) == false, "no programme is no song")
+}
+
 /// The guide folds a programme too short to read into a neighbour, narrowest first and into the
 /// narrower neighbour, and names the cell for what takes most of it (owner, 2026-11-18: "words are
 /// cutoff and not readable in the guide").
 func guideCellsFold() throws {
-    let g = GuideGrid(row: 0, now: pkt(2026, 11, 17, 12, 10))      // window 12:00 to 14:00
+    let g = GuideGrid(row: 0, now: pkt(2026, 11, 17, 12, 10))      // window 12:00 to 13:30
     let s: [GuideSlot] = [
         GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 5), title: "A"),   // 5 min on screen
         GuideSlot(start: pkt(2026, 11, 17, 12, 5), end: pkt(2026, 11, 17, 13, 0), title: "B"),
@@ -2487,7 +2562,7 @@ func guideCellsFold() throws {
                                           end: pkt(2026, 11, 17, 12, $0 % 60).addingTimeInterval(Double($0 / 60) * 3600 + 60), title: "t\($0)") }
     let folded = g.cells(tiny, minimum: 20 * 60)
     try expect(folded.allSatisfy { $0.end.timeIntervalSince($0.start) >= 20 * 60 }, "a folded cell narrower than the minimum")
-    try expectEqual(folded.reduce(0) { $0 + $1.programmes }, 120)
+    try expectEqual(folded.reduce(0) { $0 + $1.programmes }, 90)   // the ninety on screen
     try expectEqual(g.cells([], minimum: 20 * 60), [])
     // A short programme on air now names its cell, not the long one it is folded into.
     let soon = [GuideSlot(start: pkt(2026, 11, 17, 11, 30), end: pkt(2026, 11, 17, 12, 15), title: "On now"),
@@ -2495,8 +2570,8 @@ func guideCellsFold() throws {
     let s1 = g.cells(soon, minimum: 20 * 60)
     try expectEqual(s1.count, 1); try expectEqual(s1[0].lead, 0); try expectEqual(s1[0].more(naming: 0, in: soon), 1)
     // A programme folded into a long dark stretch names the cell; off air names only a cell with no programme.
-    let dark = [GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 13, 50), title: nil),
-                GuideSlot(start: pkt(2026, 11, 17, 13, 50), end: pkt(2026, 11, 17, 14, 10), title: "Late")]
+    let dark = [GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 13, 20), title: nil),
+                GuideSlot(start: pkt(2026, 11, 17, 13, 20), end: pkt(2026, 11, 17, 13, 40), title: "Late")]
     let s2 = g.cells(dark, minimum: 20 * 60)
     try expectEqual(s2.count, 1); try expectEqual(s2[0].lead, 1); try expectEqual(s2[0].more(naming: 1, in: dark), 0)
     // In a cell the next day's return carries the weekday alone; the headline keeps the date.
@@ -5701,6 +5776,8 @@ func storedSubtitlesAnswer() throws {
 }
 
 let tests: [(String, () throws -> Void)] = [
+    ("Remote: a swipe is told from a press", remoteGestureTellsASwipeFromAPress),
+    ("Guide timeline: a run counts its songs", guideRunsCountTheirSongs),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),

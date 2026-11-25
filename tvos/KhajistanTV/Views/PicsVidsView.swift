@@ -129,6 +129,10 @@ struct PicsVidsView: View {
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)
+        // The section spans the page, so Up from a tile anywhere on the top shelf lands here.
+        // Hugging its buttons, it covered only the left: Up from a right-hand tile found nothing
+        // above it and went to the top bar, or nowhere (UI test, 2026-11-25).
+        .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
     }
 

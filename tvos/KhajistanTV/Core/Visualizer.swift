@@ -25,18 +25,21 @@ enum VisualizerMode: String, Sendable {
     static let key = "kj-visualizer"
     static let natureKey = "kj-visualizer-nature"
 
-    static func modes(reverent: Bool) -> [VisualizerMode] {
-        reverent ? [.off, .nature] : [.dancer, .khajistan, .off]
+    /// `dancer` false is the iPhone, which has no dancer: its sound channels cycle off, khajistan,
+    /// with off first, as the phone showed the channel's name alone before the visualizers.
+    static func modes(reverent: Bool, dancer: Bool = true) -> [VisualizerMode] {
+        reverent ? [.off, .nature] : dancer ? [.dancer, .khajistan, .off] : [.off, .khajistan]
     }
 
     /// The stored choice for this kind of channel; anything unknown is the default.
-    static func current(reverent: Bool, stored: String?, storedNature: String?) -> VisualizerMode {
+    static func current(reverent: Bool, stored: String?, storedNature: String?, dancer: Bool = true) -> VisualizerMode {
+        let list = modes(reverent: reverent, dancer: dancer)
         let mode = VisualizerMode(rawValue: (reverent ? storedNature : stored) ?? "")
-        return mode.flatMap { modes(reverent: reverent).contains($0) ? $0 : nil } ?? modes(reverent: reverent)[0]
+        return mode.flatMap { list.contains($0) ? $0 : nil } ?? list[0]
     }
 
-    func next(reverent: Bool) -> VisualizerMode {
-        let list = Self.modes(reverent: reverent)
+    func next(reverent: Bool, dancer: Bool = true) -> VisualizerMode {
+        let list = Self.modes(reverent: reverent, dancer: dancer)
         return list[((list.firstIndex(of: self) ?? -1) + 1) % list.count]
     }
 

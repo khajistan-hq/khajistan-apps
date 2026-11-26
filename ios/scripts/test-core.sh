@@ -18,6 +18,7 @@ Player/PlayerLayerView Views/PigeonMark"
 SHARED="$SHARED Views/ChatMedia Core/Shuffle"
 SHARED="$SHARED Core/SupabaseRoute"
 SHARED="$SHARED Core/TVSignIn Core/LiveStills"
+SHARED="$SHARED Core/Visualizer Core/Beat Player/VisualizerPlayer"
 SHARED="$SHARED Core/ReadingRoom Core/Films Core/PassportSaves Services/ReadingStore Services/FilmStore Services/SavesStore Services/PnvImages Services/BagStore Core/Bazaar Core/Madrassa Core/Databases Services/SiteFeed"
 for f in $SHARED; do
     if [ ! -L "Khajistan/$f.swift" ] || [ ! -f "Khajistan/$f.swift" ]; then

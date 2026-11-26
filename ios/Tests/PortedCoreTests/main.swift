@@ -2347,7 +2347,21 @@ func mixClockFormat() throws {
 
 // MARK: - Runner
 
+/// The phone's visualizer modes (Core/Visualizer.swift, shared): no dancer, Off first.
+func phoneVisualizerModes() throws {
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: false, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false, dancer: false), .off)
+    // A reverent channel never gets the dancer or a Khajistan piece (negative cases).
+    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "khajistan", dancer: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
+    try expect(Reverence.isReverent(name: "Quran Radio", nativeName: nil, broadcaster: nil))
+    try expect(!Reverence.isReverent(name: "Khajistan Transmission \u{00B7} Channel 3", nativeName: nil, broadcaster: nil))
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Visualizer: the phone's modes", phoneVisualizerModes),
     ("Skin follows the sun: noon, midnight, 0 degrees, either side of +6", skinFollowsTheSun),
     ("Skin hex triples", skinColours),
     ("Skin choice: Automatic follows the sun, a fixed choice holds", skinChoiceResolvesAutomaticAndFixed),

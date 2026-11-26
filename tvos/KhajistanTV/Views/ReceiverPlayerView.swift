@@ -75,7 +75,10 @@ struct ReceiverPlayerView: View {
     @State private var leaving = false
     /// Picture in picture for the two layers (PictureInPicture.swift).
     @State private var pip = PictureInPicture()
-    private enum Chip { case captions, like, guide, pip }
+    private enum Chip { case captions, like, visualizer, guide, pip }
+    /// The viewer's visualizer choice, shared with SoundStage (Core/Visualizer.swift).
+    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.dancer.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.off.rawValue
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -108,8 +111,9 @@ struct ReceiverPlayerView: View {
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
-            // front of the channel's name. The band says live radio; the centre carries the name.
-            DancerLayer(controller: controller) {
+            // front of the channel's name, or the visualizer the viewer chose (SoundStage). The
+            // band says live radio; the centre carries the name.
+            SoundStage(controller: controller, eligible: current.mediaType == "radio", reverent: current.isReverent) {
                 if current.mediaType == "radio" && controller.state == .playing {
                     RadioNowPlaying(channel: current, song: song)
                 }
@@ -227,6 +231,7 @@ struct ReceiverPlayerView: View {
         // A control cannot stay lit on a strip nobody can see: Select would work it blind.
         .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
+        .onChange(of: visualizerOffered) { _, offered in if !offered, armed == .visualizer { armed = nil } }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
@@ -317,6 +322,9 @@ struct ReceiverPlayerView: View {
         case .like:
             like()
             wake()
+        case .visualizer:
+            cycleVisualizer()
+            wake()
         case .guide: openGuide()
         case .pip: startPictureInPicture()
         case nil:
@@ -391,6 +399,7 @@ struct ReceiverPlayerView: View {
         HStack(spacing: 14) {
             captionsControl
             likeControl
+            if visualizerOffered { visualizerControl }
             if guideOffered { guideControl }
             if pipOffered { pipControl }
         }
@@ -573,6 +582,33 @@ struct ReceiverPlayerView: View {
             .accessibilityValue(liked ? "On" : "Off")
     }
 
+    /// Radio, where the dancer or a visualizer takes the picture's place; not for a viewer who has
+    /// asked for less motion, who gets neither.
+    private var visualizerOffered: Bool {
+        current.mediaType == "radio" && destination == nil && !reduceMotion
+    }
+
+    private var visualizerMode: VisualizerMode {
+        VisualizerMode.current(reverent: current.isReverent, stored: visualizerStored, storedNature: visualizerNatureStored)
+    }
+
+    /// "Visualizer · Dancer", "· Khajistan", "· Off"; "· Nature" or "· Off" on a reverent channel.
+    /// Right lights it, Select cycles it, as Captions.
+    private var visualizerControl: some View {
+        StripChipStyle.face(Text(visualizerMode.label), isOn: visualizerMode != .off, selected: armed == .visualizer)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(visualizerMode.label)
+            .accessibilityIdentifier("visualizerControl")
+            .accessibilityAction { cycleVisualizer(); wake() }
+            .accessibilityAddTraits(armed == .visualizer ? .isSelected : [])
+    }
+
+    private func cycleVisualizer() {
+        let reverent = current.isReverent
+        let next = visualizerMode.next(reverent: reverent).rawValue
+        if reverent { visualizerNatureStored = next } else { visualizerStored = next }
+    }
+
     /// "→ " before the first control on the strip while nothing is armed: the strip's controls are
     /// reached with a press right, and nothing else said so (owner, 2026-10-09).
     private var rightCue: String { armed == nil ? "\u{2192} " : "" }
@@ -596,7 +632,9 @@ struct ReceiverPlayerView: View {
             // the guide (owner, 2026-11-04). Left past CC on the strip stops there (owner, 2026-11-07).
             if stripWasUp, !isFailed { armed = .captions } else { openGuide() }
         case .captions: armed = .like
-        case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .like:
+            if visualizerOffered { armed = .visualizer } else if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .visualizer: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .guide: if pipOffered { armed = .pip }
         case .pip: break
         }
@@ -606,8 +644,9 @@ struct ReceiverPlayerView: View {
 
     private func moveLeft(onStrip: Bool) {
         switch armed {
-        case .pip: armed = guideOffered ? .guide : .like
-        case .guide: armed = .like
+        case .pip: armed = guideOffered ? .guide : visualizerOffered ? .visualizer : .like
+        case .guide: armed = visualizerOffered ? .visualizer : .like
+        case .visualizer: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
         // Left or right on the bare picture opens the guide, as a live TV app does (owner,

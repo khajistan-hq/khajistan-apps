@@ -79,6 +79,28 @@ enum Visualizer {
         return (piece, offset(of: piece, at: now), until)
     }
 
+    /// Owner, 2026-11-26: "make sure all visualisers play randomly so every visualiser gets a chance to be seen".
+    /// A shuffle bag: a random piece this device has not shown yet; when every piece has had its turn the bag
+    /// refills (never with the piece just shown, when there is a choice). Joined at a random point, and the next
+    /// draw comes when the piece ends or after half an hour. `roll` and `startRoll` are in 0..<1 so tests can fix them.
+    static let seenKey = "kj-visualizer-seen"
+    static func draw(_ rows: [VisualizerPiece], reverent: Bool, seen: [String], roll: Double, startRoll: Double)
+        -> (piece: VisualizerPiece, offset: TimeInterval, play: TimeInterval, seen: [String])? {
+        let suited = rows.filter { ($0.reverent ?? false) == reverent }
+        guard !suited.isEmpty else { return nil }
+        var fresh = suited.filter { !seen.contains($0.id) }
+        var bag = seen
+        if fresh.isEmpty {
+            bag = []
+            fresh = suited.count > 1 ? suited.filter { $0.id != seen.last } : suited
+        }
+        let piece = fresh[min(fresh.count - 1, Int(roll * Double(fresh.count)))]
+        let room = max(0, piece.seconds - 60)
+        let offset = room * min(max(startRoll, 0), 0.999)
+        let play = min(block, piece.seconds - offset)
+        return (piece, offset, play, bag + [piece.id])
+    }
+
     /// Where the picture is joined: the clock's seconds, round the piece's length.
     static func offset(of piece: VisualizerPiece, at now: Date, duration: Double? = nil) -> TimeInterval {
         let length = duration.flatMap { $0 > 0 && $0.isFinite ? $0 : nil } ?? piece.seconds

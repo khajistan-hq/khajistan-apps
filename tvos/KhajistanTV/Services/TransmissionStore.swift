@@ -821,9 +821,14 @@ final class TransmissionStore {
     /// reverent rule reads. Whether the samples can be read is the carrier's to say: a Supabase
     /// storage file or a Dropbox link can be tapped, a Cloudflare Stream manifest cannot.
     static func dancerMayListen(_ air: OnAir, channel: Int) -> Bool {
-        guard air.programme?.audio_only == true else { return false }
+        air.programme?.audio_only == true && !isReverent(air, channel: channel)
+    }
+
+    /// The reverent rule for a house channel, read from the show's name (the dancer's and the
+    /// visualizer's: a reverent programme plays nature pieces only and never the dancer).
+    static func isReverent(_ air: OnAir, channel: Int) -> Bool {
         let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
-        return !Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
+        return Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
     }
 
     /// Five vinyl transfers carry no title; the show name stands in for it.

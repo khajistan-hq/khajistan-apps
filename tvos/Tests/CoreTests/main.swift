@@ -6280,6 +6280,54 @@ func pnvVideosOnlyDropsEveryPhoto() throws {
     try expectEqual(PnvKind.shown(mixed, only: nil).count, mixed.count, "no kind keeps every row")
 }
 
+func visualizerPicksByTheHalfHour() throws {
+    let rows = Visualizer.rows(from: Data("""
+    [{"id":"a","title":"A","category":"Roads","seconds":600,"play_url":"https://x/functions/v1/tv-play?id=a"},
+     {"id":"b","seconds":3600,"play_url":"https://x/functions/v1/tv-play?id=b"},
+     {"id":"n","seconds":900,"play_url":"https://x/functions/v1/tv-play?id=n","reverent":true},
+     {"id":"bad","seconds":0,"play_url":"https://x"},
+     {"id":"nourl","seconds":60,"play_url":""},
+     {"title":"no id"}]
+    """.utf8))
+    try expectEqual(rows.map(\.id), ["a", "b", "n"])
+    // Slot 0 (00:00-00:30 UTC on 1970-01-01... any multiple of 1800 s): index 0 of the sound rows.
+    let t0 = Date(timeIntervalSince1970: 1800 * 1000)            // slot 1000, even
+    var p = try require(Visualizer.pick(rows, reverent: false, now: t0))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 1000).truncatingRemainder(dividingBy: 600))
+    try expectEqual(p.until, Date(timeIntervalSince1970: 1800 * 1001))
+    // 29 min later: same piece, offset moved on with the clock.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1799)))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 1000 + 1799).truncatingRemainder(dividingBy: 600))
+    // The next half hour: the next piece.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1800)))
+    try expectEqual(p.piece.id, "b")
+    // Reverent channels play nature pieces only, and sound channels never do (negative case).
+    try expectEqual(Visualizer.pick(rows, reverent: true, now: t0)?.piece.id, "n")
+    try expect(Visualizer.pick(rows, reverent: true, now: t0.addingTimeInterval(1800))?.piece.id == "n")
+    try expect(Visualizer.pick(rows.filter { $0.reverent != true }, reverent: true, now: t0) == nil)
+    try expect(Visualizer.pick([], reverent: false, now: t0) == nil)
+    // A real duration shorter than the row's still wraps inside the file.
+    try expectClose(Visualizer.offset(of: rows[0], at: Date(timeIntervalSince1970: 1250), duration: 500), 250)
+}
+
+func visualizerModesCycle() throws {
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .dancer)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: "nature"), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "dancer", storedNature: "nature"), .nature)
+    // The dancer is never a reverent choice, and nature never a sound one (negative cases).
+    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "dancer"), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "nature", storedNature: nil), .dancer)
+    try expectEqual(VisualizerMode.dancer.next(reverent: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: false), .dancer)
+    try expectEqual(VisualizerMode.off.next(reverent: true), .nature)
+    try expectEqual(VisualizerMode.nature.next(reverent: true), .off)
+    try expectEqual(VisualizerMode.khajistan.label, "Visualizer \u{00B7} Khajistan")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Pics/Vids held to videos drops every photo", pnvVideosOnlyDropsEveryPhoto),
     ("programmeDecodesRomanTitleAndYear", programmeDecodesRomanTitleAndYear),
@@ -6292,6 +6340,8 @@ let tests: [(String, () throws -> Void)] = [
     ("pipSubtitleStepLoadsAndHandsOff", pipSubtitleStepLoadsAndHandsOff),
     ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
     ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
+    ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
+    ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("liveChannelsShowTheirLocalTime", liveChannelsShowTheirLocalTime),

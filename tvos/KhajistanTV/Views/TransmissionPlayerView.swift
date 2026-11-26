@@ -39,7 +39,10 @@ struct TransmissionPlayerView: View {
     @State private var subtitles = RecordedSubtitles()
     /// The strip control the remote has lit, if any.
     @State private var armed: Chip?
-    private enum Chip { case subtitles, guide, pip }
+    private enum Chip { case subtitles, visualizer, guide, pip }
+    /// The viewer's visualizer choice, shared with SoundStage (Core/Visualizer.swift).
+    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.dancer.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.off.rawValue
     /// Where the guide's time grid stands (the lit channel and moment); nil while it is closed.
     @State private var guideGrid: GuideGrid?
     @State private var guideRows: [TransmissionGuide.Row] = []
@@ -128,6 +131,7 @@ struct TransmissionPlayerView: View {
         // A control cannot stay lit once it is gone from the strip.
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
+        .onChange(of: visualizerOffered) { _, offered in if !offered, armed == .visualizer { armed = nil } }
         // Off air or re-tuning: the strip's controls go with the picture. The guide stays.
         .onChange(of: isOnAir) { _, onAir in if !onAir { armed = nil } }
         .onChange(of: store.player.state) { wake(); showNumberWhenTuned() }
@@ -238,7 +242,8 @@ struct TransmissionPlayerView: View {
     private func onAir(_ air: OnAir) -> some View {
         ZStack {
             if air.programme?.audio_only == true {
-                DancerLayer(controller: store.player) {
+                SoundStage(controller: store.player, eligible: true,
+                           reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
                     soundOnly(air)
                 }
             } else {
@@ -493,13 +498,22 @@ struct TransmissionPlayerView: View {
     private var captionsAllowed: Bool { store.channelNumber != 1 }
 
     private var chips: [Chip] {
-        [!captionsAllowed || subtitles.tracks.isEmpty ? nil : .subtitles, guideOffered ? .guide : nil, pipOffered ? .pip : nil]
+        [!captionsAllowed || subtitles.tracks.isEmpty ? nil : .subtitles, visualizerOffered ? .visualizer : nil,
+         guideOffered ? .guide : nil, pipOffered ? .pip : nil]
             .compactMap { $0 }
     }
 
     private var stripControls: some View {
         HStack(spacing: 14) {
             if captionsAllowed, !subtitles.tracks.isEmpty { subtitlesControl }
+            if visualizerOffered {
+                StripChipStyle.face(Text(visualizerMode.label), isOn: visualizerMode != .off, selected: armed == .visualizer)
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel(visualizerMode.label)
+                    .accessibilityIdentifier("visualizerControl")
+                    .accessibilityAction { cycleVisualizer() }
+                    .accessibilityAddTraits(armed == .visualizer ? .isSelected : [])
+            }
             if guideOffered {
                 StripChipStyle.face(Text("Guide"), isOn: guideGrid != nil, selected: armed == .guide)
                     .accessibilityAddTraits(.isButton)
@@ -529,6 +543,7 @@ struct TransmissionPlayerView: View {
         switch armed {
         // Focus never leaves the surface: see ReceiverPlayerView's surface (2026-10-06).
         case .subtitles: subtitles.cycle()
+        case .visualizer: cycleVisualizer()
         case .guide: return openGuide()
         case .pip: return startPictureInPicture()
         case nil: if stripShown, !isFailed { armed = chips.first }
@@ -537,6 +552,28 @@ struct TransmissionPlayerView: View {
     }
 
     private var isFailed: Bool { if case .failed = store.player.state { return true } else { return false } }
+
+    /// A sound-only programme, where the dancer or a visualizer takes the picture's place.
+    private var visualizerOffered: Bool {
+        guard !reduceMotion, case .onAir(let air) = store.phase else { return false }
+        return air.programme?.audio_only == true
+    }
+
+    private var visualizerReverent: Bool {
+        guard case .onAir(let air) = store.phase else { return false }
+        return TransmissionStore.isReverent(air, channel: store.channelNumber)
+    }
+
+    private var visualizerMode: VisualizerMode {
+        VisualizerMode.current(reverent: visualizerReverent, stored: visualizerStored, storedNature: visualizerNatureStored)
+    }
+
+    /// Select cycles Dancer, Khajistan, Off; Off, Nature on a reverent programme.
+    private func cycleVisualizer() {
+        let reverent = visualizerReverent
+        let next = visualizerMode.next(reverent: reverent).rawValue
+        if reverent { visualizerNatureStored = next } else { visualizerStored = next }
+    }
 
     /// Offered on air, off air and while a signal tunes, so a viewer can always find a channel
     /// that is on; not while a change is under way, which would tune under the guide, and not

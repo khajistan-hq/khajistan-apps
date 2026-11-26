@@ -5367,22 +5367,23 @@ func visualizerPicksByTheHalfHour() throws {
 }
 
 func visualizerModesCycle() throws {
-    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .dancer)
-    try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .nature)
     try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: "nature"), .khajistan)
     try expectEqual(VisualizerMode.current(reverent: true, stored: "dancer", storedNature: "nature"), .nature)
     // The dancer is never a reverent choice, and nature never a sound one (negative cases).
-    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "dancer"), .off)
-    try expectEqual(VisualizerMode.current(reverent: false, stored: "nature", storedNature: nil), .dancer)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "dancer"), .nature)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "nature", storedNature: nil), .khajistan)
     try expectEqual(VisualizerMode.dancer.next(reverent: false), .khajistan)
     try expectEqual(VisualizerMode.khajistan.next(reverent: false), .off)
     try expectEqual(VisualizerMode.off.next(reverent: false), .dancer)
     try expectEqual(VisualizerMode.off.next(reverent: true), .nature)
     try expectEqual(VisualizerMode.nature.next(reverent: true), .off)
     try expectEqual(VisualizerMode.khajistan.label, "Visualizer \u{00B7} Khajistan")
-    // The iPhone has no dancer: off first, then khajistan; a stored dancer reads as off there.
-    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .off)
-    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .off)
+    // The iPhone has no dancer: it cycles off, khajistan, Khajistan by default; a stored dancer reads as the default.
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "off", storedNature: nil, dancer: false), .off)
     try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: nil, dancer: false), .khajistan)
     try expectEqual(VisualizerMode.off.next(reverent: false, dancer: false), .khajistan)
     try expectEqual(VisualizerMode.khajistan.next(reverent: false, dancer: false), .off)

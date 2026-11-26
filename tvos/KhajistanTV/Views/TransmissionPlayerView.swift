@@ -31,8 +31,8 @@ struct TransmissionPlayerView: View {
     @State private var armed: Chip?
     private enum Chip { case subtitles, visualizer, guide, pip }
     /// The viewer's visualizer choice, shared with SoundStage (Core/Visualizer.swift).
-    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.dancer.rawValue
-    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.off.rawValue
+    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.nature.rawValue
     /// The guide's lit row, as an index into `guideRows`; nil while it is closed.
     @State private var guideRow: Int?
     @State private var guideRows: [TransmissionGuide.Row] = []

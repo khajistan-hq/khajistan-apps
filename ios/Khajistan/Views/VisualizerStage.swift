@@ -4,7 +4,9 @@ import SwiftUI
 /// Khajistan visualizer behind it, as the viewer has chosen (Core/Visualizer.swift, shared with
 /// the Apple TV app; owner, 2026-11-25: "create these multiple visualizers that on demand can play
 /// just like how the dancer shows up in all of the audio"). The phone has no dancer, so its sound
-/// channels cycle Off and Khajistan, and a reverent channel Off and Nature. The picture is an After
+/// channels cycle Off and Khajistan, and a reverent channel Off and Nature; Khajistan and Nature are
+/// the defaults (owner, 2026-11-26: "for all audio channels make the khajistan viusalizer the default
+/// option"), and the name stands on the ground until the picture is up. The picture is an After
 /// Hours piece on a muted player of its own (Player/VisualizerPlayer.swift, shared), under the
 /// channel's sound: a failure, or a viewer not signed in, only leaves the name on the ground.
 /// Reduce Motion: no picture. The caller draws this only where there is no picture of its own.
@@ -15,8 +17,8 @@ struct VisualizerStage<Name: View>: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.off.rawValue
-    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.off.rawValue
+    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.nature.rawValue
     @State private var picture = VisualizerPlayer()
 
     private struct Want: Equatable { let play: Bool; let reverent: Bool; let signedIn: Bool }
@@ -26,9 +28,12 @@ struct VisualizerStage<Name: View>: View {
         let play = !reduceMotion && mode.playsPicture && controller.state == .playing
         let shown = play && picture.ready
         ZStack {
-            if shown {
+            if play {
+                // Attached from the start, invisible until ready: an AVPlayer with no layer and no play()
+                // can sit at "unknown" for good (measured 2026-11-26 on the owner's Apple TV HD).
                 PlayerLayerView(player: picture.player, gravity: .resizeAspectFill)
                     .ignoresSafeArea()
+                    .opacity(shown ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -38,6 +43,18 @@ struct VisualizerStage<Name: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: shown ? .topTrailing : .center)
                 .padding(.top, shown ? 64 : 0)
                 .padding(.trailing, shown ? KJLayout.inset : 0)
+            // Until the picture is up, one line says the step it is on or why it cannot come, as on the TV;
+            // at the top here, because the phone's controls sit over the bottom of the screen.
+            if mode.playsPicture, !picture.ready {
+                let step = !play ? (controller.state == .playing ? "off for this channel" : "waiting for the channel to play")
+                    : (picture.problem ?? picture.step)
+                Text("Khajistan visualizer: \(step)")
+                    .kjSmall(faint: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, KJLayout.inset)
+                    .padding(.top, 64)
+                    .allowsHitTesting(false)
+            }
         }
         .task(id: Want(play: play, reverent: reverent, signedIn: model.auth.isSignedIn)) {
             guard play else { return picture.stop() }
@@ -52,8 +69,8 @@ struct VisualizerStage<Name: View>: View {
 struct VisualizerButton: View {
     let reverent: Bool
     var wake: () -> Void = {}
-    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.off.rawValue
-    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.off.rawValue
+    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.nature.rawValue
 
     var body: some View {
         let mode = VisualizerMode.current(reverent: reverent, stored: stored, storedNature: storedNature, dancer: false)

@@ -1,5 +1,4 @@
 import AVFoundation
-import Combine
 import Foundation
 import Observation
 
@@ -21,6 +20,10 @@ final class VisualizerPlayer {
     }()
     /// The picture is on its first frame, at the clock point.
     private(set) var ready = false
+    /// Why the picture is not up, in plain words; nil while it loads or plays.
+    private(set) var problem: String?
+    /// The step under way, shown while the picture is not up.
+    private(set) var step = "starting"
     @ObservationIgnored private var pieceId: String?
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// Bumped by each run, so a run SwiftUI has cancelled cannot tear down or attach over the next.
@@ -31,11 +34,22 @@ final class VisualizerPlayer {
     func run(reverent: Bool, auth: AuthStore) async {
         generation += 1
         let gen = generation
-        guard let rows = await Self.load(previewPassword: auth.previewPassword) else { return }
         while !Task.isCancelled, gen == generation {
-            guard let pick = Visualizer.pick(rows, reverent: reverent, now: Date()) else { break }
-            if pick.piece.id != pieceId { await play(pick.piece, auth: auth, gen: gen) }
-            try? await Task.sleep(for: .seconds(max(1, pick.until.timeIntervalSinceNow)))
+            // A failed step is tried again in a minute rather than waiting for a mode change.
+            step = "reading the list of pictures"
+            guard let rows = await Self.load(previewPassword: auth.previewPassword), !rows.isEmpty else {
+                problem = "the list of pictures could not be read"
+                try? await Task.sleep(for: .seconds(60))
+                continue
+            }
+            guard let pick = Visualizer.pick(rows, reverent: reverent, now: Date()) else {
+                problem = "no picture for this kind of channel yet"
+                try? await Task.sleep(for: .seconds(60))
+                continue
+            }
+            if pick.piece.id != pieceId || !ready { await play(pick.piece, auth: auth, gen: gen) }
+            let wait = ready ? max(1, pick.until.timeIntervalSinceNow) : 60
+            try? await Task.sleep(for: .seconds(wait))
         }
         if gen == generation { stop() }
     }
@@ -52,19 +66,32 @@ final class VisualizerPlayer {
     private func play(_ piece: VisualizerPiece, auth: AuthStore, gen: Int) async {
         stop()
         pieceId = piece.id
-        guard let url = await Self.carrier(for: piece, auth: auth), !Task.isCancelled, gen == generation else { return }
+        guard auth.isSignedIn else { problem = "sign in to see it"; return }
+        step = "asking for the picture link"
+        guard let url = await Self.carrier(for: piece, auth: auth) else { problem = "the picture link was refused"; return }
+        step = "opening the picture"
+        guard !Task.isCancelled, gen == generation else { return }
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
-        for await status in item.publisher(for: \.status).values {
-            if status == .failed || Task.isCancelled || gen != generation { return }
-            if status == .readyToPlay { break }
+        player.play()   // muted; loading starts now rather than waiting on a status nobody asked for
+        let deadline = Date().addingTimeInterval(30)
+        while item.status != .readyToPlay {
+            if item.status == .failed {
+                problem = "the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))"
+                return
+            }
+            if Task.isCancelled || gen != generation { return }
+            if Date() > deadline { problem = "the picture did not open within 30 seconds"; player.pause(); return }
+            try? await Task.sleep(for: .milliseconds(250))
         }
+        step = "joining the picture at the clock point"
         let duration = item.duration.seconds
         let at = Visualizer.offset(of: piece, at: Date(), duration: duration.isFinite ? duration : nil)
         _ = await player.seek(to: CMTime(seconds: at, preferredTimescale: 600))
         guard !Task.isCancelled, gen == generation, player.currentItem === item else { return }
         player.play()
         ready = true
+        problem = nil
         let player = player
         loop = Task {
             for await _ in NotificationCenter.default.notifications(named: AVPlayerItem.didPlayToEndTimeNotification, object: item) {

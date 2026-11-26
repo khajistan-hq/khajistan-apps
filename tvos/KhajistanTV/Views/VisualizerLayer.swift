@@ -111,13 +111,16 @@ final class VisualizerPlayer {
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            guard let pick = Visualizer.pick(rows, reverent: reverent, now: Date()) else {
+            let seen = UserDefaults.standard.stringArray(forKey: Visualizer.seenKey) ?? []
+            guard let pick = Visualizer.draw(rows, reverent: reverent, seen: seen,
+                                             roll: Double.random(in: 0..<1), startRoll: Double.random(in: 0..<1)) else {
                 problem = "no picture for this kind of channel yet"
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            if pick.piece.id != pieceId || !ready { await play(pick.piece, auth: auth, gen: gen) }
-            let wait = ready ? max(1, pick.until.timeIntervalSinceNow) : 60
+            await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
+            if ready { UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey) }
+            let wait = ready ? max(5, pick.play) : 60
             try? await Task.sleep(for: .seconds(wait))
         }
         if gen == generation { stop() }
@@ -132,7 +135,7 @@ final class VisualizerPlayer {
         ready = false
     }
 
-    private func play(_ piece: VisualizerPiece, auth: AuthStore, gen: Int) async {
+    private func play(_ piece: VisualizerPiece, at start: TimeInterval, auth: AuthStore, gen: Int) async {
         stop()
         pieceId = piece.id
         guard auth.isSignedIn else { problem = "sign in to see it"; return }
@@ -153,9 +156,8 @@ final class VisualizerPlayer {
             if Date() > deadline { problem = "the picture did not open within 30 seconds"; player.pause(); return }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        step = "joining the picture at the clock point"
-        let duration = item.duration.seconds
-        let at = Visualizer.offset(of: piece, at: Date(), duration: duration.isFinite ? duration : nil)
+        step = "joining the picture"
+        let at = start
         _ = await player.seek(to: CMTime(seconds: at, preferredTimescale: 600))
         guard !Task.isCancelled, gen == generation, player.currentItem === item else { return }
         player.play()

@@ -26,22 +26,30 @@ struct SoundStage<Behind: View>: View {
     var body: some View {
         let mode = VisualizerMode.current(reverent: reverent, stored: stored, storedNature: storedNature)
         let play = eligible && !reduceMotion && mode.playsPicture && controller.state == .playing
+        let dancer = !eligible || (mode != .off && !(play && picture.ready) && !reverent)
         ZStack {
-            if !eligible || (mode != .off && !(play && picture.ready) && !reverent) {
+            if dancer {
                 // The dancer as before; in Khajistan mode he stands in until the picture is up.
                 DancerLayer(controller: controller, behind: behind)
-            } else if play && picture.ready {
+            }
+            if play {
+                // Attached from the start, invisible until ready: on Apple TV an AVPlayer with no layer and
+                // no play() can sit at "unknown" for good (measured 2026-11-26 on the owner's Apple TV HD:
+                // stuck at "opening the picture" on a plain 960x540 H.264 file Channel 1 plays fine).
                 PlayerLayerView(player: picture.player, gravity: .resizeAspectFill)
                     .ignoresSafeArea()
+                    .opacity(picture.ready ? 1 : 0)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
+            }
+            if play && picture.ready {
                 // The name moves to the top right, as it does for the dancer.
                 behind()
                     .scaleEffect(0.45, anchor: .topTrailing)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 64)
                     .padding(.trailing, KJLayout.inset)
-            } else {
+            } else if !dancer {
                 behind().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             // When the picture cannot come, one line says why (owner, 2026-11-26: "khajistan visualizer
@@ -134,13 +142,16 @@ final class VisualizerPlayer {
         guard !Task.isCancelled, gen == generation else { return }
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
-        for await status in item.publisher(for: \.status).values {
-            if status == .failed {
+        player.play()   // muted; loading starts now rather than waiting on a status nobody asked for
+        let deadline = Date().addingTimeInterval(30)
+        while item.status != .readyToPlay {
+            if item.status == .failed {
                 problem = "the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))"
                 return
             }
             if Task.isCancelled || gen != generation { return }
-            if status == .readyToPlay { break }
+            if Date() > deadline { problem = "the picture did not open within 30 seconds"; player.pause(); return }
+            try? await Task.sleep(for: .milliseconds(250))
         }
         step = "joining the picture at the clock point"
         let duration = item.duration.seconds

@@ -248,8 +248,6 @@ final class PicsVidsUITests: XCTestCase {
         kjScreenshot("pv-07-pictures", app: app)
     }
 
-    /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and
-    /// says what it needs; the other plays.
     /// Up from a tile far to the right on the top shelf reaches the page's controls. The control
     /// row covered only the left of the screen, so tvOS found nothing above a right-hand tile
     /// and Up did nothing (CI, 2026-11-25: focus held by a tile at x 1134 for 4 presses).
@@ -267,11 +265,36 @@ final class PicsVidsUITests: XCTestCase {
         let from = focusedTile(app)
         XCTAssertGreaterThan(from.frame.minX, shuffle.frame.maxX, "the walk reaches a tile right of the controls; at \(from.frame)")
         let tileID = from.identifier
-        kjPress(.up, app: app)
+        // A press that reports no move may only be slow: give it time before reading focus.
+        if !kjPress(.up, app: app) { kjPause(3) }
         let now = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch.identifier
         XCTAssertTrue(now.hasPrefix("pnvkind-") || now == "pnvShuffle", "Up from \(tileID) reaches the controls, got \(now)")
     }
 
+    /// Down from the bar's right-hand end lands on the first control, Everything. The control row
+    /// spans the page, so this holds only while the page's default focus outranks the nearest
+    /// button, which under the bar's right end is Shuffle.
+    func testDownFromTheBarsRightEndLandsOnEverything() {
+        let app = launch()
+        dismissNotice(app)
+        XCTAssertTrue(app.buttons["pnvkind-all"].waitForExistence(timeout: 60))
+        kjPause(4)
+        XCTAssertTrue(kjIntoTopBar(app), "Up reaches the top bar")
+        for _ in 0..<8 { if !kjPress(.right, app: app) { break } }
+        // The walk must end right of the controls, or Down proves nothing about the nearest button.
+        let tab = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-' AND hasFocus == true")).firstMatch
+        XCTAssertTrue(tab.exists, "focus is still in the top bar, got \(kjFocusKey(app))")
+        XCTAssertGreaterThan(tab.frame.midX, app.buttons["pnvShuffle"].frame.maxX, "the bar item sits right of Shuffle; on \(kjFocusKey(app))")
+        // And it is the bar's last item: a slow Right must not read as the end of the bar.
+        let lastX = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-'")).allElementsBoundByIndex.map(\.frame.midX).max() ?? 0
+        XCTAssertEqual(tab.frame.midX, lastX, accuracy: 1, "the walk ends on the bar's last item; on \(kjFocusKey(app))")
+        if !kjPress(.down, app: app) { kjPause(3) }
+        kjPause(1)
+        XCTAssertTrue(app.buttons["pnvkind-all"].hasFocus, "Down from the bar lands on Everything, got \(kjFocusKey(app))")
+    }
+
+    /// A Khajistan TV row and an account-hosted video, signed out. The row opens on its poster and
+    /// says what it needs; the other plays.
     func testVideoAndKhajistanTVRow() {
         let app = launch()
         dismissNotice(app)

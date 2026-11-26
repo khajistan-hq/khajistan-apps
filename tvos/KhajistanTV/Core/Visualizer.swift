@@ -70,7 +70,8 @@ enum Visualizer {
     /// suits this kind of channel.
     static func pick(_ rows: [VisualizerPiece], reverent: Bool, now: Date)
         -> (piece: VisualizerPiece, offset: TimeInterval, until: Date)? {
-        let suited = rows.filter { ($0.reverent ?? false) == reverent }
+        // Owner, 2026-11-26: every piece on a sound channel, only Nature on a religious one.
+        let suited = rows.filter { !reverent || $0.reverent == true }
         guard !suited.isEmpty else { return nil }
         let t = now.timeIntervalSince1970
         let slot = Int((t / block).rounded(.down))
@@ -86,7 +87,8 @@ enum Visualizer {
     static let seenKey = "kj-visualizer-seen"
     static func draw(_ rows: [VisualizerPiece], reverent: Bool, seen: [String], roll: Double, startRoll: Double)
         -> (piece: VisualizerPiece, offset: TimeInterval, play: TimeInterval, seen: [String])? {
-        let suited = rows.filter { ($0.reverent ?? false) == reverent }
+        // Owner, 2026-11-26: every piece on a sound channel, only Nature on a religious one.
+        let suited = rows.filter { !reverent || $0.reverent == true }
         guard !suited.isEmpty else { return nil }
         var fresh = suited.filter { !seen.contains($0.id) }
         var bag = seen

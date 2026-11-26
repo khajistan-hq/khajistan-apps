@@ -17,8 +17,8 @@ struct SoundStage<Behind: View>: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.dancer.rawValue
-    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.off.rawValue
+    @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.nature.rawValue
     @State private var picture = VisualizerPlayer()
 
     private struct Want: Equatable { let play: Bool; let reverent: Bool; let signedIn: Bool }

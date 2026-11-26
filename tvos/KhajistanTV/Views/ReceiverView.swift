@@ -506,6 +506,10 @@ private struct ThemeRow: View {
     private static let fewest = 3
 
     @Environment(AppModel.self) private var model
+    /// The All / TV / Radio chips under Surf. A theme holds only what they let through (owner,
+    /// 2026-11-25: "when only tv is selected surf and themes when clicked should only show tv,
+    /// same for radio").
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @State private var rows: [Row] = []
     @State private var playing: Pick?
     /// Focus coming into the row lands on the theme last focused (Back from the player: the one
@@ -557,7 +561,7 @@ private struct ThemeRow: View {
         .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id,
                       priority: .userInitiated)
         .onChange(of: focused) { _, now in if let now { lastFocused = now } }
-        .task(id: model.extendedAtlas) { await load() }
+        .task(id: "\(model.extendedAtlas) \(mediumRaw)") { await load() }
         .fullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
@@ -584,7 +588,8 @@ private struct ThemeRow: View {
             for await (id, list) in group { lists[id] = list }
         }
         guard !Task.isCancelled else { return }
-        let channels = ids.flatMap { lists[$0] ?? [] }.filter { $0.mediaType != "camera" }
+        let medium = ShuffleMedium.stored(mediumRaw)
+        let channels = ids.flatMap { lists[$0] ?? [] }.filter { medium.includes($0.mediaType) }
         rows = Self.kinds.compactMap { kind in
             var seen = Set<String>()
             let shelf = channels.filter { channel in

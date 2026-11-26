@@ -5334,6 +5334,29 @@ func scheduleCacheKeepsOneMonthWithItsTag() throws {
     try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
 }
 
+func visualizerShuffleBagShowsEveryPiece() throws {
+    let rows = (1...5).map { VisualizerPiece(id: "p\($0)", title: nil, category: nil, seconds: 1800, play_url: "u", reverent: nil) }
+        + [VisualizerPiece(id: "n", title: nil, category: "Nature", seconds: 900, play_url: "u", reverent: true)]
+    var seen: [String] = [], shown: [String] = []
+    for k in 0..<5 {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: Double(k % 3) / 3, startRoll: 0.5))
+        try expect(!shown.contains(d.piece.id), "a piece came back before every piece had its turn")
+        try expect(d.offset >= 0 && d.offset + 60 <= d.piece.seconds, "the start point lies inside the piece")
+        shown.append(d.piece.id); seen = d.seen
+    }
+    try expectEqual(Set(shown), Set(["p1", "p2", "p3", "p4", "p5"]))
+    // The bag refills, never with the piece just shown.
+    for roll in [0.0, 0.5, 0.99] {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: roll, startRoll: 0))
+        try expect(d.piece.id != shown.last, "the refill repeated the piece just shown")
+        try expectEqual(d.seen, [d.piece.id])
+    }
+    // Nature only on a reverent channel, and never on a sound channel.
+    try expectEqual(Visualizer.draw(rows, reverent: true, seen: [], roll: 0.7, startRoll: 0)?.piece.id, "n")
+    try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
+    try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+}
+
 func visualizerPicksByTheHalfHour() throws {
     let rows = Visualizer.rows(from: Data("""
     [{"id":"a","title":"A","category":"Roads","seconds":600,"play_url":"https://x/functions/v1/tv-play?id=a"},
@@ -5392,6 +5415,7 @@ func visualizerModesCycle() throws {
 
 let tests: [(String, () throws -> Void)] = [
     ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
+    ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
     ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),

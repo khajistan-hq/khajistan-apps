@@ -77,8 +77,8 @@ struct ReceiverPlayerView: View {
     @State private var pip = PictureInPicture()
     private enum Chip { case captions, like, visualizer, guide, pip }
     /// The viewer's visualizer choice, shared with SoundStage (Core/Visualizer.swift).
-    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.dancer.rawValue
-    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.off.rawValue
+    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.nature.rawValue
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?

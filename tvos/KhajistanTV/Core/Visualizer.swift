@@ -32,7 +32,9 @@ enum VisualizerMode: String, Sendable {
     /// The stored choice for this kind of channel; anything unknown is the default.
     static func current(reverent: Bool, stored: String?, storedNature: String?) -> VisualizerMode {
         let mode = VisualizerMode(rawValue: (reverent ? storedNature : stored) ?? "")
-        return mode.flatMap { modes(reverent: reverent).contains($0) ? $0 : nil } ?? modes(reverent: reverent)[0]
+        // Owner, 2026-11-26: "for all audio channels make the khajistan viusalizer the default option" — Nature on a
+        // reverent channel. The dancer still stands in while the picture is not up.
+        return mode.flatMap { modes(reverent: reverent).contains($0) ? $0 : nil } ?? (reverent ? .nature : .khajistan)
     }
 
     func next(reverent: Bool) -> VisualizerMode {

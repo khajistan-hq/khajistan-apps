@@ -46,8 +46,11 @@ struct SoundStage<Behind: View>: View {
             }
             // When the picture cannot come, one line says why (owner, 2026-11-26: "khajistan visualizer
             // isnt showing on my apple tv"); the dancer stands in meanwhile.
-            if play, !picture.ready, let problem = picture.problem {
-                Text("Khajistan visualizer: \(problem)")
+            if mode.playsPicture, !picture.ready {
+                // Until the picture is up, the step it is on, so a hang shows as clearly as a failure.
+                let step = !play ? (controller.state == .playing ? "off for this channel" : "waiting for the channel to play")
+                    : (picture.problem ?? picture.step)
+                Text("Khajistan visualizer: \(step)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
@@ -80,6 +83,8 @@ final class VisualizerPlayer {
     private(set) var ready = false
     /// Why the picture is not up, in plain words; nil while it loads or plays.
     private(set) var problem: String?
+    /// The step under way, shown while the picture is not up.
+    private(set) var step = "starting"
     @ObservationIgnored private var pieceId: String?
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// Bumped by each run, so a run SwiftUI has cancelled cannot tear down or attach over the next.
@@ -92,6 +97,7 @@ final class VisualizerPlayer {
         let gen = generation
         while !Task.isCancelled, gen == generation {
             // A failed step is tried again in a minute rather than waiting for a mode change.
+            step = "reading the list of pictures"
             guard let rows = await Self.load(previewPassword: auth.previewPassword), !rows.isEmpty else {
                 problem = "the list of pictures could not be read"
                 try? await Task.sleep(for: .seconds(60))
@@ -122,7 +128,9 @@ final class VisualizerPlayer {
         stop()
         pieceId = piece.id
         guard auth.isSignedIn else { problem = "sign in to see it"; return }
+        step = "asking for the picture link"
         guard let url = await Self.carrier(for: piece, auth: auth) else { problem = "the picture link was refused"; return }
+        step = "opening the picture"
         guard !Task.isCancelled, gen == generation else { return }
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
@@ -134,6 +142,7 @@ final class VisualizerPlayer {
             if Task.isCancelled || gen != generation { return }
             if status == .readyToPlay { break }
         }
+        step = "joining the picture at the clock point"
         let duration = item.duration.seconds
         let at = Visualizer.offset(of: piece, at: Date(), duration: duration.isFinite ? duration : nil)
         _ = await player.seek(to: CMTime(seconds: at, preferredTimescale: 600))

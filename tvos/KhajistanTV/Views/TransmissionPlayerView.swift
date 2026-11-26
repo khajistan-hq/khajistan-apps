@@ -198,7 +198,7 @@ struct TransmissionPlayerView: View {
                 TransmissionGuide(rows: guideRows, current: store.channelNumber, lit: guideRow)
                     .transition(.move(edge: .bottom))
             }
-            CaptionLayer(text: subtitles.text, skin: model.skin, lift: stripShown ? stripHeight : 0)
+            CaptionLayer(text: captionsAllowed ? subtitles.text : nil, skin: model.skin, lift: stripShown ? stripHeight : 0)
                 // Not over the guide's rows: the guide covers the lower part of the picture.
                 .opacity(guideRow == nil ? 1 : 0)
             HandoverNotice(
@@ -394,14 +394,18 @@ struct TransmissionPlayerView: View {
     // MARK: - Strip controls, the guide and picture in picture
 
     /// The strip's controls, left to right, as the remote walks them.
+    /// Owner, 2026-11-25: "cc functions and text should not be there on channel 1". Channel 1 is After Hours,
+    /// picture and music: no Subtitles control and no caption text, whatever a programme carries.
+    private var captionsAllowed: Bool { store.channelNumber != 1 }
+
     private var chips: [Chip] {
-        [subtitles.tracks.isEmpty ? nil : .subtitles, guideOffered ? .guide : nil, pipOffered ? .pip : nil]
+        [!captionsAllowed || subtitles.tracks.isEmpty ? nil : .subtitles, guideOffered ? .guide : nil, pipOffered ? .pip : nil]
             .compactMap { $0 }
     }
 
     private var stripControls: some View {
         HStack(spacing: 14) {
-            if !subtitles.tracks.isEmpty { subtitlesControl }
+            if captionsAllowed, !subtitles.tracks.isEmpty { subtitlesControl }
             if guideOffered {
                 StripChipStyle.face(Text("Guide"), isOn: guideRow != nil, selected: armed == .guide)
                     .accessibilityAddTraits(.isButton)

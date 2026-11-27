@@ -5420,6 +5420,11 @@ func bazaarRules() throws {
     try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"data":{"product":null}}"#.utf8)), .notForSale, "an unpublished product is not a fault")
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"errors":[{"message":"x"}]}"#.utf8)), .unreadable, "an error is not 'not for sale'")
+    // A variant carries its own picture when the shop links one, and decodes without one (owner 2026-11-27).
+    let framed = Data(#"{"data":{"product":{"title":"P","descriptionHtml":null,"images":{"nodes":[{"url":"https://cdn.example/a.jpg"}]},"variants":{"nodes":[{"id":"v1","title":"50 × 70 cm, oak frame","availableForSale":true,"price":{"amount":"90.0","currencyCode":"USD"},"image":{"url":"https://cdn.example/oak.jpg"}},{"id":"v2","title":"50 × 70 cm","availableForSale":true,"price":{"amount":"50.0","currencyCode":"USD"},"image":null}]}}}}"#.utf8)
+    guard case .found(let product) = ShopStorefront.productAnswer(from: framed) else { throw Failure(description: "a product with variant pictures did not decode") }
+    try expectEqual(product.variants.first?.image?.url, URL(string: "https://cdn.example/oak.jpg"))
+    try expectEqual(product.variants.last?.image, nil, "an option with no picture keeps none")
     let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
     try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
     let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)

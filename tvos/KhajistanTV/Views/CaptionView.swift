@@ -15,7 +15,7 @@ struct CaptionView: View {
     /// keeps its plate whatever the viewer chose, since yellow text on the day ground cannot be read.
     var overPicture = true
 
-    private static let size: CGFloat = 52   // 2.7% of 1920
+    private static let size: CGFloat = 44   // 4% of 1080 (owner, 2026-11-27: 52 looked big)
     @AppStorage(CaptionStyle.key) private var styleRaw = CaptionStyle.plate.rawValue
 
     private var look: CaptionStyle {

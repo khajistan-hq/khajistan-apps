@@ -369,8 +369,10 @@ struct ReceiverPlayerView: View {
             // A captions note hides the song only while captions are on. With them off, tuning
             // writes the channel's parked reason ("No captions: …") on almost every music
             // channel, and the song never showed on television.
-            if !model.captions.note.isEmpty, tvSong == nil || model.captions.isEnabled { return model.captions.note }
-            let line = [current.place.isEmpty ? nil : current.place, tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
+            // The place stays first; the captions note follows it (owner, 2026-11-27: "the country
+            // name should stay right now the captions message takes place for it").
+            let note = !model.captions.note.isEmpty && (tvSong == nil || model.captions.isEnabled) ? model.captions.note : nil
+            let line = [current.place.isEmpty ? nil : current.place, note ?? tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }
     }

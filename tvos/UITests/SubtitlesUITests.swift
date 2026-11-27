@@ -175,7 +175,10 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")
-        XCTAssertTrue(app.staticTexts["No captions: Kashmiri is not on the live recogniser."].exists, "the line says why")
+        // The country stays first on the line; the reason follows it (owner, 2026-11-27).
+        let why = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "\u{00B7} No captions: Kashmiri is not on the live recogniser.")).firstMatch
+        XCTAssertTrue(why.exists, "the line keeps the place and says why")
+        XCTAssertTrue(why.label.hasPrefix("India"), "the country stays first: \(why.label)")
         kjScreenshot("live-3-kashmiri-no-control", app: app)
     }
 

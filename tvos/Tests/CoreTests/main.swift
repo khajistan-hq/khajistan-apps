@@ -1091,6 +1091,48 @@ let syntheticJSON = #"""
   {"date":"2026-09-01","channels":{"transfers":[{"start":"00:00","start_minute":0,"minutes":60,"show":"a","programmes":[0]},{"start":"00:00","start_minute":0,"minutes":60,"show":"b","programmes":[1]}]}}]}
 """#
 
+/// Owner, 2026-11-26: "i want every refresh to play a different file" (Channel 1 · After Hours, site and Apple TV).
+/// Strips on the real channel are one piece long, 90 s to an hour, so a tune plays a shuffled run of whole pieces.
+func afterHoursDrawsAnotherPieceOnEveryTune() throws {
+    let lengths = [90, 3600, 600, 1500, 240, 2400]
+    func schedule(_ channel: String) throws -> Programming {
+        let ids = (0..<6).map { "P\($0)" }
+        let programmes = ids.enumerated().map { "\"\($1)\":{\"id\":\"\($1)\",\"title\":\"\($1)\",\"display_title\":\"\($1)\",\"seconds\":\(lengths[$0])}" }.joined(separator: ",")
+        var at = 660 * 60
+        let slots = (0..<6).map { i -> String in
+            defer { at += lengths[i] }
+            return "{\"start\":\"\(String(format: "%02d:%02d", at / 3600, at / 60 % 60))\",\"start_minute\":\(at / 60),\"minutes\":\(lengths[i] / 60),\"start_second\":\(at),\"seconds\":\(lengths[i]),\"show\":\"s\",\"programmes\":[\(i)]}"
+        }.joined(separator: ",")
+        let raw = "{\"_meta\":{\"channels\":[{\"id\":\"\(channel)\",\"number\":1,\"name\":\"Channel 1\"}]},\"shows\":{\"s\":{\"slug\":\"s\",\"name\":\"After Hours\"}},"
+            + "\"programme_order\":[\(ids.map { "\"\($0)\"" }.joined(separator: ","))],\"programmes\":{\(programmes)},"
+            + "\"days\":[{\"date\":\"2026-11-26\",\"weekday\":\"Thursday\",\"channels\":{\"\(channel)\":[\(slots)]}}]}"
+        return try decode(Programming.self, raw)
+    }
+    let p = try schedule("after-hours"), at = pkt(2026, 11, 26, 11, 1)
+    var last: String? = nil, seen = Set<String>()
+    for _ in 0..<40 {
+        AfterHoursShuffle.shared.reset()
+        let air = try require(StationClock.onAir(p, channel: 1, at: at))
+        try expect(air.programmeId != last, "a tune opened on the piece last shown, \(air.programmeId)")
+        try expect(air.into < 1, "joined \(air.into) s in")
+        try expectEqual(StationClock.onAir(p, channel: 1, at: at)?.programmeId, air.programmeId, "one tune keeps its piece")
+        let len = air.programme?.seconds ?? 0
+        try expectEqual(StationClock.onAir(p, channel: 1, at: at.addingTimeInterval(len - 0.5))?.programmeId, air.programmeId, "whole piece")
+        let next = try require(StationClock.onAir(p, channel: 1, at: at.addingTimeInterval(len + 0.5)))
+        try expectEqual(next.programmeId, air.nextProgrammeId, "the next piece of the run follows")
+        try expect(next.programmeId != air.programmeId && next.into < 1, "handover to another piece at its head")
+        last = next.programmeId          // the last piece this device was shown
+        seen.insert(air.programmeId)
+    }
+    try expect(seen.count >= 4, "draws reached \(seen.sorted())")
+    // Every other channel keeps its timetable: at 11:01 the strip on air holds P0 (90 s from 11:00) then P1.
+    let other = try schedule("mujra")
+    for _ in 0..<5 {
+        AfterHoursShuffle.shared.reset()
+        try expectEqual(StationClock.onAir(other, channel: 1, at: at)?.programmeId, "P0")
+    }
+}
+
 func syntheticSchedule() throws -> Programming { try decode(Programming.self, syntheticJSON) }
 
 /// The seven channels of 2026-11-04. Since 2026-11-13 the dial follows the order of the list
@@ -5467,6 +5509,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),
+    ("Channel 1 draws another piece on every tune", afterHoursDrawsAnotherPieceOnEveryTune),
     ("The channel list follows the schedule order, Mujra first", channelListFollowsTheScheduleOrder),
     ("Channel Up and Down go round all seven channels", channelUpAndDownGoRoundTheDial),
     ("nextSlot rolls over every kind of day end", nextSlotRollsOverEveryKindOfDayEnd),

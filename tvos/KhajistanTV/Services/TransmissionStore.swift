@@ -331,6 +331,8 @@ final class TransmissionStore {
     /// Needing a sign-in and failing are phases the player shows, not errors.
     func tune(channel: Int) async {
         refusals = 0
+        AfterHoursShuffle.shared.reset()   // Channel 1 draws a new run on every tune (owner, 2026-11-26)
+        AfterHoursShuffle.shared.reset()   // Channel 1 draws a new piece on every tune (owner, 2026-11-26)
         await tune(channel: channel, keepingRefusals: true)
     }
 
@@ -367,6 +369,7 @@ final class TransmissionStore {
 
     /// `switchBehind(step:)` for a channel chosen by number, as the guide chooses one.
     func switchBehind(to target: Int) async -> PendingSwitch? {
+        AfterHoursShuffle.shared.reset()   // Channel 1 draws a new piece on every tune (owner, 2026-11-26)
         await loadSchedule()
         guard schedule == .ready, let p = programming,
               let air = StationClock.onAir(p, channel: target, at: Self.now()),

@@ -292,13 +292,17 @@ enum StationClock {
     static func onAir(_ p: Programming, channelId: String, at date: Date) -> OnAir? {
         let now = stationNow(date)
         let second = Double(now.seconds)
-        guard let hit = locate(p, channel: channelId, iso: now.iso, second: second),
+        let shuffled = channelId == AfterHoursShuffle.channelId ? AfterHoursShuffle.shared.run(p, iso: now.iso, second: second) : nil
+        guard let hit = shuffled ?? locate(p, channel: channelId, iso: now.iso, second: second),
               !hit.slot.programmes.isEmpty else { return nil }
         let slot = hit.slot
         let position = positionInSlot(p, slot: slot, second: now.seconds)
         // An index outside programme_order names no programme; the station cannot air it.
         guard let id = programmeId(p, index: slot.programmes[position.index]) else { return nil }
         let programme = p.programmes[id]
+        if shuffled != nil { AfterHoursShuffle.shared.shown(id) }
+        // Channel 1's run is two days long, so "until" is the end of the piece on screen.
+        let pieceEnd = (slotSecond(hit.date, now: now) ?? second) + runSeconds(programme) - position.into
         return withNextProgramme(OnAir(
             channelId: channelId,
             // The day the strip is filed under: yesterday's, for a show still running past
@@ -313,7 +317,7 @@ enum StationClock {
             // The file offset is the leader the reel is read past plus how far the slot has run.
             seekTo: (programme?.clean_start ?? 0) + position.into,
             startLabel: slot.start,
-            endLabel: endLabel(slot),
+            endLabel: shuffled != nil ? clockLabel(Int((pieceEnd / 60).rounded(.down))) : endLabel(slot),
             nextShow: nil,                  // set from the clock by withNextProgramme
             nextStart: nil
         ), in: p, slotSecond: slotSecond(hit.date, now: now), iso: now.iso, second: second)
@@ -645,5 +649,56 @@ enum ServerClock {
         if let read = await task.value { return read }
         lock.withLock { if reading == task { reading = nil } }   // a failed reading is not kept
         return currentSkew
+    }
+}
+
+/// CHANNEL 1 · AFTER HOURS IS NOT ON THE TIMETABLE (owner, 2026-11-26: "i want every refresh to play a different
+/// file"; asked, chose the website and the Apple TV). kj-station-clock.js `shuffledRun` is the same rule: on the first
+/// reading after a tune, the channel becomes one long strip that starts that second, holding every piece the schedule
+/// gives the channel, shuffled, back to back, never opening on the piece this device was last shown. A timetable strip
+/// is exactly one piece long, so a piece drawn into it would loop or be cut; a run of whole pieces is neither.
+/// TransmissionStore calls `reset()` on every tune, so tuning Channel 1 again draws a new run.
+final class AfterHoursShuffle: @unchecked Sendable {
+    static let shared = AfterHoursShuffle()
+    static let channelId = "after-hours"
+    static let lastKey = "kj-after-hours-last"
+
+    private let lock = NSLock()
+    private var drawn: (slot: Programming.Slot, date: String, month: String)? = nil
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    func reset() {
+        lock.lock(); defer { lock.unlock() }
+        drawn = nil
+    }
+
+    /// This tune's run and the day it is filed under; nil when the schedule gives the channel nothing.
+    func run(_ p: Programming, iso: String, second: Double) -> (slot: Programming.Slot, date: String)? {
+        lock.lock(); defer { lock.unlock() }
+        let month = p.days.first?.date ?? ""
+        if let d = drawn, d.month == month { return (d.slot, d.date) }
+        let channel = Self.channelId
+        let strips = p.days.flatMap { $0.channels[channel] ?? [] } + (p.prev_day?.channels[channel] ?? [])
+        var seen = Set<String>(), pool: [Int] = []
+        for s in strips {
+            for i in s.programmes where i >= 0 && i < p.programme_order.count && seen.insert(p.programme_order[i]).inserted {
+                pool.append(i)
+            }
+        }
+        guard let show = strips.first?.show, !pool.isEmpty else { return nil }
+        pool.shuffle()
+        if pool.count > 1, p.programme_order[pool[0]] == defaults.string(forKey: Self.lastKey) { pool.append(pool.removeFirst()) }
+        let minute = Int(second / 60)
+        let slot = Programming.Slot(start: StationClock.clockLabel(minute), start_minute: minute, minutes: 2 * 1440, show: show,
+                                    programmes: pool, start_second: second, seconds: 2 * 86_400)
+        drawn = (slot, iso, month)
+        return (slot, iso)
+    }
+
+    /// The piece on screen, so the next tune does not open on it.
+    func shown(_ id: String) {
+        if defaults.string(forKey: Self.lastKey) != id { defaults.set(id, forKey: Self.lastKey) }
     }
 }

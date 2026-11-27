@@ -165,10 +165,7 @@ final class PlayerController {
             }
         }
 
-        // Not on an mp3: on the Apple TV a tap on a progressive mp3 plays silent while the player
-        // reports Playing at full volume (owner, 2026-11-27: no sound on Channel 1, whose mixes are
-        // mp3; the m4a/mp4 channels kept their sound). The dancer then moves without the signal.
-        if listen, asset.url.pathExtension.lowercased() != "mp3" { installTap(on: item, asset: asset, generation: gen) }
+        if listen { installTap(on: item, asset: asset, generation: gen) }
 
         fadeTask?.cancel()
         player.volume = 0
@@ -403,7 +400,8 @@ final class PlayerController {
             guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
             guard let self, gen == self.generation else { return }
             let tap = SignalTap()
-            guard let mix = tap.audioMix(for: track) else { return }
+            // An mp3 tapped after effects played silent on the Apple TV (owner, 2026-11-27, Channel 1).
+            guard let mix = tap.audioMix(for: track, preEffects: asset.url.pathExtension.lowercased() == "mp3") else { return }
             item.audioMix = mix
             self.signal = tap
         }

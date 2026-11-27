@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import Observation
 
@@ -6,26 +7,35 @@ import Observation
 // It reads AuthStore's isSignedIn, previewPassword and validAccessToken(), which both apps' own
 // AuthStore carry.
 
-/// The muted picture: picks the piece the clock has on, asks tv-play for it with the viewer's
-/// session (PicsVidsStore.playableURL's route), joins it at the clock point, loops it, and moves
-/// to the next piece at the half hour. Torn down when its task ends.
+/// The muted picture: draws a piece from the shuffle bag, asks tv-play for it with the viewer's
+/// session (PicsVidsStore.playableURL's route), joins it at a random point, and fades the next piece
+/// in over it before it ends, or after half an hour. Torn down when its task ends.
 @MainActor @Observable
 final class VisualizerPlayer {
-    @ObservationIgnored let player: AVPlayer = {
+    @ObservationIgnored let players: [AVPlayer] = (0..<2).map { _ in
         let player = AVPlayer()
         player.isMuted = true
         player.allowsExternalPlayback = false
-        player.actionAtItemEnd = .none
+        // The next piece is drawn before this one ends; only if it fails does this one reach its end and loop.
+        player.actionAtItemEnd = .pause
         return player
-    }()
+    }
+    /// Seconds the next piece takes to fade in over the last.
+    static let fade = 1.2
+    /// Seconds before a piece ends that the next one starts to load.
+    static let lead = 12.0
+    /// The player on screen, and the one it is fading in over (nil once the fade is over).
+    private(set) var front = 0
+    private(set) var outgoing: Int?
+    @ObservationIgnored private var loops: [Task<Void, Never>?] = [nil, nil]
+    /// Whether the piece on screen was drawn for a devotional programme.
+    @ObservationIgnored private var shownReverent: Bool?
     /// The picture is on its first frame, at the clock point.
     private(set) var ready = false
     /// Why the picture is not up, in plain words; nil while it loads or plays.
     private(set) var problem: String?
     /// The step under way, shown while the picture is not up.
     private(set) var step = "starting"
-    @ObservationIgnored private var pieceId: String?
-    @ObservationIgnored private var loop: Task<Void, Never>?
     /// Bumped by each run, so a run SwiftUI has cancelled cannot tear down or attach over the next.
     @ObservationIgnored private var generation = 0
     /// The list, read once per launch; a failed read is asked again next time.
@@ -34,6 +44,9 @@ final class VisualizerPlayer {
     func run(reverent: Bool, auth: AuthStore) async {
         generation += 1
         let gen = generation
+        // A devotional programme never keeps an After Hours picture, not even while Nature loads (and the other
+        // way round): a change of kind clears the picture at once. Only a sign-in change keeps it up.
+        if ready, shownReverent != reverent { stop() }
         while !Task.isCancelled, gen == generation {
             // A failed step is tried again in a minute rather than waiting for a mode change.
             step = "reading the list of pictures"
@@ -49,59 +62,105 @@ final class VisualizerPlayer {
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
-            if ready { UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey) }
-            let wait = ready ? max(5, pick.play) : 60
+            let shown = await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
+            // A piece that would not open counts as seen too, so the bag moves past it; a cancelled run counts nothing.
+            if !Task.isCancelled, gen == generation {
+                UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey)
+                if shown { shownReverent = reverent }
+            }
+            // The next piece starts loading `lead` seconds before this one ends, so it is up before the end.
+            let wait = shown ? max(5, pick.play - Self.lead) : (ready ? 30 : 60)
             try? await Task.sleep(for: .seconds(wait))
         }
-        if gen == generation { stop() }
+        // No stop() here: when the picture should go, the view's task stops it (`guard play`) or onDisappear does,
+        // and a change of kind stops it at the top of the next run. A sign-in change keeps the picture up.
     }
 
     func stop() {
-        loop?.cancel()
-        loop = nil
-        player.pause()
-        player.replaceCurrentItem(with: nil)
-        pieceId = nil
+        for i in players.indices { clear(i) }
+        outgoing = nil
         ready = false
+        shownReverent = nil
     }
 
-    private func play(_ piece: VisualizerPiece, at start: TimeInterval, auth: AuthStore, gen: Int) async {
-        stop()
-        pieceId = piece.id
-        guard auth.isSignedIn else { problem = "sign in to see it"; return }
-        step = "asking for the picture link"
-        guard let url = await Self.carrier(for: piece, auth: auth) else { problem = "the picture link was refused"; return }
-        step = "opening the picture"
-        guard !Task.isCancelled, gen == generation else { return }
+    private func clear(_ i: Int) {
+        loops[i]?.cancel()
+        loops[i] = nil
+        players[i].pause()
+        players[i].replaceCurrentItem(with: nil)
+    }
+
+    /// Opens `piece` on the player behind and fades it in over the one on screen once it is drawing. True once it
+    /// is showing; on a failure the piece on screen, if any, stays up.
+    private func play(_ piece: VisualizerPiece, at start: TimeInterval, auth: AuthStore, gen: Int) async -> Bool {
+        // A fade still under way (a restarted run can arrive inside one) is let finish, never cut short.
+        while outgoing != nil {
+            try? await Task.sleep(for: .milliseconds(100))
+            if Task.isCancelled || gen != generation { return false }
+        }
+        let back = ready ? 1 - front : front
+        clear(back)
+        let current = { !Task.isCancelled && gen == self.generation }
+        func fail(_ why: String) -> Bool {
+            if current() { clear(back); if !ready { problem = why } }
+            return false
+        }
+        guard auth.isSignedIn else { return fail("sign in to see it") }
+        if !ready { step = "asking for the picture link" }
+        guard let url = await Self.carrier(for: piece, auth: auth) else { return fail("the picture link was refused") }
+        guard current() else { return false }
+        if !ready { step = "opening the picture" }
+        let player = players[back]
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
         player.play()   // muted; loading starts now rather than waiting on a status nobody asked for
         let deadline = Date().addingTimeInterval(30)
         while item.status != .readyToPlay {
+            guard current(), player.currentItem === item else { return false }
             if item.status == .failed {
-                problem = "the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))"
-                return
+                return fail("the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))")
             }
-            if Task.isCancelled || gen != generation { return }
-            if Date() > deadline { problem = "the picture did not open within 30 seconds"; player.pause(); return }
+            if Date() > deadline { return fail("the picture did not open within 30 seconds") }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        step = "joining the picture"
-        let at = start
-        _ = await player.seek(to: CMTime(seconds: at, preferredTimescale: 600))
-        guard !Task.isCancelled, gen == generation, player.currentItem === item else { return }
+        if !ready { step = "joining the picture" }
+        _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600))
+        guard current(), player.currentItem === item else { return false }
         player.play()
-        ready = true
-        problem = nil
-        let player = player
-        loop = Task {
+        // Faded in only once frames are coming: ready-to-play and a finished seek do not yet mean a picture.
+        let drawing = Date().addingTimeInterval(15)
+        while player.timeControlStatus != .playing {
+            guard current(), player.currentItem === item else { return false }
+            if Date() > drawing { return fail("the picture did not start") }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard current(), player.currentItem === item else { return false }
+        // If its successor fails, a piece that runs out goes round again rather than standing still.
+        loops[back] = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: AVPlayerItem.didPlayToEndTimeNotification, object: item) {
-                if Task.isCancelled { return }
+                guard let self, !Task.isCancelled else { return }
+                guard self.front == back, self.outgoing == nil else { continue }
                 await player.seek(to: .zero)
                 player.play()
             }
         }
+        problem = nil
+        if ready, back != front {
+            let old = front
+            outgoing = old
+            front = back
+            // Not tied to this task: a restart during the fade must not drop the old piece before the fade is over.
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(Self.fade + 0.2))
+                guard let self, self.outgoing == old else { return }
+                self.outgoing = nil
+                if old != self.front { self.clear(old) }
+            }
+        } else {
+            front = back
+            ready = true
+        }
+        return true
     }
 
     /// The signed play address, or nil: not signed in, or tv-play said no.

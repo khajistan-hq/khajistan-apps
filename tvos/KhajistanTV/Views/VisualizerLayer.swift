@@ -1,3 +1,5 @@
+import AVFoundation
+import Combine
 import SwiftUI
 
 /// What a sound channel shows in place of a picture: the dancer, a Khajistan visualizer, or the
@@ -35,11 +37,20 @@ struct SoundStage<Behind: View>: View {
                 // Attached from the start, invisible until ready: on Apple TV an AVPlayer with no layer and
                 // no play() can sit at "unknown" for good (measured 2026-11-26 on the owner's Apple TV HD:
                 // stuck at "opening the picture" on a plain 960x540 H.264 file Channel 1 plays fine).
-                PlayerLayerView(player: picture.player, gravity: .resizeAspectFill)
-                    .ignoresSafeArea()
-                    .opacity(picture.ready ? 1 : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                // Two players (owner, 2026-11-26: "there should be seamless transition between the visualiser
+                // files"): the next piece opens on the one behind and fades in on top; the one it replaces stays
+                // up underneath until the fade is over, so the ground never shows between pieces.
+                ZStack {
+                    ForEach(0..<2, id: \.self) { i in
+                        PlayerLayerView(player: picture.players[i], gravity: .resizeAspectFill)
+                            .opacity(picture.ready && (picture.front == i || picture.outgoing == i) ? 1 : 0)
+                            .zIndex(picture.front == i ? 1 : 0)
+                    }
+                }
+                .animation(.linear(duration: VisualizerPlayer.fade), value: picture.front)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             if play && picture.ready {
                 // The name moves to the top right, as it does for the dancer.

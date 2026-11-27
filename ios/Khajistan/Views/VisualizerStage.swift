@@ -31,11 +31,18 @@ struct VisualizerStage<Name: View>: View {
             if play {
                 // Attached from the start, invisible until ready: an AVPlayer with no layer and no play()
                 // can sit at "unknown" for good (measured 2026-11-26 on the owner's Apple TV HD).
-                PlayerLayerView(player: picture.player, gravity: .resizeAspectFill)
-                    .ignoresSafeArea()
-                    .opacity(shown ? 1 : 0)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+                // Two players, as on the TV: the next piece fades in over the one it replaces.
+                ZStack {
+                    ForEach(0..<2, id: \.self) { i in
+                        PlayerLayerView(player: picture.players[i], gravity: .resizeAspectFill)
+                            .opacity(shown && (picture.front == i || picture.outgoing == i) ? 1 : 0)
+                            .zIndex(picture.front == i ? 1 : 0)
+                    }
+                }
+                .animation(.linear(duration: VisualizerPlayer.fade), value: picture.front)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
             // The name moves to the top right while the picture plays, as it does on the TV.
             name()

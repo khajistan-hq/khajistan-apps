@@ -90,7 +90,7 @@ struct TVProductScreen: View {
             HStack(alignment: .top, spacing: 80) {
                 ZStack {
                     palette.lift
-                    if let url = Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) {
+                    if let url = chosenPicture ?? Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) {
                         TVPicture(url: url, maxPixel: 1200).padding(40)
                     }
                 }
@@ -127,6 +127,12 @@ struct TVProductScreen: View {
                 live = .unreadable
             }
         }
+    }
+
+    /// The chosen option's own picture, when the shop links one (owner 2026-11-27).
+    private var chosenPicture: URL? {
+        guard case .found(let product) = live, let option else { return nil }
+        return product.variants.first { $0.id == option }?.image?.url
     }
 
     /// The price first, as Etsy sets it, then the options as chips; the chosen one's price shows.

@@ -25,20 +25,23 @@ enum VisualizerMode: String, Sendable {
     static let key = "kj-visualizer"
     static let natureKey = "kj-visualizer-nature"
 
-    static func modes(reverent: Bool) -> [VisualizerMode] {
-        reverent ? [.off, .nature] : [.dancer, .khajistan, .off]
+    /// `dancer` false is the iPhone, which has no dancer: its sound channels cycle off, khajistan.
+    static func modes(reverent: Bool, dancer: Bool = true) -> [VisualizerMode] {
+        reverent ? [.off, .nature] : dancer ? [.dancer, .khajistan, .off] : [.off, .khajistan]
     }
 
     /// The stored choice for this kind of channel; anything unknown is the default.
-    static func current(reverent: Bool, stored: String?, storedNature: String?) -> VisualizerMode {
+    static func current(reverent: Bool, stored: String?, storedNature: String?, dancer: Bool = true) -> VisualizerMode {
+        let list = modes(reverent: reverent, dancer: dancer)
         let mode = VisualizerMode(rawValue: (reverent ? storedNature : stored) ?? "")
         // Owner, 2026-11-26: "for all audio channels make the khajistan viusalizer the default option" — Nature on a
-        // reverent channel. The dancer still stands in while the picture is not up.
-        return mode.flatMap { modes(reverent: reverent).contains($0) ? $0 : nil } ?? (reverent ? .nature : .khajistan)
+        // reverent channel, on both apps. On the TV the dancer stands in while the picture is not up; on the
+        // iPhone, which has no dancer, the channel's name does.
+        return mode.flatMap { list.contains($0) ? $0 : nil } ?? (reverent ? .nature : .khajistan)
     }
 
-    func next(reverent: Bool) -> VisualizerMode {
-        let list = Self.modes(reverent: reverent)
+    func next(reverent: Bool, dancer: Bool = true) -> VisualizerMode {
+        let list = Self.modes(reverent: reverent, dancer: dancer)
         return list[((list.firstIndex(of: self) ?? -1) + 1) % list.count]
     }
 

@@ -5416,6 +5416,14 @@ func visualizerModesCycle() throws {
     try expectEqual(VisualizerMode.off.next(reverent: true), .nature)
     try expectEqual(VisualizerMode.nature.next(reverent: true), .off)
     try expectEqual(VisualizerMode.khajistan.label, "Visualizer \u{00B7} Khajistan")
+    // The iPhone has no dancer: it cycles off, khajistan, Khajistan by default; a stored dancer reads as the default.
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "off", storedNature: nil, dancer: false), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.off.next(reverent: false, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false, dancer: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
 }
 
 let tests: [(String, () throws -> Void)] = [

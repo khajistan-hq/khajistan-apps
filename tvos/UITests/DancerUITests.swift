@@ -276,7 +276,8 @@ final class DancerUITests: XCTestCase {
             if i == 5 || i == 19 { shot(String(format: "reverent-%02d", i), app) }
         }
         print("DANCER reverent: \(seen.sorted())")
-        XCTAssertTrue(seen.isSubset(of: ["stage=absent"]), "no tap and no dancer on recitation: \(seen.sorted())")
+        // Since the visualizers, a reverent channel does not mount the dancer at all ("no-element").
+        XCTAssertTrue(seen.isSubset(of: ["stage=absent", "no-element"]), "no tap and no dancer on recitation: \(seen.sorted())")
         app.terminate()
     }
 }

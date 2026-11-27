@@ -9,6 +9,8 @@ struct Shelf<Content: View>: View {
     let title: String
     let count: String?
     let content: Content
+    @Environment(\.shelfRaise) private var raise
+    @FocusState private var inside: Bool
 
     init(_ title: String, count: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -36,7 +38,26 @@ struct Shelf<Content: View>: View {
             .scrollClipDisabled()
         }
         .focusSection()
+        .focused($inside)
+        // A press down moves the page only as far as the card, which left this title under the
+        // top bar and the row above's last line showing there (owner, 2026-11-27: "fix the 105
+        // minutes Pakistan text"). Focus coming in raises the whole shelf, title first.
+        .background(alignment: .top) {
+            Color.clear.frame(height: 1).offset(y: -Self.raiseMargin).id(ShelfAnchor(title: title))
+        }
+        .onChange(of: inside) { _, now in if now { raise?(ShelfAnchor(title: title)) } }
     }
+
+    /// Room between the top of the page and a raised shelf's title, clear of the 28-point fade.
+    static var raiseMargin: CGFloat { 40 }
+}
+
+/// The scroll anchor a shelf is raised to.
+struct ShelfAnchor: Hashable { let title: String }
+
+extension EnvironmentValues {
+    /// Set by a page of shelves: scrolls the page so the shelf with this anchor is at its top.
+    @Entry var shelfRaise: ((ShelfAnchor) -> Void)? = nil
 }
 
 extension View {

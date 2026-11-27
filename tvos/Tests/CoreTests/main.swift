@@ -563,6 +563,24 @@ func carrierURLEncodesTheStreamID() throws {
     try expect(ReceiverRules.carrierURL(streamID: "station+1&x=#fragment").absoluteString.hasSuffix("stream=station%2B1%26x%3D%23fragment"))
 }
 
+func gateOutcomes() throws {
+    let next = "/data/open-frequencies/receiver-index.json"
+    func outcome(_ status: Int, _ path: String?, _ cookie: Bool) -> ReceiverRules.GateOutcome {
+        ReceiverRules.gateOutcome(status: status, landedOn: path, next: next, cookieSet: cookie)
+    }
+    try expectEqual(outcome(200, next, true), .signedIn)
+    // Landed on the index without the cookie: not signed in, and not a refusal either.
+    try expectEqual(outcome(200, next, false), .tryLater)
+    try expectEqual(outcome(200, "/gate", false), .refused)
+    try expectEqual(outcome(200, "/gate.html", false), .refused)
+    // A throttle, an outage, a captive portal or a moved host never marks a password refused.
+    try expectEqual(outcome(429, "/gate", false), .tryLater)
+    try expectEqual(outcome(503, next, false), .tryLater)
+    try expectEqual(outcome(200, "/", true), .tryLater)
+    try expectEqual(outcome(200, "/login", false), .tryLater)
+    try expectEqual(outcome(200, nil, false), .tryLater)
+}
+
 func carrierAnswerIsValidated() throws {
     let url = try ReceiverRules.carrier(from: Data(#"{"stream":"s","url":"https://example.com/live/index.m3u8"}"#.utf8))
     try expectEqual(url.absoluteString, "https://example.com/live/index.m3u8")
@@ -3508,6 +3526,12 @@ func pnvAccount(_ key: String, _ token: String?) throws -> PnvAccount {
     return try decode(PnvAccount.self, #"{"slug":"\#(key)","account_key":"\#(key)","region_token":\#(t)}"#)
 }
 
+func pnvReelSkipsInTheDirectionOfThePress() throws {
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 1), 1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: -1), -1)
+    try expectEqual(PnvAPI.reelSkipDelta(lastDelta: 0), 1)
+}
+
 func pnvAccountKeysFollowTheRosterAndTheFold() throws {
     let roster = [try pnvAccount("a1", "arabia"), try pnvAccount("a2", "egypt-nile"), try pnvAccount("m1", "egypt"),
                   try pnvAccount("i1", "indus"), try pnvAccount("n1", nil)]
@@ -3725,11 +3749,17 @@ func reverenceFollowsTheSitesRule() throws {
     // A person's ruling on the record beats the name.
     try expect(reverent("City FM89", reverent: true), "reverent: true")
     try expect(reverent("City FM89", visualiser: false), "visualiser: false")
-    // Negative: music, news, other faiths' devotional radio, and the switches the other way.
-    // "Nida Al Islam" with a space is a negative on the site too: its pattern reads al-islam or
-    // alislam, and the port keeps the pattern as it is rather than widening it here.
-    for name in ["FM 101 Lahore", "City FM89", "Punjab Rocks Radio", "Live Kirtan from Golden Temple",
-                 "Radio Islam", "Nida Al Islam"] {
+    // Owner, 2026-11-26: every religious station, not only Quran radio, plays Nature only.
+    for name in ["Live Kirtan from Golden Temple", "Radio Islam", "Nida Al Islam", "Naija Gospel Radio",
+                 "Suara Masjid Mekarindah", "Naat", "Jumeraat Qawwali", "Jihadi Jams"] {
+        try expect(reverent(name), "\(name) must be reverent")
+    }
+    try expect(reverent("Radio 1", native: "راديو الكتاب المقدس"), "the Bible in Arabic")
+    try expect(Reverence.isReverent(name: "Hayat FM 104.7", nativeName: nil, broadcaster: nil, genres: ["faith"]), "faith tag")
+    try expect(!Reverence.isReverent(name: "Hayat FM 104.7", nativeName: nil, broadcaster: nil, genres: ["music"]), "music tag")
+    // Negative: music, news, places whose names contain the words, and the switches the other way.
+    for name in ["FM 101 Lahore", "City FM89", "Punjab Rocks Radio", "Islamabad Station", "Radio Mazandaran",
+                 "Radio Mariachi", "Hi Tea"] {
         try expect(!reverent(name), "\(name) must not be reverent")
     }
     try expect(!reverent("City FM89", reverent: false, visualiser: true), "explicit false/true change nothing")
@@ -4078,10 +4108,11 @@ func vodTokenRequestAndAnswer() throws {
 /// denyText(): the site's words, by status and by what a SKU can actually charge.
 func vodDenyText() throws {
     let rentable = try film(#"{"handle":"a","title":"A","rent":6,"licence_price":1200}"#)
+    try expectEqual(Films.denyText(try film(#"{"handle":"a","title":"A","rent":3}"#), status: 403), "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again.", "the $3 films rent too")
     try expectEqual(Films.denyText(rentable, status: 401), "Sign in to the Khajistan account that holds this film, then press Watch the full film again.")
-    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it here, then press Watch the full film again.")
+    try expectEqual(Films.denyText(rentable, status: 403), "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again.")
     let buyOnly = try film(#"{"handle":"a","title":"A","rent":7,"buy":20}"#)
-    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it here, then press Watch the full film again.",
+    try expectEqual(Films.denyText(buyOnly, status: 403), "This film is not on your Khajistan account yet. Buy it at screening.khajistan.com, then press Watch the full film again.",
                     "a rent with no SKU at its price does not say rent")
     let licensed = try film(#"{"handle":"a","title":"A","licence_price":1200}"#)
     try expectEqual(Films.denyText(licensed, status: 403), "This film is licensed rather than sold. Screening and institutional terms are by inquiry.")
@@ -5339,6 +5370,11 @@ func bazaarRules() throws {
     try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"data":{"product":null}}"#.utf8)), .notForSale, "an unpublished product is not a fault")
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"errors":[{"message":"x"}]}"#.utf8)), .unreadable, "an error is not 'not for sale'")
+    // A variant carries its own picture when the shop links one, and decodes without one (owner 2026-11-27).
+    let framed = Data(#"{"data":{"product":{"title":"P","descriptionHtml":null,"images":{"nodes":[{"url":"https://cdn.example/a.jpg"}]},"variants":{"nodes":[{"id":"v1","title":"50 × 70 cm, oak frame","availableForSale":true,"price":{"amount":"90.0","currencyCode":"USD"},"image":{"url":"https://cdn.example/oak.jpg"}},{"id":"v2","title":"50 × 70 cm","availableForSale":true,"price":{"amount":"50.0","currencyCode":"USD"},"image":null}]}}}}"#.utf8)
+    guard case .found(let product) = ShopStorefront.productAnswer(from: framed) else { throw Failure(description: "a product with variant pictures did not decode") }
+    try expectEqual(product.variants.first?.image?.url, URL(string: "https://cdn.example/oak.jpg"))
+    try expectEqual(product.variants.last?.image, nil, "an option with no picture keeps none")
     let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
     try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
     let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)
@@ -5666,6 +5702,41 @@ final class StubDropProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Counts the askings a burst starts. A class so the @Sendable closure can count.
+final class AskingCounter: @unchecked Sendable {
+    private let lock = NSLock(); private var n = 0
+    func hit() { lock.withLock { n += 1 } }
+    var count: Int { lock.withLock { n } }
+}
+
+func aBurstOfFailuresStartsOneAsking() throws {
+    let counter = AskingCounter()
+    let real = SupabaseRoute.decider
+    defer { SupabaseRoute.decider = real; SupabaseRoute.forgetAsking() }
+    SupabaseRoute.forgetAsking()
+    SupabaseRoute.decider = {
+        counter.hit()
+        try? await Task.sleep(for: .milliseconds(200))   // a probe in flight
+        return .direct
+    }
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        await withTaskGroup(of: Void.self) { group in
+            // Thirty requests fail in the same blink: each forgets and asks, as reconsider() does.
+            for _ in 0..<30 { group.addTask { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle() } }
+        }
+        done.signal()
+    }
+    try expect(done.wait(timeout: .now() + 10) == .success, "the burst settled")
+    try expect(counter.count == 1, "thirty failures started \(counter.count) askings, not one")
+    // Past the window the next failure asks again.
+    SupabaseRoute.forgetAsking()
+    let again = DispatchSemaphore(value: 0)
+    Task.detached { SupabaseRoute.askAgain(); _ = await SupabaseRoute.settle(); again.signal() }
+    try expect(again.wait(timeout: .now() + 10) == .success)
+    try expect(counter.count == 2, "a later failure asks again")
+}
+
 func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StubDropProtocol.self]
@@ -5703,6 +5774,54 @@ func aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly() throws {
     try expect(!SupabaseRoute.retriesDropped(lost, request: get, onProject: true, path: .unreachable))
     try expect(SupabaseRoute.retriesDropped(lost, request: get, onProject: false, path: .unreachable), "the site is not the project")
     try expect(!SupabaseRoute.retriesDropped(CancellationError(), request: get, onProject: false, path: .direct))
+    // Which failures start a new asking and which share the last one.
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    func asks(after seconds: TimeInterval, decidedAfter: TimeInterval?, _ chosen: SupabaseRoute.Path) -> Bool {
+        SupabaseRoute.asksAgain(now: t0.addingTimeInterval(seconds), started: t0,
+                                decided: decidedAfter.map { t0.addingTimeInterval($0) } ?? t0.addingTimeInterval(-60), chosen: chosen)
+    }
+    try expect(!asks(after: 0.1, decidedAfter: nil, .direct), "a second failure in the same blink shares the probe in flight")
+    try expect(!asks(after: 3.0, decidedAfter: nil, .direct), "a probe at its 3.0 s limit is still shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .direct), "a fresh answer that a way is open is shared")
+    try expect(!asks(after: 1, decidedAfter: 0.4, .proxy))
+    try expect(asks(after: 3.6, decidedAfter: 0.4, .direct), "past the window, ask")
+    try expect(SupabaseRoute.shareWindow > SupabaseRoute.probeLimit + 0.5, "longer than the longest probe")
+    try expect(asks(after: 1, decidedAfter: 0.4, .unreachable), "a finished 'no way open' is never reused: Wi-Fi may be back")
+    try expect(!asks(after: 1, decidedAfter: nil, .unreachable), "unreachable from an EARLIER answer, new probe in flight: shared")
+    try expect(SupabaseRoute.asksAgain(now: Date(), started: .distantPast, decided: .distantPast, chosen: .direct), "the first failure of a launch asks")
+    try expect(asks(after: -30, decidedAfter: nil, .direct), "a clock set backwards asks, and does not share until it catches up")
+}
+
+func aPlayerIsRetunedOnlyForTheNetwork() throws {
+    func retunes(_ error: Error?, _ logged: [(domain: String, code: Int)] = [], stalled: Bool = false) -> Bool {
+        SupabaseRoute.retunesPlayback(error: error, logged: logged, stalled: stalled)
+    }
+    for code in [URLError.Code.timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .secureConnectionFailed] {
+        try expect(retunes(URLError(code)), "\(code.rawValue) is the network")
+    }
+    let wrapped = NSError(domain: "AVFoundationErrorDomain", code: -11800,
+                          userInfo: [NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost)])
+    try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
+    try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
+    try expect(!retunes(URLError(.userAuthenticationRequired)))
+    try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
+    try expect(!retunes(nil), "an item failure with no cause")
+    try expect(retunes(nil, stalled: true), "a carrier that stopped sending")
+    try expect(retunes(nil, [(NSURLErrorDomain, NSURLErrorTimedOut)], stalled: true))
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", 404)], stalled: true), "a stall after a 404 is not the network")
+    try expect(!retunes(URLError(.networkConnectionLost), [("CoreMediaErrorDomain", 403)]), "a gate refused once stays shut")
+    try expect(!retunes(nil, [("CoreMediaErrorDomain", -12937)], stalled: true), "an authentication error stays shut")
+    // The newest entry's age: a network blip long ago earns a later item failure nothing, while
+    // an old answer that came back still says the stall is not the network.
+    let timedOut = [(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)]
+    let old = SupabaseRoute.logRecency + 1
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: 20, stalled: false), "a recent timeout")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: false), "an old timeout, a failure now")
+    try expect(!SupabaseRoute.retunesPlayback(error: URLError(.badServerResponse), logged: timedOut, lastAge: old, stalled: false))
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: old, stalled: true), "a stall is the network by itself")
+    try expect(!SupabaseRoute.retunesPlayback(error: nil, logged: [("CoreMediaErrorDomain", 404)], lastAge: old, stalled: true),
+               "an old 404 still says a stall is not the network")
+    try expect(SupabaseRoute.retunesPlayback(error: nil, logged: timedOut, lastAge: nil, stalled: false), "an undated entry counts")
 }
 
 func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
@@ -5775,9 +5894,132 @@ func storedSubtitlesAnswer() throws {
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
 }
 
+/// The schedule kept on the device: its ETag is offered only with its body, and a new month
+/// replaces the old one.
+func scheduleCacheKeepsOneMonthWithItsTag() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kj-schedule-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let cache = ScheduleCache(directory: dir)
+    // Nothing held: nothing to offer (negative case).
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    cache.store(Data("{\"a\":1}".utf8), etag: "\"e1\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e1\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"a\":1}".utf8))
+    // A body gone (purged) takes its tag with it: no 304 can be asked for with nothing to answer it.
+    try FileManager.default.removeItem(at: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A file holding a tag and no body offers neither (negative case).
+    try Data("\"e9\"\n".utf8).write(to: dir.appendingPathComponent("programming-2026-11.cache"))
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    // A tag that would break the one-line header, or an empty one, is not kept.
+    cache.store(Data("{}".utf8), etag: "\"a\nb\"", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    cache.store(Data("{}".utf8), etag: "", month: "2026-11")
+    try expect(cache.etag(month: "2026-11") == nil)
+    // Two stores: the pair on disk is always one store's tag with that store's body.
+    cache.store(Data("{\"old\":1}".utf8), etag: "\"e-old\"", month: "2026-11")
+    cache.store(Data("{\"new\":1}".utf8), etag: "\"e-new\"", month: "2026-11")
+    try expectEqual(cache.etag(month: "2026-11"), "\"e-new\"")
+    try expectEqual(cache.data(month: "2026-11"), Data("{\"new\":1}".utf8))
+    // The next month drops the last.
+    cache.store(Data("{}".utf8), etag: "\"e1\"", month: "2026-11")
+    cache.store(Data("{\"b\":2}".utf8), etag: "\"e2\"", month: "2026-12")
+    try expect(cache.etag(month: "2026-11") == nil && cache.data(month: "2026-11") == nil)
+    try expectEqual(cache.etag(month: "2026-12"), "\"e2\"")
+    try expectEqual(try FileManager.default.contentsOfDirectory(atPath: dir.path).count, 1)
+    // clear() drops every month.
+    cache.clear()
+    try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
+}
+
+func visualizerShuffleBagShowsEveryPiece() throws {
+    let rows = (1...5).map { VisualizerPiece(id: "p\($0)", title: nil, category: nil, seconds: 1800, play_url: "u", reverent: nil) }
+        + [VisualizerPiece(id: "n", title: nil, category: "Nature", seconds: 900, play_url: "u", reverent: true)]
+    var seen: [String] = [], shown: [String] = []
+    for k in 0..<6 {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: Double(k % 3) / 3, startRoll: 0.5))
+        try expect(!shown.contains(d.piece.id), "a piece came back before every piece had its turn")
+        try expect(d.offset >= 0 && d.offset + 60 <= d.piece.seconds, "the start point lies inside the piece")
+        shown.append(d.piece.id); seen = d.seen
+    }
+    try expectEqual(Set(shown), Set(["p1", "p2", "p3", "p4", "p5", "n"]))
+    // The bag refills, never with the piece just shown.
+    for roll in [0.0, 0.5, 0.99] {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: roll, startRoll: 0))
+        try expect(d.piece.id != shown.last, "the refill repeated the piece just shown")
+        try expectEqual(d.seen, [d.piece.id])
+    }
+    // Nature only on a reverent channel; a sound channel draws every piece, Nature too.
+    try expectEqual(Visualizer.draw(rows, reverent: true, seen: [], roll: 0.7, startRoll: 0)?.piece.id, "n")
+    try expectEqual(Visualizer.draw(rows, reverent: false, seen: ["p1", "p2", "p3", "p4", "p5"], roll: 0, startRoll: 0)?.piece.id, "n")
+    try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
+    try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+}
+
+func visualizerPicksByTheHalfHour() throws {
+    let rows = Visualizer.rows(from: Data("""
+    [{"id":"a","title":"A","category":"Roads","seconds":600,"play_url":"https://x/functions/v1/tv-play?id=a"},
+     {"id":"b","seconds":3600,"play_url":"https://x/functions/v1/tv-play?id=b"},
+     {"id":"n","seconds":900,"play_url":"https://x/functions/v1/tv-play?id=n","reverent":true},
+     {"id":"bad","seconds":0,"play_url":"https://x"},
+     {"id":"nourl","seconds":60,"play_url":""},
+     {"title":"no id"}]
+    """.utf8))
+    try expectEqual(rows.map(\.id), ["a", "b", "n"])
+    // Slot 0 (00:00-00:30 UTC on 1970-01-01... any multiple of 1800 s): index 0 of the sound rows.
+    let t0 = Date(timeIntervalSince1970: 1800 * 999)             // slot 999: index 0 of the three rows
+    var p = try require(Visualizer.pick(rows, reverent: false, now: t0))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 999).truncatingRemainder(dividingBy: 600))
+    try expectEqual(p.until, Date(timeIntervalSince1970: 1800 * 1000))
+    // 29 min later: same piece, offset moved on with the clock.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1799)))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 999 + 1799).truncatingRemainder(dividingBy: 600))
+    // The next half hour: the next piece.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1800)))
+    try expectEqual(p.piece.id, "b")
+    // Reverent channels play nature pieces only; a sound channel reaches Nature in its turn.
+    try expectEqual(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(3600))?.piece.id, "n")
+    try expectEqual(Visualizer.pick(rows, reverent: true, now: t0)?.piece.id, "n")
+    try expect(Visualizer.pick(rows, reverent: true, now: t0.addingTimeInterval(1800))?.piece.id == "n")
+    try expect(Visualizer.pick(rows.filter { $0.reverent != true }, reverent: true, now: t0) == nil)
+    try expect(Visualizer.pick([], reverent: false, now: t0) == nil)
+    // A real duration shorter than the row's still wraps inside the file.
+    try expectClose(Visualizer.offset(of: rows[0], at: Date(timeIntervalSince1970: 1250), duration: 500), 250)
+}
+
+func visualizerModesCycle() throws {
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .nature)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: "nature"), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "dancer", storedNature: "nature"), .nature)
+    // The dancer is never a reverent choice, and nature never a sound one (negative cases).
+    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "dancer"), .nature)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "nature", storedNature: nil), .khajistan)
+    try expectEqual(VisualizerMode.dancer.next(reverent: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: false), .dancer)
+    try expectEqual(VisualizerMode.off.next(reverent: true), .nature)
+    try expectEqual(VisualizerMode.nature.next(reverent: true), .off)
+    try expectEqual(VisualizerMode.khajistan.label, "Visualizer \u{00B7} Khajistan")
+    // The iPhone has no dancer: it cycles off, khajistan, Khajistan by default; a stored dancer reads as the default.
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "off", storedNature: nil, dancer: false), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.off.next(reverent: false, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false, dancer: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Remote: a swipe is told from a press", remoteGestureTellsASwipeFromAPress),
     ("Guide timeline: a run counts its songs", guideRunsCountTheirSongs),
+    ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
+    ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
+    ("visualizerModesCycle", visualizerModesCycle),
+    ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
@@ -5809,6 +6051,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Site sign-in outcomes", gateOutcomes),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
     ("Deep links parse", deepLinksParse),
@@ -5870,6 +6113,8 @@ let tests: [(String, () throws -> Void)] = [
     ("StationClock matches the site's JS (differential)", stationClockMatchesTheJS),
     ("StationClock matches the site's JS past midnight (seconds, prev_day)", stationClockMatchesTheJSPastMidnight),
     ("A dropped connection is sent once more, for GET and HEAD only", aDroppedConnectionIsSentOnceMoreForARepeatableRequestOnly),
+    ("A player is retuned only for the network, never past a refusal", aPlayerIsRetunedOnlyForTheNetwork),
+    ("A burst of failed requests starts one network check, not one each", aBurstOfFailuresStartsOneAsking),
     ("The differential comparator can fail", differentialComparatorCanFail),
     ("Edges and the end of the grid", stationClockEdgesAndTheEndOfTheGrid),
     ("following() at every fixture instant", followingAgreesWithTheRosterAtEveryFixtureInstant),
@@ -5897,6 +6142,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Pics/Vids: the page's requests", pnvRequests),
     ("Pics/Vids: Content-Range totals", pnvContentRange),
     ("Pics/Vids: account keys follow the roster and the fold", pnvAccountKeysFollowTheRosterAndTheFold),
+    ("Pics/Vids: the Reel skips a broken video in the direction of the press", pnvReelSkipsInTheDirectionOfThePress),
     ("Pics/Vids: the summary line", pnvSummaryLine),
     ("Pics/Vids: captions", pnvCaptions),
     ("Pics/Vids: the viewer's meta line", pnvMetaLine),

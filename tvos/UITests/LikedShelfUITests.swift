@@ -1,7 +1,8 @@
 import XCTest
 
-/// The account's liked channels are the first shelf under the map (owner, 2026-11-08: "add liked
-/// channels on homepage for an account so they are easily accessible"). A Debug build takes the
+/// The account's liked channels are a shelf on Home (owner, 2026-11-08: "add liked channels on
+/// homepage for an account so they are easily accessible"), the last one on the page since
+/// 2026-11-21 (owner: "put liked video at the botton of the page"). A Debug build takes the
 /// likes from `-kjlikedrefs`, so no account is signed in here.
 final class LikedShelfUITests: XCTestCase {
     /// Newest first. The last ref names no channel and must not be drawn.
@@ -18,7 +19,7 @@ final class LikedShelfUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    func testLikedShelfIsOnePressDownFromTheMap() {
+    func testLikedShelfIsTheLastOnHome() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs, "-kjfixturesonly", "YES"]
         kjLaunch(app)
@@ -32,10 +33,14 @@ final class LikedShelfUITests: XCTestCase {
         XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix("Al Arabiya"), "newest like first, got \(cards.element(boundBy: 0).label)")
         XCTAssertFalse(cards.element(boundBy: 0).label.contains("Liked"), "no second 'Liked' on a card of the Liked shelf")
 
-        XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
+        XCUIRemote.shared.press(.down)
+        kjPause(1)
+        XCTAssertFalse(focusedID(app).hasPrefix("liked-"), "Liked is not the first shelf under the front, got \(focusedID(app))")
+        XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches the Liked shelf")
         XCUIRemote.shared.press(.down)
         kjPause(6)   // stills arrive one at a time
-        XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "one press down from the strip lands on Liked, got \(focusedID(app))")
+        XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "nothing under Liked: down stays on it, got \(focusedID(app))")
         kjScreenshot("liked-shelf-focused", app: app)
 
         let firstId = String(focusedID(app).dropFirst("liked-".count))
@@ -49,7 +54,7 @@ final class LikedShelfUITests: XCTestCase {
         kjScreenshot("liked-player", app: app)
     }
 
-    /// Signed out and with no likes there is no shelf, and down from the strip goes to the genres.
+    /// Signed out and with no likes there is no shelf, and down from the front goes to the genres.
     func testNoLikesNoShelf() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
@@ -68,10 +73,10 @@ final class LikedShelfUITests: XCTestCase {
             kjLaunch(app)
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")
-            XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip in \(skin)")
-            XCUIRemote.shared.press(.down)
+            XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front in \(skin)")
+            XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches Liked in \(skin)")
             kjPause(6)   // stills arrive one at a time
-            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "down lands on Liked in \(skin), got \(focusedID(app))")
+            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "focus is on Liked in \(skin), got \(focusedID(app))")
             let pictured = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-' AND label CONTAINS 'live picture'"))
             let one = NSPredicate { _, _ in pictured.count >= 1 }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: one, object: nil)], timeout: 60), .completed,

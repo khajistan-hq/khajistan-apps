@@ -368,3 +368,57 @@ struct StoredSubtitles: Equatable, Sendable {
     }
 
 }
+
+/// The month's schedule kept on the device with the ETag it came with, so a launch asks the site
+/// only whether it changed. programming-2026-11.json is 8.8 MB (1.45 MB compressed, about 7 s
+/// to fetch); unchanged, the site answers If-None-Match with a 0-byte 304 in about 1 s.
+struct ScheduleCache: Sendable {
+    let directory: URL
+
+    static let shared = ScheduleCache(directory: FileManager.default
+        .urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("schedule", isDirectory: true))
+
+    /// One file per month: the ETag, a newline, then the body. Tag and body are written in one
+    /// atomic write, so two stores that overlap leave one whole pair, never one's tag on the
+    /// other's body.
+    private func file(_ month: String) -> URL { directory.appendingPathComponent("programming-\(month).cache") }
+    private static let newline = UInt8(ascii: "\n")
+    private static let maxTag = 1024
+    /// Well inside the head read by etag(), which needs the newline and a body byte in it.
+    private static let maxStoredTag = 512
+
+    /// The ETag to send as If-None-Match: read from the head of the file, so the body comes with it.
+    func etag(month: String) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file(month)) else { return nil }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: Self.maxTag),
+              let end = head.firstIndex(of: Self.newline), end > head.startIndex,
+              head.count > end - head.startIndex + 1 else { return nil }
+        return String(decoding: head[head.startIndex..<end], as: UTF8.self)
+    }
+
+    /// The body kept with the tag; nil when the file is missing, torn or has no body.
+    func data(month: String) -> Data? {
+        guard let all = try? Data(contentsOf: file(month)),
+              let end = all.prefix(Self.maxTag).firstIndex(of: Self.newline) else { return nil }
+        let body = all[(end + 1)...]
+        return body.isEmpty ? nil : Data(body)
+    }
+
+    /// Keeps this month's schedule and drops every other month's.
+    func store(_ data: Data, etag: String, month: String) {
+        guard !etag.isEmpty, etag.utf8.count <= Self.maxStoredTag, !etag.contains("\n"), !data.isEmpty else { return }
+        clear()
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try? (Data(etag.utf8) + [Self.newline] + data).write(to: file(month), options: .atomic)
+    }
+
+    /// Drops every kept month: a body that will not decode, or the preview password cleared.
+    func clear() {
+        let fm = FileManager.default
+        for name in (try? fm.contentsOfDirectory(atPath: directory.path)) ?? [] {
+            try? fm.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+}

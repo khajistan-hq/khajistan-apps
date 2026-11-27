@@ -170,8 +170,11 @@ private struct ChannelCard: View {
 struct TransmissionPlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var overlay = OverlayClock()
     @State private var showSignIn = false
+    /// One retune for a viewer who is signed in but was still shown "Sign in"; after it the button opens the form.
+    @State private var retriedSignedIn = false
 
     private var store: TransmissionStore { model.transmission }
 
@@ -197,7 +200,14 @@ struct TransmissionPlayerView: View {
         }
         // The receiver was turned off, or switched to a live channel, while this was up.
         .onChange(of: isTransmission) { _, on in if !on { dismiss() } }
-        .onAppear { overlay.wake(settled: store.player.state == .playing) }
+        .onAppear {
+            overlay.wake(settled: store.player.state == .playing)
+            // Signed in on another screen while this one was asking: opening it is the request to watch.
+            if store.phase == .needsSignIn, model.auth.session != nil, !retriedSignedIn {
+                retriedSignedIn = true
+                Task { await store.tune(channel: store.channelNumber) }
+            }
+        }
         .onDisappear { overlay.stop() }
         .sheet(isPresented: $showSignIn) {
             SignInView(model: model, onSignedIn: { await store.tune(channel: store.channelNumber) })
@@ -223,7 +233,14 @@ struct TransmissionPlayerView: View {
             }
         case .needsSignIn:
             message("Sign in to watch Khajistan Transmission.") {
-                Button(kicker: "Sign in") { showSignIn = true }.buttonStyle(HouseButtonStyle(solid: true))
+                Button(kicker: "Sign in") {
+                    // Signed in already: try the channel once. If the server still asks (the session
+                    // was ended elsewhere), the next press opens the sign-in form, as it always did.
+                    if model.auth.session != nil, !retriedSignedIn {
+                        retriedSignedIn = true
+                        Task { await store.tune(channel: store.channelNumber) }
+                    } else { showSignIn = true }
+                }.buttonStyle(HouseButtonStyle(solid: true))
             }
         case .offAir(channelName: let name, returns: let returns):
             message(returns.map { "\(name) returns at \($0)." } ?? "\(name) is off air.", title: "Off air") {
@@ -263,11 +280,14 @@ struct TransmissionPlayerView: View {
     private func onAir(_ air: OnAir, _ palette: Palette) -> some View {
         ZStack {
             if air.programme?.audio_only == true {
-                VStack(spacing: 12) {
-                    Kicker("\(store.channelName(store.channelNumber)) \u{00B7} sound only")
-                    Text(headline(air)).kjDisplay().multilineTextAlignment(.center)
+                // Sound only: the title on the ground, and the visualizer the viewer chose behind it.
+                VisualizerStage(controller: store.player, reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
+                    VStack(spacing: 12) {
+                        Kicker("\(store.channelName(store.channelNumber)) \u{00B7} sound only")
+                        Text(headline(air)).kjDisplay().multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, KJLayout.inset)
                 }
-                .padding(.horizontal, KJLayout.inset)
             } else {
                 Color.black.ignoresSafeArea()
                 PlayerLayerView(player: store.player.player, soundCarriesInBackground: true).ignoresSafeArea()
@@ -296,6 +316,11 @@ struct TransmissionPlayerView: View {
             if !model.tuner.song.isEmpty { Text("Now playing: " + model.tuner.song).kjBody().lineLimit(2) }
             if let custodian = nonEmpty(air.programme?.custodian) { Text(custodian).kjSmall(faint: true) }
             if let transfer = nonEmpty(air.programme?.transfer) { Text(transfer).kjSmall(faint: true) }
+            if soundOnly && !reduceMotion {
+                VisualizerButton(reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
+                    overlay.wake(settled: false)
+                }
+            }
             TransportRow(isPlaying: store.player.state == .playing, toggle: playPause)
             Text("Swipe up or down to switch channel.").kjSmall(faint: true)
         }

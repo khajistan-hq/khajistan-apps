@@ -66,6 +66,31 @@ final class TransmissionStore {
         config.requestCachePolicy = .reloadIgnoringLocalCacheData
         config.httpAdditionalHeaders = ["User-Agent": KJConfig.userAgent]
         urlSession = URLSession(configuration: config)
+        _ = auth.observeAccess { [weak self] in self?.accessDidChange() }
+    }
+
+    /// Sign-out ends the programme at once and asks for a sign-in, as on Apple TV; before this the
+    /// programme played on to its next handover. A change of account while a programme is up tunes
+    /// the same channel again under the new account. A sign-in while the screen is asking for one
+    /// changes nothing here: that screen's own sheet tunes when it closes, and a sign-in made from
+    /// another screen must not start a programme nobody asked for. Off air, a failure and idle
+    /// are left alone for the same reason.
+    func accessDidChange() {
+        guard phase != .idle else { return }
+        guard auth.session != nil else {
+            stop()
+            phase = .needsSignIn
+            return
+        }
+        // Only a programme that is up, or on its way up, is tuned again. An Off air or a failed
+        // screen left open must not start sound because the viewer signed in on another screen.
+        switch phase {
+        case .onAir, .tuning: break
+        default: return
+        }
+        let channel = channelNumber
+        stop()
+        Task { await tune(channel: channel) }
     }
 
     // MARK: - What the schedule says
@@ -416,11 +441,18 @@ final class TransmissionStore {
         return url
     }
 
+    /// The reverent rule for a house channel, read from the show's name, as the Apple TV app reads
+    /// it: a reverent programme plays nature visualizers only.
+    static func isReverent(_ air: OnAir, channel: Int) -> Bool {
+        let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
+        return Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
+    }
+
     /// Five vinyl transfers carry no title; the show name stands in for it.
     private func nowPlayingTitle(_ air: OnAir) -> String {
         let title = air.programme?.title ?? ""
         if !title.isEmpty { return title }
-        return air.show?.name ?? "Khajistan TV"
+        return air.show?.name ?? "Khajistan Transmission"
     }
 }
 

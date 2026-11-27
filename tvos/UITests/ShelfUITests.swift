@@ -47,7 +47,7 @@ final class ShelfUITests: XCTestCase {
         }
     }
 
-    /// Down from the strip: the genre shelves first, News leading (2026-11-04), as many as the
+    /// Down from the foot of the front: the genre shelves first, News leading (2026-11-04), as many as the
     /// live lists fill, then the parts of Khajistan. Returns how many genre shelves were crossed.
     private func downPastGenres(_ skin: String, _ app: XCUIApplication) -> Int {
         // The genre shelves arrive after every region list has been read: wait for them, or the
@@ -55,13 +55,13 @@ final class ShelfUITests: XCTestCase {
         let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-news-'"))
         XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "\(skin): the front carries a News shelf")
         press(.down, app: app)
-        XCTAssertTrue(focusedID(app).hasPrefix("genre-news-"), "\(skin): the first shelf under the strip is News, got \(focusedID(app))")
+        XCTAssertTrue(focusedID(app).hasPrefix("genre-news-"), "\(skin): the first shelf under the front is News, got \(focusedID(app))")
         var crossed = 0
         while crossed < 10, focusedID(app).hasPrefix("genre-") {
             crossed += 1
             press(.down, app: app)
         }
-        XCTAssertGreaterThan(crossed, 0, "\(skin): at least the News shelf sits between the strip and the parts of Khajistan")
+        XCTAssertGreaterThan(crossed, 0, "\(skin): at least the News shelf sits between the front and the parts of Khajistan")
         return crossed
     }
 
@@ -71,22 +71,18 @@ final class ShelfUITests: XCTestCase {
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "\(skin): the front must draw its regions")
             kjPause(4)
-            // Focus starts on the top bar's tab; down reaches the strip.
-            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-            XCTAssertTrue(focusedID(app).hasPrefix("region-"), "\(skin): down from the top bar reaches the strip")
-            for _ in 0..<30 where focusedID(app) != "region-indus" { press(.right, app: app) }
-            XCTAssertEqual(focusedID(app), "region-indus", "\(skin): the walk east along the strip reaches Indus")
+            // The A–Z list beside the map is the front's way to a region (2026-11-17).
+            XCTAssertTrue(kjFocusRegion(app, "indus"), "\(skin): the walk down the region list reaches Indus")
+            XCTAssertEqual(focusedID(app), "region-indus")
             shot("\(skin)-1-receiver-front", app)
+            // The shelves start one press down from the foot of the front.
+            XCTAssertTrue(kjFocusFrontFoot(app), "\(skin): focus reaches the Beyond the atlas switch")
 
-            // Under the strip, the genre shelves (News first), then every part of Khajistan as a
-            // tile (owner, 2026-10-29), then Cameras, a plate per region that has them (owner,
-            // 2026-10-07), then the Screening Room, which loads only with the preview password.
+            // Under the front, the genre shelves (News first), then Cameras, a plate per region
+            // that has them (owner, 2026-10-07), then the Screening Room, which loads only with the
+            // preview password. The shelf of every part of Khajistan is gone (owner, 2026-11-21).
             let genres = downPastGenres(skin, app)
-            XCTAssertTrue(focusedID(app).hasPrefix("home-door-"), "\(skin): down past the genre shelves lands on the parts of Khajistan, got \(focusedID(app))")
-            kjPause(1)
-            shot("\(skin)-2-receiver-doors-shelf", app)
-            press(.down, app: app)
-            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): the next shelf down is Cameras, got \(focusedID(app))")
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down past the genre shelves lands on Cameras, got \(focusedID(app))")
             shot("\(skin)-2-receiver-cameras-shelf", app)
             let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
             if films.firstMatch.waitForExistence(timeout: 30) {
@@ -96,9 +92,9 @@ final class ShelfUITests: XCTestCase {
                 shot("\(skin)-2-receiver-films-shelf", app)
                 press(.up, app: app)
             }
-            // Up through the parts of Khajistan and the genre shelves returns to the front: the
-            // strip, or the sidebar's switch, which is what sits straight above the left-most tile.
-            press(.up, times: 2 + genres, app: app)
+            // Up through Cameras and the genre shelves returns to the front: the sidebar's
+            // switch, which sits straight above the left-most card, or the list.
+            press(.up, times: 1 + genres, app: app)
             let back = focusedID(app)
             XCTAssertTrue(back.hasPrefix("region-") || back == "beyondTheAtlas", "\(skin): up from the first shelf returns to the front, got \(back)")
             app.terminate()
@@ -111,11 +107,10 @@ final class ShelfUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
         kjPause(3)
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus must reach the foot of the front")
         _ = downPastGenres("day", app)
-        press(.down, app: app)   // past the parts of Khajistan, to Cameras
         let plate = focusedID(app)
-        XCTAssertTrue(plate.hasPrefix("cameras-"), "down past the genre shelves and the parts of Khajistan lands on a Cameras plate, got \(plate)")
+        XCTAssertTrue(plate.hasPrefix("cameras-"), "down past the genre shelves lands on a Cameras plate, got \(plate)")
         XCUIRemote.shared.press(.select)
         let shelf = app.descendants(matching: .any)["shelf-camera"]
         XCTAssertTrue(shelf.waitForExistence(timeout: 60), "\(plate): the region page carries its cameras")
@@ -133,8 +128,7 @@ final class ShelfUITests: XCTestCase {
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
             kjPause(3)
-            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-            for _ in 0..<30 where focusedID(app) != "region-indus" { press(.right, app: app) }
+            XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
             XCTAssertEqual(focusedID(app), "region-indus")
             XCUIRemote.shared.press(.select)
             let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
@@ -210,7 +204,7 @@ final class ShelfUITests: XCTestCase {
             kjPause(2)
             shot("pv-\(skin)-3-lower-shelves", app)
             // The one filter, above the shelves: Videos narrows every shelf.
-            XCTAssertTrue(kjFocus(app.buttons["pnvkind-video"], app: app), "\(skin): Videos takes focus")
+            XCTAssertTrue(kjFocus(app.buttons["pnvkind-video"], app: app), "\(skin): Videos takes focus; focus is held by \(kjFocusKey(app))")
             XCUIRemote.shared.press(.select)
             kjPause(8)
             shot("pv-\(skin)-4-videos", app)

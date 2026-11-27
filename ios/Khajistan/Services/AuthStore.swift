@@ -26,6 +26,8 @@ final class AuthStore {
     }
     private(set) var previewPassword: String?
     @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
+    /// Called whenever a session ends: Sign out, or a refresh the server refused.
+    @ObservationIgnored var onSessionEnd: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -114,9 +116,12 @@ final class AuthStore {
     }
 
     /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
+    /// The preview password goes too, as on the Apple TV: a Mac or iPad can be shared (owner,
+    /// 2026-11-14). A refused refresh keeps it; only a chosen sign-out clears it.
     func signOut() async {
         let token = session?.accessToken
         clearSession()
+        clearPreviewPassword()
         guard let token else { return }
         _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
     }
@@ -128,7 +133,7 @@ final class AuthStore {
         if UserDefaults.standard.bool(forKey: "kjtestsignedout") { throw AuthStoreError.unavailable }
         #endif
         guard let current = session else {
-            throw AuthError.server("Sign in to watch Khajistan TV.")
+            throw AuthError.server("Sign in to watch Khajistan Transmission.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
         // One refresh at a time: every caller waits on the same request. Parallel refreshes sent
@@ -192,5 +197,6 @@ final class AuthStore {
         session = nil
         pendingFactorId = nil
         Keychain.delete(Account.session)
+        onSessionEnd?()
     }
 }

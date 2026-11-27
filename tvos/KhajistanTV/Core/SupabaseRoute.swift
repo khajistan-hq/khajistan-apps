@@ -30,11 +30,12 @@ enum SupabaseRoute {
 
     private static let key = "kj.supabaseRoute"
     /// How long either way gets to answer before it counts as unreachable.
-    private static let probeLimit: TimeInterval = 2.5
+    static let probeLimit: TimeInterval = 2.5
     private static let lock = NSLock()
     nonisolated(unsafe) private static var chosen = Path(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .direct
     nonisolated(unsafe) private static var settling: Task<Path, Never>?
     nonisolated(unsafe) private static var decidedAt = Date.distantPast
+    nonisolated(unsafe) private static var settlingStarted = Date.distantPast
     /// While neither way answers, how often a request may ask again before it fails at once.
     private static let recheckEvery: TimeInterval = 10
 
@@ -87,7 +88,7 @@ enum SupabaseRoute {
     static func ready() async -> Path {
         // Nothing answered last time: ask again now, as the screen opens (at most `probeLimit`).
         if path == .unreachable {
-            lock.withLock { settling = nil }
+            askAgain()
             return await settle()
         }
         if UserDefaults.standard.string(forKey: key) != nil {
@@ -97,24 +98,58 @@ enum SupabaseRoute {
         return await settle()
     }
 
+    /// What an asking runs. The two probes, except in the test that counts how many askings a
+    /// burst of failures starts.
+    nonisolated(unsafe) static var decider: @Sendable () async -> Path = { await decide() }
+
+    /// Forgets the asking outright, for a test to start from a known state.
+    static func forgetAsking() { lock.withLock { settling = nil; settlingStarted = .distantPast } }
+
     /// Asks both ways once per launch; a second caller waits for the same answer.
     @discardableResult
     static func settle() async -> Path {
         let task: Task<Path, Never> = lock.withLock {
             if let settling { return settling }
-            let made = Task.detached(priority: .userInitiated) { await decide() }
+            let made = Task.detached(priority: .userInitiated) { await decider() }
             settling = made
+            settlingStarted = Date()
             return made
         }
         return await task.value
     }
+
+    /// Forgets the last answer so the next `settle()` asks both ways again, unless that asking began
+    /// within the last `shareWindow` seconds. Thirty cover loads failing in one Wi-Fi blink each
+    /// called this and each began its own pair of probes, the last to finish choosing the route;
+    /// now they share the one already under way.
+    static func askAgain() {
+        lock.withLock {
+            if asksAgain(now: Date(), started: settlingStarted, decided: decidedAt, chosen: chosen) { settling = nil }
+        }
+    }
+
+    /// Whether a failure or a screen opening starts a new asking, or shares the last one.
+    /// - An asking that began within `shareWindow` is still under way or just answered: share it.
+    ///   The window is longer than the longest a probe can run (`probeLimit` + 0.5 s resource
+    ///   timeout), so a failure can never start a second asking while the first is in flight.
+    /// - Except an asking that has FINISHED with no way open (`decided` at or after `started`):
+    ///   the network may be back, and a screen opening or a Try again must ask. While that
+    ///   asking is still in flight (`decided` is the earlier answer's time) it is shared.
+    static func asksAgain(now: Date, started: Date, decided: Date, chosen: Path) -> Bool {
+        if chosen == .unreachable && decided >= started { return true }
+        // A clock set backwards makes the age negative: ask, or the last answer would be shared
+        // for as long as the clock takes to catch up.
+        let age = now.timeIntervalSince(started)
+        return age < 0 || age > shareWindow
+    }
+    static let shareWindow: TimeInterval = probeLimit + 1
 
     /// A request on the project could not connect: ask both ways again, and say whether there is now
     /// a working route other than the one that failed, so the caller can try once more on it.
     static func reconsider(after error: Error) async -> Bool {
         guard isUnreachable(error) else { return false }
         let before = path
-        lock.withLock { settling = nil }
+        askAgain()
         let after = await settle()
         return after != before && after != .unreachable
     }
@@ -133,7 +168,7 @@ enum SupabaseRoute {
             // Ask again now and then, so the apps come back by themselves when the network does.
             let stale = lock.withLock { Date().timeIntervalSince(decidedAt) > recheckEvery }
             if stale {
-                lock.withLock { settling = nil }
+                askAgain()
                 _ = await settle()
             }
             if path == .unreachable { throw URLError(.cannotConnectToHost) }
@@ -176,6 +211,40 @@ enum SupabaseRoute {
     /// The project's own host, or the proxy's path on the site.
     static func isProject(_ url: URL) -> Bool {
         url.host == host || url.host == directBase.host || (url.host == proxyBase.host && url.path.hasPrefix(proxyBase.path + "/"))
+    }
+
+    /// The network failures a player is retuned once for: a request that ran out of time (-1001),
+    /// a host not reached (-1004), a connection that went away (-1005), no network (-1009), a TLS
+    /// handshake cut off (-1200). Never an answer that came back.
+    static let retunableCodes: Set<Int> = [NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost,
+                                           NSURLErrorNotConnectedToInternet, NSURLErrorSecureConnectionFailed]
+    /// A refusal in a player's error log: HTTP 401/403, and CoreMedia's names for them (-12937
+    /// authentication, -12660 forbidden). An account gate stays shut; it is never retuned.
+    static let refusalCodes: Set<Int> = [401, 403, -12937, -12660]
+
+    /// How old the newest error-log entry may be and still say the failure now was the network.
+    static let logRecency: TimeInterval = 60
+
+    /// Whether a player that failed or stalled gets its one retune. `error` is the failure's own
+    /// (its underlying errors are read too); `logged` is the item's error log, newest last, and
+    /// `lastAge` the newest entry's age in seconds (nil when undated). A stall with nothing
+    /// logged is a carrier that stopped sending, which is the network too.
+    static func retunesPlayback(error: Error?, logged: [(domain: String, code: Int)], lastAge: TimeInterval? = nil,
+                                stalled: Bool) -> Bool {
+        if logged.contains(where: { refusalCodes.contains($0.code) }) { return false }
+        var next = error.map { $0 as NSError }
+        while let cause = next {
+            if refusalCodes.contains(cause.code) { return false }
+            if cause.domain == NSURLErrorDomain, retunableCodes.contains(cause.code) { return true }
+            next = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        if let last = logged.last {
+            // A newest entry that is not the network says so, however old. One that is counts
+            // only while recent: a blip recovered from long ago earns a later failure nothing.
+            guard last.domain == NSURLErrorDomain, retunableCodes.contains(last.code) else { return false }
+            if (lastAge ?? 0) <= logRecency { return true }
+        }
+        return stalled
     }
 
     /// Errors that mean the address could not be reached, as against an answer that came back.

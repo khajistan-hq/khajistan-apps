@@ -259,6 +259,8 @@ struct TVRoomScreen: View {
             }
         }
         .foregroundStyle(palette.ink)
+        // Full screen over the section: the radio bar is covered, so nothing here shrinks for it.
+        .environment(\.underRadioBar, false)
     }
 }
 

@@ -75,7 +75,10 @@ struct ReceiverPlayerView: View {
     @State private var leaving = false
     /// Picture in picture for the two layers (PictureInPicture.swift).
     @State private var pip = PictureInPicture()
-    private enum Chip { case captions, like, guide, pip }
+    private enum Chip { case captions, like, visualizer, guide, pip }
+    /// The viewer's visualizer choice, shared with SoundStage (Core/Visualizer.swift).
+    @AppStorage(VisualizerMode.key) private var visualizerStored = VisualizerMode.khajistan.rawValue
+    @AppStorage(VisualizerMode.natureKey) private var visualizerNatureStored = VisualizerMode.nature.rawValue
     private var captionArmed: Bool { armed == .captions }
     @State private var stripHeight: CGFloat = 0
     @FocusState private var focus: PlayerFocus?
@@ -108,8 +111,9 @@ struct ReceiverPlayerView: View {
                 .ignoresSafeArea()
                 .opacity(aIsFront ? 0 : 1)
             // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
-            // front of the channel's name. The band says live radio; the centre carries the name.
-            DancerLayer(controller: controller) {
+            // front of the channel's name, or the visualizer the viewer chose (SoundStage). The
+            // band says live radio; the centre carries the name.
+            SoundStage(controller: controller, eligible: current.mediaType == "radio", reverent: current.isReverent) {
                 if current.mediaType == "radio" && controller.state == .playing {
                     RadioNowPlaying(channel: current, song: song)
                 }
@@ -227,6 +231,7 @@ struct ReceiverPlayerView: View {
         // A control cannot stay lit on a strip nobody can see: Select would work it blind.
         .onChange(of: stripShown) { _, shown in if !shown { armed = nil } }
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
+        .onChange(of: visualizerOffered) { _, offered in if !offered, armed == .visualizer { armed = nil } }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in wake() }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in wake() }
         .task {
@@ -250,7 +255,12 @@ struct ReceiverPlayerView: View {
             guard current.mediaType == "radio" || current.mediaType == "tv" else { return }
             await NowPlaying.watch(current.id, active: { controller.state == .playing }) { song = $0 }
         }
-        .onDisappear { stopEverything() }
+        // The Receiver is not redrawn under an open player (ReceiverStore.playerDidOpen).
+        .onAppear { model.receiver.playerDidOpen() }
+        .onDisappear {
+            stopEverything()
+            model.receiver.playerDidClose()
+        }
     }
 
     // MARK: - Overlay
@@ -311,6 +321,9 @@ struct ReceiverPlayerView: View {
             wake()
         case .like:
             like()
+            wake()
+        case .visualizer:
+            cycleVisualizer()
             wake()
         case .guide: openGuide()
         case .pip: startPictureInPicture()
@@ -386,6 +399,7 @@ struct ReceiverPlayerView: View {
         HStack(spacing: 14) {
             captionsControl
             likeControl
+            if visualizerOffered { visualizerControl }
             if guideOffered { guideControl }
             if pipOffered { pipControl }
         }
@@ -537,7 +551,11 @@ struct ReceiverPlayerView: View {
     }
 
     /// A channel chosen in the guide: the same change as a press up or down, behind the pigeon.
+    /// The row already on screen is the exception: it closes the guide, as Back does.
     private func pick(_ target: Channel) {
+        // The channel already on screen: exactly Back (the list stays the one it was tuned from,
+        // and a dead signal moves on).
+        guard target.id != (destination ?? current).id else { return closeGuide() }
         stopMovingOn()
         withAnimation(CardMotion.panel(reduceMotion: reduceMotion)) { guideRow = nil }
         armed = nil
@@ -546,7 +564,6 @@ struct ReceiverPlayerView: View {
             list = guideList
             if guideRegion != nil { listRegion = guideRegion; listTitle = nil }
         }
-        guard target.id != (destination ?? current).id else { return wake() }
         if let surfChoice { model.surfHistory.visit(target, for: surfChoice) }
         destination = target
         changeTask?.cancel()
@@ -563,6 +580,33 @@ struct ReceiverPlayerView: View {
             .accessibilityAction { like() }
             .accessibilityAddTraits(armed == .like ? .isSelected : [])
             .accessibilityValue(liked ? "On" : "Off")
+    }
+
+    /// Radio, where the dancer or a visualizer takes the picture's place; not for a viewer who has
+    /// asked for less motion, who gets neither.
+    private var visualizerOffered: Bool {
+        current.mediaType == "radio" && destination == nil && !reduceMotion
+    }
+
+    private var visualizerMode: VisualizerMode {
+        VisualizerMode.current(reverent: current.isReverent, stored: visualizerStored, storedNature: visualizerNatureStored)
+    }
+
+    /// "Visualizer · Dancer", "· Khajistan", "· Off"; "· Nature" or "· Off" on a reverent channel.
+    /// Right lights it, Select cycles it, as Captions.
+    private var visualizerControl: some View {
+        StripChipStyle.face(Text(visualizerMode.label), isOn: visualizerMode != .off, selected: armed == .visualizer)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(visualizerMode.label)
+            .accessibilityIdentifier("visualizerControl")
+            .accessibilityAction { cycleVisualizer(); wake() }
+            .accessibilityAddTraits(armed == .visualizer ? .isSelected : [])
+    }
+
+    private func cycleVisualizer() {
+        let reverent = current.isReverent
+        let next = visualizerMode.next(reverent: reverent).rawValue
+        if reverent { visualizerNatureStored = next } else { visualizerStored = next }
     }
 
     /// "→ " before the first control on the strip while nothing is armed: the strip's controls are
@@ -588,7 +632,9 @@ struct ReceiverPlayerView: View {
             // the guide (owner, 2026-11-04). Left past CC on the strip stops there (owner, 2026-11-07).
             if stripWasUp, !isFailed { armed = .captions } else { openGuide() }
         case .captions: armed = .like
-        case .like: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .like:
+            if visualizerOffered { armed = .visualizer } else if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
+        case .visualizer: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .guide: if pipOffered { armed = .pip }
         case .pip: break
         }
@@ -598,8 +644,9 @@ struct ReceiverPlayerView: View {
 
     private func moveLeft(onStrip: Bool) {
         switch armed {
-        case .pip: armed = guideOffered ? .guide : .like
-        case .guide: armed = .like
+        case .pip: armed = guideOffered ? .guide : visualizerOffered ? .visualizer : .like
+        case .guide: armed = visualizerOffered ? .visualizer : .like
+        case .visualizer: armed = .like
         case .like: armed = .captions
         case .captions: armed = nil
         // Left or right on the bare picture opens the guide, as a live TV app does (owner,
@@ -981,6 +1028,7 @@ struct RadioBar: View {
     @Environment(\.palette) private var palette
     /// The song while the radio plays on under the screens (NowPlaying).
     @State private var song = ""
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         let state = away.controller.state
@@ -1007,6 +1055,7 @@ struct RadioBar: View {
             .buttonStyle(OnBandStyle())
             .accessibilityHint("Opens the channel full screen")
             .accessibilityIdentifier("radioBarName")
+            .focused($nameFocused)
             // Play tunes the station afresh, full screen, as the player's own Play does: a live
             // signal paused or stopped is not the live signal any more.
             Button {
@@ -1036,6 +1085,7 @@ struct RadioBar: View {
         .focusSection()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("radioBar")
+        .onChange(of: model.radioBarFocusRequests) { nameFocused = true }
         .task(id: away.channel.id) {
             song = ""
             await NowPlaying.watch(away.channel.id, active: { away.controller.state == .playing }) { song = $0 }

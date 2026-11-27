@@ -848,6 +848,12 @@ enum RRPageDisk {
 
     static func remove(_ path: String) { try? FileManager.default.removeItem(at: file(path)) }
 
+    /// Sign-out: no page a signed-in reader opened stays on the device.
+    static func purge() {
+        try? FileManager.default.removeItem(at: folder)
+        RRPrivateFiles.prepare(folder)
+    }
+
     static func read(_ path: String) -> Data? {
         let url = file(path)
         guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,

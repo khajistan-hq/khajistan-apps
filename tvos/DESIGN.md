@@ -100,27 +100,32 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 ## The Receiver
 
-- **Front = the map.** Left: RECEIVER (display), the website's own sentence *Live television,
-  live radio and public cameras from the Middle World.*, the four figures (LIVE NOW,
-  TELEVISION, RADIO, CAMERAS) from `receiver-index.json`, and the *Beyond the atlas* switch with
-  its line *The wider Islamicate, Rumelia to Nusantara*. Right: the map from
+- **Front = the map** (simplified 2026-11-17, owner: "simplify home page", three choices made
+  that day). Left: **Surf** (focused at launch), one row of chips **All · TV · Radio**, the
+  **Live now** figure from `receiver-index.json`, and the *Beyond the atlas* switch with no second
+  line. No RECEIVER title: the top bar underlines the section. Middle: the map from
   `/data/region-shapes.json` (and `-extended.json` with the switch on), drawn as the website
   draws it — fills from the data (`#050505` → mapTint, `#006F00` → mapDeep), the people's
   regions hatched (9pt stripes at 45°, black at 32%), regions with no channels at 48%, the
   extensions in mapTint at 50%, labels in yellow with a black halo, the native name beneath,
-  the live count under that. The map is a picture, not a control: under it runs a strip of
-  every region with channels, name and live count, west to east by centroid, so right on the
-  remote moves east. The region focused in the strip gains a 3.5pt yellow outline on the map
-  and its label sits on a yellow plate with black text. Select opens the region. (Until
-  2026-10-05 each label was its own focus point; tvOS moves focus only along the press, and
-  on the owner's TV focus stuck on one region.)
-- **Shelf under the front.** The sidebar, the map and its strip are the first screen; the page
-  scrolls to the Screening Room's full-width shelf under it, as the TV app lays its rows, peeking
-  at the bottom of the first screen. The Khajistan Radio mixes are not on the TV (owner,
-  2026-10-06): they play as programmes on Transmission's channel 2, the website's sound channel.
+  the live count under that. The map is a picture, not a control. Right: **Regions A–Z**, every
+  region with channels and its live count; the row focused lights its region on the map (a
+  3.5pt yellow outline, its label on a yellow plate with black text), and Select opens it. The
+  list is the front's one way to a region: the picture strip that ran under the map (2026-10-29)
+  went on 2026-11-17, and the region page carries the pictures. Surf draws from any genre; the
+  genre row (2026-11-04) went the same day, because the Music and Film & drama shelves surf
+  their genre in the player.
+- **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
+  shelf (Liked, or News) peeks under them with its live pictures, as the TV app lays its rows.
+  In the store build all eleven stay (owner, 2026-11-17): Liked, News, Music, Film & drama,
+  Faith, Culture, Sport, Children, Street cameras, the Screening Room and Transmission (once the
+  schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
+  Bazaar, Chat) after the genre shelves. The Khajistan Radio mixes are
+  not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
+  website's sound channel.
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
-  accessible"): the first shelf under the map, so a liked channel is one press down from the region
-  strip and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
+  accessible"): the first shelf under the map, so a liked channel is one press down from the switch at
+  the foot of the sidebar and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
   player's Like and the website's heart write, read at launch and at sign-in; a like made on this
   TV shows at once), newest first, as live cards: picture cards for
   television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
@@ -432,6 +437,15 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   again at once. The phone keeps the feed's own order.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
+- **The Reel moves as Transmission does and gives the screen to the video** (owner, 2026-11-20):
+  Up is the next video and Down the one before, as Channel Up and Down (Down on the first video of a
+  deal comes round to the last one loaded, and a broken video is skipped in the direction of the press). Right
+  lights Save, Collection, Shuffle and Region; Left walks back and lets go. No status band and no
+  panel: one line, *@account · Region*, on a ground plate that hugs it at the bottom left, with
+  *→ Save* beside it while the controls are down. The controls' strip shows only while one is lit,
+  and always while VoiceOver runs. A lit control holds the Reel on its video (an ending clip loops,
+  a broken one waits) and lets go after 10 s without a press. The phone's Reel carries the same one line, and its Shuffle
+  plate is not lit, since the Reel is always shuffled.
 - **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
   opens on pictures. Its viewer walks that mixed stream, pictures and videos both.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own

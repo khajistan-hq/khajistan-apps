@@ -90,11 +90,7 @@ final class DancerUITests: XCTestCase {
         kjLaunch(app)
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         guard regions.firstMatch.waitForExistence(timeout: 60) else { return nil }
-        let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-        XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-        for _ in 0..<40 where focusedRegion.exists && focusedRegion.identifier != "region-\(region)" {
-            XCUIRemote.shared.press(.right)
-        }
+        XCTAssertTrue(kjFocusRegion(app, "\(region)"), "focus must reach \(region) in the region list")
         print("DANCER nav region: \(focused(app))")
         XCUIRemote.shared.press(.select)
 
@@ -280,7 +276,8 @@ final class DancerUITests: XCTestCase {
             if i == 5 || i == 19 { shot(String(format: "reverent-%02d", i), app) }
         }
         print("DANCER reverent: \(seen.sorted())")
-        XCTAssertTrue(seen.isSubset(of: ["stage=absent"]), "no tap and no dancer on recitation: \(seen.sorted())")
+        // Since the visualizers, a reverent channel does not mount the dancer at all ("no-element").
+        XCTAssertTrue(seen.isSubset(of: ["stage=absent", "no-element"]), "no tap and no dancer on recitation: \(seen.sorted())")
         app.terminate()
     }
 }

@@ -1,7 +1,7 @@
 import XCTest
 
 /// Home carries every part of Khajistan (owner, 2026-10-29: "all nav carousels should show up in
-/// home", and one "should be able to move down a page in home"). From the region strip, a press
+/// home", and one "should be able to move down a page in home"). From the foot of the front, a press
 /// down at a time walks the shelves under the front to the last one; each shelf reached is
 /// photographed. Transmission, the Reading Room and Pics/Vids need no password and must be there;
 /// the Madrassa, the Bazaar and Chat are reported when their feeds answer.
@@ -35,7 +35,7 @@ final class HomeRowsUITests: XCTestCase {
         let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the front draws its regions")
         kjPause(8)   // the shelves load a moment after the front
-        XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         var reached: [String] = []
         // The genre shelves (News, Music, Film & drama, ...) sit between the regions and the rest.
         for _ in 0..<26 {
@@ -54,12 +54,14 @@ final class HomeRowsUITests: XCTestCase {
         // and Pics/Vids only for Friends; its doors shelf shows only with two doors or more.
         var required = ["news", "music"]
         #if !KJ_APP_STORE
-        required += ["doors", "reading", "picsvids"]
-        #elseif KJ_FRIENDS
-        required += ["doors", "picsvids"]
+        required += ["reading"]
         #endif
         for required in required {
             XCTAssertTrue(reached.contains(required), "down reaches the \(required) shelf; reached \(reached)")
+        }
+        // Off Home since 2026-11-21 (owner): the shelf of every part of Khajistan, and Pics/Vids.
+        for gone in ["doors", "picsvids"] {
+            XCTAssertFalse(reached.contains(gone), "no \(gone) shelf on Home; reached \(reached)")
         }
 
         // Up walks back to the front.
@@ -84,7 +86,7 @@ final class HomeRowsUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: two, object: nil)], timeout: 120), .completed,
                        "the first News cards get live stills; pictured \(pictured.count) of \(news.count)")
         print("KJNEWS cards \(news.count), pictured \(pictured.count)")
-        XCTAssertTrue(kjFocusStrip(app), "focus reaches the region strip")
+        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
         XCUIRemote.shared.press(.down)
         kjPause(1.5)
         kjScreenshot("home-news-pictures", app: app)

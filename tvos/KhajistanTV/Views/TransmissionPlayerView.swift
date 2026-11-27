@@ -553,6 +553,7 @@ struct TransmissionPlayerView: View {
             swipe.rowsMoved = 0
             swipe.opened = false
         }
+        swipe.touching = state == .began || state == .changed
         // Up and down only: a sideways swipe is left to the move commands.
         guard abs(travel.y) > abs(travel.x) else { return }
         swipe.last = .init(travel: Double(travel.y), at: ProcessInfo.processInfo.systemUptime)
@@ -989,6 +990,24 @@ struct TransmissionPlayerView: View {
             openGuide()
             return
         }
+        // tvOS can send the move before the finger has travelled far enough to count as a swipe:
+        // the first swipe then changed channel, and the guide refused to open mid-change (owner,
+        // 2026-11-27: "it doesnt show first and then on a second swipe it shows"). While a finger
+        // is still moving, wait a moment and decide again.
+        if swipe.touching, !swipe.opened {
+            Task {
+                try? await Task.sleep(for: .milliseconds(250))
+                if swipe.opened || guideGrid != nil { return }
+                // A swipe that reached its travel meanwhile has opened the guide itself (pan).
+                if movedBy == .swipe { openGuide() } else { changeChannel(direction) }
+            }
+            return
+        }
+        changeChannel(direction)
+    }
+
+    /// Channel Up or Down, behind the pigeon.
+    private func changeChannel(_ direction: MoveCommandDirection) {
         armed = nil
         guard holdsFocus, !switching else { return }
         switching = true
@@ -1131,6 +1150,8 @@ private final class SwipeTrack {
     var rowsMoved = 0
     /// This touch opened the guide: it does nothing more.
     var opened = false
+    /// A finger is moving on the touch surface now (the pan has begun and not ended).
+    var touching = false
 }
 
 /// Grows a view by the picture layer's own padding, so it fills the layer whatever part of the

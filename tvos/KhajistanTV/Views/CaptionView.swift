@@ -12,7 +12,7 @@ struct CaptionView: View {
     let skin: Skin
     var status: String? = nil
 
-    private static let size: CGFloat = 52   // 2.7% of 1920
+    private static let size: CGFloat = 44   // 4% of 1080 (owner, 2026-11-27: 52 looked big)
 
     var body: some View {
         if let text, !text.isEmpty {

@@ -183,7 +183,10 @@ struct ProductScreen: View {
         .task { await load() }
     }
 
+    /// The chosen option's own picture first (owner 2026-11-27: changing the size or frame shows
+    /// its mockup), then the catalogue's picture.
     private var picture: URL? {
+        if let own = selected?.image?.url { return own }
         if let item { return Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) }
         return live?.images.first
     }

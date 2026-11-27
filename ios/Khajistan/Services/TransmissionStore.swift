@@ -441,6 +441,13 @@ final class TransmissionStore {
         return url
     }
 
+    /// The reverent rule for a house channel, read from the show's name, as the Apple TV app reads
+    /// it: a reverent programme plays nature visualizers only.
+    static func isReverent(_ air: OnAir, channel: Int) -> Bool {
+        let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
+        return Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
+    }
+
     /// Five vinyl transfers carry no title; the show name stands in for it.
     private func nowPlayingTitle(_ air: OnAir) -> String {
         let title = air.programme?.title ?? ""

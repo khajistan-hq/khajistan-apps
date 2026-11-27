@@ -9,6 +9,7 @@ import UIKit
 struct ReceiverPlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var overlay = OverlayClock()
     @State private var panelHeight: CGFloat = 0
 
@@ -21,16 +22,21 @@ struct ReceiverPlayerView: View {
         ZStack {
             (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
             PlayerLayerView(player: controller.player, soundCarriesInBackground: true).ignoresSafeArea()
-            if let current, current.mediaType == "radio" && controller.state == .playing {
-                VStack(spacing: 12) {
-                    Text(current.name)
-                        .kjDisplay()
-                        .multilineTextAlignment(.center)
-                    if let caption = NowPlaying.caption(song: tuner.song, mediaType: "radio") {
-                        Text(caption).kjBody().multilineTextAlignment(.center)
+            // Radio: the name on the ground, and the visualizer the viewer chose behind it.
+            if let current, current.mediaType == "radio" {
+                VisualizerStage(controller: controller, reverent: current.isReverent) {
+                    if controller.state == .playing {
+                        VStack(spacing: 12) {
+                            Text(current.name)
+                                .kjDisplay()
+                                .multilineTextAlignment(.center)
+                            if let caption = NowPlaying.caption(song: tuner.song, mediaType: "radio") {
+                                Text(caption).kjBody().multilineTextAlignment(.center)
+                            }
+                        }
+                        .padding(.horizontal, KJLayout.inset)
                     }
                 }
-                .padding(.horizontal, KJLayout.inset)
             }
             VStack {
                 Spacer()
@@ -101,6 +107,9 @@ struct ReceiverPlayerView: View {
                 .buttonStyle(HouseButtonStyle(padding: EdgeInsets()))
                 .accessibilityIdentifier("receiverCC")
                 .accessibilityLabel(model.captions.isOn ? "Turn captions off" : "Turn captions on")
+                if current?.mediaType == "radio" && !reduceMotion {
+                    VisualizerButton(reverent: current?.isReverent ?? false) { overlay.wake(settled: false) }
+                }
             }
             ReceiverCaptionStatus(session: model.captions)
             TransportRow(isPlaying: controller.state == .playing || controller.state == .tuning, toggle: { overlay.wake(settled: false); tuner.playPause() },

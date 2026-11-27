@@ -77,7 +77,8 @@ final class SignalTap: @unchecked Sendable {
     }
 
     /// An audio mix that taps `track`, or nil if the tap could not be made.
-    func audioMix(for track: AVAssetTrack) -> AVAudioMix? {
+    /// `preEffects` for an mp3: tapped after effects, an mp3 played silent on the Apple TV (2026-11-27).
+    func audioMix(for track: AVAssetTrack, preEffects: Bool = false) -> AVAudioMix? {
         var callbacks = MTAudioProcessingTapCallbacks(
             version: kMTAudioProcessingTapCallbacksVersion_0,
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(self).toOpaque()),
@@ -99,7 +100,7 @@ final class SignalTap: @unchecked Sendable {
         )
         var tap: MTAudioProcessingTap?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
-                                                kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
+                                                preEffects ? kMTAudioProcessingTapCreationFlag_PreEffects : kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
         guard status == noErr, let tap else {
             // The tap never took the retain it was handed.
             Unmanaged.passUnretained(self).release()

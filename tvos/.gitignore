@@ -4,3 +4,11 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .DS_Store
+*.ipa
+*.xcarchive
+
+# Signing material never belongs in a public repo.
+*.p12
+*.mobileprovision
+*.cer
+*.pem

@@ -400,7 +400,8 @@ final class PlayerController {
             guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
             guard let self, gen == self.generation else { return }
             let tap = SignalTap()
-            guard let mix = tap.audioMix(for: track) else { return }
+            // An mp3 tapped after effects played silent on the Apple TV (owner, 2026-11-27, Channel 1).
+            guard let mix = tap.audioMix(for: track, preEffects: asset.url.pathExtension.lowercased() == "mp3") else { return }
             item.audioMix = mix
             self.signal = tap
         }

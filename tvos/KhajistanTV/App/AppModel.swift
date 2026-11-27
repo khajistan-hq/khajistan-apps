@@ -165,6 +165,8 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
+        // No page a signed-in reader opened stays on the device once the session ends.
+        auth.onSessionEnd = { Task.detached(priority: .utility) { RRPageDisk.purge() } }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
             // The dial changes with the password: a region page open on the old one goes too.

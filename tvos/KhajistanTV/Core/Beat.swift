@@ -15,14 +15,17 @@ import Foundation
 /// station whose name says nothing (owner, 2026-09-04).
 enum Reverence {
     private static let latin = try! NSRegularExpression(
-        pattern: "qur.?an|koran|recitation|tilawa\\s*h?|nida\\s*al-?islam",
+        // Owner, 2026-11-26: "only nature is available on religious and quranic channels". The words a
+        // religious station names itself by, kept in step with open-frequencies.js REVERENT_LATIN.
+        pattern: "qur.?an|koran|coran|recitation|tilawa\\s*h?|nida\\s*al-?islam|\\b(?:islam|islamic|muslims?|gospel|church|christian|christ|bible|sunnah|dakwah|trendakwah|tarbiyah|masjid|bhajans?|bhakti|gurbani|kirtan|torah|hadith|adhana|naat|na'at|qawwal\\w*|nasheeds?|jihad\\w*|hamd|zikr|dhikr|majlis|noha|nauha|radio maria)\\b",
         options: [.caseInsensitive]
     )
-    private static let arabic = ["قرآن", "قران", "تلاوة", "نداء الاسلام", "نداء الإسلام"]
+    private static let arabic = ["قرآن", "قران", "تلاوة", "نداء الاسلام", "نداء الإسلام", "الكتاب المقدس"]
 
     static func isReverent(name: String?, nativeName: String?, broadcaster: String?,
-                           reverent: Bool? = nil, visualiser: Bool? = nil) -> Bool {
+                           reverent: Bool? = nil, visualiser: Bool? = nil, genres: [String]? = nil) -> Bool {
         if reverent == true || visualiser == false { return true }
+        if genres?.contains("faith") == true { return true }   // a station the registry files as faith
         return [name, nativeName, broadcaster].compactMap { $0 }.filter { !$0.isEmpty }.contains { value in
             let whole = NSRange(value.startIndex..., in: value)
             if latin.firstMatch(in: value, range: whole) != nil { return true }
@@ -40,7 +43,7 @@ enum Reverence {
 extension Channel {
     var isReverent: Bool {
         Reverence.isReverent(name: name, nativeName: nativeName, broadcaster: broadcaster,
-                             reverent: reverent, visualiser: visualiser)
+                             reverent: reverent, visualiser: visualiser, genres: genres)
     }
 }
 

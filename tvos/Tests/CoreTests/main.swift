@@ -3162,11 +3162,17 @@ func reverenceFollowsTheSitesRule() throws {
     // A person's ruling on the record beats the name.
     try expect(reverent("City FM89", reverent: true), "reverent: true")
     try expect(reverent("City FM89", visualiser: false), "visualiser: false")
-    // Negative: music, news, other faiths' devotional radio, and the switches the other way.
-    // "Nida Al Islam" with a space is a negative on the site too: its pattern reads al-islam or
-    // alislam, and the port keeps the pattern as it is rather than widening it here.
-    for name in ["FM 101 Lahore", "City FM89", "Punjab Rocks Radio", "Live Kirtan from Golden Temple",
-                 "Radio Islam", "Nida Al Islam"] {
+    // Owner, 2026-11-26: every religious station, not only Quran radio, plays Nature only.
+    for name in ["Live Kirtan from Golden Temple", "Radio Islam", "Nida Al Islam", "Naija Gospel Radio",
+                 "Suara Masjid Mekarindah", "Naat", "Jumeraat Qawwali", "Jihadi Jams"] {
+        try expect(reverent(name), "\(name) must be reverent")
+    }
+    try expect(reverent("Radio 1", native: "راديو الكتاب المقدس"), "the Bible in Arabic")
+    try expect(Reverence.isReverent(name: "Hayat FM 104.7", nativeName: nil, broadcaster: nil, genres: ["faith"]), "faith tag")
+    try expect(!Reverence.isReverent(name: "Hayat FM 104.7", nativeName: nil, broadcaster: nil, genres: ["music"]), "music tag")
+    // Negative: music, news, places whose names contain the words, and the switches the other way.
+    for name in ["FM 101 Lahore", "City FM89", "Punjab Rocks Radio", "Islamabad Station", "Radio Mazandaran",
+                 "Radio Mariachi", "Hi Tea"] {
         try expect(!reverent(name), "\(name) must not be reverent")
     }
     try expect(!reverent("City FM89", reverent: false, visualiser: true), "explicit false/true change nothing")
@@ -4777,6 +4783,11 @@ func bazaarRules() throws {
     try expectEqual(ShopStorefront.safeCheckout("http://khajistan.com/checkouts/1"), nil)
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"data":{"product":null}}"#.utf8)), .notForSale, "an unpublished product is not a fault")
     try expectEqual(ShopStorefront.productAnswer(from: Data(#"{"errors":[{"message":"x"}]}"#.utf8)), .unreadable, "an error is not 'not for sale'")
+    // A variant carries its own picture when the shop links one, and decodes without one (owner 2026-11-27).
+    let framed = Data(#"{"data":{"product":{"title":"P","descriptionHtml":null,"images":{"nodes":[{"url":"https://cdn.example/a.jpg"}]},"variants":{"nodes":[{"id":"v1","title":"50 × 70 cm, oak frame","availableForSale":true,"price":{"amount":"90.0","currencyCode":"USD"},"image":{"url":"https://cdn.example/oak.jpg"}},{"id":"v2","title":"50 × 70 cm","availableForSale":true,"price":{"amount":"50.0","currencyCode":"USD"},"image":null}]}}}}"#.utf8)
+    guard case .found(let product) = ShopStorefront.productAnswer(from: framed) else { throw Failure(description: "a product with variant pictures did not decode") }
+    try expectEqual(product.variants.first?.image?.url, URL(string: "https://cdn.example/oak.jpg"))
+    try expectEqual(product.variants.last?.image, nil, "an option with no picture keeps none")
     let errors = Data(#"{"data":{"cartCreate":{"cart":null,"userErrors":[{"message":"Sold out"}]}}}"#.utf8)
     try expectEqual(ShopStorefront.checkout(from: errors), .failure(.refused("Sold out")))
     let ok = Data(#"{"data":{"cartCreate":{"cart":{"checkoutUrl":"https://khajistan.com/cart/c/1"},"userErrors":[]}}}"#.utf8)
@@ -5334,7 +5345,91 @@ func scheduleCacheKeepsOneMonthWithItsTag() throws {
     try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
 }
 
+func visualizerShuffleBagShowsEveryPiece() throws {
+    let rows = (1...5).map { VisualizerPiece(id: "p\($0)", title: nil, category: nil, seconds: 1800, play_url: "u", reverent: nil) }
+        + [VisualizerPiece(id: "n", title: nil, category: "Nature", seconds: 900, play_url: "u", reverent: true)]
+    var seen: [String] = [], shown: [String] = []
+    for k in 0..<6 {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: Double(k % 3) / 3, startRoll: 0.5))
+        try expect(!shown.contains(d.piece.id), "a piece came back before every piece had its turn")
+        try expect(d.offset >= 0 && d.offset + 60 <= d.piece.seconds, "the start point lies inside the piece")
+        shown.append(d.piece.id); seen = d.seen
+    }
+    try expectEqual(Set(shown), Set(["p1", "p2", "p3", "p4", "p5", "n"]))
+    // The bag refills, never with the piece just shown.
+    for roll in [0.0, 0.5, 0.99] {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: seen, roll: roll, startRoll: 0))
+        try expect(d.piece.id != shown.last, "the refill repeated the piece just shown")
+        try expectEqual(d.seen, [d.piece.id])
+    }
+    // Nature only on a reverent channel; a sound channel draws every piece, Nature too.
+    try expectEqual(Visualizer.draw(rows, reverent: true, seen: [], roll: 0.7, startRoll: 0)?.piece.id, "n")
+    try expectEqual(Visualizer.draw(rows, reverent: false, seen: ["p1", "p2", "p3", "p4", "p5"], roll: 0, startRoll: 0)?.piece.id, "n")
+    try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
+    try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+}
+
+func visualizerPicksByTheHalfHour() throws {
+    let rows = Visualizer.rows(from: Data("""
+    [{"id":"a","title":"A","category":"Roads","seconds":600,"play_url":"https://x/functions/v1/tv-play?id=a"},
+     {"id":"b","seconds":3600,"play_url":"https://x/functions/v1/tv-play?id=b"},
+     {"id":"n","seconds":900,"play_url":"https://x/functions/v1/tv-play?id=n","reverent":true},
+     {"id":"bad","seconds":0,"play_url":"https://x"},
+     {"id":"nourl","seconds":60,"play_url":""},
+     {"title":"no id"}]
+    """.utf8))
+    try expectEqual(rows.map(\.id), ["a", "b", "n"])
+    // Slot 0 (00:00-00:30 UTC on 1970-01-01... any multiple of 1800 s): index 0 of the sound rows.
+    let t0 = Date(timeIntervalSince1970: 1800 * 999)             // slot 999: index 0 of the three rows
+    var p = try require(Visualizer.pick(rows, reverent: false, now: t0))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 999).truncatingRemainder(dividingBy: 600))
+    try expectEqual(p.until, Date(timeIntervalSince1970: 1800 * 1000))
+    // 29 min later: same piece, offset moved on with the clock.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1799)))
+    try expectEqual(p.piece.id, "a")
+    try expectClose(p.offset, (1800.0 * 999 + 1799).truncatingRemainder(dividingBy: 600))
+    // The next half hour: the next piece.
+    p = try require(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(1800)))
+    try expectEqual(p.piece.id, "b")
+    // Reverent channels play nature pieces only; a sound channel reaches Nature in its turn.
+    try expectEqual(Visualizer.pick(rows, reverent: false, now: t0.addingTimeInterval(3600))?.piece.id, "n")
+    try expectEqual(Visualizer.pick(rows, reverent: true, now: t0)?.piece.id, "n")
+    try expect(Visualizer.pick(rows, reverent: true, now: t0.addingTimeInterval(1800))?.piece.id == "n")
+    try expect(Visualizer.pick(rows.filter { $0.reverent != true }, reverent: true, now: t0) == nil)
+    try expect(Visualizer.pick([], reverent: false, now: t0) == nil)
+    // A real duration shorter than the row's still wraps inside the file.
+    try expectClose(Visualizer.offset(of: rows[0], at: Date(timeIntervalSince1970: 1250), duration: 500), 250)
+}
+
+func visualizerModesCycle() throws {
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .nature)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: "nature"), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: true, stored: "dancer", storedNature: "nature"), .nature)
+    // The dancer is never a reverent choice, and nature never a sound one (negative cases).
+    try expectEqual(VisualizerMode.current(reverent: true, stored: nil, storedNature: "dancer"), .nature)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "nature", storedNature: nil), .khajistan)
+    try expectEqual(VisualizerMode.dancer.next(reverent: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: false), .dancer)
+    try expectEqual(VisualizerMode.off.next(reverent: true), .nature)
+    try expectEqual(VisualizerMode.nature.next(reverent: true), .off)
+    try expectEqual(VisualizerMode.khajistan.label, "Visualizer \u{00B7} Khajistan")
+    // The iPhone has no dancer: it cycles off, khajistan, Khajistan by default; a stored dancer reads as the default.
+    try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "dancer", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "off", storedNature: nil, dancer: false), .off)
+    try expectEqual(VisualizerMode.current(reverent: false, stored: "khajistan", storedNature: nil, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.off.next(reverent: false, dancer: false), .khajistan)
+    try expectEqual(VisualizerMode.khajistan.next(reverent: false, dancer: false), .off)
+    try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
+    ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
+    ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),

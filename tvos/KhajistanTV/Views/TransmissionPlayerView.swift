@@ -80,8 +80,9 @@ struct TransmissionPlayerView: View {
         ZStack {
             palette.ground.ignoresSafeArea()
             // Read from a view that ignores the safe area: one laid out inside it reports insets of 0,
-            // and the layer then lost its margins (captions sat on the screen's bottom edge).
-            Color.clear.ignoresSafeArea().onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { safeInsets = $0 }
+            // and the layer then lost its margins (captions sat on the screen's bottom edge). A reading
+            // of 0 keeps the tvOS default the state starts with.
+            Color.clear.ignoresSafeArea().onGeometryChange(for: EdgeInsets.self) { $0.safeAreaInsets } action: { if $0.bottom > 0 { safeInsets = $0 } }
             // In every phase, off air and tuning too: the guide is how a viewer finds a channel
             // that is on (since #79 it opened only over a picture, and an off-air channel picked
             // from it left no way back to it). It lies under the picture, which shrinks to the

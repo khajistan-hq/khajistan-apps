@@ -294,7 +294,7 @@ for the tests. The Receiver's first focus on Surf waits for the welcome to close
   VoiceOver hears "Channel 5".
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
-  channel's name. Up and down switch channel as under Motion. The
+  channel's name. A press of Up or Down switches channel as under Motion (Remote, below). The
   status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 with ● ON AIR trailing. The panel's
   left column carries NOW 18:00–18:15 PKT, the show as the headline, the show's line, KIND and
   ORIGIN, and the custodian and transfer credits; its right column is UP NEXT, the next three
@@ -305,37 +305,65 @@ for the tests. The Receiver's first focus on Surf waits for the welcome to close
   0.3 s past where the seek landed, and the black behind a picture shows only once the layer has
   drawn a frame (`isReadyForDisplay`); until then the tuning ground stays, and a channel change
   cuts only on a drawn frame (owner, 2026-11-19: Channel 1 "goes black for second" as it starts). Off air is OFF AIR in display type with the return time.
-- **Guide: a time grid** (owner, 2026-11-17: "it needs to be showing schedule on an hourly
-  basis"; the time grid was the owner's choice of three). Left or Right on the bare picture, or
-  the strip's Guide control, raises it from the bottom, on air, off air and while a channel tunes,
-  so an off-air channel never leaves the viewer without it. Channels run down the side (number,
-  mark, name on up to two lines, ● LIVE on the one tuned while something is on it), two hours run
-  across under half-hour marks in PKT, with a short accent bar at now, and each programme is a
-  block as long as it airs: its title and its times on the lift plate, an off-air stretch with no
-  plate and *back at* its return. **No cell is drawn too narrow to read** (owner, 2026-11-18:
-  "words are cutoff and not readable in the guide", on three hours across, where a ten-minute
-  programme read "R… 1…"): a programme whose part on screen is narrower than a cell's title and
-  times is folded into its narrower neighbour, and the cell reads *+N* for the others it holds,
-  with the whole cell's times. The lit cell names the lit programme with its own times, so Right
-  inside a fold reads each one in turn. A run of programmes under ten minutes in one strip is one block named for its show
-  (lit while it airs, the headline adds the programme on air, kept current every half minute:
-  *now: Jugni*); anything under a minute is part of the block before it (an off-air seam joins a
-  programme or an off-air stretch), except a programme after an off-air stretch, which keeps its
-  own block: off air never covers something on. Near a month's end the next month's schedule is fetched; until it is held, a row ends
-  where the month does rather than read the month after as off air (a programme begun before
-  midnight is drawn whole), and a row with nothing read for the hours on screen says Loading, as
-  does the headline when nothing is read at the lit moment. When the store lets go of the month
-  before at the turn, a run carried over midnight reads from 00:00 under its last programme's name
-  for its last few minutes, as the clock does. A refill keeps the blocks on
-  screen until the new reading lands. Over the grid the lit programme reads in full (its title, then the channel and its
-  times), since a short programme's block is too narrow for its name. One block is lit (the focus
-  plate, no lift: a block can be most of the screen wide). Up and Down change channel and keep the
-  moment; Right lights the next programme, as far as twelve hours ahead; Left the one before, never
-  one that has ended. The window moves in half hours to keep the lit programme in view. Select
-  tunes the lit channel, whatever the lit programme's time; Menu closes it. While it is open, now
-  moves on each half minute and the rows are read again when the half hour turns. The times come
-  from the station clock itself, asked at each programme's start (StationClock.timeline), so the
-  grid agrees with what airs to the second. It does not open under the sign-on's cover.
+- **Remote** (owner, 2026-11-24: "Swiping up and down with the trackpad should open the guide …
+  The up and down button should otherwise be treated as changing the channel"). Watching, a
+  swipe up or down on the touch surface opens the guide; a press of Up or Down changes channel.
+  Left and Right walk the strip's controls while the strip is up and open the guide from the bare
+  picture; Select works the lit control; Play/Pause pauses or rejoins live; Menu lets go of a
+  control, hides the strip, then leaves. tvOS sends the same move command for a swipe and a
+  press, so the screen also watches the finger (a pan recogniser on the remote's indirect
+  touches, `RemoteSwipeReader`) and `RemoteGesture.classify` decides: a move within 0.5 s of the
+  finger travelling 120 points or more is a swipe, any other is a press. The numbers are in
+  `Core/RemoteGesture.swift` and are tuned on the device. If the finger is never reported, every
+  move is a press and Up and Down change channel, as before.
+- **Guide: the whole screen** (owner, 2026-11-24: "more like early 2000s TV Guide. Full screen
+  with smaller video icon … in the khajistan palate"; the time grid under it is the owner's
+  choice of 2026-11-17, "it needs to be showing schedule on an hourly basis"). It opens on air,
+  off air and while a channel tunes, lit on the tuned channel's programme on now. It does not
+  open under the sign-on's cover.
+  - **Top band**, 38% of the height. At left the picture plays on in a 16:9 window, 34% of the
+    width: the player's own layer, drawn at the window's size and place (one player, one decode).
+    The layer is the screen's size with the safe area as its own padding, and what fills it does
+    so by that padding, never by ignoring the safe area: SwiftUI works the safe area out from
+    where a view is drawn, and in the small window an ignoring view grew out to the screen's corner.
+    A sound-only programme shows its dancer there and an off-air channel its card, since the
+    window is the full screen made small. Beside it: KHAJISTAN TRANSMISSION and the PKT clock on
+    one line; the lit cell's title (52pt); one line of facts (its times, the schedule's kind
+    line such as *Iranian film trailers*, Channel N); then the channel's own line from the
+    schedule. A channel's own cell reads *Channel 5 · Mehfil* over that line. Every line in the
+    guide is ink at full strength: the faint tier read as grey by day (owner, 2026-11-24).
+  - **Header**: the station day over the channels, then three half hours, each a band plate.
+  - **Rows**, seven at a time: the channel's cell on a band plate (number, mark, name on up to
+    two lines, ● LIVE on the one tuned while something is on it), then a block per programme as
+    long as it airs, on the lift plate, with its title and times. A stretch off air has no plate
+    and reads *back at* its return. Plates are separated by 4pt of ground; nothing is outlined.
+  - **The lit cell** is the focus plate with its text in the plate's colours, no lift and no
+    shadow. A channel's cell lit among band plates takes the focus plate too, except by day,
+    where the focus plate is the band's own green: there it is the ink plate with the ground's
+    yellow as text (`Palette.litAmongBands`).
+  - **Short programmes.** A run of programmes under ten minutes in one strip is one block: the
+    show's name, then *12 songs · now Jugni* (*programmes* where they are not songs; the one on
+    air is kept current every half minute). Anything under a minute is part of the block before
+    it, except a programme after an off-air stretch, which keeps its own block. A block still
+    narrower than a readable cell is folded into its narrower neighbour (owner, 2026-11-18:
+    "words are cutoff and not readable in the guide"); the cell reads *and 1 more* after its
+    title where both fit whole, and the title alone where they do not.
+  - **Moving.** Up and Down change the row and keep the moment; a swipe moves one row at 120
+    points of travel and one more per 200 after, and stops when the finger lifts. Right lights
+    the next programme, as far as twelve hours ahead, and the window follows in half hours. Left
+    lights the one before, never one that has ended; from the programme on now, Left lights the
+    channel's own cell, and Right leaves it.
+  - **Select** on a channel's cell tunes the window to that channel and the guide stays (owner,
+    2026-11-24: "show description of a channel on click"). On the programme on now it tunes the
+    channel and closes the guide. On a later programme or a stretch off air it does nothing.
+    **Menu** closes the guide on the channel the window shows.
+  - **The schedule** is the station clock's own, asked at each programme's start
+    (`StationClock.timeline`), so the grid agrees with what airs to the second. Near a month's
+    end the next month's file is fetched; until it is held a row ends where the month does, and a
+    row with nothing read for the hours on screen says Loading. While the guide is open, now
+    moves on each half minute and the rows are read again when the half hour turns; a refill
+    keeps the blocks on screen until the new reading lands.
+  - No line on screen says how to work the remote.
 
 ## The Screening Room
 
@@ -566,7 +594,8 @@ to be just like how it is on apple tv app"). The numbers are in `CardMotion` (`T
 | Focus on a card, plate, tab, strip chip or band control | one spring, response 0.34, damping 0.74 | 0.12 s ease, no overshoot |
 | Guide, Up and Down | the rows, keyed by channel, scroll one place over 0.3 s with no bounce; the plate fades off one row as the next takes it, lifted to 1.03 | the rows and the plate cut, with no lift; at the list's ends, where the rows stay put, the plate changes over 0.12 s |
 | Guide, Left and Right (a region turn) | a cut; while the next region loads, and on a region with none, the rows keep the height they last had and say Loading or "No …" in it | the same |
-| Guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
+| Receiver guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
+| Transmission guide, open and close | the picture shrinks to its window in one move over 0.4 s with no bounce, the guide fading in under it; it grows back the same way | it cuts |
 
 Picture transitions (tuning, the pigeon, a channel change) are the paragraphs below; nothing here
 touches them.

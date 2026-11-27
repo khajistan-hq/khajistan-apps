@@ -66,8 +66,23 @@ struct GuideSlot: Hashable, Sendable {
     /// schedule gives: its end is not when anything changes. An off-air one says when the channel
     /// is back from `returnAt`, never from its end.
     var openEnd = false
+    /// How many programmes the block holds: more than one for a run.
+    var items = 1
+    /// Every programme in the block is a song (StationClock.isSong): a run then counts songs.
+    var songs = false
 
     var isOffAir: Bool { title == nil }
+
+    /// "12 songs", or "8 programmes" for a run of short items that are not songs.
+    var itemsLabel: String { "\(items) \(songs ? "songs" : "programmes")" }
+
+    /// What a run's block reads, in one line: its show, how many it holds and, while it airs, the
+    /// one on air ("Geet Mala · 12 songs · now Jugni"). `onNow` is nil when the run is not on air.
+    func runLabel(onNow: String?) -> String {
+        var parts = [title ?? "", itemsLabel]
+        if let onNow, !onNow.isEmpty, onNow != title { parts.append("now \(onNow)") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
     func contains(_ moment: Date) -> Bool { start <= moment && moment < end }
 
     /// When an off-air stretch ends, "03:10 PKT", with its day when that is not the station day of
@@ -663,6 +678,15 @@ enum StationClock {
     /// sees: it is drawn as part of the programme before it.
     static let shortGap: TimeInterval = 60
 
+    /// A programme a run counts as a song: sound with no picture, or a kind that is sung.
+    /// ponytail: a word list over `work_kind`; a `song` flag from the builder would replace it.
+    static func isSong(_ programme: Programming.Programme?) -> Bool {
+        let kind = (programme?.work_kind ?? "").lowercased()
+        // A kind that is named decides: a mushaira reading or film dialogue is sound and not a song.
+        if kind.isEmpty { return programme?.audio_only == true }
+        return ["song", "naat", "nasheed", "qawwali", "ghazal"].contains { kind.contains($0) }
+    }
+
     /// The first instant of the station month after the last day a schedule file holds; nil when
     /// the file names no day.
     static func monthEnd(_ p: Programming) -> Date? {
@@ -781,7 +805,7 @@ enum StationClock {
                 if let slotEnd = date(iso: air.date, second: air.slot.endSecond), slotEnd < end { end = slotEnd }
                 // The clock reads whole seconds: a programme ending inside this second is over.
                 end = max(end, Date(timeIntervalSince1970: whole + 1))
-                raw.append((GuideSlot(start: start, end: end, title: air.guideLine),   // with its Roman form after a Persian name (PR 103)
+                raw.append((GuideSlot(start: start, end: end, title: air.guideLine, songs: isSong(air.programme)),   // with its Roman form after a Persian name (PR 103)
                             "\(air.date) \(air.slot.startSecond)", air.show?.name, runSeconds(air.programme)))
                 at = Date(timeIntervalSince1970: end.timeIntervalSince1970.rounded(.up))
             } else {
@@ -824,7 +848,8 @@ enum StationClock {
                 // One block per strip: each strip is a slot the schedule starts at its own time, so two
                 // strips of one show side by side are two blocks, each with its own times.
                 out.append(GuideSlot(start: item.slot.start, end: raw[runEnd].slot.end,
-                                     title: item.show ?? item.slot.title, grouped: true))
+                                     title: item.show ?? item.slot.title, grouped: true, items: runEnd - index + 1,
+                                     songs: raw[index...runEnd].allSatisfy { $0.slot.songs }))
             } else if item.slot.end.timeIntervalSince(item.slot.start) < shortGap, let prior = out.last,
                       item.slot.isOffAir || !prior.isOffAir {
                 // Under a minute, an off-air seam or a lone programme after a programme: too narrow
@@ -913,9 +938,10 @@ enum ServerClock {
 /// The window moves in half hours, enough to keep the lit programme's start in view, and never
 /// starts before the half hour now is in.
 struct GuideGrid: Equatable, Sendable {
-    /// Two hours across the screen: at three, a ten-minute programme was 70 points wide on the
-    /// TV and read "R… 1…".
-    static let span: TimeInterval = 2 * 3600
+    /// Three half hours across the screen, as a television guide channel lays its header (owner,
+    /// 2026-11-24). It was two hours; at three hours a ten-minute programme was 70 points wide on
+    /// the TV and read "R… 1…".
+    static let span: TimeInterval = 90 * 60
     /// The window moves by half hours, the marks along its top.
     static let step: TimeInterval = 30 * 60
     /// How far ahead Right reaches.
@@ -929,6 +955,9 @@ struct GuideGrid: Equatable, Sendable {
     var row: Int
     /// The lit moment: now, or the start of a later programme.
     var cursor: Date
+    /// The lit cell is the channel's own, at the row's left end, not a programme. Left from the
+    /// programme on now reaches it and Right leaves it; Up and Down keep it.
+    var onChannel = false
     /// The left edge of the two hours on screen.
     var windowStart: Date
     /// The moment the grid is read at, moved on every half minute while the guide is open (refresh).
@@ -958,6 +987,7 @@ struct GuideGrid: Equatable, Sendable {
 
     /// Right: the next programme on the lit channel, within the horizon.
     mutating func later(on slots: [GuideSlot]) {
+        if onChannel { onChannel = false; return }
         guard let index = lit(in: slots), index + 1 < slots.count else { return }
         let next = slots[index + 1]
         guard next.start < horizonEnd else { return }
@@ -965,12 +995,15 @@ struct GuideGrid: Equatable, Sendable {
         follow()
     }
 
-    /// Left: the programme before, never earlier than now.
+    /// Left: the programme before, never earlier than now; from the first one, the channel's cell.
     mutating func earlier(on slots: [GuideSlot]) {
+        if onChannel { return }
         if let index = lit(in: slots), index > 0, slots[index - 1].end > now {
             cursor = max(slots[index - 1].start, now)
         } else {
+            let before = lit(in: slots)
             cursor = now
+            if lit(in: slots) == before { onChannel = true }
         }
         follow()
     }

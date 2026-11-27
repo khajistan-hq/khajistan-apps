@@ -69,6 +69,9 @@ struct Programming: Decodable, Sendable {
                   let en = display_title_en?.trimmingCharacters(in: .whitespacesAndNewlines), !en.isEmpty, en != shown else { return nil }
             return en
         }
+        /// What kind of thing the programme is, in the schedule's own words ("Afghan news
+        /// footage"); the guide's facts line carries it.
+        var kind_line: String? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -114,7 +117,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title, display_title_en, year, part
+        case display_title, display_title_en, year, part, kind_line
     }
 
     init(from decoder: Decoder) throws {
@@ -140,6 +143,7 @@ extension Programming.Programme {
         display_title_en = (try? values.decodeIfPresent(String.self, forKey: .display_title_en)) ?? nil
         year = (try? values.decodeIfPresent(Int.self, forKey: .year)) ?? nil
         part = (try? values.decodeIfPresent(String.self, forKey: .part)) ?? nil
+        kind_line = try values.decodeIfPresent(String.self, forKey: .kind_line)
     }
 }
 

@@ -553,7 +553,13 @@ final class TransmissionStore {
     private func play(_ air: OnAir, generation gen: Int) async {
         #if DEBUG
         // With a schedule file there is no account: the overlay is drawn over no picture.
+        // `-kjtransmissionpicture YES` plays the UI tests' own video file (Fixtures/recorded/media)
+        // as the programme, so a test can photograph a moving picture, in the guide's window too.
         if isScheduleFile {
+            if UserDefaults.standard.bool(forKey: "kjtransmissionpicture"),
+               let file = try? KJFixtureProtocol.mediaURL(for: "tv") {
+                player.attach(url: file, seekTo: 0, title: nowPlayingTitle(air), subtitle: air.show?.name)
+            }
             phase = .onAir(air)
             watchSlotEnd(air, generation: gen)
             return

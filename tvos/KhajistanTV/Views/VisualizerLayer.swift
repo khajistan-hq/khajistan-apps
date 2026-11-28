@@ -62,13 +62,12 @@ struct SoundStage<Behind: View>: View {
             } else if !dancer {
                 behind().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // When the picture cannot come, one line says why (owner, 2026-11-26: "khajistan visualizer
-            // isnt showing on my apple tv"); the dancer stands in meanwhile.
-            if mode.playsPicture, !picture.ready {
-                // Until the picture is up, the step it is on, so a hang shows as clearly as a failure.
-                let step = !play ? (controller.state == .playing ? "off for this channel" : "waiting for the channel to play")
-                    : (picture.problem ?? picture.step)
-                Text("Khajistan visualizer: \(step)")
+            // When the picture fails on a sound channel, one line says why (owner, 2026-11-26: "khajistan
+            // visualizer isnt showing on my apple tv"); the dancer stands in meanwhile. Only a failure, and only
+            // where a picture is wanted: on a channel with its own picture this line stood over every programme
+            // (owner, 2026-11-27: "sticky visualizer message on every tv channel").
+            if play, !picture.ready, let problem = picture.problem {
+                Text("Khajistan visualizer: \(problem)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)

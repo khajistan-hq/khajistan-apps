@@ -107,6 +107,9 @@ struct ClickTally: Equatable {
         return .wait
     }
 
+    /// Forgets a click still waiting: the viewer has left, and its wait must settle nothing.
+    mutating func cancel() { pending = nil }
+
     /// True when the click made at `time` still stands alone: it is a single click, and is spent.
     mutating func settle(_ time: TimeInterval) -> Bool {
         guard pending == time else { return false }

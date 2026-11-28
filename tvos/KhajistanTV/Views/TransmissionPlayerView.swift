@@ -641,7 +641,8 @@ struct TransmissionPlayerView: View {
         case .wait:
             Task {
                 try? await Task.sleep(for: .milliseconds(Int(ClickTally.window * 1000)))
-                if clicks.settle(at) { perform(RemoteMap.action(.click, in: .picture)) }
+                // Not after the viewer has left: the wait can outlive the screen (Menu inside the window).
+                if clicks.settle(at), !left { perform(RemoteMap.action(.click, in: .picture)) }
             }
         }
     }
@@ -719,7 +720,8 @@ struct TransmissionPlayerView: View {
         guard let index = grid.lit(in: row.slots), !row.slots[index].isOffAir else { return nil }
         // A second in, so the reading is of this programme and not the one that ended as it began.
         let at = max(row.slots[index].start, grid.now).addingTimeInterval(1)
-        guard let programme = store.nowOn(channel: row.number, at: at)?.programme else { return nil }
+        // From the month that holds the cell, as the grid reads it: past midnight on the 1st that is the next file.
+        guard let programme = StationClock.onAir(store.guideMonths, channel: row.number, at: at)?.programme else { return nil }
         if let line = nonEmpty(programme.kind_line) { return line }
         let parts = [nonEmpty(programme.work_kind), nonEmpty(programme.country)].compactMap { $0 }
         return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
@@ -960,11 +962,11 @@ struct TransmissionPlayerView: View {
     /// A double click: any channel but this one, behind the pigeon.
     private func randomChannel() {
         armed = nil
-        guard holdsFocus, !switching else { return }
+        guard !left, holdsFocus, !switching else { return }
         switching = true
         Task {
             await store.loadSchedule()
-            if let target = RemoteMap.random(from: store.channelNumbers, not: store.channelNumber, roll: Double.random(in: 0..<1)) {
+            if !left, let target = RemoteMap.random(from: store.channelNumbers, not: store.channelNumber, roll: Double.random(in: 0..<1)) {
                 await switchUnderThePigeon(to: target)
             }
             switching = false
@@ -1162,13 +1164,15 @@ struct TransmissionPlayerView: View {
     /// One swipe can send several moves: a change under way takes no second step.
     private func changeChannel(step: Int) {
         armed = nil
-        guard holdsFocus, !switching else { return }
+        // Never once the viewer has left: `leave` stopped the store, and a change now would tune it
+        // again and fly the bird over the screen the viewer went back to.
+        guard !left, holdsFocus, !switching else { return }
         switching = true
         Task {
             // Resolved after the schedule, from the channel tuned by then (the sign-on may still
             // be setting it at the press).
             await store.loadSchedule()
-            await switchUnderThePigeon(to: store.channel(step: step))
+            if !left { await switchUnderThePigeon(to: store.channel(step: step)) }
             switching = false
         }
     }
@@ -1288,6 +1292,8 @@ struct TransmissionPlayerView: View {
 
     private func leave() {
         left = true
+        // A click still inside its wait changes no channel on a screen that has gone.
+        clicks.cancel()
         plateTask?.cancel()
         plateChannel = nil
         // The bird is on the window, over every screen: it goes with the player.

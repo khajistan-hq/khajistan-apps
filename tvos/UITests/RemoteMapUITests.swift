@@ -122,9 +122,14 @@ final class RemoteMapUITests: XCTestCase {
         let first = app.buttons["transmission-channel-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
         XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        for _ in 1..<14 { XCUIRemote.shared.press(.down); kjPause(0.4) }
+        // The rows are a lazy list: channel 14's exists once the remote has walked near it.
         let card = app.buttons["transmission-channel-14"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10) && card.hasFocus, "focus walks down to channel 14")
+        var trail: [String] = []
+        for _ in 0..<30 where !(card.exists && card.hasFocus) {
+            kjPress(.down, app: app)
+            trail.append(kjFocusKey(app).components(separatedBy: "|").first ?? "")
+        }
+        XCTAssertTrue(card.exists && card.hasFocus, "focus walks down to channel 14: \(trail)")
         XCUIRemote.shared.press(.select)
         let tuned = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(tuned.waitForExistence(timeout: 30))

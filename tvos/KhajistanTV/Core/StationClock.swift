@@ -738,7 +738,7 @@ enum StationClock {
         // round 4: from 00:00 on 1 December with December alone, 8 of 29 rows read off air).
         if let day = months.first?.days.map(\.date).min(), let start = date(iso: day, second: 0), at < start { at = start }
         var last: (p: Programming, id: String, end: Date)?
-        for p in months {
+        for (position, p) in months.enumerated() {
             guard at < to, let end = monthEnd(p) else { continue }
             guard at < end else { continue }
             guard let id = channelId(p, number: number) else {
@@ -748,7 +748,22 @@ enum StationClock {
                 continue
             }
             last = (p, id, end)
+            let seam = raw.count
             at = walk(p, channelId: id, from: at, to: min(to, end), monthEnd: end, into: &raw, limit: limit)
+            // A programme carried over midnight on the 1st, read again from this month's prev_day,
+            // is the one block it was before midnight, not two.
+            if seam > 0, raw.count > seam, let strip = raw[seam - 1].strip, raw[seam].strip == strip,
+               raw[seam].slot.title == raw[seam - 1].slot.title,
+               abs(raw[seam].slot.start.timeIntervalSince(raw[seam - 1].slot.end)) < 1 {
+                raw[seam - 1].slot.end = raw[seam].slot.end
+                raw.remove(at: seam)
+            }
+            // With the month after held, that month says what airs from its midnight (onAir reads
+            // it there): this month's programme running past the end is cut at midnight.
+            if position < months.count - 1, at > end {
+                if let tail = raw.indices.last, raw[tail].slot.end > end { raw[tail].slot.end = end }
+                at = end
+            }
         }
         var out = group(raw).filter { $0.end > from }
         // A stretch off air that runs to the end of what was asked for, or of the months held, says
@@ -823,6 +838,9 @@ enum StationClock {
                    let ahead = secondsAhead(next, iso: now.iso, second: Double(now.seconds)) {
                     end = min(to, Date(timeIntervalSince1970: whole + max(1, ahead)))
                 }
+                // Read again at the station's midnight: nextSlot answers a strip filed today past
+                // 86400 before it reads tomorrow's own, which may start earlier (00:30 against 02:00).
+                if let midnight = date(iso: now.iso, second: daySeconds), midnight > at { end = min(end, midnight) }
                 end = max(end, Date(timeIntervalSince1970: whole + 1))
                 // One stretch off air, however many readings it took to cross, starting where the
                 // programme before ended (that end is inside the second this reading rounded up to).

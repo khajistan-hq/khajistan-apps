@@ -311,7 +311,14 @@ if !(fileHidden && fileShown) { failures += 1 }
 // The window's own Play rejoins the broadcast live.
 let rejoin = Probe()
 rejoin.startPictureInPicture()
+rejoin.pip.onStart?()
 rejoin.pip.onSetPlaying?(true)
+// A Play queued in a window that closes before it runs does not start the channel again (CodeRabbit, PR 82).
+let closedFirst = Probe()
+closedFirst.startPictureInPicture()
+closedFirst.pip.onStart?()
+closedFirst.pip.onSetPlaying?(true)
+closedFirst.pip.onEnd?()
 // Full screen asks for the channel to open over whatever is on top.
 let restoreTop = Probe()
 restoreTop.startPictureInPicture()
@@ -412,6 +419,10 @@ Task {
     let rejoined = rejoin.store.rejoined == 1
     print("\(rejoined ? "PASS" : "FAIL") Play (the bar's, the remote's or the window's own) rejoins the channel live")
     if !rejoined { failures += 1 }
+    try? await Task.sleep(for: .milliseconds(200))
+    let staysClosed = closedFirst.store.rejoined == 0
+    print("\(staysClosed ? "PASS" : "FAIL") a Play queued in a window that has closed does not rejoin")
+    if !staysClosed { failures += 1 }
     for stage in ["token", "reply", "valid"] {
         let store = TransmissionStore()
         store.signed.removeAll()

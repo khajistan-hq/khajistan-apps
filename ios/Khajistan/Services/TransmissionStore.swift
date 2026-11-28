@@ -88,9 +88,16 @@ final class TransmissionStore {
         case .onAir, .tuning: break
         default: return
         }
+        // A paused programme stays paused: only Play starts it again, never a sign-in.
+        if player.state == .paused { return }
         let channel = channelNumber
         stop()
-        Task { await tune(channel: channel) }
+        // A Stop, a Pause or another channel between now and the task's turn calls the retune off.
+        let stopped = generation
+        Task { [weak self] in
+            guard let self, self.generation == stopped else { return }
+            await self.tune(channel: channel)
+        }
     }
 
     // MARK: - What the schedule says

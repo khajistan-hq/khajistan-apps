@@ -559,6 +559,13 @@ final class PicsVidsUITests: XCTestCase {
     func testShelfLeftFromTheFirstStaysPut() {
         let app = launch()
         dismissNotice(app)
+        // Pictures only: a shuffled first tile can be a video, which opens a Reel, where Left does
+        // nothing and Right lights Save.
+        let pictures = app.buttons["pnvkind-image"]
+        XCTAssertTrue(pictures.waitForExistence(timeout: 60), "Pictures is offered")
+        XCTAssertTrue(kjFocus(pictures, app: app), "Pictures takes focus")
+        XCUIRemote.shared.press(.select)
+        kjPause(10)
         let tile = tiles(app).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
         XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")

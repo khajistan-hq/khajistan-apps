@@ -99,7 +99,8 @@ final class ReceiverStore {
             return
         }
         if index != nil, let at = indexFetchedAt, Date().timeIntervalSince(at) < Self.staleAfter { return }
-        let task = Task { await self.fetchIndex(password: password, generation: generation) }
+        let started = generation
+        let task = Task { await self.fetchIndex(password: password, generation: started) }
         loading = (password, task)
         await task.value
         if loading?.task == task { loading = nil }
@@ -108,17 +109,24 @@ final class ReceiverStore {
     /// With a password, the index is read through the site's sign-in on every refresh (at most
     /// once in `staleAfter`), so a changed site password or an expired cookie is noticed within
     /// minutes. The site counts only failed sign-ins against its lock.
-    private func fetchIndex(password: String?, generation started: Int) async {
+    private func fetchIndex(password: String?, generation: Int) async {
+        var started = generation
         // A sign-in cancelled by a sign-out may still have stored its cookie.
         if password == nil { deleteSiteCookies() }
         if index == nil { indexError = nil }
+        // Kept outside the read below: a throttled sign-in is tried again even when the public
+        // fallback read fails too.
+        var retry = false
         do {
             var reply: (Data, URLResponse)?
             var note: String?
             var whole = false
-            var retry = false
             if let password, password != refused {
-                switch await gate(password) {
+                let outcome = await gate(password)
+                // A sign-in answered after the password changed belongs to the old password: its
+                // refusal must not delete the cookie the new password's sign-in has stored.
+                guard started == self.generation, !Task.isCancelled else { return }
+                switch outcome {
                 case .signedIn(let answer):
                     reply = answer
                     whole = true
@@ -126,6 +134,15 @@ final class ReceiverStore {
                     refused = password
                     deleteSiteCookies()
                     note = Self.refusedNote
+                    // The whole dial on hand can no longer be opened: it goes now, so a failed
+                    // public read below cannot leave its channels listed.
+                    if wholeDial {
+                        dialKindChanged(to: false)
+                        index = nil
+                        indexFetchedAt = nil
+                        started = self.generation
+                    }
+                    signInNote = note
                 case .tryLater:
                     // The cookie from an earlier sign-in, if any, still opens the whole dial.
                     whole = wholeDial && hasSiteCookie
@@ -152,27 +169,37 @@ final class ReceiverStore {
             } catch {
                 throw ReceiverStoreError.unreadable
             }
-            guard started == generation, !Task.isCancelled else { return }
+            guard started == self.generation, !Task.isCancelled else { return }
             if whole { servedWhole = true }
-            if whole != wholeDial {
-                wholeDial = whole
-                if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
-                controls = .empty
-                controlsFetchedAt = nil
-            }
+            if whole != wholeDial { dialKindChanged(to: whole) }
             index = decoded
             indexError = nil
             signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
             indexFailedAt = nil
-            if retry { scheduleRetry(generation: started) }
+            if retry { scheduleRetry(generation: self.generation) }
         } catch {
-            if Task.isCancelled || started != generation { return }
+            if Task.isCancelled || started != self.generation { return }
+            if retry { scheduleRetry(generation: self.generation) }
             indexFailedAt = Date()
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
+    }
+
+    /// The dial on hand changes kind (whole or public). Region downloads and a feeds read under
+    /// way came from the other dial, so the generation moves and none of them is kept. The redraw
+    /// is a separate matter: it waits while a player is open over the Receiver.
+    private func dialKindChanged(to whole: Bool) {
+        wholeDial = whole
+        generation += 1
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        shards.removeAll()
+        if playersOpen > 0 { redrawWaiting = whole != drawnWhole } else { redraw() }
+        controls = .empty
+        controlsFetchedAt = nil
     }
 
     private static let refusedNote = "The preview password did not open every channel. Check it under Account."
@@ -326,6 +353,9 @@ final class ReceiverStore {
             shards[key] = raw
         }
         await refreshControlsIfStale()
+        // A list read for the dial before a password change or a dial change is not handed out
+        // after it, whether it came from the cache, a shared download or this one.
+        guard started == generation else { throw CancellationError() }
         return ReceiverRules.eligible(raw, controls: controls)
     }
 

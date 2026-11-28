@@ -28,7 +28,8 @@ enum PiPCaptionLayout {
         let width = min(text.width + padX * 2, frame.width)
         let height = text.height + padY * 2
         let foot = frame.height * 0.95
-        let plate = CGRect(x: ((frame.width - width) / 2).rounded(), y: (foot - height).rounded(),
+        // A cue taller than the room above the foot keeps its first lines in the frame.
+        let plate = CGRect(x: ((frame.width - width) / 2).rounded(), y: max(0, foot - height).rounded(),
                            width: width.rounded(), height: height.rounded())
         let textRect = CGRect(x: (frame.width - text.width) / 2, y: plate.minY + padY, width: text.width, height: text.height)
         return (plate, textRect)

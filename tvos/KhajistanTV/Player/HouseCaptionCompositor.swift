@@ -51,7 +51,11 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
             request.finish(withComposedVideoFrame: source)
             return
         }
-        Self.copy(source, into: out)
+        // A frame that could not be copied is passed through as it came, not drawn on a blank one.
+        guard Self.copy(source, into: out) else {
+            request.finish(withComposedVideoFrame: source)
+            return
+        }
         Self.draw(on: out) { context in
             // Core Graphics counts from the bottom; the plate's rect counts from the top.
             let height = CGFloat(CVPixelBufferGetHeight(out))
@@ -71,14 +75,13 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
         }
     }
 
-    private static func copy(_ source: CVPixelBuffer, into out: CVPixelBuffer) {
-        CVPixelBufferLockBaseAddress(source, .readOnly)
-        CVPixelBufferLockBaseAddress(out, [])
-        defer {
-            CVPixelBufferUnlockBaseAddress(out, [])
-            CVPixelBufferUnlockBaseAddress(source, .readOnly)
-        }
-        guard let from = CVPixelBufferGetBaseAddress(source), let to = CVPixelBufferGetBaseAddress(out) else { return }
+    /// True when the whole picture was copied.
+    private static func copy(_ source: CVPixelBuffer, into out: CVPixelBuffer) -> Bool {
+        guard CVPixelBufferLockBaseAddress(source, .readOnly) == kCVReturnSuccess else { return false }
+        defer { CVPixelBufferUnlockBaseAddress(source, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(out, []) == kCVReturnSuccess else { return false }
+        defer { CVPixelBufferUnlockBaseAddress(out, []) }
+        guard let from = CVPixelBufferGetBaseAddress(source), let to = CVPixelBufferGetBaseAddress(out) else { return false }
         let fromRow = CVPixelBufferGetBytesPerRow(source), toRow = CVPixelBufferGetBytesPerRow(out)
         let rows = min(CVPixelBufferGetHeight(source), CVPixelBufferGetHeight(out))
         if fromRow == toRow {
@@ -86,6 +89,7 @@ final class HouseCaptionCompositor: NSObject, AVVideoCompositing {
         } else {
             for row in 0..<rows { memcpy(to + row * toRow, from + row * fromRow, min(fromRow, toRow)) }
         }
+        return true
     }
 
     private static func draw(on buffer: CVPixelBuffer, _ body: (CGContext) -> Void) {

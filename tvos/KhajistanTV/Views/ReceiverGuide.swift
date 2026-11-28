@@ -313,7 +313,8 @@ struct TransmissionGuide: View {
 
     private func row(_ row: Row, lit: Bool, width: CGFloat) -> some View {
         let litSlot = lit && !grid.onChannel ? grid.lit(in: row.slots) : nil
-        let cells = grid.cells(row.slots, minimum: Double(Self.cellWidth / width) * GuideGrid.span)
+        // The gap is taken off each block's width when drawn, so the fold counts it too.
+        let cells = grid.cells(row.slots, minimum: Double((Self.cellWidth + Self.gap) / width) * GuideGrid.span)
         return HStack(spacing: 0) {
             // LIVE marks the channel tuned, while something is on it.
             let onNow = row.slots.first { $0.contains(grid.now) }.map { !$0.isOffAir } ?? false
@@ -334,7 +335,9 @@ struct TransmissionGuide: View {
                     let right = min(width, x(cell.end, width: width))
                     let lit = litSlot.map(cell.holds) ?? false
                     // The lit cell names the lit programme, so Right inside a fold reads each in turn.
-                    let named = lit ? litSlot ?? cell.lead : cell.lead
+                    // An off-air stretch folded into a programme's cell does not name the cell "Off air".
+                    let litNames = litSlot.map { !row.slots[$0].isOffAir || row.slots[cell.lead].isOffAir } ?? false
+                    let named = lit && litNames ? litSlot ?? cell.lead : cell.lead
                     GuideBlock(slot: row.slots[named], more: cell.more(naming: named, in: row.slots),
                                start: cell.start, end: cell.end, lit: lit,
                                windowStart: grid.windowStart, now: grid.now, onNow: row.onNow)

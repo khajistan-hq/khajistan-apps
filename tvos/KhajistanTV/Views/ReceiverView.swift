@@ -379,7 +379,14 @@ private struct AtlasPanel: View {
     var body: some View {
         Group {
             if let mapError {
-                HStack(alignment: .center, spacing: 40) { leading; failure(mapError) }
+                // The switch stays: a wider map that failed is put back by turning it off.
+                HStack(alignment: .center, spacing: 40) {
+                    leading
+                    VStack(alignment: .leading, spacing: 24) {
+                        if let aboveMap { aboveMap.focusSection() }
+                        failure(mapError)
+                    }
+                }
             } else if let composed {
                 // One top line: Surf level with the list's heading, the map's band beside them.
                 HStack(alignment: .top, spacing: 40) {
@@ -402,8 +409,11 @@ private struct AtlasPanel: View {
             } else {
                 HStack(alignment: .center, spacing: 40) {
                     leading
-                    TuningLoader("Loading the receiver\u{2026}")
-                        .frame(maxWidth: .infinity, minHeight: Self.mapHeight)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let aboveMap { aboveMap.focusSection() }
+                        TuningLoader("Loading the receiver\u{2026}")
+                            .frame(maxWidth: .infinity, minHeight: aboveMap == nil ? Self.mapHeight : Self.mapHeight - Self.switchRow)
+                    }
                 }
             }
         }
@@ -592,8 +602,12 @@ private struct ThemeRow: View {
     }
 
     private func play(_ row: Row) {
-        guard let channel = row.channels.randomElement() else { return }
-        playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+        // The rows on screen may still be the last medium's while the new one loads: only the
+        // medium picked now is played (TV picked, no radio).
+        let medium = ShuffleMedium.stored(mediumRaw)
+        let list = row.channels.filter { medium.includes($0.mediaType) }
+        guard let channel = list.randomElement() else { return }
+        playing = Pick(channel: channel, list: list, title: row.kind.label)
     }
 
     /// Every region list in the atlas shown, read together (each is cached after its first read),

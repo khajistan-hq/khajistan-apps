@@ -101,17 +101,24 @@ final class ReceiverStore {
     /// With a password, the index is read through the site's sign-in on every refresh (at most
     /// once in `staleAfter`), so a changed site password or an expired cookie is noticed within
     /// minutes. The site counts only failed sign-ins against its lock.
-    private func fetchIndex(password: String?, generation started: Int) async {
+    private func fetchIndex(password: String?, generation: Int) async {
+        var started = generation
         // A sign-in cancelled by a sign-out may still have stored its cookie.
         if password == nil { deleteSiteCookies() }
         if index == nil { indexError = nil }
+        // Kept outside the read below: a throttled sign-in is tried again even when the public
+        // fallback read fails too.
+        var tryAgain = false
         do {
             var reply: (Data, URLResponse)?
             var note: String?
             var whole = false
-            var tryAgain = false
             if let password, password != refused {
-                switch await gate(password) {
+                let outcome = await gate(password)
+                // A sign-in answered after the password changed belongs to the old password: its
+                // refusal must not delete the cookie the new password's sign-in has stored.
+                guard started == self.generation, !Task.isCancelled else { return }
+                switch outcome {
                 case .signedIn(let answer):
                     reply = answer
                     whole = true
@@ -119,6 +126,15 @@ final class ReceiverStore {
                     refused = password
                     deleteSiteCookies()
                     note = Self.refusedNote
+                    // The whole dial on hand can no longer be opened: it goes now, so a failed
+                    // public read below cannot leave its channels listed.
+                    if wholeDial {
+                        dialKindChanged(to: false)
+                        index = nil
+                        indexFetchedAt = nil
+                        started = self.generation
+                    }
+                    signInNote = note
                 case .tryLater:
                     // The cookie from an earlier sign-in, if any, still opens the whole dial.
                     whole = wholeDial && hasSiteCookie
@@ -128,7 +144,7 @@ final class ReceiverStore {
             } else if password != nil {
                 note = Self.refusedNote
             }
-            guard started == generation, !Task.isCancelled else { return }
+            guard started == self.generation, !Task.isCancelled else { return }
             if reply == nil {
                 // Only a read meant for the whole dial carries the site cookie. A sign-in cancelled
                 // by a sign-out can store its cookie after every delete; this read never sends it.
@@ -147,35 +163,39 @@ final class ReceiverStore {
             } catch {
                 throw ReceiverStoreError.unreadable
             }
-            guard started == generation, !Task.isCancelled else { return }
+            guard started == self.generation, !Task.isCancelled else { return }
             if whole { servedWhole = true }
-            if whole != wholeDial {
-                wholeDial = whole
-                // Lists on screen, and region downloads under way, came from the other dial. With
-                // no index on hand there are none: a password change already reset everything,
-                // and a failed first read listed nothing.
-                if index != nil {
-                    generation += 1
-                    inFlight.values.forEach { $0.cancel() }
-                    inFlight.removeAll()
-                    dialID += 1
-                }
-                controls = .empty
-                controlsFetchedAt = nil
-            }
+            if whole != wholeDial { dialKindChanged(to: whole) }
             index = decoded
             indexError = nil
             signInNote = note
             indexFetchedAt = Date()
             shards.removeAll()
             indexFailedAt = nil
-            if tryAgain { scheduleRetry(generation: generation) }
+            if tryAgain { scheduleRetry(generation: self.generation) }
         } catch {
-            if Task.isCancelled || started != generation { return }
+            if Task.isCancelled || started != self.generation { return }
+            if tryAgain { scheduleRetry(generation: self.generation) }
             indexFailedAt = Date()
             // A list already on screen stays; only a missing list is an error to show.
             if index == nil { indexError = error.localizedDescription }
         }
+    }
+
+    /// The dial on hand changes kind (whole or public). Lists on screen, region downloads and a
+    /// feeds read under way came from the other dial, so none of them is kept: the generation
+    /// moves even with no index on hand, so a feeds read begun before the first index is dropped.
+    private func dialKindChanged(to whole: Bool) {
+        wholeDial = whole
+        generation += 1
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        shards.removeAll()
+        // With no index on hand nothing was drawn: a password change already reset everything,
+        // and a failed first read listed nothing.
+        if index != nil { dialID += 1 }
+        controls = .empty
+        controlsFetchedAt = nil
     }
 
     private static let refusedNote = "The preview password did not open every channel. Check it under You."

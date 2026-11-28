@@ -67,9 +67,12 @@ struct TransmissionView: View {
             switch model.link {
             case .transmission:
                 model.link = nil
-                // The station link plays, even after Back on this visit.
-                started = false
-                startOnce()
+                // The station link plays, even after Back on this visit. With a channel already on
+                // screen it is there already, and the visit stays started.
+                if playing == nil {
+                    started = false
+                    startOnce()
+                }
             case .channel(let number):
                 started = true
                 // Only a channel the schedule names opens; any other number stays on this page.

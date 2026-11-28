@@ -133,6 +133,9 @@ struct ReceiverView: View {
                 // On the page's whole content, padding included: scrolled to, the page sits
                 // exactly as it opened, with no step of the top padding.
                 .id(AtlasPanel.topAnchor)
+                .environment(\.shelfRaise) { anchor in
+                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(anchor, anchor: .top) }
+                }
             }
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.

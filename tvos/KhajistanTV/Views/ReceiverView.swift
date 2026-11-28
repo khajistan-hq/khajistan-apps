@@ -528,10 +528,6 @@ private struct ThemeRow: View {
     ]
     /// A theme with fewer channels than this is not shown yet.
     private static let fewest = 3
-    /// The shelves whose first cards get live stills, and how many each; 24 a visit in all
-    /// (StillPlan). Liked takes none: it is names only (2026-11-21).
-    private static let pictured: [String] = ["news", "music"]
-    private static let picturedCards = 4
 
     @Environment(AppModel.self) private var model
     /// The All / TV / Radio chips under Surf. A theme holds only what they let through (owner,

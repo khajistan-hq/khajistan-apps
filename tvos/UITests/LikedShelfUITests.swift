@@ -39,7 +39,7 @@ final class LikedShelfUITests: XCTestCase {
         XCTAssertFalse(focusedID(app).hasPrefix("liked-"), "Liked is not the first shelf under the front, got \(focusedID(app))")
         XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches the Liked shelf")
         XCUIRemote.shared.press(.down)
-        kjPause(6)   // stills arrive one at a time
+        kjPause(1)
         XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "nothing under Liked: down stays on it, got \(focusedID(app))")
         kjScreenshot("liked-shelf-focused", app: app)
 
@@ -74,9 +74,9 @@ final class LikedShelfUITests: XCTestCase {
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")
             XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch in \(skin)")
-            XCUIRemote.shared.press(.down)
-            kjPause(1.5)
-            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "down lands on Liked in \(skin), got \(focusedID(app))")
+            // Liked is the last shelf (Themes, the home rows, CCTV, Liked), so the walk goes down to it.
+            XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches Liked in \(skin)")
+            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "focus is on Liked in \(skin), got \(focusedID(app))")
             // Names only, as the Themes row (owner, 2026-11-21): a plate two lines of text high,
             // never a picture card (236 or more), and no "live picture" on any of them.
             let first = cards.firstMatch

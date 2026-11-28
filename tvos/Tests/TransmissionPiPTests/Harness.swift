@@ -98,7 +98,8 @@ final class ReadingStore {
 }
 final class ReceiverStore {
     var credentialChanges = 0
-    func credentialDidChange() { credentialChanges += 1 }
+    /// The app reads whether the dial changed (a whole-dial radio is then turned off); here it never does.
+    @discardableResult func credentialDidChange() -> Bool { credentialChanges += 1; return false }
 }
 final class PictureInPicture {
     var title = ""
@@ -147,8 +148,14 @@ final class ProgrammeSubtitleFollower {
     var cleared = false
     func end(clearing: Bool = true) { ended = true; cleared = clearing }
 }
+/// A radio kept playing while the viewer is elsewhere; only what the credential handler touches.
+final class RadioAway {
+    var pip: PictureInPicture?
+    let controller = PlayerController()
+}
 final class AppModel {
     var skin = 0
+    var radioAway: RadioAway?
     var restoringTransmission: Int?
     enum Section { case transmission }
     enum Link { case channel(Int) }

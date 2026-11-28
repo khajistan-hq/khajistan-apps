@@ -11,7 +11,7 @@ final class Watch {
     var cancelled = false
     func cancel() { cancelled = true }
 }
-final class TransmissionStore {
+@MainActor final class TransmissionStore {
     let auth = AuthStore()
     enum Schedule { case ready }
     let schedule = Schedule.ready
@@ -59,7 +59,7 @@ enum Transmission {
     }
     static func carrier(from data: Data, route: Route) throws -> URL { URL(string: "https://example.invalid/new")! }
 }
-final class AuthStore {
+@MainActor final class AuthStore {
     struct Session { let userId = "same-viewer" }
     var session: Session? = Session()
     var waitForToken = false
@@ -99,7 +99,7 @@ final class PictureInPicture {
     func stop() { stopped = true }
     func letGo() {}
 }
-final class AppModel {
+@MainActor final class AppModel {
     enum Section { case transmission }
     enum Link { case channel(Int) }
     var transmissionPiP: PictureInPicture?
@@ -116,7 +116,7 @@ final class AppModel {
         // PRODUCTION_PREVIEW_OBSERVER
     }
 }
-final class Probe {
+@MainActor final class Probe {
     var model = AppModel()
     var store: TransmissionStore { model.transmission }
     var pip = PictureInPicture()
@@ -137,7 +137,7 @@ final class Probe {
 }
 
 var failures = 0
-func check(_ name: String, mutate: (Probe) -> Void, accepted: Bool) {
+@MainActor func check(_ name: String, mutate: (Probe) -> Void, accepted: Bool) {
     let p = Probe()
     p.startPictureInPicture()
     mutate(p)
@@ -218,7 +218,7 @@ let receiverMetadataPreserved = SharedNowPlaying.title == "Public Receiver"
     && idle.store.generation == 1 && idle.store.signed.isEmpty
 print("\(receiverMetadataPreserved ? "PASS" : "FAIL") idle Transmission invalidation preserves Receiver Now Playing")
 if !receiverMetadataPreserved { failures += 1 }
-func waitForBoundary(_ ready: () -> Bool) async -> Bool {
+@MainActor func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     let deadline = ContinuousClock.now.advanced(by: .seconds(2))
     while !ready() {
         if ContinuousClock.now >= deadline { return false }
@@ -226,38 +226,35 @@ func waitForBoundary(_ ready: () -> Bool) async -> Bool {
     }
     return true
 }
-Task {
-    for stage in ["token", "reply", "valid"] {
-        let store = TransmissionStore()
-        store.signed.removeAll()
-        store.auth.waitForToken = stage == "token"
-        var finished = false
-        let task = Task { await store.warm(channel: 8); finished = true }
-        if stage == "token" {
-            guard await waitForBoundary({ store.auth.tokenContinuation != nil }) else {
-                print("FAIL token boundary was not reached"); failures += 1; task.cancel(); continue
-            }
-            store.accessDidChange()
-            store.auth.tokenContinuation?.resume(returning: "test-token")
-            guard await waitForBoundary({ finished || store.replyContinuation != nil }) else {
-                print("FAIL token completion did not settle"); failures += 1; task.cancel(); continue
-            }
-            // The old method incorrectly proceeds to the signer; release that response so the
-            // regression fails its assertion instead of hanging on the deliberately bad path.
-            store.replyContinuation?.resume(returning: .init(data: Data(), status: 200))
-        } else {
-            guard await waitForBoundary({ store.replyContinuation != nil }) else {
-                print("FAIL reply boundary was not reached"); failures += 1; task.cancel(); continue
-            }
-            if stage == "reply" { store.accessDidChange() }
-            store.replyContinuation?.resume(returning: .init(data: Data(), status: 200))
+for stage in ["token", "reply", "valid"] {
+    let store = TransmissionStore()
+    store.signed.removeAll()
+    store.auth.waitForToken = stage == "token"
+    var finished = false
+    let task = Task { await store.warm(channel: 8); finished = true }
+    if stage == "token" {
+        guard await waitForBoundary({ store.auth.tokenContinuation != nil }) else {
+            print("FAIL token boundary was not reached"); failures += 1; task.cancel(); continue
         }
-        await task.value
-        let passed = stage == "valid" ? store.signed.count == 1
-            : store.signed.isEmpty && (stage != "token" || !store.sendStarted)
-        print("\(passed ? "PASS" : "FAIL") warm carrier \(stage) access boundary")
-        if !passed { failures += 1 }
+        store.accessDidChange()
+        store.auth.tokenContinuation?.resume(returning: "test-token")
+        guard await waitForBoundary({ finished || store.replyContinuation != nil }) else {
+            print("FAIL token completion did not settle"); failures += 1; task.cancel(); continue
+        }
+        // The old method incorrectly proceeds to the signer; release that response so the
+        // regression fails its assertion instead of hanging on the deliberately bad path.
+        store.replyContinuation?.resume(returning: .init(data: Data(), status: 200))
+    } else {
+        guard await waitForBoundary({ store.replyContinuation != nil }) else {
+            print("FAIL reply boundary was not reached"); failures += 1; task.cancel(); continue
+        }
+        if stage == "reply" { store.accessDidChange() }
+        store.replyContinuation?.resume(returning: .init(data: Data(), status: 200))
     }
-    exit(failures == 0 ? 0 : 1)
+    await task.value
+    let passed = stage == "valid" ? store.signed.count == 1
+        : store.signed.isEmpty && (stage != "token" || !store.sendStarted)
+    print("\(passed ? "PASS" : "FAIL") warm carrier \(stage) access boundary")
+    if !passed { failures += 1 }
 }
-dispatchMain()
+exit(failures == 0 ? 0 : 1)

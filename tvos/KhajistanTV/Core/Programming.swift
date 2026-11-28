@@ -157,7 +157,8 @@ extension OnAir {
     /// The headline's second line (Programme.secondTitle), only while the headline is the
     /// programme's own name and not the show standing in for it.
     var secondTitle: String? {
-        guard let now = nowName, now == Self.trimmed(programme?.display_title) else { return nil }
+        // Both sides trimmed: a display_title with a stray space is still the headline.
+        guard let now = Self.trimmed(nowName), now == Self.trimmed(programme?.display_title) else { return nil }
         return programme?.secondTitle
     }
 

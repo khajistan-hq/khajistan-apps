@@ -167,6 +167,15 @@ struct TransmissionPlayerView: View {
             if let close { close() } else { dismiss() }
         }
         .onChange(of: store.phase) { wake() }
+        // A failed tune or a sign-in has its own button under Select: the guide closes, so Select
+        // does not work that button while a channel is lit in the guide.
+        .onChange(of: store.phase) { _, phase in
+            guard guideGrid != nil else { return }
+            switch phase {
+            case .failed, .needsSignIn: closeGuide()
+            default: break
+            }
+        }
         // A control cannot stay lit once it is gone from the strip.
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
@@ -773,7 +782,21 @@ struct TransmissionPlayerView: View {
 
     /// Reads every row the guide holds again, for a new half hour or a month brought in.
     private func refillGuide() {
-        guard let grid = guideGrid else { return }
+        guard var grid = guideGrid else { return }
+        // A schedule that adds or drops a channel: the rows follow it, the lit one by its number.
+        let numbers = store.channelNumbers
+        if numbers != guideRows.map(\.number) {
+            let lit = guideRows.indices.contains(grid.row) ? guideRows[grid.row].number : store.channelNumber
+            let held = Dictionary(guideRows.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
+            let months = store.guideMonths
+            guideRows = numbers.map { number in
+                held[number] ?? .init(number: number, name: store.channelName(number), line: store.channelLine(number),
+                                      soundOnly: store.nowOn(channel: number, at: grid.now)?.programme?.audio_only == true,
+                                      onNow: StationClock.nowName(months, channel: number, at: grid.now), slots: [])
+            }
+            grid.row = guideRows.firstIndex { $0.number == lit } ?? 0
+            guideGrid = grid
+        }
         guideFillGeneration += 1
         guideFilling = []
         guideStale = Set(guideRows.indices.filter { !guideRows[$0].slots.isEmpty })
@@ -1040,7 +1063,8 @@ struct TransmissionPlayerView: View {
         // A swipe up or down on the touch surface opens the guide; a press of Up or Down changes
         // channel (owner, 2026-11-24). The swipe itself has usually opened it already (pan).
         if movedBy == .swipe {
-            openGuide()
+            // A touch the guide's Back has consumed does not open it again (pan reads the same flag).
+            if !swipe.opened { openGuide() }
             return
         }
         // tvOS can send the move before the finger has travelled far enough to count as a swipe:
@@ -1050,7 +1074,8 @@ struct TransmissionPlayerView: View {
         if swipe.touching, !swipe.opened {
             Task {
                 try? await Task.sleep(for: .milliseconds(250))
-                if swipe.opened || guideGrid != nil { return }
+                // The viewer may have left meanwhile: no channel change after the screen has gone.
+                if left || swipe.opened || guideGrid != nil { return }
                 // A swipe that reached its travel meanwhile has opened the guide itself (pan).
                 if movedBy == .swipe { openGuide() } else { changeChannel(direction) }
             }

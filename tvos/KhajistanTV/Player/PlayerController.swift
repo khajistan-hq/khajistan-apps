@@ -201,6 +201,7 @@ final class PlayerController {
         switch event {
         case .started:
             timeoutTask?.cancel()
+            retunePending = false
             state = .playing
             if fadeInPending, !holdsSound {
                 fadeInPending = false
@@ -498,6 +499,8 @@ final class PlayerController {
                 landedAt = nil
             }
             timeoutTask?.cancel()
+            // The grace that cancelled task held is over: a failure from here is seen, not dropped.
+            retunePending = false
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }
             #endif

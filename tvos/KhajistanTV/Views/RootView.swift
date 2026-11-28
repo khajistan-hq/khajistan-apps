@@ -29,6 +29,12 @@ struct RootView: View {
         #endif
     }
 
+    /// The welcome is seen: it does not come again on this device.
+    private func closeWelcome() {
+        UserDefaults.standard.set(true, forKey: Welcome.key)
+        model.welcoming = false
+    }
+
     /// A new page with no bar under it is laid out in full.
     private func leavePage() {
         if !model.radioBarUp { underBar = false }
@@ -36,7 +42,16 @@ struct RootView: View {
 
     private func screens(_ palette: Palette) -> some View {
         VStack(spacing: 0) {
-            TopBar(current: model.section, select: { model.section = $0 })
+            // Receiver in the top bar opens the Receiver's home, from a region page or from another
+            // section left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it
+            // should go to home page").
+            TopBar(current: model.section, select: { section in
+                if section == .receiver {
+                    model.receiverPath = []
+                    model.camerasFirst = nil
+                }
+                model.section = section
+            })
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusSection()
@@ -50,6 +65,8 @@ struct RootView: View {
                 }
             }
         }
+        // The corner window's bar, over the foot of whichever section is up (PiPBar).
+        .pipBarHost(handlesPlayPause: false)
         // The page keeps the bar's shape after the bar goes (Off, or a film or channel opened from
         // a shelf, which stops the radio behind its page) and takes its full shape on the next page.
         // Grown back in place it moved the card focus was on: behind a page, focus was lost when
@@ -64,20 +81,61 @@ struct RootView: View {
         // A new dial rebuilds the Receiver's front: a new page too. Only there: the dial also turns
         // when a player closes, over whatever section opened it.
         .onChange(of: model.receiver.dialID) { if model.section == .receiver { leavePage() } }
-        // Full screen from the picture-in-picture window: the channel opens again, tuned afresh,
-        // as a radio from the small player does.
+        // Full screen from the picture-in-picture window: the channel's screen opens over whatever
+        // screen is on top (TopScreen): a cover on the root would open under a page's cover and
+        // never be seen. The screen takes the playing channel over, as Apple TV hands it back.
+        // With no screen to open on, the channel plays on in the small bar rather than stopping
+        // with nothing on screen.
         .onChange(of: model.restoring?.id) {
             guard let away = model.restoring else { return }
             model.restoring = nil
-            // Not silenced here: the player that opens silences it as it starts. If a page's cover
-            // is open and the screen cannot open over it, the channel plays on in the small bar
-            // rather than stopping with nothing on screen.
             var bar = away
             bar.pip = nil
             model.radioAway = bar
-            reopened = away
+            TopScreen.present(model: model, otherwise: {}) { close in
+                ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
+                                   regionId: away.listRegion, listTitle: away.listTitle, close: close,
+                                   resuming: away.controller)
+            }
         }
-        .fullScreenCover(item: $reopened) { away in
+        // Full screen from a Transmission channel's window: its player opens over whatever is on
+        // top and takes the playing channel over, with no retune (TransmissionPlayerView.start).
+        .onChange(of: model.restoringTransmission) {
+            guard let number = model.restoringTransmission else { return }
+            model.restoringTransmission = nil
+            TopScreen.present(model: model, otherwise: { model.silenceRadio() }) { close in
+                TransmissionPlayerView(channel: number, close: close)
+            }
+        }
+        // Full screen from the film's corner window: the film opens again over whatever is on top
+        // and asks for its token afresh; the player that opens closes the window and resumes from
+        // the kept place.
+        .onChange(of: model.restoringFilm?.handle) {
+            guard let film = model.restoringFilm else { return }
+            model.restoringFilm = nil
+            FilmRestore.present(film, model: model)
+        }
+        .fullScreenCover(isPresented: Binding(get: { model.welcoming }, set: { if !$0, model.welcoming { closeWelcome() } }),
+                         onDismiss: { model.welcomeOnScreen = false }) {
+            WelcomeView(done: closeWelcome)
+        }
+        // A launch from the Top Shelf (khajistan://…) goes where it points: the welcome steps
+        // aside for it rather than covering the channel it opens.
+        // Not marked seen: a viewer whose first launch is a link still meets it on the next.
+        // The hold on links (welcomeOnScreen) is cleared by the cover's onDismiss. Only if the welcome
+        // never appeared is it also cleared 1.5 s on, as a cover never shown may report no dismissal
+        // (round-4 review); one that did appear is waited for however long it takes to go, so a slow
+        // dismissal never lets the player be presented under it (round-5 review). Not reproduced: a
+        // link set before the first frame still gets the dismissal.
+        .onChange(of: model.link == nil, initial: true) { _, none in
+            guard !none, model.welcoming else { return }
+            model.welcoming = false
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                if !model.welcomeAppeared { model.welcomeOnScreen = false }
+            }
+        }
+        .kjFullScreenCover(item: $reopened) { away in
             ReceiverPlayerView(channel: away.channel, list: away.list, surfChoice: away.surfChoice,
                                regionId: away.listRegion, listTitle: away.listTitle)
         }
@@ -122,16 +180,8 @@ struct RootView: View {
         }
         // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
         // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
-        .onPlayPauseCommand(perform: model.radioAway == nil || model.radioAway?.pip != nil ? nil : {
-            guard let away = model.radioAway else { return }
-            if away.controller.state == .playing || away.controller.state == .tuning {
-                away.controller.pause()
-            } else {
-                // Play tunes the station afresh, full screen, as the bar's own Play does.
-                model.silenceRadio()
-                reopened = away
-            }
-        })
+        // With the corner window up, Play/Pause works the window's picture, wherever focus is.
+        .onPlayPauseCommand(perform: takesPlayPause ? playPause : nil)
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {
                 model.receiverPath.removeLast()
@@ -140,6 +190,31 @@ struct RootView: View {
                 model.section = visited.popLast() ?? .receiver
             }
         })
+    }
+
+    /// Whether Play/Pause is ours: a corner window is up, or a radio plays on under the screens
+    /// with no window of its own. Otherwise it is left to tvOS and the focused card.
+    private var takesPlayPause: Bool {
+        if model.activePiP != nil { return true }
+        guard let away = model.radioAway else { return false }
+        return away.pip == nil
+    }
+
+    // Named and typed apart from the view body: as one inline closure in a ternary, CI's compiler
+    // gave up type-checking it "in reasonable time".
+    private func playPause() {
+        if let pip = model.activePiP {
+            pip.setPlaying(!pip.isPlaying)
+            return
+        }
+        guard let away = model.radioAway else { return }
+        if away.controller.state == .playing || away.controller.state == .tuning {
+            away.controller.pause()
+        } else {
+            // Play tunes the station afresh, full screen, as the bar's own Play does.
+            model.silenceRadio()
+            reopened = away
+        }
     }
 
     @ViewBuilder
@@ -151,7 +226,7 @@ struct RootView: View {
         case .reading: ReadingView()
         case .picsvids: PicsVidsView()
         case .rooms:
-            if StoreBuild.roomsAreScreeningOnly { TVScreeningRoom() } else { RoomsTVView() }
+            if StoreBuild.roomsAreScreeningOnly { TVScreeningRoom(underTopBar: true) } else { RoomsTVView() }
         case .chat: ChatView()
         case .account: AccountView()
         }

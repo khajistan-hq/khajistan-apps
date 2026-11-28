@@ -416,6 +416,24 @@ func tiersAndMediumLabels() throws {
 
 // MARK: - Carrier
 
+func gateOutcomes() throws {
+    let next = "/data/open-frequencies/receiver-index.json"
+    func outcome(_ status: Int, _ path: String?, _ cookie: Bool) -> ReceiverRules.GateOutcome {
+        ReceiverRules.gateOutcome(status: status, landedOn: path, next: next, cookieSet: cookie)
+    }
+    try expectEqual(outcome(200, next, true), .signedIn)
+    // Landed on the index without the cookie: not signed in, and not a refusal either.
+    try expectEqual(outcome(200, next, false), .tryLater)
+    try expectEqual(outcome(200, "/gate", false), .refused)
+    try expectEqual(outcome(200, "/gate.html", false), .refused)
+    // A throttle, an outage, a captive portal or a moved host never marks a password refused.
+    try expectEqual(outcome(429, "/gate", false), .tryLater)
+    try expectEqual(outcome(503, next, false), .tryLater)
+    try expectEqual(outcome(200, "/", true), .tryLater)
+    try expectEqual(outcome(200, "/login", false), .tryLater)
+    try expectEqual(outcome(200, nil, false), .tryLater)
+}
+
 func carrierURLEncodesTheStreamID() throws {
     let plain = ReceiverRules.carrierURL(streamID: "anatolia-t-rkiye-4u-tv-720p-primary")
     try expectEqual(plain.absoluteString, "https://khajistan-archive.pages.dev/api/frequency?stream=anatolia-t-rkiye-4u-tv-720p-primary")
@@ -690,7 +708,7 @@ func authRequests() throws {
 
     let logout = AuthAPI.logoutRequest(accessToken: "AT")
     try expectEqual(logout.httpMethod, "POST")
-    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout")
+    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout?scope=local")
     try expectEqual(logout.value(forHTTPHeaderField: "Authorization"), "Bearer AT")
     try expectEqual(logout.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
     try expectEqual(logout.value(forHTTPHeaderField: "Content-Type"), "application/json")
@@ -794,6 +812,20 @@ func makeProgramme(_ id: String, seconds: Double? = nil, nominal: Double? = nil,
     Programming.Programme(id: id, title: id, seconds: seconds, nominal_minutes: nominal, clean_start: cleanStart, clean_end: cleanEnd,
                           show: nil, channel: 1, play_url: nil, audio_only: nil, custodian: nil, transfer: nil,
                           work_kind: nil, country: nil, description: nil, subtitle_url: nil)
+}
+
+func songRunRules() throws {
+    func made(_ kind: String?, sound: Bool?) -> Programming.Programme {
+        Programming.Programme(id: "a", title: "a", seconds: 300, nominal_minutes: nil, clean_start: nil, clean_end: nil,
+                              show: nil, channel: 1, play_url: nil, audio_only: sound, custodian: nil, transfer: nil,
+                              work_kind: kind, country: nil, description: nil, subtitle_url: nil)
+    }
+    // A run says "songs" only for what is sung: a mushaira reading with no picture is a programme.
+    try expect(StationClock.isSong(made("Film song", sound: true)))
+    try expect(StationClock.isSong(made(nil, sound: true)))
+    try expect(!StationClock.isSong(made("Mushaira", sound: true)))
+    try expect(!StationClock.isSong(made("Film dialogue", sound: true)))
+    try expect(!StationClock.isSong(made(nil, sound: nil)))
 }
 
 func runSecondsRules() throws {
@@ -2378,6 +2410,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Controls fold the feeds", controlsFoldTheFeedsAndLastHealthRecordWins),
     ("Tiers on by default and medium labels", tiersAndMediumLabels),
     ("carrierURL encodes the stream id", carrierURLEncodesTheStreamID),
+    ("Site sign-in outcomes", gateOutcomes),
     ("Carrier answer is validated", carrierAnswerIsValidated),
     ("validCarrier rules", validCarrierRules),
     ("Transmission routes the three shapes", transmissionRoutesTheThreeShapes),
@@ -2397,6 +2430,7 @@ let tests: [(String, () throws -> Void)] = [
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("song run rules", songRunRules),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
     ("slotAt and onAir on a hand-made schedule", slotAtAndOnAirOnTheSyntheticSchedule),

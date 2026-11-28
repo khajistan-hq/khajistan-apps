@@ -116,8 +116,11 @@ struct ProductPicture: View {
             }
             .accessibilityHidden(true)
             .task(id: url) {
-                guard let url else { return }
-                image = await PnvImages.shared.image([url], maxPixel: 800, authorization: model.siteAuthorization(for: url))
+                // No picture for this choice: the last one's goes, rather than standing for it.
+                guard let url else { image = nil; return }
+                let loaded = await PnvImages.shared.image([url], maxPixel: 800, authorization: model.siteAuthorization(for: url))
+                // A load the next choice replaced does not write over the newer picture.
+                if !Task.isCancelled { image = loaded }
             }
     }
 }

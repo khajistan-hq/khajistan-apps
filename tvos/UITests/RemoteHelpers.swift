@@ -13,23 +13,23 @@ extension XCTestCase {
         app.launch()
     }
 
-    /// Waits for the channel just opened to play. When it does not, Down tunes the next channel,
-    /// as the player's own line says, up to `tries` channels; then a live run is skipped, naming what
+    /// Waits for the channel just opened to play. When it does not, Right tunes the next channel
+    /// (the players' remote map, 2026-11-28; it was Down until then), up to `tries` channels; then a live run is skipped, naming what
     /// each said. It fails instead on the local test video, and when every channel played and
     /// `accept` turned each down. For tests whose subject is the strip or captions, not one carrier: 24 News HD and
     /// ABN News did not reach the runner and failed them (CI 2026-11-15, run 43672877637).
     /// `accept` narrows which channel counts, by id: a captions test needs a language the
-    /// recogniser takes, and Down can bring up DD Kashir, which plays but is Kashmiri.
+    /// recogniser takes, and Right can bring up DD Kashir, which plays but is Kashmiri.
     func kjTuneUntilPlaying(_ app: XCUIApplication, tries: Int = 4, accept: @escaping (String) -> Bool = { _ in true }) throws {
         let state = app.staticTexts["playerState"]
         let current = app.staticTexts["currentChannel"]
         var tried: [String] = []
         var turnedDown = 0
         for attempt in 0..<tries {
-            // After Down, only the next channel playing counts: the one being left can still
+            // After Right, only the next channel playing counts: the one being left can still
             // reach Playing before the cut (Bugbot on PR 66).
             let left = attempt > 0 && current.exists ? current.label : nil
-            if attempt > 0 { XCUIRemote.shared.press(.down); kjPause(1) }
+            if attempt > 0 { XCUIRemote.shared.press(.right); kjPause(1) }
             XCTAssertTrue(state.waitForExistence(timeout: 20), "the player opens")
             let playing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 state.label == "Playing" && (left == nil || (current.exists && current.label != left))
@@ -90,10 +90,16 @@ extension XCTestCase {
         return focused.exists
     }
 
-    /// Reach the foot of the front: the Beyond the atlas switch, at the bottom of the sidebar. One
-    /// press down from it lands on the first shelf under the front (Liked, or News).
+    /// Focus is on the Receiver's front: the list, the switch over the map, or the sidebar (Surf
+    /// and its All · TV · Radio chips, straight above the left-most card of the first shelf).
+    func kjOnFront(_ id: String) -> Bool {
+        id.hasPrefix("region-") || id == "beyondTheAtlas" || id == "shuffle" || id.hasPrefix("shuffle-medium-")
+    }
+
+    /// Reach the Beyond the atlas switch, over the map (it was at the foot of the sidebar until
+    /// 2026-11-20). Up from the first shelf under the front (Liked, or News) lands on it.
     @discardableResult
-    func kjFocusFrontFoot(_ app: XCUIApplication) -> Bool {
+    func kjFocusAtlasSwitch(_ app: XCUIApplication) -> Bool {
         let toggle = app.buttons["beyondTheAtlas"]
         guard toggle.waitForExistence(timeout: 30) else { return false }
         return kjFocus(toggle, app: app)

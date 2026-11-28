@@ -94,14 +94,14 @@ struct RoomsTVView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .kjTopFade()
-        .fullScreenCover(item: $open) { room in
+        .kjFullScreenCover(item: $open) { room in
             TVRoomScreen(room: room)
         }
-        .fullScreenCover(item: $reopened) { item in
+        .kjFullScreenCover(item: $reopened) { item in
             TVOpenedScreen(item: item)
         }
-        .fullScreenCover(item: $filmPage) { film in TVFilmPage(film: film) }
-        .fullScreenCover(item: $filmDirect) { film in FilmPlayerView(film: film, startsFull: true) }
+        .kjFullScreenCover(item: $filmPage) { film in TVFilmPage(film: film) }
+        .kjFullScreenCover(item: $filmDirect) { film in FilmPlayerView(film: film, startsFull: true) }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: RunLoop.main)) { _ in
             let now = ReadingPlaces.all, lately = OpenedLately.all
             if now != places { places = now }
@@ -481,7 +481,7 @@ private struct TVDatabases: View {
             }
             .padding(.vertical, 20)
         }
-        .fullScreenCover(item: $open) { db in TVDatabaseScreen(db: db) }
+        .kjFullScreenCover(item: $open) { db in TVDatabaseScreen(db: db) }
     }
 }
 
@@ -561,8 +561,8 @@ private struct TVDatabaseScreen: View {
             let found = await Task.detached { DBQuery.sort(DBQuery.filter(records, text: typed, facets: chosen), by: order) }.value
             if !Task.isCancelled { shown = Shown(query: typed, records: found) }
         }
-        .fullScreenCover(item: $record) { item in TVRecordScreen(db: db, record: item) }
-        .fullScreenCover(item: $panel) { which in
+        .kjFullScreenCover(item: $record) { item in TVRecordScreen(db: db, record: item) }
+        .kjFullScreenCover(item: $panel) { which in
             switch which {
             case .filter:
                 TVFilterPanel(properties: facetValues, chosen: facets) { name, value in facets[name] = value }

@@ -16,6 +16,10 @@ struct FilmShelf: View {
     /// Set by a screen that holds the film's page itself (the Screening Room): a shelf that
     /// leaves (Up Next empties when a film ends) must not take the open page with it.
     var present: ((Film, _ direct: Bool) -> Void)? = nil
+    /// The first shelf of the store build's Screening Room, the one page that sets it: Up from it
+    /// goes to the top bar (AppModel.topBarCall), whatever the page's scroll has done.
+    var leadsPage = false
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         Shelf(title, count: count) {
@@ -31,14 +35,15 @@ struct FilmShelf: View {
                     onChoose()
                     if let present { present(film, opensPage) } else if opensPage { playingDirect = film } else { playing = film }
                 }
+                .onMoveCommand(perform: leadsPage ? { if $0 == .up { model.topBarCall += 1 } } : nil)
                 .accessibilityIdentifier(showsPlaces ? "upnext-\(film.handle)" : "film-\(film.handle)")
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }
         }
-        .fullScreenCover(item: $playing) { film in
+        .kjFullScreenCover(item: $playing) { film in
             if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
-        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
+        .kjFullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
     }
 }
 

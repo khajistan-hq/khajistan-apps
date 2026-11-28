@@ -45,6 +45,8 @@ final class PlayerController {
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
     /// A new signal starts silent and its sound comes up once it is actually playing.
     @ObservationIgnored private var fadeInPending = false
+    /// Where a part-way join's seek landed, until the picture has moved on from it.
+    @ObservationIgnored private var landedAt: Double?
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
@@ -92,6 +94,9 @@ final class PlayerController {
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         attachedURL = url
+        // Muted by the PiP window while paused for a rejoin: a new item (the rejoin, or a handover
+        // that came first) is heard.
+        player.isMuted = false
         generation += 1
         let gen = generation
         #if DEBUG
@@ -99,6 +104,7 @@ final class PlayerController {
         #endif
         state = .tuning
         signal = nil
+        landedAt = nil
         timeoutTask?.cancel()
         removeItemObservers()
         stopLive()
@@ -195,6 +201,7 @@ final class PlayerController {
         switch event {
         case .started:
             timeoutTask?.cancel()
+            retunePending = false
             state = .playing
             if fadeInPending, !holdsSound {
                 fadeInPending = false
@@ -234,6 +241,27 @@ final class PlayerController {
         fadeInPending = false
         if let liveRadio { liveRadio.pause() } else { player.pause() }
         state = .paused
+    }
+
+    /// Set while the picture-in-picture window carries this player (PictureInPicture).
+    var followsWindow = false
+
+    /// The window's own Play or Pause worked AVPlayer directly: the state follows it, and nothing
+    /// is played, paused or faded again (`resume()` would fade the sound in from 0 and wait for a
+    /// change that never comes, as AVPlayer is already playing).
+    func follow(playing: Bool) {
+        // A failed or stopped signal stays as it is: an end of file or a stall is not a Pause.
+        if case .failed = state { return }
+        guard state != .idle else { return }
+        if !playing {
+            fadeTask?.cancel()
+            fadeInPending = false
+            state = .paused
+            return
+        }
+        guard state == .paused else { return }
+        // The player's own reading decides: playing, or waiting with the stall watch running.
+        syncWithPlayer()
     }
 
     func resume() {
@@ -307,6 +335,8 @@ final class PlayerController {
     }
 
     func stop() {
+        // Muted by the PiP window for a broadcast's rejoin: the next signal is heard.
+        player.isMuted = false
         fadeTask?.cancel()
         fadeInPending = false
         generation += 1
@@ -424,6 +454,9 @@ final class PlayerController {
                 #if DEBUG
                 print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
                 #endif
+                // A time the player cannot read holds nothing: NaN would never compare as moved.
+                let landed = self.player.currentTime().seconds
+                self.landedAt = landed.isFinite ? landed : nil
                 self.player.play()
             }
         }
@@ -433,11 +466,41 @@ final class PlayerController {
     /// that arrives late cannot put back a state the viewer has already left.
     private func syncWithPlayer() {
         guard liveRadio == nil else { return }
+        // The picture-in-picture window's own Play, read here first (the observer runs before the
+        // window's 100 ms reading): a sound left low by a fade that a Pause cut short comes back up
+        // once it plays.
+        // Not while muted: a broadcast paused from the window is muted until its rejoin replaces it.
+        if PiPSound.fadesBack(paused: state == .paused, followsWindow: followsWindow, muted: player.isMuted,
+                              nowPlaying: player.timeControlStatus != .paused, volume: volume, holdsSound: holdsSound) {
+            fadeInPending = true
+        }
         switch player.timeControlStatus {
         case .playing:
-            // A queued ready/seek callback cannot override a newer explicit Pause.
-            guard state != .paused else { player.pause(); return }
+            // A queued ready/seek callback cannot override a newer explicit Pause. In the
+            // picture-in-picture window a Play read here is the window's own control, not a late
+            // callback: followed, not undone.
+            guard state != .paused || followsWindow else { player.pause(); return }
+            // A join part-way through reports Playing as the seek lands, before a frame from the
+            // new place is drawn; the screen then showed the frame it held, often a film's black
+            // head, for a second (owner, 2026-11-19, Channel 1). Playing waits until the clock has
+            // moved on from where the seek landed, so frames from there are coming through. A
+            // signal that never moves stays tuning, and the start-up timeout ends it. Moved either
+            // way: a scrub back during the hold (a film resumed, then rewound) also ends it.
+            if let landed = landedAt {
+                guard abs(player.currentTime().seconds - landed) >= 0.3 else {
+                    let gen = generation
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard let self, gen == self.generation else { return }
+                        self.syncWithPlayer()
+                    }
+                    return
+                }
+                landedAt = nil
+            }
             timeoutTask?.cancel()
+            // The grace that cancelled task held is over: a failure from here is seen, not dropped.
+            retunePending = false
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }
             #endif

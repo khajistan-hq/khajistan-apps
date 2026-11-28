@@ -44,7 +44,11 @@ struct PicsVidsView: View {
         .defaultFocus($focus, store.noticeVisible ? .noticeOK : .firstTab, priority: .userInitiated)
         // A new hand if the page was left, dealt before the shelves' first loads ask.
         .onAppear { store.dealIfLeft() }
-        .task { await store.start() }
+        .task {
+            // Held to one kind before the shelves ask, so no photo is ever asked for.
+            if let only = StoreBuild.picsVidsKind { store.select(kind: only) }
+            await store.start()
+        }
         .onDisappear {
             // Left for another section (not for an object opened over the page): the next visit
             // deals again (owner, 2026-11-14: "shuffle everytime").
@@ -56,7 +60,7 @@ struct PicsVidsView: View {
             // The page is on screen here, so the deal is made at once.
             if old == .background, new != .background, viewing == nil { store.setShuffled(true) }
         }
-        .fullScreenCover(item: $viewing) { choice in
+        .kjFullScreenCover(item: $viewing) { choice in
             if let list = choice.list {
                 PnvViewerView(row: choice.row, list: list)
             } else {
@@ -112,20 +116,17 @@ struct PicsVidsView: View {
     /// The page's one control. The regions are the shelves under it.
     private var filters: some View {
         HStack(spacing: 12) {
-            kindTab("Everything", kind: nil)
-                .focused($focus, equals: .firstTab)
-            ForEach(PnvKind.allCases, id: \.self) { kind in
-                kindTab(kind.label, kind: kind)
+            // Held to one kind (StoreBuild.picsVidsKind): no tabs, and Shuffle takes first focus.
+            if StoreBuild.picsVidsKind == nil {
+                kindTab("Everything", kind: nil)
+                    .focused($focus, equals: .firstTab)
+                ForEach(PnvKind.allCases, id: \.self) { kind in
+                    kindTab(kind.label, kind: kind)
+                }
+                shuffleButton.padding(.leading, 28)
+            } else {
+                shuffleButton.focused($focus, equals: .firstTab)
             }
-            // A new deal now, every shelf from a new random place, as the Receiver's Surf.
-            Button {
-                store.setShuffled(true)
-            } label: {
-                Label("Shuffle", systemImage: "shuffle").kjKicker()
-            }
-            .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
-            .padding(.leading, 28)
-            .accessibilityIdentifier("pnvShuffle")
         }
         // The tabs' plate padding is pulled back so their text sits on the page margin.
         .padding(.leading, -22)
@@ -134,6 +135,17 @@ struct PicsVidsView: View {
         // above it and went to the top bar, or nowhere (UI test, 2026-11-25).
         .frame(maxWidth: .infinity, alignment: .leading)
         .focusSection()
+    }
+
+    /// A new deal now, every shelf from a new random place, as the Receiver's Surf.
+    private var shuffleButton: some View {
+        Button {
+            store.setShuffled(true)
+        } label: {
+            Label("Shuffle", systemImage: "shuffle").kjKicker()
+        }
+        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
+        .accessibilityIdentifier("pnvShuffle")
     }
 
     private func kindTab(_ title: String, kind: PnvKind?) -> some View {
@@ -243,7 +255,7 @@ private struct PnvSavedShelf: View {
               (response as? HTTPURLResponse)?.statusCode == 200,
               let page = try? JSONDecoder().decode([PnvRow].self, from: data), !Task.isCancelled else { return }
         let found = Dictionary(page.map { ($0.media_key, $0) }, uniquingKeysWith: { first, _ in first })
-        rows = wanted.compactMap { found[$0] }
+        rows = PnvKind.shown(wanted.compactMap { found[$0] }, only: StoreBuild.picsVidsKind)
     }
 }
 
@@ -273,7 +285,7 @@ private struct PnvRegionShelf: View {
                 if feed.items.isEmpty {
                     placeholder(feed)
                 } else {
-                    ForEach(feed.items) { row in
+                    ForEach(PnvKind.shown(feed.items, only: StoreBuild.picsVidsKind)) { row in
                         tile(row)
                             .onAppear {
                                 if nearEnd.contains(row.id) { Task { await store.loadMore(region: region) } }

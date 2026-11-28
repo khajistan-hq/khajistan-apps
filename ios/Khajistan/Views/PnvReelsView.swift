@@ -403,7 +403,8 @@ struct PnvReelsView: View {
         skipTask?.cancel()
         skipTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
-            if !Task.isCancelled, currentId == key, hasNextPage { step(1) }
+            // VoiceOver or Switch Control turned on during the wait keeps the page being read.
+            if !Task.isCancelled, currentId == key, hasNextPage, !assistiveTechRunning { step(1) }
         }
     }
 

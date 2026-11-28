@@ -329,6 +329,9 @@ struct StoredSubtitles: Equatable, Sendable {
     let access: Access
     let tracks: [Track]
     static let closed = StoredSubtitles(access: .none, tracks: [])
+    /// Seconds before each ask of tv_subtitles(): at once, then again after a failed request
+    /// (ProgrammeSubtitles.storedSubtitles). About 42 s in all, inside any programme.
+    static let retryDelays: [Double] = [0, 2, 10, 30]
     var open: Bool { access != .none }
 
     static var rpcURL: URL { KJConfig.supabase.appendingPathComponent("rest/v1/rpc/tv_subtitles") }

@@ -58,6 +58,30 @@ final class BackToAtlasUITests: XCTestCase {
         XCTAssertNotEqual(app.state, .runningForeground, "Back from the atlas, with nothing behind it, leaves the app")
     }
 
+    /// Back from a region page lights the row it was opened from, not Surf: the front's default
+    /// focus (Surf, for Up from the shelves) must not take focus as the page pops.
+    func testBackFromARegionPageLightsItsRow() {
+        let app = XCUIApplication()
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "the atlas must load")
+        XCTAssertTrue(kjFocusRegions(app), "focus must reach the region list")
+        XCUIRemote.shared.press(.down)
+        kjPause(0.5)
+        let opened = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(opened.exists, "a region row has focus")
+        let id = opened.identifier
+        XCUIRemote.shared.press(.select)
+        XCTAssertFalse(regions.firstMatch.waitForExistence(timeout: 5), "the region page must replace the map")
+        kjPause(2)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 15), "Back pops to the front")
+        kjPause(1.5)
+        let now = app.buttons.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        print("BACKROW opened \(id) now \(now.exists ? now.identifier : "none")")
+        XCTAssertTrue(app.buttons[id].hasFocus, "Back lights \(id), got \(now.exists ? now.identifier : "none")")
+    }
+
     /// The focus helper must also recover after the remote has moved below the region list.
     func testRegionListCanBeReachedFromTheShelfBelow() {
         let app = XCUIApplication()
@@ -69,7 +93,7 @@ final class BackToAtlasUITests: XCTestCase {
             XCUIRemote.shared.press(.down)
             kjPause(0.35)
         }
-        XCTAssertTrue(genre.exists, "start on a channel shelf below the front")
+        XCTAssertTrue(genre.exists, "start on the Themes row below the front")
         XCTAssertTrue(kjFocusRegions(app), "focus must return upward to the region list")
         XCTAssertTrue(regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch.exists,
                       "an actual region row must have focus")

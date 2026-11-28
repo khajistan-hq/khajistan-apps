@@ -266,6 +266,8 @@ final class PlayerController {
         case .playing:
             guard wantsPlayback else { player.pause(); return }
             timeoutTask?.cancel()
+            // The grace that cancelled task held is over: a failure from here is seen, not dropped.
+            retunePending = false
             state = .playing
             updateNowPlayingRate(1)
             if fadeInPending {

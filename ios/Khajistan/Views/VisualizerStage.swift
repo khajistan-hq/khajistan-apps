@@ -50,12 +50,11 @@ struct VisualizerStage<Name: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: shown ? .topTrailing : .center)
                 .padding(.top, shown ? 64 : 0)
                 .padding(.trailing, shown ? KJLayout.inset : 0)
-            // Until the picture is up, one line says the step it is on or why it cannot come, as on the TV;
-            // at the top here, because the phone's controls sit over the bottom of the screen.
-            if mode.playsPicture, !picture.ready {
-                let step = !play ? (controller.state == .playing ? "off for this channel" : "waiting for the channel to play")
-                    : (picture.problem ?? picture.step)
-                Text("Khajistan visualizer: \(step)")
+            // When the picture fails, one line says why, as on the TV; only a failure, never the loading steps
+            // (owner, 2026-11-27, on the TV's line: "sticky visualizer message on every tv channel"). At the top
+            // here, because the phone's controls sit over the bottom of the screen.
+            if play, !picture.ready, let problem = picture.problem {
+                Text("Khajistan visualizer: \(problem)")
                     .kjSmall(faint: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.horizontal, KJLayout.inset)

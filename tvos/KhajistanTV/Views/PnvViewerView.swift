@@ -45,7 +45,8 @@ struct PnvViewerView: View {
     /// goes on back, not forward to the video just left.
     @State private var lastDelta = 1
     /// VoiceOver's state, followed live, so the Reel's strip comes and goes with it.
-    @State private var voiceOver = UIAccessibility.isVoiceOverRunning
+    /// VoiceOver or Switch Control: either keeps the Reel's controls in the accessibility tree.
+    @State private var voiceOver = !OverlayTiming.hidesItself
     @State private var skipped: String?
     @State private var skipTask: Task<Void, Never>?
     /// A new region or deal loading: its own task, so a step (Left or Right; Up or Down in the
@@ -182,8 +183,12 @@ struct PnvViewerView: View {
         .onChange(of: armed) { armIdle() }
         .onChange(of: showCollections) { armIdle() }
         .onChange(of: showSignIn) { armIdle() }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.switchControlStatusDidChangeNotification)) { _ in
+            voiceOver = !OverlayTiming.hidesItself
+            wake()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.voiceOverStatusDidChangeNotification)) { _ in
-            voiceOver = UIAccessibility.isVoiceOverRunning
+            voiceOver = !OverlayTiming.hidesItself
             wake()
         }
         .onChange(of: controller.state) {
@@ -205,10 +210,10 @@ struct PnvViewerView: View {
         }
         #endif
         .onDisappear { stopEverything() }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { show(current) })
         }
-        .fullScreenCover(isPresented: $showCollections) {
+        .kjFullScreenCover(isPresented: $showCollections) {
             PnvCollectionsPanel(key: current.media_key).environment(\.palette, palette)
         }
         .task(id: model.auth.email) { await model.saves.load() }
@@ -308,8 +313,7 @@ struct PnvViewerView: View {
                     .lineLimit(3)
             }
             if phase == .needsSignIn {
-                // Select opens the sign-in sheet; the line says so.
-                Kicker("Select to sign in")
+                Kicker("Sign in")
             }
             saveControls
         }
@@ -398,6 +402,8 @@ struct PnvViewerView: View {
     /// A new region or a new deal: the stream starts over and opens on its first object.
     private func restart(_ change: () -> Void) {
         stepTask?.cancel()
+        // The cancelled step may still be waiting on a page: it no longer holds the next end.
+        stepping = nil
         restartTask?.cancel()
         skipTask?.cancel()
         // A new hand or region starts the count of broken videos skipped in a row again.
@@ -544,7 +550,7 @@ struct PnvViewerView: View {
                 // VoiceOver and Switch Control loop too, as on the iPhone.
                 if videosOnly, OverlayTiming.hidesItself, armed == nil {
                     // A video that played to its end was decodable: the undecodable run is over.
-                    if current.id == key, stepping == nil { codecSkips = 0; step(by: 1) }
+                    if current.id == key, stepping == nil { codecSkips = 0; step(by: 1, automatic: true) }
                     return
                 }
                 guard videosOnly || !row.isKtv, let controller else { return }
@@ -622,14 +628,17 @@ struct PnvViewerView: View {
             try? await Task.sleep(for: .seconds(2))
             // A lit control holds the skip as it holds autoplay; it goes on once the control lets go.
             while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
-            if !Task.isCancelled, current.id == key {
-                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta))
+            // VoiceOver or Switch Control turned on during the wait keeps the object being read.
+            if !Task.isCancelled, current.id == key, OverlayTiming.hidesItself {
+                step(by: PnvAPI.reelSkipDelta(lastDelta: lastDelta), automatic: true)
             }
         }
     }
 
     /// The neighbour in the stream. At the end of what is loaded the next page is asked for first.
-    private func step(by delta: Int) {
+    /// `automatic`: an end or a skip, not a press. It waits while a control is lit, so the lit
+    /// control never acts on a video the viewer did not choose.
+    private func step(by delta: Int, automatic: Bool = false) {
         // While a new deal loads there is no neighbour yet; the press waits for nothing.
         guard restartTask == nil else { return }
         // A deal that came back empty or failed: a step (Left or Right; Up or Down in the Reel)
@@ -680,6 +689,10 @@ struct PnvViewerView: View {
                 index = 0
             }
             guard items.indices.contains(index) else { return }
+            if automatic {
+                while !Task.isCancelled, armed != nil { try? await Task.sleep(for: .milliseconds(300)) }
+                guard !Task.isCancelled else { return }
+            }
             show(items[index])
         }
     }

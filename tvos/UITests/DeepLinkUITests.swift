@@ -43,7 +43,8 @@ final class DeepLinkUITests: XCTestCase {
 
     /// Seven channels, from a hand-made schedule (Fixtures/programming-seven-channels.json, one
     /// 24-hour strip on each channel): the station page carries a card for each and focus walks
-    /// right to Channel 7, which opens; Channel Up there goes round to Channel 1, Down back to 7.
+    /// right to Channel 7, which opens; Right there (the next channel) goes round to Channel 1, Left
+    /// back to 7 (they were Up and Down until the players' remote map of 2026-11-28).
     /// The programmes carry no play_url, so each change is the plain retune (`switchChannel`), not
     /// the cut behind the picture (`switchBehind`), which needs a playable source.
     func testSevenChannelsOnThePageAndRoundTheDial() {
@@ -60,8 +61,8 @@ final class DeepLinkUITests: XCTestCase {
 
         let seventh = app.buttons["transmission-channel-7"]
         for _ in 0..<4 where !app.buttons["transmission-channel-1"].hasFocus { XCUIRemote.shared.press(.down) }
-        for _ in 0..<10 where !(seventh.exists && seventh.hasFocus) { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(seventh.exists && seventh.hasFocus, "focus walks right to Channel 7's card")
+        for _ in 0..<10 where !(seventh.exists && seventh.hasFocus) { XCUIRemote.shared.press(.down); kjPause(0.6) }
+        XCTAssertTrue(seventh.exists && seventh.hasFocus, "focus walks down to Channel 7's row")
         screenshot("seven-1-channel-7-card", app: app)
         XCUIRemote.shared.press(.select)
 
@@ -72,12 +73,12 @@ final class DeepLinkUITests: XCTestCase {
         // changes for the rest of the player's life: found 2026-11-04, on main too, with two
         // channels. Until that is fixed this test lets each flight land before it presses.
         kjPause(8)
-        tune(.up, until: "1", channel)
-        XCTAssertEqual(channel.label, "1", "Channel Up from 7 goes round to 1")
-        screenshot("seven-2-up-to-1", app: app)
+        tune(.right, until: "1", channel)
+        XCTAssertEqual(channel.label, "1", "Right, the next channel, from 7 goes round to 1")
+        screenshot("seven-2-next-to-1", app: app)
         kjPause(8)
-        tune(.down, until: "7", channel)
-        XCTAssertEqual(channel.label, "7", "Channel Down from 1 goes round to 7")
+        tune(.left, until: "7", channel)
+        XCTAssertEqual(channel.label, "7", "Left, the channel before, from 1 goes round to 7")
     }
 
     /// Presses once, and again if the channel has not moved in twelve seconds, a few times over.

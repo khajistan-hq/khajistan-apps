@@ -137,7 +137,9 @@ final class PicsVidsStore {
 
     private func loadFacets() async {
         guard let facets = try? await fetch(PnvFacets.self, PnvAPI.facetsRequest()) else { return }
-        summary = PnvAPI.summary(roster: roster, facets: facets)
+        // The facets count pictures and videos together; a build held to one kind leaves the number off
+        // rather than state a count of things it does not show.
+        summary = PnvAPI.summary(roster: roster, facets: facets, withCount: StoreBuild.picsVidsKind == nil)
         summaryWithoutCount = PnvAPI.summary(roster: roster, facets: facets, withCount: false)
     }
 

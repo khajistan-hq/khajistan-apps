@@ -33,6 +33,11 @@ final class RecordedSubtitles {
     @ObservationIgnored private var output: AVPlayerItemLegibleOutput?
     @ObservationIgnored private let relay = LegibleRelay()
     @ObservationIgnored private var generation = 0
+    /// Where the choice is remembered while manifest tracks are attached: the film's own key, or
+    /// the shared one on Transmission.
+    @ObservationIgnored private var choiceKey: String?
+    /// The window opened while `attach` was still reading the tracks: the handover waits for them.
+    @ObservationIgnored private var handOffWaiting = false
 
     /// "Subtitles · English", "Subtitles · Off": the receiver's recorded-subtitle picker, as one control.
     var label: String {
@@ -40,8 +45,77 @@ final class RecordedSubtitles {
         return "Subtitles \u{00B7} \(on)"
     }
 
+    /// The track AVPlayer can draw itself, handed to it for the picture-in-picture window, where
+    /// the house view does not reach: the suppressing output comes off and the track stays
+    /// selected, so tvOS draws it, in the skin's colours (`attach`'s text style rules). The
+    /// languages stay, so the PiP bar can still move to the next one. A programme's prepared file
+    /// is not a track and stays here: the window's compositor draws it (HouseCaptionCompositor).
+    /// True when a track was handed over.
+    @discardableResult
+    func handOff() -> Bool {
+        guard group != nil else {
+            // Still loading: `attach` hands the tracks over when they arrive, instead of putting
+            // on an output that would hide them from the window.
+            handOffWaiting = true
+            return false
+        }
+        handOffWaiting = false
+        if let output, let item { item.remove(output) }
+        output = nil
+        text = nil
+        // tvOS draws only the manifest's tracks: a stored file's language on (a staged Urdu beside
+        // the manifest's English) would leave the window bare under "Subtitles · Urdu". The window
+        // takes the manifest language the viewer would get; the screen they return to loads afresh.
+        let choice = SubtitleChoice.windowChoice(
+            current: current, manifest: Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: true),
+            stored: choiceKey.flatMap { UserDefaults.standard.string(forKey: $0) }, preferred: Locale.preferredLanguages)
+        if choice != current { apply(choice) }
+        return true
+    }
+
+    /// The window has closed and a screen takes the channel back: the track tvOS was drawing is
+    /// switched off, so no system-drawn line shows before the screen's own load selects it again.
+    /// Nothing is added to the item: the screen attaches with its own output, and a leftover one
+    /// would keep suppressing the track the next time the window opens on the same item.
+    func reclaim() {
+        handOffWaiting = false
+        guard isHandedOff, let group, let item else { return }
+        item.select(nil, in: group)
+        text = nil
+    }
+
+    /// The languages the control steps through: once handed off, only the manifest's, since tvOS
+    /// has no track of a stored file to draw in the window.
+    static func windowCodes(_ codes: [String], manifest: Set<String>, handedOff: Bool) -> [String] {
+        handedOff ? codes.filter(manifest.contains) : codes
+    }
+
+    /// True once the track is drawn by AVPlayer rather than this object (`handOff()`).
+    var isHandedOff: Bool { group != nil && output == nil }
+
+    /// True while a programme's prepared file is loaded: text the PiP window must draw into the
+    /// picture itself (HouseCaptionCompositor), as tvOS has no track of it.
+    var hasFile: Bool { !fileCues.isEmpty }
+
+    /// The skin's caption colours for the text tvOS draws itself: bold and half again as large,
+    /// since the window shows it at a third of the size (Apple TV HD, 2026-11-17: yellow on the
+    /// Grove plate in the window). Set again by the window when the skin turns.
+    /// The viewer's "Text only" choice (CaptionStyle) draws yellow text with a black edge and no plate.
+    static func styleRules(_ skin: Skin, style: CaptionStyle = .current) -> [AVTextStyleRule] {
+        let bare = style == .bare
+        return [AVTextStyleRule(textMarkupAttributes: [
+            kCMTextMarkupAttribute_ForegroundColorARGB as String: Skin.argb(bare ? Skin.bareCaptionHex : skin.captionTextHex),
+            kCMTextMarkupAttribute_BackgroundColorARGB as String: bare ? [0, 0, 0, 0] : Skin.argb(skin.captionPlateHex),
+            kCMTextMarkupAttribute_CharacterEdgeStyle as String: bare ? kCMTextMarkupCharacterEdgeStyle_Uniform as String
+                                                                      : kCMTextMarkupCharacterEdgeStyle_None as String,
+            kCMTextMarkupAttribute_BoldStyle as String: true,
+            kCMTextMarkupAttribute_RelativeFontSize as String: 150,
+        ])].compactMap { $0 }
+    }
+
     func clear() {
         generation += 1
+        handOffWaiting = false
         ticker?.cancel()
         ticker = nil
         // Deselect too: with its suppressing output gone, a selected track would be drawn by the
@@ -55,14 +129,19 @@ final class RecordedSubtitles {
         tracks = []
         current = nil
         text = nil
+        choiceKey = nil
     }
+
+    /// Moves on every clear: a load that sees it moved by more than its own clear was taken over
+    /// by another load (the screen's and the window's, overlapping as the screen closes).
+    var revision: Int { generation }
 
     /// True while the tracks shown are this item's.
     func follows(_ other: AVPlayerItem) -> Bool { item === other }
 
     /// The next language, then off, then the first again.
     func cycle() {
-        let codes = tracks.map(\.code)
+        let codes = Self.windowCodes(tracks.map(\.code), manifest: Set(options.keys), handedOff: isHandedOff)
         guard !codes.isEmpty else { return }
         let next: String?
         if let current, let index = codes.firstIndex(of: current) {
@@ -129,12 +208,19 @@ final class RecordedSubtitles {
 
     // MARK: - A film's manifest tracks
 
-    /// Lists the legible options of `item`, one per language, labelled from the film's record, and
-    /// switches on the remembered or device language, else English, else none (desiredSubtitle()).
-    func attach(_ item: AVPlayerItem, listed: [SubtitleLanguage]) async {
+    /// Lists the legible options of `item`, one per language, labelled from `listed`, and
+    /// switches on the language remembered for this film (or, with no film, the one Transmission
+    /// choice), or the device's, else English, else none (desiredSubtitle()).
+    func attach(_ item: AVPlayerItem, film handle: String?, listed: [SubtitleLanguage], skin: Skin) async {
         clear()
         let gen = generation
-        guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
+        // The house view draws the text full screen. In the picture-in-picture window AVPlayer
+        // draws it (handOff()), and these rules give it the skin's caption plate there.
+        item.textStyleRules = Self.styleRules(skin)
+        // A load cancelled while it waited (the screen shut down for the window) puts nothing on
+        // the item: an output added now would hide the track from the window the next time.
+        guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation,
+              !Task.isCancelled else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []
         for option in found.options {
@@ -158,13 +244,16 @@ final class RecordedSubtitles {
         legible.setDelegate(relay, queue: .main)
         item.add(legible)
         output = legible
-        let stored = UserDefaults.standard.string(forKey: SubtitleChoice.storeKey)
+        let key = handle.map(SubtitleChoice.filmKey) ?? SubtitleChoice.storeKey
+        choiceKey = key
+        let stored = UserDefaults.standard.string(forKey: key)
         apply(SubtitleChoice.desired(available: order.map(\.code), stored: stored, preferred: Locale.preferredLanguages))
+        if handOffWaiting { handOff() }
     }
 
-    /// The viewer's choice, remembered as the site remembers it ("off" or the code).
+    /// The viewer's choice, remembered under `choiceKey` ("off" or the code).
     private func select(_ code: String?) {
-        if group != nil { UserDefaults.standard.set(code ?? "off", forKey: SubtitleChoice.storeKey) }
+        if group != nil, let choiceKey { UserDefaults.standard.set(code ?? "off", forKey: choiceKey) }
         apply(code)
     }
 

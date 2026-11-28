@@ -88,6 +88,8 @@ enum Visualizer {
     /// refills (never with the piece just shown, when there is a choice). Joined at a random point, and the next
     /// draw comes when the piece ends or after half an hour. `roll` and `startRoll` are in 0..<1 so tests can fix them.
     static let seenKey = "kj-visualizer-seen"
+    /// Nature (religious channels) keeps its own bag, so a Nature draw does not reset the other one.
+    static func seenKey(reverent: Bool) -> String { reverent ? seenKey + "-nature" : seenKey }
     static func draw(_ rows: [VisualizerPiece], reverent: Bool, seen: [String], roll: Double, startRoll: Double)
         -> (piece: VisualizerPiece, offset: TimeInterval, play: TimeInterval, seen: [String])? {
         // Owner, 2026-11-26: every piece on a sound channel, only Nature on a religious one.
@@ -97,7 +99,9 @@ enum Visualizer {
         var bag = seen
         if fresh.isEmpty {
             bag = []
-            fresh = suited.count > 1 ? suited.filter { $0.id != seen.last } : suited
+            // Never the piece just shown when another exists; a list of one piece (or one id) repeats it.
+            let others = suited.filter { $0.id != seen.last }
+            fresh = others.isEmpty ? suited : others
         }
         let piece = fresh[min(fresh.count - 1, Int(roll * Double(fresh.count)))]
         let room = max(0, piece.seconds - 60)

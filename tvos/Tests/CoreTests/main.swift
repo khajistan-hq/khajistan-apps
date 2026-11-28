@@ -856,7 +856,7 @@ func authRequests() throws {
 
     let logout = AuthAPI.logoutRequest(accessToken: "AT")
     try expectEqual(logout.httpMethod, "POST")
-    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout")
+    try expectEqual(logout.url?.absoluteString, "https://qojysegeddztsxdmhjfb.supabase.co/auth/v1/logout?scope=local")
     try expectEqual(logout.value(forHTTPHeaderField: "Authorization"), "Bearer AT")
     try expectEqual(logout.value(forHTTPHeaderField: "apikey"), KJConfig.anonKey)
     try expectEqual(logout.value(forHTTPHeaderField: "Content-Type"), "application/json")
@@ -1320,6 +1320,16 @@ func returnTimeLooksPastTomorrow() throws {
     // A start the builder cannot write keeps the hour alone, and does not trap converting to Int.
     let huge = try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: "47024.7", with: "1e24").replacingOccurrences(of: #""start_second":72000"#, with: #""start_second":1e24"#))
     try expectEqual(StationClock.returnLabel(huge, channelId: "g", at: pkt(2026, 11, 1, 12, 0, 0)), "13:03 PKT")
+    // The guide's open off-air stretch: the 12th's strip as its return, and no return at all for a
+    // start the builder cannot write, never an invented time (Fable, round 7).
+    let noon = pkt(2026, 11, 1, 12, 0, 0)
+    try expectEqual(StationClock.timeline([p], channel: 21, from: noon, to: noon.addingTimeInterval(3600)).last?.returnAt, pkt(2026, 11, 12, 13, 3, 44).addingTimeInterval(0.7))
+    for bad in [huge, try decode(Programming.self, gapScheduleJSON().replacingOccurrences(of: "47024.7", with: "700000").replacingOccurrences(of: #""start_second":72000"#, with: #""start_second":-5"#))] {
+        let tail = StationClock.timeline([bad], channel: 21, from: noon, to: noon.addingTimeInterval(3600)).last
+        try expectEqual(tail?.openEnd, true)
+        try expectEqual(tail?.returnAt, nil)
+        try expectEqual(tail?.back(now: noon), nil)
+    }
 }
 
 func upNextNamesOnlyAStripUnderADayAway() throws {
@@ -1577,6 +1587,27 @@ func followingWalksTheRosterAndHandsBackToTheClock() throws {
     try expectEqual(StationClock.following(current, in: p, at: nextDay)?.date, "2026-10-11")
     // Off air after the slot: nil.
     try expectEqual(StationClock.following(current, in: p, at: pkt(2026, 10, 10, 8, 30, 0)), nil)
+}
+
+/// `year` and `part` reach the strip only if the decoder reads them (Fable refute, 2026-11-16:
+/// both were declared and never decoded, so every strip showed neither). Lenient like `title`.
+func programmeDecodesYearAndPart() throws {
+    let both = try decode(Programming.Programme.self, #"{"id":"x","year":1988,"part":"Part 4 of 5"}"#)
+    try expectEqual(both.year, 1988)
+    try expectEqual(both.part, "Part 4 of 5")
+    let wrong = try decode(Programming.Programme.self, #"{"id":"x","year":"1988","part":4}"#)
+    try expectEqual(wrong.year, nil)
+    try expectEqual(wrong.part, nil)
+}
+
+/// Just after midnight on the 1st, Up next starts on last month's late strip (prev_day) and goes
+/// on into the 1st (Fable refute, 2026-11-16: it stopped after one strip).
+func upcomingWalksOnFromPrevDay() throws {
+    let url = fixtureURL.deletingLastPathComponent().appendingPathComponent("station-clock-fixture-2026-12.json")
+    let p = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: url)).programming
+    let got = StationClock.upcoming(p, channelId: "radio", at: pkt(2026, 12, 1, 0, 5, 0), count: 5)
+    try expectEqual(got.map { "\($0.date) \($0.startLabel)" },
+                    ["2026-11-30 00:12", "2026-12-01 01:11", "2026-12-01 02:50", "2026-12-01 02:59", "2026-12-01 03:52"])
 }
 
 func upcomingListsTheNextStripsInOrder() throws {
@@ -2052,6 +2083,666 @@ func followingAgreesWithTheRosterAtEveryFixtureInstant() throws {
     print("      following(): \(checked) instants walked the roster (\(wrapped) wrapped to the head), \(afterEnd) handed back to the clock, \(nearEnd) at a strip's end")
     try expect(checked >= 400, "only \(checked) checked")
     try expect(wrapped >= 1, "no roster wrapped")
+}
+
+// MARK: - The guide's time grid
+
+/// Checks a timeline against the clock, aligned on the moment and never on position: the blocks
+/// run end to end with no gap or overlap, and at every sampled whole second the block holding it
+/// says what `onAir` says (the programme's title, or for a run of short programmes the show's
+/// name, or off air). At a block's own boundary second the clock may still read the block before
+/// (the clock reads whole seconds, a programme ends inside one), so each boundary is sampled one
+/// second either side, and the boundary second itself is not. Anything under a minute (an off-air
+/// seam, a lone item) is drawn inside the block before it, so the last minute of a block may hold
+/// it. Inside a grouped run the clock's programme must be a short one: a long programme is never
+/// hidden in a run.
+@discardableResult
+func timelineAgreesWithTheClock(_ months: [Programming], channel: Int, from: Date, to: Date, every step: TimeInterval) throws -> [GuideSlot] {
+    let slots = StationClock.timeline(months, channel: channel, from: from, to: to)
+    try expect(!slots.isEmpty, "channel \(channel): no blocks")
+    try expect((slots.first?.start ?? .distantFuture) <= from, "channel \(channel): the first block starts after \(from)")
+    for (a, b) in zip(slots, slots.dropFirst()) {
+        try expect(a.end == b.start, "channel \(channel): a gap or an overlap at \(a.end) / \(b.start)")
+        try expect(a.start < a.end, "channel \(channel): an empty block at \(a.start)")
+        try expect(!(a.isOffAir && b.isOffAir), "channel \(channel): two off-air blocks side by side at \(a.end)")
+    }
+    var moments: [Date] = []
+    var t = from
+    while t < (slots.last?.end ?? from) { moments.append(t); t = t.addingTimeInterval(step) }
+    for slot in slots where slot.start > from {
+        moments.append(slot.start.addingTimeInterval(-1).rounded())
+        moments.append(slot.start.addingTimeInterval(1).rounded())
+    }
+    let boundaries = Set(slots.map { $0.start.timeIntervalSince1970.rounded(.down) })
+    var checked = 0
+    for moment in moments where moment >= from && moment < (slots.last?.end ?? from) {
+        guard !boundaries.contains(moment.timeIntervalSince1970.rounded(.down)) else { continue }
+        // The month that holds the moment: the first whose end is after it.
+        let month = months.first { p in StationClock.monthEnd(p).map { moment < $0 } ?? false } ?? months[0]
+        let block = try require(slots.first { $0.contains(moment) })
+        let air = StationClock.onAir(month, channel: channel, at: moment)
+        let joined = block.end.timeIntervalSince(moment) <= StationClock.shortGap
+        if let air {
+            let expected = block.grouped ? (air.show?.name ?? air.nowName ?? "") : (air.nowName ?? air.show?.name ?? "")
+            try expect(block.title == expected || joined, "channel \(channel) at \(moment): the grid says \(block.title ?? "off air"), the clock \(expected)")
+            // Off air never covers something on, joined seam or not (StationClock.group).
+            try expect(!block.isOffAir, "channel \(channel) at \(moment): the grid says off air, the clock \(expected)")
+            if block.grouped, !joined {
+                try expect(StationClock.runSeconds(air.programme) < StationClock.shortProgramme,
+                           "channel \(channel) at \(moment): a \(Int(StationClock.runSeconds(air.programme))) s programme inside the run \(block.title ?? "")")
+            }
+        } else {
+            try expect(block.isOffAir || joined, "channel \(channel) at \(moment) is off air, the grid says \(block.title ?? "")")
+        }
+        checked += 1
+    }
+    // As many moments as the row's length holds at this step: a check that read nothing fails.
+    let span = (slots.last?.end ?? from).timeIntervalSince(from)
+    try expect(checked >= max(2, Int(span / step) - 1), "only \(checked) moments checked over \(Int(span)) s")
+    return slots
+}
+
+extension Date {
+    /// To the whole second, for sampling the clock as it reads.
+    func rounded() -> Date { Date(timeIntervalSince1970: timeIntervalSince1970.rounded(.down)) }
+}
+
+func guideTimelineSynthetic() throws {
+    let p = try syntheticSchedule()
+    // 06:00-07:00 runs Zero (600 s), One (270 s), the untitled 300 s one, round again; the strip's
+    // end cuts the last. 07:00-08:00 is Three (60 s) sixty times; dark until 23:00.
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 10, 10, 6, 0), to: pkt(2026, 10, 10, 23, 30), every: 23)
+    try expectEqual(slots.first?.start, pkt(2026, 10, 10, 6, 0))
+    try expectEqual(slots.first?.end, pkt(2026, 10, 10, 6, 10))
+    try expectEqual(slots.first?.title, "Show A")   // no display title: the show's name, as Now prints it
+    // One (4.5 min) and the untitled one (5 min) are short, side by side in one strip: one block.
+    try expectEqual(slots[1], GuideSlot(start: pkt(2026, 10, 10, 6, 10), end: pkt(2026, 10, 10, 6, 19, 30), title: "Show A", grouped: true, items: 2))
+    // Sixty one-minute programmes of Show B: one block for the strip.
+    let seven = try require(slots.firstIndex { $0.start == pkt(2026, 10, 10, 7, 0) })
+    try expectEqual(slots[seven], GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
+    try expectEqual(slots[seven - 1].end, pkt(2026, 10, 10, 7, 0))
+    // One dark stretch from 08:00 to 23:00, not one per reading.
+    let dark = slots.filter(\.isOffAir)
+    try expectEqual(dark.count, 1)
+    try expectEqual(dark.first?.start, pkt(2026, 10, 10, 8, 0))
+    try expectEqual(dark.first?.end, pkt(2026, 10, 10, 23, 0))
+    try expectEqual(dark.first?.returnAt, nil)   // it ends inside what was asked for
+    try expectEqual(dark.first?.openEnd, false)
+    // A dark stretch that runs past what was asked for says when the channel is back, and its end
+    // (the edge of what was read) is not a time anything happens.
+    let open = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 8, 30), to: pkt(2026, 10, 10, 9, 0))
+    try expectEqual(open.count, 1)
+    try expectEqual(open.first?.returnAt, pkt(2026, 10, 10, 23, 0))
+    try expectEqual(open.first?.back(now: pkt(2026, 10, 10, 8, 30)), "23:00 PKT")
+    try expectEqual(open.first?.openEnd, true)
+    // Read to 07:30, the run of one-minute programmes is finished to its strip's end, 08:00: its end
+    // is the run's own, not the edge of what was read.
+    try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 50), to: pkt(2026, 10, 10, 7, 30)).last,
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
+    // Opened inside the run of one-minute programmes, the run still starts at 07:00.
+    try expectEqual(StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 7, 40), to: pkt(2026, 10, 10, 8, 30)).first,
+                    GuideSlot(start: pkt(2026, 10, 10, 7, 0), end: pkt(2026, 10, 10, 8, 0), title: "Show B", grouped: true, items: 60))
+    // Asked from inside a programme, the first block starts when the programme did.
+    let mid = StationClock.timeline([p], channel: 1, from: pkt(2026, 10, 10, 6, 5), to: pkt(2026, 10, 10, 6, 20))
+    try expectEqual(mid.first?.start, pkt(2026, 10, 10, 6, 0))
+    // A channel with nothing that day is one dark stretch to the end asked for.
+    let none = StationClock.timeline([p], channel: 2, from: pkt(2026, 10, 10, 9, 0), to: pkt(2026, 10, 10, 12, 0))
+    try expectEqual(none.map(\.isOffAir), [true])
+    try expectEqual(none.first?.start, pkt(2026, 10, 10, 9, 0)); try expectEqual(none.first?.end, pkt(2026, 10, 10, 12, 0))
+    // A channel the file does not name is off air to the month's end, then nothing.
+    try expectEqual(StationClock.timeline([p], channel: 9, from: pkt(2026, 10, 10, 9, 0), to: pkt(2026, 10, 10, 12, 0)).map(\.isOffAir), [true])
+}
+
+/// A strip that ends inside a second, with the next strip at the next whole second: the clock reads
+/// off air for that one second. The grid draws it inside the programme before, so Right does not
+/// stop on a block no one can see.
+func guideTimelineSeamBetweenStrips() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"},"s2":{"slug":"s2","name":"Show Two"}},
+     "programme_order":["A","B"],
+     "programmes":{"A":{"id":"A","title":"a","display_title":"Title A","seconds":1798.5},
+                   "B":{"id":"B","title":"b","display_title":"Title B","seconds":1800}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":30,"start_second":43200,"seconds":1798.5,"show":"s1","programmes":[0]},
+       {"start":"12:30","start_minute":750,"minutes":30,"start_second":45000,"seconds":1800,"show":"s2","programmes":[1]}]}}]}
+    """)
+    try expect(StationClock.onAir(p, channel: 1, at: pkt(2026, 11, 8, 12, 29, 59)) == nil, "the clock reads the seam as off air")
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 12, 0), to: pkt(2026, 11, 8, 13, 0), every: 7)
+    try expectEqual(slots.map(\.title), ["Title A", "Title B"])
+    try expectEqual(slots.first?.end, pkt(2026, 11, 8, 12, 30))
+}
+
+/// A lone item under a minute between long programmes is drawn inside the block before it, and
+/// two strips of short items of one show side by side stay two blocks, each with its strip's times.
+func guideTimelineJoinsWhatCannotBeSeen() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L","S","M","N"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":1800},
+                   "S":{"id":"S","title":"s","display_title":"Sting","seconds":30},
+                   "M":{"id":"M","title":"m","display_title":"Long Two","seconds":1770},
+                   "N":{"id":"N","title":"n","display_title":"Clip","seconds":300}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":60,"show":"s1","programmes":[0,1,2]},
+       {"start":"13:00","start_minute":780,"minutes":30,"show":"s1","programmes":[3]},
+       {"start":"13:30","start_minute":810,"minutes":30,"show":"s1","programmes":[3]}]}}]}
+    """)
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 12, 0), to: pkt(2026, 11, 8, 14, 0), every: 11)
+    try expectEqual(slots.map(\.title), ["Long", "Long Two", "Show One", "Show One"])
+    try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 30, 30))   // the 30 s sting is inside "Long"
+    try expectEqual(slots[2], GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true, items: 6))
+    try expectEqual(slots[3], GuideSlot(start: pkt(2026, 11, 8, 13, 30), end: pkt(2026, 11, 8, 14, 0), title: "Show One", grouped: true, items: 6))
+    // Read to 13:15, the run is finished to its strip's end, 13:30, and not on into the next strip.
+    let short = StationClock.timeline([p], channel: 1, from: pkt(2026, 11, 8, 12, 50), to: pkt(2026, 11, 8, 13, 15))
+    try expectEqual(short.last, GuideSlot(start: pkt(2026, 11, 8, 13, 0), end: pkt(2026, 11, 8, 13, 30), title: "Show One", grouped: true, items: 6))
+}
+
+/// Off air must never cover something on: a programme under a minute right after an off-air
+/// stretch keeps its own block (an off-air seam after a programme still joins the programme).
+func guideTimelineKeepsWhatFollowsOffAir() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["S","L"],
+     "programmes":{"S":{"id":"S","title":"s","display_title":"Sting","seconds":40},
+                   "L":{"id":"L","title":"l","display_title":"Long","seconds":3560}},
+     "days":[{"date":"2026-11-08","channels":{"c":[
+       {"start":"12:00","start_minute":720,"minutes":60,"show":"s1","programmes":[0,1]}]}}]}
+    """)
+    let slots = try timelineAgreesWithTheClock([p], channel: 1, from: pkt(2026, 11, 8, 11, 0), to: pkt(2026, 11, 8, 13, 0), every: 7)
+    try expectEqual(slots.map(\.title), [nil, "Sting", "Long"])
+    try expectEqual(slots[0].end, pkt(2026, 11, 8, 12, 0))
+}
+
+/// The last month held ends with the channel off air: that stretch ends at the month's end, which
+/// is the edge of what is held, not a time the channel comes back. It is an open end, and with no
+/// later month held it has no return.
+func guideTimelineOffAirAtTheEndOfTheMonthsHeld() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-30","channels":{"c":[
+       {"start":"22:00","start_minute":1320,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let slots = StationClock.timeline([p], channel: 1, from: pkt(2026, 11, 30, 22, 30), to: pkt(2026, 12, 1, 2, 0))
+    try expectEqual(slots.map(\.title), ["Long", nil])
+    try expectEqual(slots.last?.end, pkt(2026, 12, 1, 0, 0))
+    try expectEqual(slots.last?.openEnd, true)
+    try expectEqual(slots.last?.returnAt, nil)
+}
+
+/// A channel dark across midnight on the month's last day says when it is back, read before
+/// midnight or after: the return is asked of the new month from its own first day.
+func guideTimelineDarkAcrossTheMonthsEnd() throws {
+    let nov = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-30","channels":{"c":[
+       {"start":"20:00","start_minute":1200,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let dec = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-12-01","channels":{"c":[]}},{"date":"2026-12-02","channels":{"c":[
+       {"start":"10:00","start_minute":600,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    for from in [pkt(2026, 11, 30, 20, 30), pkt(2026, 11, 30, 23, 30), pkt(2026, 12, 1, 0, 0)] {
+        let tail = StationClock.timeline([nov, dec], channel: 1, from: from, to: pkt(2026, 12, 1, 6, 0)).last
+        try expect(tail?.isOffAir == true && tail?.openEnd == true, "read from \(from): the row ends off air, open")
+        guard let back = tail?.returnAt else { throw Failure(description: "read from \(from): no return time") }
+        try expectEqual(back, pkt(2026, 12, 2, 10, 0))
+        // Read the evening before, it is a day and more away: the day is printed with the hour.
+        try expectEqual(tail?.back(now: from), "10:00 PKT on Wednesday 2 December")
+    }
+    // A return the next day, less than 24 hours away, still carries its day (Fable, round 6: back
+    // at 23:30 on 1 December, read at 22:00 on 30 November, printed "back at 23:30 PKT").
+    let soon = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-12-01","channels":{"c":[
+       {"start":"23:30","start_minute":1410,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let tail = StationClock.timeline([nov, soon], channel: 1, from: pkt(2026, 11, 30, 22, 0), to: pkt(2026, 12, 1, 1, 0)).last
+    try expectEqual(tail?.returnAt, pkt(2026, 12, 1, 23, 30))
+    try expectEqual(tail?.back(now: pkt(2026, 11, 30, 22, 0)), "23:30 PKT on Tuesday 1 December")
+    try expectEqual(tail?.back(now: pkt(2026, 12, 1, 9, 0)), "23:30 PKT")
+    // Mid-month, one month held: dark from 22:00, back at 13:00 the next day, read at 09:30.
+    let mid = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+     "shows":{"s1":{"slug":"s1","name":"Show One"}},
+     "programme_order":["L"],
+     "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":3600}},
+     "days":[{"date":"2026-11-17","channels":{"c":[
+       {"start":"21:00","start_minute":1260,"minutes":60,"show":"s1","programmes":[0]}]}},
+             {"date":"2026-11-18","channels":{"c":[
+       {"start":"13:00","start_minute":780,"minutes":60,"show":"s1","programmes":[0]}]}}]}
+    """)
+    let read = pkt(2026, 11, 17, 9, 30)
+    let open = StationClock.timeline([mid], channel: 1, from: read, to: read.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)).last
+    try expectEqual(open?.openEnd, true)
+    try expectEqual(open?.back(now: read), "13:00 PKT on Wednesday 18 November")
+}
+
+/// The programme on air by its Now name, from the month that holds the moment: after midnight on
+/// the 1st that is the second file.
+func guideNowNameAcrossTheMonth() throws {
+    let nov = try realProgramming("2026-11")
+    let dec = try realProgramming("2026-12")
+    let at = pkt(2026, 12, 1, 3, 30)
+    for channel in nov._meta.channels.map(\.number) {
+        try expectEqual(StationClock.nowName([nov, dec], channel: channel, at: at), StationClock.onAir(dec, channel: channel, at: at)?.nowName)
+        try expectEqual(StationClock.nowName([nov], channel: channel, at: at), nil)
+    }
+    let mid = pkt(2026, 11, 14, 21, 10)
+    for channel in nov._meta.channels.map(\.number) {
+        try expectEqual(StationClock.nowName([nov, dec], channel: channel, at: mid), StationClock.onAir(nov, channel: channel, at: mid)?.nowName)
+    }
+}
+
+/// The month the guide fetches: none while it reads inside the month held, the next one past its
+/// end, none once that one is held too, and the month the clock has turned into while the month
+/// before is still held.
+func guideMonthToFetch() throws {
+    let nov = try decode(Programming.self, #"{"_meta":{"channels":[]},"shows":{},"programme_order":[],"programmes":{},"days":[{"date":"2026-11-01","channels":{}},{"date":"2026-11-30","channels":{}}]}"#)
+    let dec = try decode(Programming.self, #"{"_meta":{"channels":[]},"shows":{},"programme_order":[],"programmes":{},"days":[{"date":"2026-12-01","channels":{}}]}"#)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nil, until: pkt(2026, 11, 30, 23, 59)), nil)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nil, until: pkt(2026, 12, 1, 0, 0)), "2026-12")
+    try expectEqual(StationClock.monthToFetch(held: nov, next: dec, until: pkt(2026, 12, 1, 9, 0)), nil)
+    try expectEqual(StationClock.monthToFetch(held: nov, next: nov, until: pkt(2026, 12, 1, 9, 0)), "2026-12")
+    try expectEqual(StationClock.monthToFetch(held: nil, next: nil, until: pkt(2026, 12, 1, 9, 0)), nil)
+    try expectEqual(StationClock.monthToFetch(held: dec, next: nil, until: pkt(2027, 1, 1, 0, 0)), "2027-01")
+}
+
+/// The guide opened an hour apart reads the same blocks where the two openings overlap: a run read
+/// from its middle keeps its start and its name (Fable, round 2: 10:57 for a run begun at 10:07,
+/// and a name that changed at the half hour). Every channel, every day of November.
+func guideTimelineReadsTheSameWhenOpened() throws {
+    let nov = try realProgramming("2026-11")
+    var compared = 0
+    for day in 1...29 {
+        for channel in nov._meta.channels.map(\.number) {
+            let early = pkt(2026, 11, day, 11, 10), late = pkt(2026, 11, day, 12, 10)
+            let a = StationClock.timeline([nov], channel: channel, from: early, to: early.addingTimeInterval(6 * 3600))
+            let b = StationClock.timeline([nov], channel: channel, from: late, to: late.addingTimeInterval(4 * 3600))
+            // Blocks that end inside both openings: one at an opening's far edge depends on where
+            // it was read to (whether a sub-minute item after it joins it).
+            for block in b where !block.openEnd && block.end <= late.addingTimeInterval(4 * 3600) {
+                // The same block to the second (one opening may read a start from whole seconds, the
+                // other snap it to the fractional end before it).
+                let same = a.contains { abs($0.start.timeIntervalSince(block.start)) < 1 && abs($0.end.timeIntervalSince(block.end)) < 1
+                    && $0.title == block.title && $0.grouped == block.grouped }
+                try expect(same, "channel \(channel), \(day) November: opened at 12:10 the guide reads \(block), opened at 11:10 it does not")
+                compared += 1
+            }
+        }
+    }
+    try expect(compared > 3000, "only \(compared) blocks compared")
+}
+
+/// Every day of a real month, every channel, from 06:10, 18:10 and 23:10, for as long as a guide
+/// reads (the horizon and a window): the grid agrees with the clock, no row stops short, and
+/// none hits the walk's cap.
+func guideTimelineRealMonth() throws {
+    let nov = try realProgramming("2026-11")
+    let end = try require(StationClock.monthEnd(nov))
+    let reach = GuideGrid.horizon + GuideGrid.span
+    var rows = 0
+    for day in 1...30 {
+        for hour in [6, 18, 23] {
+            let from = pkt(2026, 11, day, hour, 10)
+            for channel in nov._meta.channels.map(\.number) {
+                let to = from.addingTimeInterval(reach)
+                let slots = try timelineAgreesWithTheClock([nov], channel: channel, from: from, to: to, every: 613)
+                // A row reaches what was asked, or the month's end; nothing past the month is read as off air.
+                try expect((slots.last?.end ?? from) >= min(to, end), "channel \(channel) from \(from): the row stops at \(slots.last?.end ?? from)")
+                try expect(!slots.contains { $0.isOffAir && $0.end > end }, "channel \(channel) from \(from): off air after the month's end")
+                rows += 1
+            }
+        }
+    }
+    try expect(rows > 2000, "only \(rows) rows")
+}
+
+/// The last evening of November with December's file held: the rows run on past midnight, and what
+/// they say after it is December's clock.
+func guideTimelineAcrossTheMonth() throws {
+    let nov = try realProgramming("2026-11")
+    let dec = try realProgramming("2026-12")
+    let end = try require(StationClock.monthEnd(nov))
+    let from = pkt(2026, 11, 30, 23, 10)
+    let to = from.addingTimeInterval(GuideGrid.horizon + GuideGrid.span)
+    var past = 0
+    for channel in nov._meta.channels.map(\.number) {
+        let slots = try timelineAgreesWithTheClock([nov, dec], channel: channel, from: from, to: to, every: 211)
+        try expect((slots.last?.end ?? from) >= to, "channel \(channel): the row stops at \(slots.last?.end ?? from)")
+        past += slots.filter { $0.start >= end && !$0.isOffAir }.count
+        // December alone, as the store holds it once the month has turned: from midnight and from
+        // half past, the rows agree with December's clock (a run carried over from 30 November
+        // starts where December's file does); read from 23:30 on the 30th, nothing December's
+        // clock has on is drawn off air.
+        for start in [end, end.addingTimeInterval(1800)] {
+            try timelineAgreesWithTheClock([dec], channel: channel, from: start, to: start.addingTimeInterval(GuideGrid.horizon + GuideGrid.span), every: 173)
+        }
+        let early = StationClock.timeline([dec], channel: channel, from: end.addingTimeInterval(-1800), to: end.addingTimeInterval(6 * 3600))
+        var probe = end
+        while probe < end.addingTimeInterval(6 * 3600) {
+            if StationClock.onAir(dec, channel: channel, at: probe) != nil {
+                // A block must be there: a row with none at an on-air moment is a failure, not a pass.
+                let block = try require(early.first { $0.contains(probe) }, "channel \(channel) at \(probe): no block while December's clock has a programme")
+                try expect(!block.isOffAir, "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
+            }
+            probe = probe.addingTimeInterval(97)
+        }
+        // November alone: the row ends at the month's end, with nothing read past it.
+        let alone = StationClock.timeline([nov], channel: channel, from: from, to: to)
+        try expect(!alone.contains { $0.start >= end }, "channel \(channel): a block after the month's end with no December held")
+    }
+    try expect(past > 50, "only \(past) December programmes on the rows")
+}
+
+/// CodeRabbit, PR 147/98: a November programme running past midnight hid a December programme
+/// at 00:00 that the clock (which reads December from midnight) has on.
+func guideTimelineHandsOverAtMidnight() throws {
+    func month(_ day: String, _ slot: String) -> String {
+        #"{"_meta":{"channels":[{"id":"c","number":1,"name":"C"}]},"shows":{"s":{"slug":"s","name":"S"}},"programme_order":["a","b"],"programmes":{"a":{"id":"a","title":"A","seconds":4800},"b":{"id":"b","title":"B","seconds":600}},"days":[{"date":"\#(day)","channels":{"c":[\#(slot)]}}]}"#
+    }
+    let nov = try decode(Programming.self, month("2026-11-30", #"{"start":"23:00","start_minute":1380,"minutes":80,"show":"s","programmes":[0]}"#))
+    let dec = try decode(Programming.self, month("2026-12-01", #"{"start":"00:00","start_minute":0,"minutes":10,"show":"s","programmes":[1]}"#))
+    try expect(StationClock.onAir(dec, channel: 1, at: pkt(2026, 12, 1, 0, 5)) != nil, "the fixture has B on at 00:05")
+    _ = try timelineAgreesWithTheClock([nov, dec], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0), every: 60)
+    // November alone still draws its programme to its own end.
+    let alone = StationClock.timeline([nov], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0))
+    try expect(alone.contains { !$0.isOffAir && $0.end > pkt(2026, 12, 1, 0, 0) }, "November alone cut its carryover at midnight")
+}
+
+func guideGridMoves() throws {
+    let s: [GuideSlot] = [
+        GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 20), title: "A"),
+        GuideSlot(start: pkt(2026, 11, 17, 12, 20), end: pkt(2026, 11, 17, 13, 0), title: "B"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 0), end: pkt(2026, 11, 17, 18, 0), title: nil),
+        GuideSlot(start: pkt(2026, 11, 17, 18, 0), end: pkt(2026, 11, 18, 2, 0), title: "C"),
+    ]
+    let now = pkt(2026, 11, 17, 12, 10)
+    var g = GuideGrid(row: 3, now: now)
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    try expectEqual(g.lit(in: s), 0)                      // A is on now
+    try expectEqual(g.marks.count, 3)
+    g.later(on: s); try expectEqual(g.lit(in: s), 1); try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 20))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    g.later(on: s); try expectEqual(g.lit(in: s), 2)      // the dark stretch is a block too
+    g.later(on: s); try expectEqual(g.lit(in: s), 3)
+    // 18:00 is past the window's last half hour: the window follows in half hours.
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 17, 30))
+    try expect(g.cursor < g.windowEnd.addingTimeInterval(-GuideGrid.step), "the lit start is not in view")
+    g.later(on: s); try expectEqual(g.lit(in: s), 3)      // nothing after C: Right stays
+    g.earlier(on: s); try expectEqual(g.lit(in: s), 2); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 13, 0))
+    g.earlier(on: s); g.earlier(on: s); try expectEqual(g.lit(in: s), 0)
+    // Never before now: A began at 11:00, the cursor and the window stay at now's half hour.
+    try expectEqual(g.cursor, now); try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 0))
+    // Left from the programme on now is the channel's own cell; Up and Down keep it, Right leaves
+    // it for the programme on now, and Left on it stays.
+    try expect(!g.onChannel, "two Lefts reach the programme on now, not the channel cell")
+    g.earlier(on: s); try expectEqual(g.cursor, now); try expect(g.onChannel, "Left from the programme on now")
+    g.earlier(on: s); try expect(g.onChannel, "Left on the channel cell stays")
+    g.move(rows: 1, count: 4); g.move(rows: -1, count: 4); try expect(g.onChannel, "Up and Down keep the channel cell")
+    g.later(on: s); try expect(!g.onChannel, "Right leaves the channel cell"); try expectEqual(g.lit(in: s), 0)
+    // The clock moves on with the guide open: the lit moment and the window follow now.
+    g.refresh(now: pkt(2026, 11, 17, 12, 40))
+    try expectEqual(g.cursor, pkt(2026, 11, 17, 12, 40)); try expectEqual(g.lit(in: s), 1)
+    try expectEqual(g.windowStart, pkt(2026, 11, 17, 12, 30))
+    // A later lit moment stays where it is.
+    g.later(on: s); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
+    // A row whose first programme is later than now: Left lights nothing new, so it is the
+    // channel cell at once, with the moment back at now.
+    var back = GuideGrid(row: 0, now: now)
+    back.cursor = pkt(2026, 11, 17, 18, 30)
+    back.earlier(on: [s[3]]); try expectEqual(back.cursor, now); try expect(back.onChannel, "no programme before: the channel cell")
+    g.refresh(now: pkt(2026, 11, 17, 12, 45)); try expectEqual(g.cursor, pkt(2026, 11, 17, 13, 0))
+    // Up and Down keep the moment and go round the list.
+    g.move(rows: 1, count: 4); try expectEqual(g.row, 0)
+    g.move(rows: -1, count: 4); try expectEqual(g.row, 3)
+    g.move(rows: 1, count: 0); try expectEqual(g.row, 3)
+    // Right stops at the horizon: a programme twelve hours or more away is not lit.
+    let far = [GuideSlot(start: now.addingTimeInterval(-60), end: now.addingTimeInterval(13 * 3600), title: nil),
+               GuideSlot(start: now.addingTimeInterval(13 * 3600), end: now.addingTimeInterval(14 * 3600), title: "Late")]
+    var h = GuideGrid(row: 0, now: now)
+    h.later(on: far); try expectEqual(h.lit(in: far), 0)
+    // A row with nothing lights nothing, and Right and Left do not move.
+    var e = GuideGrid(row: 0, now: now)
+    try expectEqual(e.lit(in: []), nil)
+    e.later(on: []); e.earlier(on: []); try expectEqual(e.cursor, now)
+}
+
+/// A swipe on the touch surface and a press of an arrow reach the screen as the same move command;
+/// the finger's travel tells them apart (RemoteGesture). Both directions, and the near misses.
+/// The players' remote map (owner, 2026-11-28): the whole table, so a change to one cell is seen.
+func remoteMapIsTheOwnersTable() throws {
+    typealias M = RemoteMap
+    try expectEqual(M.action(.down, in: .picture), .openGuide, "down opens the guide")
+    for input in [M.Input.up, .left, .right, .click, .doubleClick] {
+        try expect(M.action(input, in: .picture) != .openGuide, "only down opens the guide, not \(input)")
+    }
+    try expectEqual(M.action(.up, in: .picture), .lightControls)
+    try expectEqual(M.action(.left, in: .picture), .previousChannel)
+    try expectEqual(M.action(.right, in: .picture), .nextChannel)
+    try expectEqual(M.action(.click, in: .picture), .nextChannel, "a click is the next channel")
+    try expectEqual(M.action(.doubleClick, in: .picture), .randomChannel, "a double click is a random channel")
+    try expectEqual(M.action(.left, in: .controls), .walk(-1))
+    try expectEqual(M.action(.right, in: .controls), .walk(1))
+    try expectEqual(M.action(.down, in: .controls), .letGo)
+    try expectEqual(M.action(.up, in: .controls), M.Action.none)
+    try expectEqual(M.action(.click, in: .controls), .work, "a lit control is worked at once")
+    try expectEqual(M.action(.doubleClick, in: .controls), .work)
+    // With a control lit, no input changes channel or opens the guide.
+    for input in [M.Input.up, .down, .left, .right, .click, .doubleClick] {
+        let action = M.action(input, in: .controls)
+        try expect(![.openGuide, .nextChannel, .previousChannel, .randomChannel].contains(action), "\(input) with a control lit")
+    }
+}
+
+func remoteRandomChannelIsNeverTheOnePlaying() throws {
+    let dial = [1, 2, 3, 4, 5]
+    for step in 0..<100 {
+        let pick = RemoteMap.random(from: dial, not: 3, roll: Double(step) / 100)
+        try expect(pick != nil && pick != 3, "roll \(step) gave \(String(describing: pick))")
+    }
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 0), 1)
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 0.999), 5)
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 1), 5, "a roll of exactly 1 stays in the list")
+    try expect(RemoteMap.random(from: [7], not: 7, roll: 0.5) == nil, "one channel: nowhere to go")
+    try expect(RemoteMap.random(from: [Int](), not: 7, roll: 0.5) == nil)
+}
+
+func clickTallyTellsADoubleFromTwoSingles() throws {
+    var tally = ClickTally()
+    // One click, then the wait runs out: a single click, once.
+    try expectEqual(tally.click(at: 10), .wait)
+    try expect(tally.settle(10), "the lone click stands")
+    try expect(!tally.settle(10), "and is spent")
+    // Two inside the window: a double, and the first click's wait finds nothing.
+    try expectEqual(tally.click(at: 20), .wait)
+    try expectEqual(tally.click(at: 20 + ClickTally.window - 0.01), .double, "just inside the window is a double")
+    try expect(!tally.settle(20), "the first click of a double is not also a single")
+    // Two apart: two singles.
+    try expectEqual(tally.click(at: 30), .wait)
+    try expect(tally.settle(30))
+    try expectEqual(tally.click(at: 30 + ClickTally.window + 0.01), .wait, "just past the window is a new click")
+    try expect(tally.settle(30 + ClickTally.window + 0.01))
+    // A second click before the first settled, but past the window: the first is replaced, not doubled.
+    try expectEqual(tally.click(at: 40), .wait)
+    try expectEqual(tally.click(at: 41), .wait)
+    try expect(!tally.settle(40), "the replaced click does not act")
+    try expect(tally.settle(41))
+    // A triple click: a double, then a fresh click.
+    try expectEqual(tally.click(at: 50), .wait)
+    try expectEqual(tally.click(at: 50.1), .double)
+    try expectEqual(tally.click(at: 50.2), .wait)
+}
+
+func remoteGestureTellsASwipeFromAPress() throws {
+    let t = 1000.0
+    // The finger travelled and the move came straight after: a swipe, up or down.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - 0.05)), .swipe)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: -400, at: t - 0.05)), .swipe)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: RemoteGesture.threshold, at: t - RemoteGesture.window)), .swipe)
+    // A press: no finger seen at all, or the thumb settling a little as it clicks.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: nil), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 12, at: t - 0.02)), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: -(RemoteGesture.threshold - 1), at: t)), .press)
+    // A swipe long before the press does not make the press a swipe.
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - 3)), .press)
+    try expectEqual(RemoteGesture.classify(moveAt: t, lastPan: .init(travel: 400, at: t - RemoteGesture.window - 0.01)), .press)
+    // Rows by distance: none under the threshold, one at it, one more per rowTravel, signed.
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold - 1), 0)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold), 1)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold + RemoteGesture.rowTravel - 1), 1)
+    try expectEqual(RemoteGesture.rows(travel: RemoteGesture.threshold + RemoteGesture.rowTravel), 2)
+    try expectEqual(RemoteGesture.rows(travel: -(RemoteGesture.threshold + 2 * RemoteGesture.rowTravel)), -3)
+    try expectEqual(RemoteGesture.rows(travel: 0), 0)
+    // Every travel classify calls a swipe has moved at least one row, so a swipe in the guide is
+    // never swallowed with nothing moved.
+    for travel in stride(from: -900.0, through: 900, by: 7) {
+        let swipe = RemoteGesture.classify(moveAt: t, lastPan: .init(travel: travel, at: t)) == .swipe
+        try expectEqual(swipe, RemoteGesture.rows(travel: travel) != 0, "travel \(travel)")
+    }
+}
+
+/// A run of short programmes is one block that says how many it holds and which is on air: a row
+/// of five-minute songs is not a row of slivers (owner, 2026-11-24).
+func guideRunsCountTheirSongs() throws {
+    func schedule(_ extra: String) throws -> Programming {
+        try decode(Programming.self, """
+        {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+         "shows":{"s1":{"slug":"s1","name":"Geet Mala"}},
+         "programme_order":["A","B","C","L"],
+         "programmes":{"A":{"id":"A","title":"a","display_title":"Jugni","seconds":300\(extra)},
+                       "B":{"id":"B","title":"b","display_title":"Lathe Di Chadar","seconds":300\(extra)},
+                       "C":{"id":"C","title":"c","display_title":"Chan Kithan","seconds":300\(extra)},
+                       "L":{"id":"L","title":"l","display_title":"The Feature","seconds":1800}},
+         "days":[{"date":"2026-11-08","channels":{"c":[
+           {"start":"12:00","start_minute":720,"minutes":30,"show":"s1","programmes":[0,1,2]},
+           {"start":"12:30","start_minute":750,"minutes":30,"show":"s1","programmes":[3]}]}}]}
+        """)
+    }
+    let from = pkt(2026, 11, 8, 12, 0), to = pkt(2026, 11, 8, 13, 0)
+    let songs = StationClock.timeline([try schedule(#","work_kind":"Folk song""#)], channel: 1, from: from, to: to)
+    // Six five-minute songs (the roster of three goes round) are one block; the half-hour feature keeps its own.
+    try expectEqual(songs.map(\.title), ["Geet Mala", "The Feature"])
+    try expectEqual(songs[0].items, 6); try expect(songs[0].grouped && songs[0].songs, "a run of songs")
+    try expectEqual(songs[0].runLabel(onNow: "Jugni"), "Geet Mala \u{00B7} 6 songs \u{00B7} now Jugni")
+    try expectEqual(songs[0].runLabel(onNow: nil), "Geet Mala \u{00B7} 6 songs")           // not on air: no "now"
+    try expectEqual(songs[0].runLabel(onNow: "Geet Mala"), "Geet Mala \u{00B7} 6 songs")   // never the show twice
+    try expect(!songs[1].grouped && songs[1].items == 1, "a programme of ten minutes or more is its own block")
+    // Opened inside the run, the count is still the whole run's.
+    try expectEqual(StationClock.timeline([try schedule(#","audio_only":true"#)], channel: 1, from: pkt(2026, 11, 8, 12, 17), to: to).first?.itemsLabel, "6 songs")
+    // Short items that are not songs are counted as programmes (the near miss).
+    let items = StationClock.timeline([try schedule(#","work_kind":"Television programme""#)], channel: 1, from: from, to: to)
+    try expectEqual(items[0].runLabel(onNow: "Jugni"), "Geet Mala \u{00B7} 6 programmes \u{00B7} now Jugni")
+    try expect(StationClock.isSong(nil) == false, "no programme is no song")
+}
+
+/// The guide folds a programme too short to read into a neighbour, narrowest first and into the
+/// narrower neighbour, and names the cell for what takes most of it (owner, 2026-11-18: "words are
+/// cutoff and not readable in the guide").
+func guideCellsFold() throws {
+    let g = GuideGrid(row: 0, now: pkt(2026, 11, 17, 12, 10))      // window 12:00 to 13:30
+    let s: [GuideSlot] = [
+        GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 5), title: "A"),   // 5 min on screen
+        GuideSlot(start: pkt(2026, 11, 17, 12, 5), end: pkt(2026, 11, 17, 13, 0), title: "B"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 0), end: pkt(2026, 11, 17, 13, 5), title: "C"),
+        GuideSlot(start: pkt(2026, 11, 17, 13, 5), end: pkt(2026, 11, 17, 13, 8), title: nil),   // 3 min dark
+        GuideSlot(start: pkt(2026, 11, 17, 13, 8), end: pkt(2026, 11, 17, 14, 30), title: "E"),
+        GuideSlot(start: pkt(2026, 11, 17, 14, 30), end: pkt(2026, 11, 17, 15, 0), title: "F"),  // off screen
+    ]
+    let cells = g.cells(s, minimum: 20 * 60)
+    try expectEqual(cells.count, 2)
+    // A clipped by the window's edge joins B; the dark seam joins C first, then the pair joins E.
+    try expectEqual(cells[0].first, 0); try expectEqual(cells[0].last, 1); try expectEqual(cells[0].lead, 1)
+    try expectEqual(cells[0].more(naming: 1, in: s), 1)
+    try expectEqual(cells[1].first, 2); try expectEqual(cells[1].last, 4); try expectEqual(cells[1].lead, 4)
+    try expectEqual(cells[1].programmes, 2)                         // the dark seam is not a programme
+    try expectEqual(cells[1].more(naming: 4, in: s), 1)
+    try expectEqual(cells[1].more(naming: 3, in: s), 2)             // lit on the seam, both programmes are more
+    try expect(cells[1].holds(3) && !cells[1].holds(1), "holds")
+    // No minimum: one cell per slot on screen, nothing folded.
+    let all = g.cells(s, minimum: 0)
+    try expectEqual(all.map(\.first), [0, 1, 2, 3, 4])
+    try expect(all.allSatisfy { $0.first == $0.last && $0.lead == $0.first }, "a lone slot names its own cell")
+    // A row of one-minute items folds to cells that are each wide enough, or to one cell.
+    let tiny = (0..<120).map { GuideSlot(start: pkt(2026, 11, 17, 12, $0 % 60).addingTimeInterval(Double($0 / 60) * 3600),
+                                          end: pkt(2026, 11, 17, 12, $0 % 60).addingTimeInterval(Double($0 / 60) * 3600 + 60), title: "t\($0)") }
+    let folded = g.cells(tiny, minimum: 20 * 60)
+    try expect(folded.allSatisfy { $0.end.timeIntervalSince($0.start) >= 20 * 60 }, "a folded cell narrower than the minimum")
+    try expectEqual(folded.reduce(0) { $0 + $1.programmes }, 90)   // the ninety on screen
+    try expectEqual(g.cells([], minimum: 20 * 60), [])
+    // A short programme on air now names its cell, not the long one it is folded into.
+    let soon = [GuideSlot(start: pkt(2026, 11, 17, 11, 30), end: pkt(2026, 11, 17, 12, 15), title: "On now"),
+                GuideSlot(start: pkt(2026, 11, 17, 12, 15), end: pkt(2026, 11, 17, 13, 30), title: "Next")]
+    let s1 = g.cells(soon, minimum: 20 * 60)
+    try expectEqual(s1.count, 1); try expectEqual(s1[0].lead, 0); try expectEqual(s1[0].more(naming: 0, in: soon), 1)
+    // A programme folded into a long dark stretch names the cell; off air names only a cell with no programme.
+    let dark = [GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 13, 20), title: nil),
+                GuideSlot(start: pkt(2026, 11, 17, 13, 20), end: pkt(2026, 11, 17, 13, 40), title: "Late")]
+    let s2 = g.cells(dark, minimum: 20 * 60)
+    try expectEqual(s2.count, 1); try expectEqual(s2[0].lead, 1); try expectEqual(s2[0].more(naming: 1, in: dark), 0)
+    // In a cell the next day's return carries the weekday alone; the headline keeps the date.
+    let night = GuideSlot(start: pkt(2026, 11, 17, 12, 0), end: pkt(2026, 11, 18, 0, 3), title: nil)
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 12, 10), short: true), "00:03 on Wednesday")
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 12, 10)), "00:03 PKT on Wednesday 18 November")
+    try expectEqual(night.back(now: pkt(2026, 11, 17, 23, 0), short: true), "00:03 on Wednesday")
+}
+
+/// Every row of every opening in November: no cell on screen is narrower than a readable cell, the
+/// cells hold every slot on screen once and in order, and the lit programme is in one of them.
+func guideCellsReadableRealMonth() throws {
+    let nov = try realProgramming("2026-11")
+    // ReceiverGuide's numbers on a 1920-point screen, 80 inset each side.
+    let minimum = GuideGrid.cellPoints / (1920.0 - 160 - GuideGrid.channelPoints) * GuideGrid.span
+    try expectEqual(GuideGrid.channelPoints, 440); try expectEqual(GuideGrid.cellPoints, 210)
+    var namedLater = 0
+    var rows = 0, cells = 0, folded = 0
+    for day in 1...30 {
+        for (hour, minute) in [(6, 10), (18, 34), (23, 50)] {
+            let now = pkt(2026, 11, day, hour, minute)
+            let grid = GuideGrid(row: 0, now: now)
+            for channel in nov._meta.channels.map(\.number) {
+                let slots = StationClock.timeline([nov], channel: channel, from: grid.windowStart, to: now.addingTimeInterval(GuideGrid.horizon + GuideGrid.span))
+                let row = grid.cells(slots, minimum: minimum)
+                let shown = slots.indices.filter { slots[$0].end > grid.windowStart && slots[$0].start < grid.windowEnd }
+                try expectEqual(row.first?.first, shown.first)
+                try expectEqual(row.last?.last, shown.last)
+                for (a, b) in zip(row, row.dropFirst()) { try expectEqual(b.first, a.last + 1) }
+                for cell in row {
+                    let seen = min(cell.end, grid.windowEnd).timeIntervalSince(max(cell.start, grid.windowStart))
+                    try expect(row.count == 1 || seen >= minimum, "channel \(channel) at \(now): a cell \(Int(seen)) s wide")
+                    try expect(cell.holds(cell.lead), "the lead is in its cell")
+                    // A cell holding a programme on air now is named for it.
+                    if let on = (cell.first...cell.last).first(where: { !slots[$0].isOffAir && slots[$0].contains(now) }), cell.lead != on { namedLater += 1 }
+                    // A cell holding a programme is never named off air.
+                    if cell.programmes > 0, slots[cell.lead].isOffAir { namedLater += 1 }
+                    if cell.last > cell.first { folded += 1 }
+                }
+                if let lit = grid.lit(in: slots), shown.contains(lit) {
+                    try expect(row.contains { $0.holds(lit) }, "channel \(channel) at \(now): the lit programme is in no cell")
+                }
+                rows += 1; cells += row.count
+            }
+        }
+    }
+    print("      \(rows) rows, \(cells) cells, \(folded) folded")
+    try expect(rows > 2000 && folded > 0, "rows \(rows), folded \(folded)")
+    try expectEqual(namedLater, 0)
 }
 
 // MARK: - Real files
@@ -2966,6 +3657,8 @@ func pnvSummaryLine() throws {
     let facets = try decode(PnvFacets.self, #"{"totals":{"media":99474},"accounts":[{"slug":"a1","media":5},{"slug":"a2","media":0}]}"#)
     // a2 has no media; a3 is not in the counts at all and stays.
     try expectEqual(PnvAPI.summary(roster: roster, facets: facets), "99,474 pictures and videos \u{00B7} 2 accounts \u{00B7} 2 regions")
+    // A build held to videos must not state the mixed count of pictures and videos.
+    try expectEqual(PnvAPI.summary(roster: roster, facets: facets, withCount: false), "2 accounts \u{00B7} 2 regions")
     try expectEqual(PnvAPI.summary(roster: roster, facets: nil), "3 accounts")
     try expectEqual(PnvAPI.summary(roster: roster, facets: try decode(PnvFacets.self, #"{"accounts":[]}"#)), "3 accounts")
 }
@@ -3375,13 +4068,17 @@ func dancerStageEntersDancesAndLeaves() throws {
     _ = run(3000, grooving: true)
     try expect(stage.leave(now: now), "a dancer on stage is owed an exit")
     var frames = 0
-    while stage.stepLeaving(now: now) != .blank { now += 1000.0 / 60; frames += 1 }
+    // Bounded: an exit that never ends fails here rather than hanging the run.
+    while stage.stepLeaving(now: now) != .blank, frames < 60 * 30 { now += 1000.0 / 60; frames += 1 }
+    try expect(frames < 60 * 30, "the exit never reached blank")
     try expect(frames > 60, "the exit plays out (\(frames) frames)")
     try expect(!stage.leave(now: now), "nothing is owed when he is off")
 }
 
 func dancerMovesFollowTheSite() throws {
-    try expectEqual(DancerMoves.all.count, 23)
+    try expectEqual(DancerMoves.all.count, 32)
+    try expectEqual(DancerMoves.hold.count, 9)
+    try expect(DancerMoves.hold.isSubset(of: Set(DancerMoves.all)), "every held step is a move")
     try expect(!DancerMoves.list(for: .base).contains("Kawliya"), "Kawliya belongs to the long-haired figure")
     try expect(DancerMoves.list(for: .hairy).contains("Kawliya"))
     var rng = SplitMix(state: 99)
@@ -3396,6 +4093,83 @@ func dancerMovesFollowTheSite() throws {
     // Twerk is weighted four to one.
     let twerk = Double(counts["Twerk"] ?? 0), dabke = Double(counts["Dabke"] ?? 1)
     try expect(twerk / dabke > 3 && twerk / dabke < 5, "Twerk \(twerk) against Dabke \(dabke)")
+}
+
+// Owner, 2026-11-16: the video steps repeat longer — 16 beats each, every other move 8.
+// Walked for BOTH figures: the long-haired one draws from a different list (Kawliya), so the
+// held index points at a different name there.
+func holdRuns(seed: UInt64) throws -> String {
+    var rng = SplitMix(state: seed)
+    var stage = DancerStage(random: { rng.next() })
+    var now = 0.0, count = 0
+    func frame() -> DancerStage.Frame {
+        let f = stage.step(now: now, grooving: { _ in true }, beat: 0.6, groove: 0.45, count: count)
+        now += 1000.0 / 60
+        return f
+    }
+    // Bounded: a stage stuck before .on fails with the seed rather than hanging the run.
+    var entering = 0
+    while stage.name != .on, entering < 60 * 30 { _ = frame(); entering += 1 }
+    try expect(stage.name == .on, "the dancer never reached .on (seed \(seed), stage \(stage.name))")
+    var moves: [String] = []
+    for beat in (count + 1)...(count + 1600) {
+        count = beat
+        if case .dance(let m) = frame() { moves.append(m) } else { moves.append("") }
+    }
+    // Runs of one move, the first and last cut off by the window.
+    var runs: [(String, Int)] = []
+    for m in moves { if let last = runs.last, last.0 == m { runs[runs.count - 1].1 += 1 } else { runs.append((m, 1)) } }
+    let whole = runs.dropFirst().dropLast()
+    try expect(whole.contains { DancerMoves.hold.contains($0.0) }, "no video step came up in 1600 beats (seed \(seed))")
+    for (m, n) in whole {
+        try expectEqual(n, DancerMoves.hold.contains(m) ? 16 : 8, "\(m), cast \(stage.cast), seed \(seed)")
+    }
+    return stage.cast
+}
+
+func dancerVideoStepsHoldTwoRuns() throws {
+    var casts = Set<String>()
+    for seed in UInt64(1)...12 { casts.insert(try holdRuns(seed: seed)) }
+    try expectEqual(casts, Set(DancerCast.keys), "the hold walked on every figure")
+}
+
+// The Swift lists are the site's lists. Tests/Fixtures/dancer-moves.json is MOVES and HOLD as
+// scripts/dancer-moves-fixture.mjs read them out of kj-scope.js; it is compared on every run, CI
+// included. Where the site is checked out (KJ_ARCHIVE), the fixture is also checked against it,
+// so a stale fixture is caught too.
+func dancerMovesMatchKjScope() throws {
+    struct Fixture: Decodable { let moves: [String]; let hold: [String] }
+    let data = try Data(contentsOf: fixtureURL.deletingLastPathComponent().appendingPathComponent("dancer-moves.json"))
+    let fixture = try JSONDecoder().decode(Fixture.self, from: data)
+    try expectEqual(DancerMoves.all, fixture.moves, "DancerMoves.all against the site's MOVES")
+    try expectEqual(DancerMoves.hold, Set(fixture.hold), "DancerMoves.hold against the site's HOLD")
+
+    guard let raw = try? realFile("scripts/kj-scope.js") else { return }   // CI: fixture only
+    let js = String(decoding: raw, as: UTF8.self)
+    func names(after marker: String, until close: Character) throws -> [String] {
+        let start = try require(js.range(of: marker)).upperBound
+        let end = try require(js[start...].firstIndex(of: close))
+        var out: [String] = [], cur = "", inside = false
+        for ch in js[start..<end] {
+            if ch == "\"" { if inside { out.append(cur); cur = "" }; inside.toggle() } else if inside { cur.append(ch) }
+        }
+        return out
+    }
+    try expectEqual(try names(after: "var MOVES = [", until: "]"), fixture.moves, "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
+    try expectEqual(Set(try names(after: "var HOLD = {", until: "}")), Set(fixture.hold), "dancer-moves.json is stale: rerun dancer-moves-fixture.mjs")
+}
+
+// Hands on hips by number: the elbow goes OUT and the forearm comes back DOWN and IN to the hip.
+// The first version bent the forearm up; this is the check that would have caught it.
+func dancerHandsOnHipsPose() throws {
+    for side in [-1.0, 1.0] {
+        for p in stride(from: 0.0, to: 2 * Double.pi, by: 0.5) {
+            let o = pose("Hands on hips", p, side, 0, 0, 0, 0)
+            let fore = o.arm + o.fore
+            try expect(cos(o.arm) * side > 0, "elbow out, side \(side)")
+            try expect(cos(fore) * side < 0 && sin(fore) > 0, "forearm down and in, side \(side), got \(fore)")
+        }
+    }
 }
 
 // MARK: - Runner
@@ -3720,6 +4494,32 @@ func filmSubtitleChoice() throws {
     try expectEqual(SubtitleChoice.desired(available: ["en", "fa"], stored: nil, preferred: ["de"]), "en")
     try expect(SubtitleChoice.desired(available: ["fa", "ur"], stored: nil, preferred: ["de"]) == nil, "nothing else is guessed")
     try expect(SubtitleChoice.desired(available: [], stored: "en", preferred: ["en"]) == nil)
+    // A choice stays with its film: Persian picked on one film is not read for another.
+    let iranian = SubtitleChoice.filmKey("gav-1969"), razia = SubtitleChoice.filmKey("razia-phas-gayi-ghundon-main-2015-khajistan")
+    try expect(iranian != razia, "each film keeps its own choice")
+    try expect(iranian != SubtitleChoice.storeKey && razia != SubtitleChoice.storeKey, "the old shared choice is not read")
+    // The viewer's subtitle look: the plate until one is chosen, and one press moves to the other.
+    try expectEqual(CaptionStyle.plate.next, .bare)
+    try expectEqual(CaptionStyle.bare.next, .plate)
+    try expectEqual(CaptionStyle.bare.label, "Yellow text")
+    try expectEqual(Skin.argb(Skin.bareCaptionHex), Skin.argb(0xF3FB04))
+    // The full film moves under the remote as Apple's player moves it.
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 0.5), 8)
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 3), 24)
+    try expectEqual(FilmTransport.scanSpeed(heldFor: 6), 64)
+    try expectEqual(FilmTransport.scanStep(heldFor: 0), 2)
+    try expectEqual(FilmTransport.scrubSeconds(points: 1000, duration: 7200), 720)
+    try expectEqual(FilmTransport.scrubSeconds(points: -500, duration: 300), -30)
+    try expectEqual(FilmTransport.scrubSeconds(points: 1000, duration: nil), 60)
+    try expectEqual(FilmTransport.clamp(-5, duration: 100), 0)
+    try expectEqual(FilmTransport.clamp(150, duration: 100), 99)
+    try expectEqual(FilmTransport.clamp(50, duration: nil), 50)
+    try expectEqual(FilmTransport.remaining(30, of: 3725), "-1:01:35")
+    try expectEqual(FilmTransport.remaining(200, of: 100), "-0:00")
+    // A film's subtitles in the picture-in-picture window take the skin's caption colours, as ARGB 0 to 1.
+    try expectEqual(Skin.argb(Skin.day.captionTextHex), [1, 0, 0, 0])
+    try expectEqual(Skin.argb(Skin.grove.captionPlateHex), [1, 0, 40.0 / 255, 0])
+    try expectEqual(Skin.argb(0xF3FB04), [1, 243.0 / 255, 251.0 / 255, 4.0 / 255])
     let listed = [SubtitleLanguage(code: "ur", name: "Urdu", native: "اردو"), SubtitleLanguage(code: "en", name: "English", native: "")]
     try expectEqual(SubtitleChoice.label("ur", listed: listed, fallback: "ur"), "Urdu \u{00B7} اردو")
     try expectEqual(SubtitleChoice.label("en", listed: listed, fallback: nil), "English")
@@ -4934,6 +5734,40 @@ func savesFilmAndPnvRefs() throws {
 
 // MARK: - Live stills: the cache's bound and the plan's throttle
 
+func letterboxCutsBlackBarsAndLeavesDarkPicturesWhole() throws {
+    // A 16:9 frame carrying a 4:3 picture: 12 columns of 100, the outer 2 on each side black.
+    let pillar = Letterbox.content(rows: Array(repeating: 0.5, count: 9),
+                                   columns: [0, 0.01] + Array(repeating: 0.4, count: 8) + [0.02, 0])
+    try expectClose(pillar.x, 2.0 / 12); try expectClose(pillar.width, 8.0 / 12)
+    try expectClose(pillar.y, 0); try expectClose(pillar.height, 1)
+    // Bars top and bottom.
+    let box = Letterbox.content(rows: [0, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0],
+                                columns: Array(repeating: 0.3, count: 16))
+    try expectClose(box.y, 0.1); try expectClose(box.height, 0.8)
+    // Negative: a picture with no bars is untouched.
+    let full = Letterbox.content(rows: Array(repeating: 0.3, count: 9), columns: Array(repeating: 0.3, count: 16))
+    try expect(full == (0, 0, 1, 1))
+    // Negative: a dark scene whose lit part is a small patch is a picture, not a letterbox.
+    let night = Letterbox.content(rows: [0, 0, 0, 0, 0.5, 0, 0, 0, 0], columns: Array(repeating: 0.3, count: 16))
+    try expect(night == (0, 0, 1, 1))
+    // Negative: a night sky over the top 30% with no bar at the foot is one-sided, so kept whole.
+    let sky = Letterbox.content(rows: [0.02, 0.03, 0.03] + Array(repeating: 0.4, count: 7),
+                                columns: Array(repeating: 0.3, count: 16))
+    try expect(sky == (0, 0, 1, 1), "\(sky)")
+    // Negative: a logo lighting one pillar leaves the axis whole rather than cutting off-centre.
+    // 48 columns, bars of 6 each side, the logo lighting 4 of the right bar's 6.
+    let logo = Letterbox.content(rows: Array(repeating: 0.4, count: 27),
+                                 columns: Array(repeating: 0, count: 6) + Array(repeating: 0.4, count: 36)
+                                     + Array(repeating: 0.2, count: 4) + [0, 0])
+    // The same bars with no logo are a pair and are cut.
+    let bars = Letterbox.content(rows: Array(repeating: 0.4, count: 27),
+                                 columns: Array(repeating: 0, count: 6) + Array(repeating: 0.4, count: 36) + Array(repeating: 0, count: 6))
+    try expectClose(bars.x, 6.0 / 48); try expectClose(bars.width, 36.0 / 48)
+    try expect(logo == (0, 0, 1, 1), "\(logo)")
+    // Negative: an all-black frame is returned whole.
+    try expect(Letterbox.content(rows: [0, 0], columns: [0, 0]) == (0, 0, 1, 1))
+}
+
 func stillCacheKeepsItsBoundAndDropsTheOldestFirst() throws {
     var cache = StillCache<String>(costLimit: 1000, maxAge: 600)
     for i in 0..<5 { cache.insert("p\(i)", for: "c\(i)", cost: 300, now: Double(i)) }
@@ -5217,6 +6051,12 @@ func aPlayerIsRetunedOnlyForTheNetwork() throws {
     try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
     try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
     try expect(!retunes(URLError(.userAuthenticationRequired)))
+    // CodeRabbit, PR 131/133: the sign-in refusal stays shut on a stall, and a refusal under a
+    // network error is still a refusal.
+    try expect(!retunes(URLError(.userAuthenticationRequired), stalled: true), "an authentication error on a stall stays shut")
+    let refusalUnderDrop = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost,
+                                   userInfo: [NSUnderlyingErrorKey: NSError(domain: "CoreMediaErrorDomain", code: -12660)])
+    try expect(!retunes(refusalUnderDrop), "a 403 under a dropped connection stays shut")
     try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
     try expect(!retunes(nil), "an item failure with no cause")
     try expect(retunes(nil, stalled: true), "a carrier that stopped sending")
@@ -5268,6 +6108,191 @@ func serverClockKeepsNoFailedReadingAndForceReplacesAnOldOne() throws {
 }
 
 
+/// The caption plate in the picture-in-picture window is sized for the window, not the screen.
+func pipCaptionIsSizedForTheWindow() throws {
+    // 6% of the frame: 115 px on a 1920 frame, over twice full screen's 2.7% (52 px), so it reads in the corner.
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 1920), 115)
+    try expect(PiPCaptionLayout.fontSize(frameWidth: 1920) > 52, "bigger than full screen's type")
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 640), 38)
+    try expectEqual(PiPCaptionLayout.fontSize(frameWidth: 0), 0)
+    // The plate: centred, its foot 5% above the bottom, padded 0.4 em by 0.12 em.
+    let frame = CGSize(width: 1920, height: 1080)
+    let (plate, text) = PiPCaptionLayout.plate(text: CGSize(width: 800, height: 100), fontSize: 100, frame: frame)
+    try expectEqual(plate, CGRect(x: 520, y: 902, width: 880, height: 124))
+    try expectEqual(plate.maxY, frame.height * 0.95)
+    try expectEqual(text.minX, 560)
+    try expectEqual(text.minY, plate.minY + 12)
+    // A line wider than the frame keeps the plate inside it.
+    let wide = PiPCaptionLayout.plate(text: CGSize(width: 1900, height: 100), fontSize: 100, frame: frame).plate
+    try expect(wide.minX >= 0 && wide.maxX <= frame.width, "plate stays in the frame")
+}
+
+/// Who closed the PiP window decides what follows: full screen reopens, Close ends, Stop does
+/// neither, and AVKit's restore request after Close or Stop is not the viewer asking.
+func pipLifecycleReadsWhoClosedTheWindow() throws {
+    // The window's own full-screen control: AVKit asks to restore, then stops.
+    var life = PiPLifecycle()
+    life.started()
+    try expect(life.systemRestoreAsked(), "the window's control opens the screen")
+    try expect(!life.stopped(), "a restore does not end the signal")
+    try expect(!life.isActive)
+    // The bar's Full screen: the screen opens once; AVKit's own restore request after it does not open it again.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.systemRestoreAsked(), "the bar already opened the screen")
+    try expect(!life.restoreAsked(), "a second press does nothing")
+    try expect(!life.stopped())
+    // The bar's Close: AVKit still asks to restore, which must not open the screen; the signal ends.
+    life.started()
+    try expect(life.closeAsked())
+    try expect(!life.systemRestoreAsked(), "Close is not a restore")
+    try expect(life.stopped(), "Close ends the signal")
+    // The window's own close: no restore request at all; the signal ends.
+    life.started()
+    try expect(life.stopped(), "the window's close ends the signal")
+    // Stop (another signal started): no restore, no end.
+    life.started()
+    try expect(life.stopAsked())
+    try expect(!life.stopAsked(), "stop is asked once")
+    try expect(!life.systemRestoreAsked(), "Stop is not a restore")
+    try expect(!life.stopped(), "Stop does not end what the next signal replaced")
+    // Stop during a restore leaves the restore alone.
+    life.started()
+    try expect(life.restoreAsked())
+    try expect(!life.stopAsked(), "the screen opening is not stopped")
+    try expect(!life.stopped())
+    // Nothing is asked of a window that is not up.
+    try expect(!life.restoreAsked() && !life.closeAsked() && !life.stopAsked(), "a closed window takes no asks")
+}
+
+/// The PiP window loads each programme's subtitles once, as the channel moves on.
+func pipFollowerLoadsEachProgrammeOnce() throws {
+    var follower = ChangeFollower<String>(loaded: "a")
+    try expect(!follower.changed(to: "a"), "what the screen loaded is not loaded again")
+    try expect(follower.changed(to: "b"), "a handover loads the next programme")
+    try expect(!follower.changed(to: "b"), "once")
+    try expect(follower.changed(to: nil), "off air clears")
+    try expect(follower.changed(to: "c"))
+    var unloaded = ChangeFollower<String>(loaded: nil)
+    try expect(unloaded.changed(to: "a"), "subtitles the screen had not finished loading are loaded")
+    // Keyed on the programme and its signal: a rejoin of the same programme on a new signal, faster
+    // than one tick, still reloads; the same signal does not; tuning is no key at all.
+    let one = URL(string: "https://example.test/a.m3u8?t=1"), two = URL(string: "https://example.test/a.m3u8?t=2")
+    var signal = ChangeFollower<String>(loaded: PiPSubtitleKey.of(programme: "p1", signal: one))
+    try expect(!signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: one)), "same programme, same signal")
+    try expect(signal.changed(to: PiPSubtitleKey.of(programme: "p1", signal: two)), "same programme, new signal reloads")
+    try expect(PiPSubtitleKey.of(programme: nil, signal: two) == nil, "tuning has no key")
+}
+
+/// The window's subtitle follower, read ten times a second: one load per key, a track handed to tvOS
+/// once and only when loaded (a closed tv_subtitles() answer loads none), and nothing after the end.
+func pipSubtitleStepLoadsAndHandsOff() throws {
+    var step = PiPSubtitleStep(loaded: "p1")
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: false), .init(load: false, handOff: true))
+    try expectEqual(step.read(key: "p1", hasTracks: true, handedOff: true), .init(), "handed off once")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(load: true, handOff: false),
+                    "a handover loads; nothing loaded yet, nothing handed off")
+    try expectEqual(step.read(key: "p2", hasTracks: false, handedOff: false), .init(), "a closed answer: no load again, no hand-off")
+    try expectEqual(step.read(key: "p2", hasTracks: true, handedOff: false), .init(load: false, handOff: true), "an open one hands off")
+    step.end()
+    try expectEqual(step.read(key: "p3", hasTracks: true, handedOff: false), .init(), "the window is done: nothing")
+}
+
+/// The window's language once tvOS draws: a stored file's moves to the manifest's, the rest stay.
+func pipWindowChoiceMovesOffAStoredFile() throws {
+    let manifest = ["en", "fa"]
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["en-US"]), "en")
+    try expectEqual(SubtitleChoice.windowChoice(current: "ur", manifest: manifest, stored: "ur", preferred: ["fa-IR"]), "fa",
+                    "the device's language when the manifest has it")
+    try expectEqual(SubtitleChoice.windowChoice(current: "fa", manifest: manifest, stored: "fa", preferred: ["en-US"]), "fa",
+                    "a manifest language stays")
+    try expectEqual(SubtitleChoice.windowChoice(current: nil, manifest: manifest, stored: "off", preferred: ["en-US"]), nil,
+                    "off stays off")
+}
+
+/// The window's own Play is passed on once, for the item it paused; a new item that loads paused (a
+/// rejoin, a handover) never is, so a rejoin cannot set off another; the bar holds what was asked.
+func pipPlayFollowerPassesOnTheWindowsOwnPlayOnce() throws {
+    let itemA = NSObject(), itemB = NSObject(), itemC = NSObject()   // held, so the identifiers differ
+    let a = ObjectIdentifier(itemA), b = ObjectIdentifier(itemB), c = ObjectIdentifier(itemC)
+    var follow = PiPPlayFollower(playing: true)
+    try expectEqual(follow.read(playing: true, item: a, at: 0), .none)
+    // The window's own Pause, then Play on the same item: each passed on once.
+    try expectEqual(follow.read(playing: false, item: a, at: 1), .windowPause)
+    try expect(!follow.shown, "the bar shows Paused")
+    try expectEqual(follow.read(playing: false, item: a, at: 1.1), .none, "once")
+    try expectEqual(follow.read(playing: true, item: a, at: 5), .windowPlay)
+    try expectEqual(follow.read(playing: true, item: a, at: 5.1), .none, "once")
+    // The rejoin it sets off: stop, the new item loads paused (a seek before play), then plays.
+    // None of it is the window's: no loop (Fable round 4 ran exactly this order).
+    try expectEqual(follow.read(playing: false, item: nil, at: 6), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 7), .none)
+    try expectEqual(follow.read(playing: false, item: b, at: 8), .none)
+    try expectEqual(follow.read(playing: true, item: b, at: 9), .none, "a rejoin's new item is not the window's Play")
+    // A handover: the next item loads paused, then plays. Nothing.
+    try expectEqual(follow.read(playing: false, item: c, at: 10), .none)
+    try expectEqual(follow.read(playing: true, item: c, at: 11), .none, "a handover is not the window's Play")
+    // The bar's Play: shown at once, held while the player catches up, never passed on.
+    var bar = PiPPlayFollower(playing: true)
+    _ = bar.read(playing: true, item: a, at: 0)
+    bar.ask(false, at: 0.5)
+    try expectEqual(bar.read(playing: false, item: a, at: 0.6), .none, "the bar's own Pause is not passed on again")
+    bar.ask(true, at: 1)
+    try expect(bar.shown, "the bar shows Playing at once")
+    try expectEqual(bar.read(playing: false, item: nil, at: 1.5), .none)
+    try expect(bar.shown, "held while the retune runs")
+    try expectEqual(bar.read(playing: false, item: b, at: 2), .none)
+    try expectEqual(bar.read(playing: true, item: b, at: 3), .none, "the bar's own Play is not passed on again")
+    // The bar's Pause, then the window's own Play of the same item: the window's (Fable round 5).
+    var mixed = PiPPlayFollower(playing: true)
+    _ = mixed.read(playing: true, item: a, at: 0)
+    mixed.ask(false, at: 1)
+    try expectEqual(mixed.read(playing: false, item: a, at: 1.2), .none)
+    try expectEqual(mixed.read(playing: true, item: a, at: 4), .windowPlay, "the window's Play after the bar's Pause")
+    // The window's Play on a broadcast: the bar asks for Playing and holds it through the rejoin's
+    // stop and the new item loading paused; nothing more is passed on (Fable round 7).
+    var rejoin = PiPPlayFollower(playing: true)
+    _ = rejoin.read(playing: true, item: a, at: 0)
+    try expectEqual(rejoin.read(playing: false, item: a, at: 1), .windowPause)
+    try expectEqual(rejoin.read(playing: true, item: a, at: 3), .windowPlay)
+    rejoin.ask(true, at: 3)
+    try expectEqual(rejoin.read(playing: false, item: nil, at: 3.2), .none)
+    try expect(rejoin.shown, "Playing held through the rejoin's stop")
+    try expectEqual(rejoin.read(playing: false, item: b, at: 4), .none)
+    try expect(rejoin.shown, "and through the new item loading")
+    try expectEqual(rejoin.read(playing: true, item: b, at: 5), .none, "the rejoin's own Play is not passed on")
+    try expect(rejoin.shown)
+    // A Play the player never follows lets go after the hold.
+    var stuck = PiPPlayFollower(playing: false)
+    stuck.ask(true, at: 0)
+    _ = stuck.read(playing: false, item: a, at: PiPPlayFollower.hold + 1)
+    try expect(!stuck.shown, "after the hold the bar shows what the player does")
+    withExtendedLifetime((itemA, itemB, itemC)) {}
+}
+
+/// The window reads its caption source on every tick, drawn or not: reading follows a handover.
+func pipCaptionFeedReadsEveryTick() throws {
+    var reads = 0
+    try expect(PiPCaptionFeed.drawn(read: { reads += 1; return "a line" }, intoPicture: false) == nil, "a stream's picture gets no plate")
+    try expectEqual(reads, 1, "but the source is read, so a handover is followed")
+    try expectEqual(PiPCaptionFeed.drawn(read: { reads += 1; return "a line" }, intoPicture: true), "a line")
+    try expect(PiPCaptionFeed.drawn(read: { "" }, intoPicture: true) == nil, "an empty line draws nothing")
+    try expectEqual(reads, 2)
+}
+
+/// The window's own Play brings a low sound back up, but not a muted broadcast awaiting its rejoin.
+func pipSoundFadesBackOnlyWhereItShould() throws {
+    try expect(PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "a film paused mid-fade comes back up")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: true, nowPlaying: true, volume: 0, holdsSound: false),
+               "a muted broadcast is not heard at its old place before the rejoin")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: false, muted: false, nowPlaying: true, volume: 0, holdsSound: false),
+               "outside the window a Play read on Paused is a late callback")
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 1, holdsSound: false))
+    try expect(!PiPSound.fadesBack(paused: true, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: true))
+    try expect(!PiPSound.fadesBack(paused: false, followsWindow: true, muted: false, nowPlaying: true, volume: 0, holdsSound: false))
+}
+
 /// Screen & Signal (owner, 2026-11-17): tv_subtitles() answers, read as subtitles() in kj-transmission-auth.js reads them.
 func storedSubtitlesAnswer() throws {
     func need<T>(_ value: T?, line: Int = #line) throws -> T {
@@ -5305,6 +6330,80 @@ func storedSubtitlesAnswer() throws {
     try expectEqual(sent, ["p_programme": "tv-jj-x"])
     try expect(StoredSubtitles.request(programme: "", accessToken: "tok") == nil)
     try expect(StoredSubtitles.request(programme: String(repeating: "x", count: 201), accessToken: "tok") == nil)
+    // Asked at once, then again after failures, growing, under a minute in all.
+    try expectEqual(StoredSubtitles.retryDelays.first, 0)
+    try expect(zip(StoredSubtitles.retryDelays, StoredSubtitles.retryDelays.dropFirst()).allSatisfy { $0 < $1 }, "delays grow")
+    try expect(StoredSubtitles.retryDelays.reduce(0, +) < 60, "retries end inside a minute")
+}
+
+/// The Roman line under a Persian programme name (owner, 2026-11-17: "name of film should also be
+/// in roman"), the guide's line, and the year, all from the schedule the site writes.
+func programmeDecodesRomanTitleAndYear() throws {
+    func decode(_ json: String) throws -> Programming.Programme {
+        try JSONDecoder().decode(Programming.Programme.self, from: Data(json.utf8))
+    }
+    let film = try decode(#"{"id":"a","title":"x","display_title":"اول هیکل","display_title_en":" Aval Heykal ","year":1967}"#)
+    try expectEqual(film.secondTitle, "Aval Heykal")
+    try expectEqual(film.year, 1967)
+    // No second form, no display name, or the same name twice: no second line.
+    try expect(try decode(#"{"id":"b","title":"x","display_title":"دشمن"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"c","title":"x","display_title_en":"Orphan"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"d","title":"x","display_title":"Arman","display_title_en":"Arman"}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"e","title":"x","display_title":"دشمن","display_title_en":"  "}"#).secondTitle == nil)
+    try expect(try decode(#"{"id":"f","title":"x"}"#).year == nil)
+    // A year that is not a number, or a name that is not a string, is dropped, not fatal to the month.
+    let odd = try decode(#"{"id":"g","title":"x","display_title":"دشمن","display_title_en":7,"year":"1970s"}"#)
+    try expect(odd.year == nil && odd.secondTitle == nil)
+
+    func air(_ p: Programming.Programme, nowName: String?) -> OnAir {
+        var a = OnAir(channelId: "iran-film", date: "2026-11-04",
+                      slot: Programming.Slot(start: "00:00", start_minute: 0, minutes: 1440, show: "filmfarsi", programmes: [0]),
+                      rosterIndex: 0, show: Programming.Show(slug: "filmfarsi", name: "Filmfarsi", line: nil, channel: "iran-film"),
+                      programmeId: p.id, programme: p, into: 0, seekTo: 0, startLabel: "00:00", endLabel: "24:00")
+        a.nowName = nowName
+        return a
+    }
+    // The headline is the film's own name: the second line and the guide's isolated pair.
+    let on = air(film, nowName: "اول هیکل")
+    try expectEqual(on.secondTitle, "Aval Heykal")
+    try expectEqual(on.guideLine, "\u{2068}اول هیکل\u{2069} \u{00B7} Aval Heykal")
+    // The show stands in for an untitled programme: no second line under the show's name.
+    let standIn = air(film, nowName: "Filmfarsi")
+    try expect(standIn.secondTitle == nil)
+    try expectEqual(standIn.guideLine, "Filmfarsi")
+    try expectEqual(air(film, nowName: nil).guideLine, "Filmfarsi")
+    // The year shows, unless a name on the strip already carries it.
+    try expectEqual(on.shownYear(headline: "اول هیکل"), "1967")
+    let dated = try decode(#"{"id":"h","title":"x","display_title":"آرایشگاه آفتاب","display_title_en":"Arayeshgah-e Aftab, dir. Naser Taghvai (1977)","year":1977}"#)
+    try expect(air(dated, nowName: "آرایشگاه آفتاب").shownYear(headline: "آرایشگاه آفتاب") == nil, "the Roman name carries the year")
+    let inName = try decode(#"{"id":"i","title":"x","display_title":"Badla (1987)","year":1987}"#)
+    try expect(air(inName, nowName: "Badla (1987)").shownYear(headline: "Badla (1987)") == nil, "the headline carries the year")
+}
+
+/// The full film's control row (owner, 2026-11-18: Down reaches subtitles, stop/play and pip).
+func filmControlRowOffersPlayAndPiP() throws {
+    typealias C = FilmTransport.Control
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: true), [C.subtitles, .playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: false, pipOffered: true), [C.playPause, .pip, .stop])
+    try expectEqual(FilmTransport.controls(hasSubtitles: true, pipOffered: false), [C.subtitles, .playPause, .stop])
+    // Read step by step: each answer is (vertical, slideDown).
+    func run(_ points: [(Double, Double)]) -> [(Bool, Bool)] {
+        var reader = FilmTransport.PanReader()
+        return points.map { let r = reader.read(x: $0.0, y: $0.1); return (r.vertical, r.slideDown) }
+    }
+    // Across 300, then down 120 without lifting: the turn is vertical at once, and the slide fires once.
+    let turned = run([(100, 0), (200, 0), (300, 0), (302, 40), (303, 80), (304, 120), (305, 160)])
+    try expect(turned.prefix(3).allSatisfy { !$0.0 }, "the scrub runs across")
+    try expect(turned[3].0 && !turned[3].1, "the turn down is vertical, not yet far enough")
+    try expectEqual(turned.filter(\.1).count, 1, "the slide down fires once")
+    try expect(turned[4].1, "fires past 60 points from the turn, not from where the thumb went down")
+    // A scrub drifting down as it runs across stays a scrub.
+    try expect(run([(100, 20), (200, 40), (300, 60), (400, 80)]).allSatisfy { !$0.0 && !$0.1 }, "drift is a scrub")
+    // A slide up, and a rest of the thumb, do not leave the bar.
+    try expect(!run([(0, -50), (0, -120), (0, -200)]).contains { $0.1 }, "a slide up")
+    try expect(!run([(2, 20), (3, 40)]).contains { $0.1 }, "a rest of the thumb")
+    // Back across after going down starts the slide over.
+    try expect(!run([(0, 40), (100, 40), (100, 80)]).contains { $0.1 }, "40 down, across, 40 down is not 60")
 }
 
 /// The schedule kept on the device: its ETag is offered only with its body, and a new month
@@ -5345,6 +6444,22 @@ func scheduleCacheKeepsOneMonthWithItsTag() throws {
     try expect(cache.etag(month: "2026-12") == nil && cache.data(month: "2026-12") == nil)
 }
 
+/// The Apple TV's Pics/Vids shows videos only (owner, 2026-11-20: "only videos from the pics n vids
+/// on the appletv"). A photo that comes back from the server anyway never reaches a shelf.
+func pnvVideosOnlyDropsEveryPhoto() throws {
+    func row(_ k: String, _ kind: String) -> PnvRow {
+        PnvRow(media_key: k, account: nil, account_key: nil, shortcode: nil, kind: kind, resource_type: nil, media_host: nil,
+               resource_endpoint: nil, width: nil, height: nil, taken_at: nil, corpus: nil, da_id: nil)
+    }
+    let mixed = [row("v1", "video"), row("p1", "image"), row("v2", "video"), row("x1", "gif"), row("p2", "image")]
+    let shown = PnvKind.shown(mixed, only: .video)
+    try expectEqual(shown.map(\.media_key), ["v1", "v2"], "a photo, or anything not a video, is dropped")
+    try expect(shown.allSatisfy(\.isVideo))
+    let videos = [row("v1", "video"), row("v2", "video"), row("v3", "video")]
+    try expectEqual(PnvKind.shown(videos, only: .video).map(\.media_key), ["v1", "v2", "v3"], "an all-video feed is kept whole, in order")
+    try expectEqual(PnvKind.shown(mixed, only: nil).count, mixed.count, "no kind keeps every row")
+}
+
 func visualizerShuffleBagShowsEveryPiece() throws {
     let rows = (1...5).map { VisualizerPiece(id: "p\($0)", title: nil, category: nil, seconds: 1800, play_url: "u", reverent: nil) }
         + [VisualizerPiece(id: "n", title: nil, category: "Nature", seconds: 900, play_url: "u", reverent: true)]
@@ -5367,6 +6482,10 @@ func visualizerShuffleBagShowsEveryPiece() throws {
     try expectEqual(Visualizer.draw(rows, reverent: false, seen: ["p1", "p2", "p3", "p4", "p5"], roll: 0, startRoll: 0)?.piece.id, "n")
     try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
     try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+    // CodeRabbit, PR 135: two rows with one id refill without a crash, repeating the only piece.
+    let twin = [rows[0], rows[0]]
+    try expectEqual(Visualizer.draw(twin, reverent: false, seen: ["p1"], roll: 0.99, startRoll: 0)?.piece.id, "p1")
+    try expect(Visualizer.seenKey(reverent: true) != Visualizer.seenKey(reverent: false), "Nature keeps its own bag")
 }
 
 func visualizerPicksByTheHalfHour() throws {
@@ -5426,12 +6545,46 @@ func visualizerModesCycle() throws {
     try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
 }
 
+func afterHoursCarriesNoCaptions() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"after-hours","number":1,"name":"Channel 1 · After Hours"},
+                          {"id":"iran-film","number":2,"name":"Channel 2 · Iranian Films"}]},
+     "shows":{},"programme_order":[],"programmes":{},"days":[]}
+    """)
+    try expect(!StationClock.carriesCaptions(p, number: 1), "After Hours carries no captions")
+    try expect(StationClock.carriesCaptions(p, number: 2), "a film channel keeps its captions")
+    // A different channel at number 1 keeps them: the rule follows the id, not the number.
+    let old = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"transfers","number":1,"name":"Channel 1"}]},
+     "shows":{},"programme_order":[],"programmes":{},"days":[]}
+    """)
+    try expect(StationClock.carriesCaptions(old, number: 1), "number 1 alone is not After Hours")
+}
+
 let tests: [(String, () throws -> Void)] = [
+    ("Pics/Vids held to videos drops every photo", pnvVideosOnlyDropsEveryPhoto),
+    ("programmeDecodesRomanTitleAndYear", programmeDecodesRomanTitleAndYear),
+    ("filmControlRowOffersPlayAndPiP", filmControlRowOffersPlayAndPiP),
+    ("pipSoundFadesBackOnlyWhereItShould", pipSoundFadesBackOnlyWhereItShould),
+    ("pipCaptionFeedReadsEveryTick", pipCaptionFeedReadsEveryTick),
+    ("pipPlayFollowerPassesOnTheWindowsOwnPlayOnce", pipPlayFollowerPassesOnTheWindowsOwnPlayOnce),
+    ("pipLifecycleReadsWhoClosedTheWindow", pipLifecycleReadsWhoClosedTheWindow),
+    ("pipFollowerLoadsEachProgrammeOnce", pipFollowerLoadsEachProgrammeOnce),
+    ("pipSubtitleStepLoadsAndHandsOff", pipSubtitleStepLoadsAndHandsOff),
+    ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
+    ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
+    ("After Hours carries no captions; the rule follows the id", afterHoursCarriesNoCaptions),
     ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
     ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
     ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
+    ("Remote: a swipe is told from a press", remoteGestureTellsASwipeFromAPress),
+    ("Remote map: the whole table", remoteMapIsTheOwnersTable),
+    ("Remote: a random channel is never the one playing", remoteRandomChannelIsNeverTheOnePlaying),
+    ("Remote: a double click is told from two single clicks", clickTallyTellsADoubleFromTwoSingles),
+    ("Guide timeline: a run counts its songs", guideRunsCountTheirSongs),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
+    ("liveChannelsShowTheirLocalTime", liveChannelsShowTheirLocalTime),
     ("pnvShuffleWalkWrapsOnce", pnvShuffleWalkWrapsOnce),
     ("pnvNextLapNeverRepeatsAtTheSeam", pnvNextLapNeverRepeatsAtTheSeam),
     ("serverClockCorrectsASlowDevice", serverClockCorrectsASlowDevice),
@@ -5441,6 +6594,7 @@ let tests: [(String, () throws -> Void)] = [
     ("nowPlayingReadsTheRPC", nowPlayingReadsTheRPC),
     ("houseSongsFindTheSpan", houseSongsFindTheSpan),
     ("nowPlayingKeepsThroughMisses", nowPlayingKeepsThroughMisses),
+    ("Letterbox cuts black bars and leaves dark pictures whole", letterboxCutsBlackBarsAndLeavesDarkPicturesWhole),
     ("Still cache keeps its bound and drops the oldest first", stillCacheKeepsItsBoundAndDropsTheOldestFirst),
     ("Still plan takes one at a time, spaced and capped", stillPlanTakesOneAtATimeSpacedAndCapped),
     ("Receiver first Pause invalidates pending resolver and channel change", receiverPauseInvalidatesPendingResolver),
@@ -5484,6 +6638,21 @@ let tests: [(String, () throws -> Void)] = [
     ("stationMonth follows Pakistan time", stationMonthFollowsPakistanTime),
     ("Clock labels", clockLabels),
     ("runSeconds rules", runSecondsRules),
+    ("Guide timeline: the clock's answer, end to end", guideTimelineSynthetic),
+    ("Guide timeline: a one-second seam between strips", guideTimelineSeamBetweenStrips),
+    ("Guide timeline: what is under a minute joins the block before", guideTimelineJoinsWhatCannotBeSeen),
+    ("Guide timeline: the same blocks whenever it is opened", guideTimelineReadsTheSameWhenOpened),
+    ("Guide: which month to fetch", guideMonthToFetch),
+    ("Guide timeline: off air never covers what follows it", guideTimelineKeepsWhatFollowsOffAir),
+    ("Guide timeline: off air at the end of the months held", guideTimelineOffAirAtTheEndOfTheMonthsHeld),
+    ("Guide timeline: dark across the month's end says when it is back", guideTimelineDarkAcrossTheMonthsEnd),
+    ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
+    ("Guide timeline: every day of a real month", guideTimelineRealMonth),
+    ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
+    ("Guide timeline: the month after takes over at midnight", guideTimelineHandsOverAtMidnight),
+    ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),
+    ("Guide grid: a programme too short to read is folded into a neighbour", guideCellsFold),
+    ("Guide grid: no cell too narrow to read, every day of a real month", guideCellsReadableRealMonth),
     ("Now and next: the next programme", nextProgrammeRule),
     ("Programme without a title decodes", programmeWithoutATitleDecodes),
     ("positionInSlot walks and wraps the roster", positionInSlotWalksAndWrapsTheRoster),
@@ -5504,6 +6673,8 @@ let tests: [(String, () throws -> Void)] = [
     ("A handover a hair before its whole second is on at that second", handoverAHairBeforeItsSecondIsOnAtThatSecond),
     ("following() walks the roster, then the clock", followingWalksTheRosterAndHandsBackToTheClock),
     ("upcoming() lists the next strips in order", upcomingListsTheNextStripsInOrder),
+    ("A programme decodes year and part", programmeDecodesYearAndPart),
+    ("upcoming() walks on from prev_day on the 1st", upcomingWalksOnFromPrevDay),
     ("secondsLeft() counts down to the slot end", secondsLeftCountsDownToTheSlotEnd),
     ("Real schedule: upcoming() agrees with onAir", realUpcomingAgreesWithOnAir),
     ("Real schedule: following() agrees with onAir at every handover", realFollowingAgreesWithOnAirAtEveryHandover),
@@ -5557,6 +6728,9 @@ let tests: [(String, () throws -> Void)] = [
     ("Beat gate hysteresis and reset", beatGateHysteresis),
     ("Dancer stage enters, dances and leaves", dancerStageEntersDancesAndLeaves),
     ("Dancer moves follow the site", dancerMovesFollowTheSite),
+    ("Dancer video steps hold two runs", dancerVideoStepsHoldTwoRuns),
+    ("Dancer moves match the site (fixture; kj-scope.js when present)", dancerMovesMatchKjScope),
+    ("Dancer Hands on hips: elbow out, hand to the hip", dancerHandsOnHipsPose),
     ("Screening Room: vod.json fixture decodes", vodFixtureDecodes),
     ("Screening Room: languages take either shape", vodLanguagesTakeEitherShape),
     ("Screening Room: the offer line (marqueeOffer)", vodOfferLine),
@@ -5919,6 +7093,38 @@ func pnvNextLapNeverRepeatsAtTheSeam() throws {
     }
     // One object: nothing else to show, so it repeats (negative case of the swap).
     try expectEqual(PnvReel.nextLap([row("a")], after: "a").map(\.id), ["a"])
+}
+
+func liveChannelsShowTheirLocalTime() throws {
+    func channel(_ country: String?, territory: String? = nil, name: String = "X") throws -> Channel {
+        var object: [String: Any] = ["id": "c", "name": name, "mediaType": "tv", "streams": []]
+        if let country { object["country"] = country }
+        if let territory { object["territory"] = territory }
+        return try JSONDecoder().decode(Channel.self, from: try JSONSerialization.data(withJSONObject: object))
+    }
+    // 2026-11-19 12:00 UTC.
+    let noon = try require(ISO8601DateFormatter().date(from: "2026-11-19T12:00:00Z"))
+    try expectEqual(LocalTime.label(for: try channel("Iran"), at: noon), "15:30 local time")
+    try expectEqual(LocalTime.label(for: try channel("Pakistan"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Yogyakarta"), at: noon), "19:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Denpasar"), at: noon), "20:00 local time")
+    // Most Indonesian rows name their city only in the station's name (Fable, 2026-11-19).
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "RRI Pro 1 Ambon FM 105.1"), at: noon), "21:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "GS Radio Bali"), at: noon), "20:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Elshinta Surabaya FM 97.6"), at: noon), "19:00 local time")
+    // No city, no time: three clocks and nothing to choose between them.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Bass FM 96.6"), at: noon) == nil)
+    // A city word inside another word does not count.
+    try expect(LocalTime.label(for: try channel("Indonesia", territory: "Indonesia", name: "Soloist FM"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel("DR Congo"), at: noon) == nil)
+    try expectEqual(LocalTime.label(for: try channel("Russia", name: "Bashkortostan 24"), at: noon), "17:00 local time")
+    try expectEqual(LocalTime.label(for: try channel("Russia", territory: "Chechnya"), at: noon), "15:00 local time")
+    // A clock nobody can tell is left out, never guessed.
+    try expect(LocalTime.label(for: try channel("Borderland / diaspora"), at: noon) == nil)
+    try expect(LocalTime.label(for: try channel(nil), at: noon) == nil)
+    try expectEqual(try channel("Iran").placeAndTime(at: noon), "Iran \u{00B7} 15:30 local time")
+    // Every zone named in the table is one the system knows.
+    for (country, id) in LocalTime.zones { try expect(TimeZone(identifier: id) != nil, "\(country): \(id)") }
 }
 
 func pnvShuffleWalkWrapsOnce() throws {

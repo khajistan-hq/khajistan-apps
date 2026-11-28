@@ -48,10 +48,10 @@ struct ReadingTitleView: View {
         }
         .foregroundStyle(palette.ink)
         .onExitCommand { dismiss() }
-        .fullScreenCover(item: $reading) { issue in
+        .kjFullScreenCover(item: $reading) { issue in
             ReadingReaderView(title: title, issue: issue)
         }
-        .fullScreenCover(item: $continuing) { place in
+        .kjFullScreenCover(item: $continuing) { place in
             ReadingReaderView(title: title, issue: place.issue, startPage: place.page)
         }
         .defaultFocus($actionFocused, true)

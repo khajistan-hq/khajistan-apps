@@ -11,8 +11,16 @@ struct CaptionView: View {
     let text: String?
     let skin: Skin
     var status: String? = nil
+    /// False where the caption sits on the skin's ground (radio, a sound-only programme): there it
+    /// keeps its plate whatever the viewer chose, since yellow text on the day ground cannot be read.
+    var overPicture = true
 
-    private static let size: CGFloat = 52   // 2.7% of 1920
+    private static let size: CGFloat = 44   // 4% of 1080 (owner, 2026-11-27: 52 looked big)
+    @AppStorage(CaptionStyle.key) private var styleRaw = CaptionStyle.plate.rawValue
+
+    private var look: CaptionStyle {
+        overPicture ? (CaptionStyle(rawValue: styleRaw) ?? .plate) : .plate
+    }
 
     var body: some View {
         if let text, !text.isEmpty {
@@ -25,12 +33,38 @@ struct CaptionView: View {
                 }
             }
             .font(.system(size: Self.size, weight: .semibold))
-            .foregroundStyle(Color(hex: skin.captionTextHex))
-            .padding(.horizontal, Self.size * 0.4)
-            .padding(.vertical, Self.size * 0.12)
-            .background(Color(hex: skin.captionPlateHex))
+            .modifier(CaptionLook(skin: skin, style: look, size: Self.size))
             .accessibilityElement(children: .combine)
+            .accessibilityValue(look.rawValue)
             .accessibilityIdentifier("caption")
+        }
+    }
+}
+
+/// The plate (the house default), or yellow text with a thin black edge and no box: the edge is
+/// four hard shadows two points out, and a soft one under them, so the text reads on a white shirt
+/// as well as on a dark room (archive PR #164 draws the website's the same way).
+private struct CaptionLook: ViewModifier {
+    let skin: Skin
+    let style: CaptionStyle
+    let size: CGFloat
+
+    func body(content: Content) -> some View {
+        switch style {
+        case .plate:
+            content
+                .foregroundStyle(Color(hex: skin.captionTextHex))
+                .padding(.horizontal, size * 0.4)
+                .padding(.vertical, size * 0.12)
+                .background(Color(hex: skin.captionPlateHex))
+        case .bare:
+            content
+                .foregroundStyle(Color(hex: Skin.bareCaptionHex))
+                .shadow(color: .black, radius: 0, x: 2, y: 2)
+                .shadow(color: .black, radius: 0, x: -2, y: -2)
+                .shadow(color: .black, radius: 0, x: 2, y: -2)
+                .shadow(color: .black, radius: 0, x: -2, y: 2)
+                .shadow(color: .black.opacity(0.6), radius: 6)
         }
     }
 }
@@ -41,11 +75,12 @@ struct CaptionLayer: View {
     let text: String?
     let skin: Skin
     var status: String? = nil
+    var overPicture = true
     let lift: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        CaptionView(text: text, skin: skin, status: status)
+        CaptionView(text: text, skin: skin, status: status, overPicture: overPicture)
             .padding(.horizontal, 115)   // 6% of the frame, as the site's plate keeps
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, lift > 0 ? lift + 24 : 12)

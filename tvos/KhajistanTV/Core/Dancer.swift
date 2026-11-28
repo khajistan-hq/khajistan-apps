@@ -12,7 +12,14 @@ enum DancerMoves {
     static let all = ["Running man", "Dabke", "Bhangra", "Attan", "Bandari", "Halay", "Shimmy",
                       "Twerk", "Horse trot", "Lasso", "Pole spin", "Side shuffle", "Fist pumps",
                       "High kicks", "Spin out", "Kolo", "Cocek", "Rachenitsa",
-                      "Eskista", "Kawliya", "Kambala", "Krumping", "Voguing"]
+                      "Eskista", "Kawliya", "Kambala", "Krumping", "Voguing",
+                      "Wings", "Sweep", "Hands on knees", "Hands on hips", "Arm swing",
+                      "Arm wave", "Airplane", "Turn", "Arm roll"]
+    /// Owner, 2026-11-16, from a phone video of the steps: add all of them and repeat each for
+    /// longer than the video does. These hold for two runs (16 beats); every other move for one.
+    /// Same table as `HOLD` in archive/scripts/kj-scope.js.
+    static let hold: Set<String> = ["Wings", "Sweep", "Hands on knees", "Hands on hips", "Arm swing",
+                                    "Arm wave", "Airplane", "Turn", "Arm roll"]
     /// The moves that bounce off the floor.
     static let hop: Set<String> = ["Running man", "Dabke", "Bhangra", "Attan", "Horse trot", "High kicks",
                                    "Kolo", "Rachenitsa", "Kambala", "Krumping"]
@@ -96,6 +103,7 @@ struct DancerStage {
     private var lastEnter: String?, lastLeave: String?, lastBreak: String?
     private var move = 0
     private var lastBar = 0
+    private var held = false
 
     var random: () -> Double
 
@@ -107,7 +115,7 @@ struct DancerStage {
     mutating func reset() {
         name = .off; kind = nil; t0 = 0; dur = 0; side = 1; cast = "base"
         wantSince = nil; lostSince = nil; smokeAt = nil
-        move = 0; lastBar = 0
+        move = 0; lastBar = 0; held = false
     }
 
     /// One frame of draw.dancer with a signal attached. `grooving(on)` is the beat gate with the
@@ -204,7 +212,12 @@ struct DancerStage {
         let bar = count / figure.cycle
         if bar != lastBar {
             lastBar = bar
-            move = DancerMoves.next(in: list, after: move, random: random())
+            if DancerMoves.hold.contains(list[min(move, list.count - 1)]) && !held {
+                held = true                               // a video step plays twice
+            } else {
+                held = false
+                move = DancerMoves.next(in: list, after: move, random: random())
+            }
         }
         return list[min(move, list.count - 1)]
     }

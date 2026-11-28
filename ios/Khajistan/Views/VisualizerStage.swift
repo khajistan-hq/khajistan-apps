@@ -17,6 +17,7 @@ struct VisualizerStage<Name: View>: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(VisualizerMode.key) private var stored = VisualizerMode.khajistan.rawValue
     @AppStorage(VisualizerMode.natureKey) private var storedNature = VisualizerMode.nature.rawValue
     @State private var picture = VisualizerPlayer()
@@ -66,6 +67,8 @@ struct VisualizerStage<Name: View>: View {
             guard play else { return picture.stop() }
             await picture.run(reverent: reverent, auth: model.auth)
         }
+        // iOS pauses the muted picture in the background; the channel's sound plays on.
+        .onChange(of: scenePhase) { _, phase in if phase == .active { picture.resume() } }
         .onDisappear { picture.stop() }
     }
 }

@@ -47,6 +47,9 @@ final class VisualizerPlayer {
         // A devotional programme never keeps an After Hours picture, not even while Nature loads (and the other
         // way round): a change of kind clears the picture at once. Only a sign-in change keeps it up.
         if ready, shownReverent != reverent { stop() }
+        // Pieces that could not open just now. They are skipped until one plays, and are never written to the
+        // stored bag: a signed-out viewer or a short outage must not use up every piece's turn.
+        var passed: [String] = []
         while !Task.isCancelled, gen == generation {
             // A failed step is tried again in a minute rather than waiting for a mode change.
             step = "reading the list of pictures"
@@ -58,8 +61,10 @@ final class VisualizerPlayer {
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            let seen = UserDefaults.standard.stringArray(forKey: Visualizer.seenKey(reverent: reverent)) ?? []
-            guard let pick = Visualizer.draw(rows, reverent: reverent, seen: seen,
+            let key = Visualizer.seenKey(reverent: reverent)
+            let seen = UserDefaults.standard.stringArray(forKey: key) ?? []
+            // `passed` first, so "never the piece just shown" still reads the stored bag's last piece.
+            guard let pick = Visualizer.draw(rows, reverent: reverent, seen: passed + seen,
                                              roll: Double.random(in: 0..<1), startRoll: Double.random(in: 0..<1)) else {
                 problem = "no picture for this kind of channel yet"
                 // Read the list again next time: a piece of this kind may be published meanwhile.
@@ -67,14 +72,18 @@ final class VisualizerPlayer {
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            let shown = await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
-            // A piece that would not open counts as seen too, so the bag moves past it; a cancelled run counts nothing.
+            let outcome = await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
+            // A cancelled or superseded run counts nothing, whatever the outcome reads.
             if !Task.isCancelled, gen == generation {
-                UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey(reverent: reverent))
-                if shown { shownReverent = reverent }
+                UserDefaults.standard.set(Visualizer.bag(after: outcome, stored: seen, drawn: pick.seen, passed: passed), forKey: key)
+                switch outcome {
+                case .shown: shownReverent = reverent; passed = []
+                case .notNow: passed.append(pick.piece.id)
+                case .broken, .superseded: break
+                }
             }
             // The next piece starts loading `lead` seconds before this one ends, so it is up before the end.
-            let wait = shown ? max(5, pick.play - Self.lead) : (ready ? 30 : 60)
+            let wait = outcome == .shown ? max(5, pick.play - Self.lead) : (ready ? 30 : 60)
             try? await Task.sleep(for: .seconds(wait))
         }
         // No stop() here: when the picture should go, the view's task stops it (`guard play`) or onDisappear does,
@@ -88,6 +97,12 @@ final class VisualizerPlayer {
         shownReverent = nil
     }
 
+    /// The picture again when the app comes back to the front: iOS pauses a video player in the background
+    /// and does not start it again, so the picture stood still under the channel's sound.
+    func resume() {
+        if ready { players[front].play() }
+    }
+
     private func clear(_ i: Int) {
         loops[i]?.cancel()
         loops[i] = nil
@@ -96,26 +111,29 @@ final class VisualizerPlayer {
     }
 
     /// Opens `piece` on the player behind and fades it in over the one on screen once it is drawing. True once it
-    /// is showing; on a failure the piece on screen, if any, stays up.
-    private func play(_ piece: VisualizerPiece, at start: TimeInterval, auth: AuthStore, gen: Int) async -> Bool {
+    /// is showing (`.shown`); on a failure the piece on screen, if any, stays up, and the outcome says whether the
+    /// piece is spent (Core/Visualizer.swift).
+    private func play(_ piece: VisualizerPiece, at start: TimeInterval, auth: AuthStore, gen: Int) async -> VisualizerOutcome {
         // A fade still under way (a restarted run can arrive inside one) is let finish, never cut short.
         while outgoing != nil {
             try? await Task.sleep(for: .milliseconds(100))
-            if Task.isCancelled || gen != generation { return false }
+            if Task.isCancelled || gen != generation { return .superseded }
         }
         let current = { !Task.isCancelled && gen == self.generation }
         // A superseded run must not clear the slot a newer run is filling.
-        guard current() else { return false }
+        guard current() else { return .superseded }
         let back = ready ? 1 - front : front
         clear(back)
-        func fail(_ why: String) -> Bool {
-            if current() { clear(back); if !ready { problem = why } }
-            return false
+        func fail(_ why: String, _ outcome: VisualizerOutcome = .notNow) -> VisualizerOutcome {
+            guard current() else { return .superseded }
+            clear(back)
+            if !ready { problem = why }
+            return outcome
         }
         guard auth.isSignedIn else { return fail("sign in to see it") }
         if !ready { step = "asking for the picture link" }
         guard let url = await Self.carrier(for: piece, auth: auth) else { return fail("the picture link was refused") }
-        guard current() else { return false }
+        guard current() else { return .superseded }
         if !ready { step = "opening the picture" }
         let player = players[back]
         let item = AVPlayerItem(url: url)
@@ -123,25 +141,26 @@ final class VisualizerPlayer {
         player.play()   // muted; loading starts now rather than waiting on a status nobody asked for
         let deadline = Date().addingTimeInterval(30)
         while item.status != .readyToPlay {
-            guard current(), player.currentItem === item else { return false }
+            guard current(), player.currentItem === item else { return .superseded }
             if item.status == .failed {
-                return fail("the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))")
+                return fail("the picture would not play (\(item.error?.localizedDescription ?? "unknown error"))",
+                            Visualizer.outcome(ofFailure: item.error))
             }
             if Date() > deadline { return fail("the picture did not open within 30 seconds") }
             try? await Task.sleep(for: .milliseconds(250))
         }
         if !ready { step = "joining the picture" }
         _ = await player.seek(to: CMTime(seconds: start, preferredTimescale: 600))
-        guard current(), player.currentItem === item else { return false }
+        guard current(), player.currentItem === item else { return .superseded }
         player.play()
         // Faded in only once frames are coming: ready-to-play and a finished seek do not yet mean a picture.
         let drawing = Date().addingTimeInterval(15)
         while player.timeControlStatus != .playing {
-            guard current(), player.currentItem === item else { return false }
+            guard current(), player.currentItem === item else { return .superseded }
             if Date() > drawing { return fail("the picture did not start") }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        guard current(), player.currentItem === item else { return false }
+        guard current(), player.currentItem === item else { return .superseded }
         // If its successor fails, a piece that runs out goes round again rather than standing still.
         loops[back] = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: AVPlayerItem.didPlayToEndTimeNotification, object: item) {
@@ -168,7 +187,7 @@ final class VisualizerPlayer {
             front = back
             ready = true
         }
-        return true
+        return .shown
     }
 
     /// The signed play address, or nil: not signed in, or tv-play said no.

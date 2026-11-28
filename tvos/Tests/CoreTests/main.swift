@@ -6521,6 +6521,47 @@ func visualizerPicksByTheHalfHour() throws {
     try expectClose(Visualizer.offset(of: rows[0], at: Date(timeIntervalSince1970: 1250), duration: 500), 250)
 }
 
+/// Only a piece that played, or whose file is broken, is spent (PR 138 review: "Failures consume the
+/// visualizer bag"). Sign-in, a refused link and a timeout are `.notNow`.
+func visualizerBagKeepsAPieceThatFailedForNow() throws {
+    let rows = (1...4).map { VisualizerPiece(id: "p\($0)", title: nil, category: nil, seconds: 1800, play_url: "u", reverent: nil) }
+    // A signed-out viewer: every try fails for now, round after round. The stored bag never changes,
+    // and each round still tries a piece it has not tried yet.
+    let stored = ["p1"]
+    var passed: [String] = [], tried: [String] = []
+    for k in 0..<3 {
+        let d = try require(Visualizer.draw(rows, reverent: false, seen: passed + stored, roll: Double(k) / 3, startRoll: 0))
+        try expect(!passed.contains(d.piece.id) && d.piece.id != "p1", "a piece skipped for now, or spent, was drawn again")
+        try expectEqual(Visualizer.bag(after: .notNow, stored: stored, drawn: d.seen, passed: passed), stored, "a try that failed for now spent a piece")
+        try expectEqual(Visualizer.bag(after: .superseded, stored: stored, drawn: d.seen, passed: passed), stored)
+        passed.append(d.piece.id)
+        tried.append(d.piece.id)
+    }
+    try expectEqual(Set(tried), ["p2", "p3", "p4"])
+    // The outage ends and a piece plays: it alone joins the bag; the pieces skipped keep their turn.
+    let d = try require(Visualizer.draw(rows, reverent: false, seen: ["p2"] + stored, roll: 0, startRoll: 0))
+    try expectEqual(d.piece.id, "p3")
+    try expectEqual(Visualizer.bag(after: .shown, stored: stored, drawn: d.seen, passed: ["p2"]), ["p1", "p3"])
+    // A broken file is spent too, so the bag moves past it.
+    try expectEqual(Visualizer.bag(after: .broken, stored: stored, drawn: d.seen, passed: ["p2"]), ["p1", "p3"])
+    // Every piece spent or skipped: the bag refills, and the piece that plays starts it.
+    let refill = try require(Visualizer.draw(rows, reverent: false, seen: ["p2", "p3", "p4"] + stored, roll: 0, startRoll: 0))
+    try expectEqual(Visualizer.bag(after: .shown, stored: stored, drawn: refill.seen, passed: ["p2", "p3", "p4"]), [refill.piece.id])
+    try expect(refill.piece.id != "p1", "the piece just shown came straight back")
+
+    // What a failed file counts as: the network and a refusal may pass; anything else is the file.
+    func error(_ domain: String, _ code: Int, under: NSError? = nil) -> NSError {
+        NSError(domain: domain, code: code, userInfo: under.map { [NSUnderlyingErrorKey: $0] } ?? [:])
+    }
+    try expectEqual(Visualizer.outcome(ofFailure: error(NSURLErrorDomain, NSURLErrorNotConnectedToInternet)), .notNow)
+    try expectEqual(Visualizer.outcome(ofFailure: error("AVFoundationErrorDomain", -11800, under: error(NSURLErrorDomain, NSURLErrorTimedOut))), .notNow)
+    try expectEqual(Visualizer.outcome(ofFailure: error("AVFoundationErrorDomain", -11800, under: error(NSOSStatusErrorDomain, -12660))), .notNow, "a 403 is a refusal")
+    try expectEqual(Visualizer.outcome(ofFailure: error("AVFoundationErrorDomain", -11829)), .broken, "a file that cannot be opened")
+    try expectEqual(Visualizer.outcome(ofFailure: nil), .broken)
+    try expect(VisualizerOutcome.shown.countsAsSeen && VisualizerOutcome.broken.countsAsSeen)
+    try expect(!VisualizerOutcome.notNow.countsAsSeen && !VisualizerOutcome.superseded.countsAsSeen)
+}
+
 func visualizerModesCycle() throws {
     try expectEqual(VisualizerMode.current(reverent: false, stored: nil, storedNature: nil), .khajistan)
     try expectEqual(VisualizerMode.current(reverent: true, stored: "khajistan", storedNature: nil), .nature)
@@ -6576,6 +6617,7 @@ let tests: [(String, () throws -> Void)] = [
     ("After Hours carries no captions; the rule follows the id", afterHoursCarriesNoCaptions),
     ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
     ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
+    ("Visualizer: a try that failed for now does not spend a piece", visualizerBagKeepsAPieceThatFailedForNow),
     ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("Remote: a swipe is told from a press", remoteGestureTellsASwipeFromAPress),

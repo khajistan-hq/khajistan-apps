@@ -559,6 +559,13 @@ final class PicsVidsUITests: XCTestCase {
     func testShelfLeftFromTheFirstStaysPut() {
         let app = launch()
         dismissNotice(app)
+        // Pictures only: the shelves are shuffled, and a video tile opens the Reel, where Right
+        // lights the controls instead of moving on.
+        let pictures = app.buttons["pnvkind-image"]
+        XCTAssertTrue(pictures.waitForExistence(timeout: 60), "Pictures is offered")
+        XCTAssertTrue(kjFocus(pictures, app: app), "Pictures takes focus")
+        XCUIRemote.shared.press(.select)
+        kjPause(10)
         let tile = tiles(app).firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 60), "The shelves must show tiles")
         XCTAssertTrue(kjFocus(tile, app: app), "a tile takes focus")
@@ -566,6 +573,7 @@ final class PicsVidsUITests: XCTestCase {
         let surface = app.buttons["pnvViewerSurface"]
         XCTAssertTrue(surface.waitForExistence(timeout: 30), "the tile opens the viewer")
         kjPause(2)
+        XCTAssertEqual(surface.label, "picture", "the viewer shows a picture, not the Reel")
         let first = surface.value as? String
         XCUIRemote.shared.press(.left); kjPause(2)
         XCTAssertEqual(surface.value as? String, first, "Left from a shelf's first object stays put")

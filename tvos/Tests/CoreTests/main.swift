@@ -5978,6 +5978,12 @@ func aPlayerIsRetunedOnlyForTheNetwork() throws {
     try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
     try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
     try expect(!retunes(URLError(.userAuthenticationRequired)))
+    // CodeRabbit, PR 131/133: the sign-in refusal stays shut on a stall, and a refusal under a
+    // network error is still a refusal.
+    try expect(!retunes(URLError(.userAuthenticationRequired), stalled: true), "an authentication error on a stall stays shut")
+    let refusalUnderDrop = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost,
+                                   userInfo: [NSUnderlyingErrorKey: NSError(domain: "CoreMediaErrorDomain", code: -12660)])
+    try expect(!retunes(refusalUnderDrop), "a 403 under a dropped connection stays shut")
     try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
     try expect(!retunes(nil), "an item failure with no cause")
     try expect(retunes(nil, stalled: true), "a carrier that stopped sending")

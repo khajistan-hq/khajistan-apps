@@ -82,7 +82,10 @@ struct TransmissionPlayerView: View {
 
     private var store: TransmissionStore { model.transmission }
 
-    var body: some View {
+    /// The screen and everything that answers the remote or follows the station's state. Apart from
+    /// `body`, which adds the tasks: as one chain, CI's compiler gave up type-checking it "in
+    /// reasonable time" (PR 150's tvOS check, 2026-11-28).
+    private var screen: some View {
         ZStack {
             palette.ground.ignoresSafeArea()
             // Read from a view that ignores the safe area: one laid out inside it reports insets of 0,
@@ -209,6 +212,10 @@ struct TransmissionPlayerView: View {
                 break
             }
         }
+    }
+
+    var body: some View {
+        screen
         .task { await start() }
         #if DEBUG
         // `-kjautoswitch 6` switches channel that many times, fifteen seconds apart, so the
@@ -218,7 +225,7 @@ struct TransmissionPlayerView: View {
             for _ in 0..<n {
                 try? await Task.sleep(for: .seconds(15))
                 print("KJSWITCH press ch=\(store.channelNumber) state=\(store.player.state) switching=\(switching)")
-                move(.up)
+                move(.right)   // the next channel (RemoteMap)
             }
         }
         #endif

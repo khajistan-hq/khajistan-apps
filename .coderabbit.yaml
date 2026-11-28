@@ -1,0 +1,43 @@
+# CodeRabbit config for khajistan-apps (2026-11-28).
+# This repo is public: these rules are written out here rather than pointing at the private
+# machinery repo, so a review comment cannot quote a private file.
+language: en-US
+tone_instructions: >-
+  Plain, short English. One finding per comment: what breaks, for whom, and the smallest fix.
+  No praise, no hype, no summaries of what the code does.
+reviews:
+  poem: false
+  in_progress_fortune: false
+  auto_review:
+    enabled: true
+    # Apple TV work stacks branches on each other; review those too.
+    base_branches:
+      - ".*"
+  path_instructions:
+    - path: "**/*.swift"
+      instructions: |
+        The mistakes most often found in this repo, in order:
+        1. A late async answer applied after the state changed. When a network reply or task result
+           arrives, check that the channel, dial, account or generation is still the one that asked.
+        2. State not reset when its cause changes, such as a refused-password record kept after the
+           password changes.
+        3. A retry scheduled only if the fallback load succeeds; schedule the retry first.
+        4. An error discarded, or read too broadly (any token-refresh failure treated as signed out).
+        5. Time edges: midnight and month-end handover of the schedule, a clock that does not refresh
+           each minute, a wait with no time limit.
+        6. A paused transmission rejoining live is intended behaviour, not a bug.
+        Main-actor isolation: UI state is changed on the main actor only.
+    - path: "**/*Tests*/**"
+      instructions: |
+        A test must fail when the behaviour it names is broken. Flag assertions that pass either way:
+        counting drawn cells instead of reading the name, accepting two seeks where one is expected,
+        or a bound read from the code under test instead of written in the test.
+    - path: "**/scripts/**"
+      instructions: |
+        Install scripts must refuse a build older than the one already on the device, and must not
+        weaken that guard when a record write fails. Quote every path; check untracked files in any
+        clean-tree check. Never print a password, token or signing secret.
+    - path: "**"
+      instructions: |
+        On-screen text: no colour emoji (monochrome glyphs only), no third-party player branding
+        (no YouTube name or logo on the receiver), and never the words "MENA" or "SWANA".

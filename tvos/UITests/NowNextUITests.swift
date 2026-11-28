@@ -26,12 +26,15 @@ final class NowNextUITests: XCTestCase {
         let first = app.buttons["transmission-channel-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
         XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        for _ in 1..<channel {
-            XCUIRemote.shared.press(.down)
-            kjPause(0.4)
-        }
+        // Each Down waits for focus to move: a fixed 0.4 s pause lost presses on the way to
+        // channels 14 and 15 (simulator, 2026-11-28), and the walk stopped short.
         let card = app.buttons["transmission-channel-\(channel)"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10) && card.hasFocus, "focus walks down to channel \(channel)")
+        var trail: [String] = []
+        for _ in 0..<(channel + 15) where !(card.exists && card.hasFocus) {
+            kjPress(.down, app: app)
+            trail.append(kjFocusKey(app).components(separatedBy: "|").first ?? "")
+        }
+        XCTAssertTrue(card.exists && card.hasFocus, "focus walks down to channel \(channel): \(trail)")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         return app

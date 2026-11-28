@@ -194,9 +194,7 @@ struct ReceiverPlayerView: View {
             case .right: input = .right
             @unknown default: return
             }
-            print("KJTRACE receiver move \(input) armed=\(String(describing: armed)) strip=\(stripShown) state=\(controller.state)")
             perform(RemoteMap.action(input, in: armed == nil ? .picture : .controls))
-            print("KJTRACE receiver after armed=\(String(describing: armed))")
         }
         .onPlayPauseCommand {
             // A radio handed to the small player, or a picture sent to PiP, keeps playing.
@@ -329,7 +327,6 @@ struct ReceiverPlayerView: View {
     /// channel, so a lone click waits `ClickTally.window` for a second one.
     private func selectOnSurface() {
         guard !leaving else { return }
-        print("KJTRACE receiver click armed=\(String(describing: armed)) guide=\(guideRow != nil)")
         if let guideRow {
             if guideList.indices.contains(guideRow) { pick(guideList[guideRow]) }
             return

@@ -57,18 +57,16 @@ final class SubtitlesUITests: XCTestCase {
             let low = caption.frame
             kjScreenshot("subs-\(skin)-1-transmission-strip-down", app: app)
 
-            XCUIRemote.shared.press(.select)   // wakes the strip
+            // Up wakes the strip and lights its first control, Subtitles (the players' remote
+            // map, 2026-11-28; Select woke it and Right lit the control until then).
+            XCUIRemote.shared.press(.up)
             kjPause(0.8)
             kjScreenshot("subs-\(skin)-2-transmission-strip-up", app: app)
             let control = app.buttons["subtitlesControl"]
             XCTAssertTrue(control.exists, "a programme with subtitles carries the control")
             XCTAssertEqual(control.label, "Subtitles · English")
             XCTAssertLessThan(caption.frame.maxY, low.maxY - 40, "\(skin): the subtitle rises above the strip")
-
-            XCUIRemote.shared.press(.right)    // to the control
-            kjPause(0.6)
-            kjScreenshot("subs-\(skin)-2b-transmission-control-focused", app: app)
-            XCTAssertTrue(control.isSelected, "right lights the Subtitles control")
+            XCTAssertTrue(control.isSelected, "Up lights the Subtitles control, the strip's first")
             XCUIRemote.shared.press(.select)   // off
             kjPause(0.6)
             XCTAssertEqual(control.label, "Subtitles · Off")
@@ -77,21 +75,25 @@ final class SubtitlesUITests: XCTestCase {
             XCUIRemote.shared.press(.select)   // on again
             kjPause(0.6)
             XCTAssertTrue(caption.waitForExistence(timeout: 3))
+            // Left on the first control stays on it; Down lets go.
             XCUIRemote.shared.press(.left)
             kjPause(0.6)
-            XCTAssertFalse(control.hasFocus, "left leaves the control")
+            XCTAssertTrue(control.isSelected, "Left on the first control stays on it")
+            XCUIRemote.shared.press(.down)
+            kjPause(0.6)
+            XCTAssertFalse(control.isSelected, "Down lets go of the control")
             app.terminate()
         }
     }
 
-    /// Lights the strip's Captions control the way the remote does since 2026-11-04: right on the
-    /// bare picture opens the guide, so Select lights it. A first Select only wakes the strip when
-    /// it had hidden; a second then lights Captions. Never a third, which would work the control.
+    /// Lights the strip's Captions control the way the remote does since 2026-11-28: Up on the
+    /// picture wakes the strip and lights its first control. A second Up is pressed only when the
+    /// first did not light it; Up on a lit control does nothing.
     private func lightCaptions(_ control: XCUIElement) {
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)
         kjPause(0.8)
         if !(control.exists && control.isSelected) {
-            XCUIRemote.shared.press(.select)
+            XCUIRemote.shared.press(.up)
             kjPause(0.8)
         }
     }
@@ -118,14 +120,14 @@ final class SubtitlesUITests: XCTestCase {
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
         // The strip offers its controls over a playing channel: ABN News, or when its carrier does
-        // not reach the runner, the next Pakistani channel down (Urdu by the country rule). DD
+        // not reach the runner, the next Pakistani channel along (Urdu by the country rule). DD
         // Kashir also plays on the runner, and Kashmiri offers no captions (CI on PR 79, 2026-11-16).
         try kjTuneUntilPlaying(app, tries: 10) { $0.hasPrefix("swept-pk-") || $0.hasPrefix("indus-") }
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)
         XCTAssertTrue(control.exists, "a live channel in a language the recogniser takes offers captions")
-        XCTAssertTrue(control.isSelected, "Select lights the Captions control")
+        XCTAssertTrue(control.isSelected, "Up lights the Captions control")
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)
@@ -139,14 +141,13 @@ final class SubtitlesUITests: XCTestCase {
         // Five seconds after the choice the strip hides; captions and the saved setting remain.
         XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
-        // Left or right on the bare picture opens the guide (owner, 2026-11-04); Select wakes the
-        // strip and lights CC, and one more Select works it.
+        // Up wakes the strip and lights CC, and Select works it.
         lightCaptions(control)
-        XCTAssertTrue(control.isSelected, "Select lights the Captions control again")
+        XCTAssertTrue(control.isSelected, "Up lights the Captions control again")
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
-        XCUIRemote.shared.press(.left)
+        XCUIRemote.shared.press(.down)   // lets go of the control
         // Back over a playing picture may hide the strip before it leaves: press until the player
         // is gone, never more than twice. (The region page's cards stay in the tree under the
         // player, so they cannot tell.)
@@ -173,7 +174,7 @@ final class SubtitlesUITests: XCTestCase {
         let kashirControl = app.buttons["captionsControl"]
         lightCaptions(kashirControl)
         XCTAssertTrue(kashirControl.exists, "CC remains discoverable for unsupported channels")
-        XCTAssertTrue(kashirControl.isSelected, "Select lights the Captions control")
+        XCTAssertTrue(kashirControl.isSelected, "Up lights the Captions control")
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")

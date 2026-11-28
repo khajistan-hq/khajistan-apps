@@ -492,9 +492,8 @@ private struct ReceiverGuideRow: View {
         let height = TransmissionGuide.rowHeight - gap
         let cell = lit ? palette.litAmongBands : palette.onBandPlate
         let side = lit ? palette.onFocusPlate : palette
-        let language = channel.detectedLanguageName ?? channel.primaryLanguage
-        let where_ = [channel.placeAndTime(), language].compactMap { $0 }.filter { !$0.isEmpty }
-            .joined(separator: " \u{00B7} ")
+        // The place, its language and the time there (Channel.placeAndTime), as the strip reads it.
+        let where_ = channel.placeAndTime()
         HStack(spacing: 0) {
             HStack(spacing: 16) {
                 Text("\(number)").kjKicker().monospacedDigit().frame(width: 52, alignment: .trailing)

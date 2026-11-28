@@ -183,7 +183,7 @@ final class ReceiverGuideUITests: XCTestCase {
         // Full screen, as Transmission's guide (owner, 2026-11-28): the picture plays on in its window.
         XCTAssertEqual(guide.frame.minY, screen.minY, accuracy: 2, "the guide fills the screen from the top")
         let headline = app.descendants(matching: .any)["guideHeadline"]
-        XCTAssertTrue(headline.exists && headline.label.contains(start), "the lit channel is described beside the picture: \(headline.label)")
+        XCTAssertTrue(headline.exists && headline.label.contains("Live"), "the playing channel is described beside the picture: \(headline.label)")
         XCTAssertLessThan(headline.frame.maxY, screen.height * 0.4, "the description sits in the top band, beside the picture's window")
         let strip = app.descendants(matching: .any)["captionsControl"]
         XCTAssertFalse(strip.exists && strip.isHittable, "no strip over the guide")

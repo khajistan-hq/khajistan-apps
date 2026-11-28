@@ -146,8 +146,14 @@ struct ReceiverPlayerView: View {
                 }
             }
             .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
-            .scaleEffect(guideRow == nil ? 1 : pictureWindow.scale, anchor: .topLeading)
-            .offset(guideRow == nil ? .zero : pictureWindow.offset)
+            // Nothing of the layer is drawn outside the screen's own rectangle, so in the window
+            // the picture is the window's size and no larger.
+            .clipped()
+            // Transformed where it is drawn, as Transmission's picture is: the layout stays the
+            // screen's, so the players are not laid out again at the window's size.
+            .visualEffect { [window = guideRow == nil ? nil : pictureWindow] layer, _ in
+                layer.scaleEffect(window?.scale ?? 1, anchor: .topLeading).offset(window?.offset ?? .zero)
+            }
             .ignoresSafeArea()
             .accessibilityHidden(guideRow != nil)
             // The focus target. It draws nothing; its job is to hold focus so the remote's

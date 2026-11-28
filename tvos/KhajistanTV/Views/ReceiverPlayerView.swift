@@ -45,6 +45,8 @@ struct ReceiverPlayerView: View {
     /// The strip control the remote has lit: Right lights Captions (when offered) then Like, Left
     /// lets go, Select works it. Focus never leaves the surface (see below).
     @State private var armed: Chip?
+    /// Clicks on the bare picture, told single from double.
+    @State private var clicks = ClickTally()
     @State private var likeNote: String?
     /// A dead signal moves on by itself: the channels that failed on this screen (never tried
     /// twice by the move), the pending move, and what the strip says about it.
@@ -172,9 +174,6 @@ struct ReceiverPlayerView: View {
         .onMoveCommand { direction in
             // The screen is closing: a press now must not act on a signal already handed on.
             guard !leaving else { return }
-            // Read before wake() shows the strip: a press on the bare picture opens the guide, a
-            // right press with the strip already up walks onto it (owner, 2026-11-08).
-            let stripWasUp = stripShown
             wake()
             if let row = guideRow {
                 let count = guideList.count
@@ -187,13 +186,15 @@ struct ReceiverPlayerView: View {
                 }
                 return
             }
+            let input: RemoteMap.Input
             switch direction {
-            case .up: click(by: -1)
-            case .down: click(by: 1)
-            case .right: moveRight(stripWasUp: stripWasUp)
-            case .left: moveLeft(onStrip: stripWasUp)
-            @unknown default: break
+            case .up: input = .up
+            case .down: input = .down
+            case .left: input = .left
+            case .right: input = .right
+            @unknown default: return
             }
+            perform(RemoteMap.action(input, in: armed == nil ? .picture : .controls))
         }
         .onPlayPauseCommand {
             // A radio handed to the small player, or a picture sent to PiP, keeps playing.
@@ -321,13 +322,50 @@ struct ReceiverPlayerView: View {
         #endif
     }
 
-    /// Select on the picture: tunes the lit guide row, works the lit strip control, or wakes.
+    /// A click on the touch surface. In the guide it tunes the lit row and on a lit control it works
+    /// the control, both at once. On the picture one click is the next channel and two a random
+    /// channel, so a lone click waits `ClickTally.window` for a second one.
     private func selectOnSurface() {
         guard !leaving else { return }
         if let guideRow {
             if guideList.indices.contains(guideRow) { pick(guideList[guideRow]) }
             return
         }
+        if armed != nil {
+            perform(RemoteMap.action(.click, in: .controls))
+            return
+        }
+        let at = ProcessInfo.processInfo.systemUptime
+        switch clicks.click(at: at) {
+        case .double: perform(RemoteMap.action(.doubleClick, in: .picture))
+        case .wait:
+            Task {
+                try? await Task.sleep(for: .milliseconds(Int(ClickTally.window * 1000)))
+                if clicks.settle(at), !leaving { perform(RemoteMap.action(.click, in: .picture)) }
+            }
+        }
+    }
+
+    /// What RemoteMap asked for, done on this screen (owner, 2026-11-28: down opens the guide, up
+    /// lights the controls, left and right change channel).
+    private func perform(_ action: RemoteMap.Action) {
+        switch action {
+        case .openGuide: openGuide()
+        case .lightControls: if stripShown, !isFailed { armed = .captions }
+        case .letGo:
+            armed = nil
+            wake()
+        case .previousChannel: click(by: -1)
+        case .nextChannel: click(by: 1)
+        case .randomChannel: randomChannel()
+        case .walk(let by): if by > 0 { moveRight() } else { moveLeft() }
+        case .work: workArmed()
+        case .none: break
+        }
+    }
+
+    /// Works the lit control.
+    private func workArmed() {
         switch armed {
         case .captions:
             model.captions.toggle()
@@ -340,13 +378,23 @@ struct ReceiverPlayerView: View {
             wake()
         case .guide: openGuide()
         case .pip: startPictureInPicture()
-        case nil:
-            // With the strip showing, Select lights its first control; left and right
-            // then walk the controls (right with the strip up does the same; right on the
-            // bare picture, and left, open the guide).
-            if stripShown { if case .failed = controller.state {} else { armed = .captions } }
-            wake()
+        case nil: break
         }
+    }
+
+    /// A double click: any channel of the shelf but this one. Surf's next channel is already a
+    /// random one the viewer has not visited, so there it is the same as a click.
+    private func randomChannel() {
+        guard guideRow == nil, !leaving else { return }
+        wake()
+        armed = nil
+        guard surfChoice == nil else { return step(by: 1) }
+        stopMovingOn()
+        let from = destination ?? current
+        guard let target = RemoteMap.random(from: list, not: from, roll: Double.random(in: 0..<1)) else { return }
+        destination = target
+        changeTask?.cancel()
+        changeTask = Task { await change(to: target) }
     }
 
     // Taken out of the body, which grew past what the type checker reads in time.
@@ -354,8 +402,8 @@ struct ReceiverPlayerView: View {
         [(destination ?? current).name, (destination ?? current).place].filter { !$0.isEmpty }.joined(separator: ", ")
     }
     private var surfaceHint: String {
-        surfChoice == nil ? "Up or down changes channel, left or right opens the guide."
-            : "Up or down surfs the whole selected atlas without repeats. Left or right opens the guide."
+        surfChoice == nil ? "Left or right changes channel, down opens the guide, up reaches the controls."
+            : "Left or right surfs the whole selected atlas without repeats. Down opens the guide, up reaches the controls."
     }
     private var previousActionName: String { surfChoice == nil ? "Previous channel" : "Another unvisited channel" }
     private var captionsActionName: String { model.captions.isEnabled ? "Captions off" : "Captions on" }
@@ -397,7 +445,7 @@ struct ReceiverPlayerView: View {
     /// The site's Captions button: its label says what is on and what is left. Right lights it,
     /// Select works it, left lets it go; no up or down press can land on it.
     private var captionsControl: some View {
-        StripChipStyle.face(Text(rightCue + captionsFace), isOn: model.captions.isEnabled, selected: captionArmed)
+        StripChipStyle.face(Text(captionsFace), isOn: model.captions.isEnabled, selected: captionArmed)
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel(model.captions.label)
             .accessibilityIdentifier("captionsControl")
@@ -418,8 +466,8 @@ struct ReceiverPlayerView: View {
         HStack(spacing: 14) {
             captionsControl
             likeControl
-            if visualizerOffered { visualizerControl }
-            if guideOffered { guideControl }
+            if visualizerShown { visualizerControl.opacity(visualizerOffered ? 1 : 0.4) }
+            guideControl.opacity(guideOffered ? 1 : 0.4)
             // The button keeps its place for the whole channel and is dim until it can act: drawn only
             // while playing, it made the row re-flow at every tune (owner, 2026-11-28: "shows buttons
             // then moves them its so glitchy").
@@ -613,9 +661,10 @@ struct ReceiverPlayerView: View {
 
     /// Radio, where the dancer or a visualizer takes the picture's place; not for a viewer who has
     /// asked for less motion, who gets neither.
-    private var visualizerOffered: Bool {
-        current.mediaType == "radio" && destination == nil && !reduceMotion
-    }
+    private var visualizerOffered: Bool { visualizerShown && destination == nil }
+
+    /// Whether the channel has a visualizer control at all: a fact of the channel, not of the moment.
+    private var visualizerShown: Bool { current.mediaType == "radio" && !reduceMotion }
 
     private var visualizerMode: VisualizerMode {
         VisualizerMode.current(reverent: current.isReverent, stored: visualizerStored, storedNature: visualizerNatureStored)
@@ -638,12 +687,7 @@ struct ReceiverPlayerView: View {
         if reverent { visualizerNatureStored = next } else { visualizerStored = next }
     }
 
-    /// "→ " before the first control on the strip while nothing is armed: the strip's controls are
-    /// reached with a press right, and nothing else said so (owner, 2026-10-09).
-    private var rightCue: String { armed == nil ? "\u{2192} " : "" }
-
-    /// A click up or down, outside the guide: the neighbouring channel. In the guide the same
-    /// click walks the rows instead, through onMoveCommand.
+    /// Left or right on the picture, or a click: the neighbouring channel.
     private func click(by delta: Int) {
         guard guideRow == nil, !leaving else { return }
         wake()
@@ -651,38 +695,28 @@ struct ReceiverPlayerView: View {
         step(by: delta)
     }
 
-    private func moveRight(stripWasUp: Bool) {
+    private func moveRight() {
         switch armed {
-        case nil:
-            // With the strip up, right lights its first control, as Select does, so Like, Guide
-            // and picture in picture are reached by swiping (owner, 2026-11-08: "when i swipe
-            // right ... it opens the guide instead of making me navigate the bottom bar to PIP").
-            // On the bare picture, and on a failed picture with no controls to walk, it opens
-            // the guide (owner, 2026-11-04). Left past CC on the strip stops there (owner, 2026-11-07).
-            if stripWasUp, !isFailed { armed = .captions } else { openGuide() }
         case .captions: armed = .like
         case .like:
             if visualizerOffered { armed = .visualizer } else if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .visualizer: if guideOffered { armed = .guide } else if pipOffered { armed = .pip }
         case .guide: if pipOffered { armed = .pip }
-        case .pip: break
+        case .pip, nil: break
         }
     }
 
     private var isFailed: Bool { if case .failed = controller.state { return true } else { return false } }
 
-    private func moveLeft(onStrip: Bool) {
+    private func moveLeft() {
         switch armed {
         case .pip: armed = guideOffered ? .guide : visualizerOffered ? .visualizer : .like
         case .guide: armed = visualizerOffered ? .visualizer : .like
         case .visualizer: armed = .like
         case .like: armed = .captions
-        case .captions: armed = nil
-        // Left or right on the bare picture opens the guide, as a live TV app does (owner,
-        // 2026-11-04). With the strip up, left past CC stops there.
-        case nil: if !onStrip { return openGuide() }
+        // Left on the first control stops there (owner, 2026-11-07).
+        case .captions, nil: break
         }
-        if armed == nil { wake() }
     }
 
     private func like() {

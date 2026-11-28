@@ -798,7 +798,7 @@ struct TransmissionPlayerView: View {
     }
 
     /// The schedule of the rows the guide draws (ReceiverGuide.window, which holds against the
-    /// list's ends) and one row beyond each side, for any of them not read yet: from the half hour
+    /// list's ends) and the rows past each side that slide in, for any of them not read yet: from the half hour
     /// now is in to the horizon plus a window, so the last programme Right reaches is drawn.
     /// The reading runs off the main thread (a busy channel's fifteen hours took 17 ms on a Mac
     /// and the Apple TV HD is many times slower), so a press never waits for it; a row reads
@@ -808,7 +808,11 @@ struct TransmissionPlayerView: View {
         guard count > 0 else { return }
         let shown = ReceiverGuide.window(count: count, lit: row, rows: TransmissionGuide.rowCount)
         guard let first = shown.first, let last = shown.last else { return }
-        let wanted = Set(shown + [(first - 1 + count) % count, (last + 1) % count])
+        // The rows drawn past the edges (TransmissionGuide.reach) and one more, so a row is read
+        // before it slides into view.
+        // Round the list both ways, short lists too (fewer channels than the rows read ahead).
+        let ahead = (1...(TransmissionGuide.reach + 1)).flatMap { [((first - $0) % count + count) % count, (last + $0) % count] }
+        let wanted = Set(shown + ahead)
             .filter { (guideRows[$0].slots.isEmpty || guideStale.contains($0)) && !guideFilling.contains($0) }
         guard !wanted.isEmpty else { return }
         guideFilling.formUnion(wanted)
@@ -912,7 +916,8 @@ struct TransmissionPlayerView: View {
         var grid = grid
         grid.move(rows: rows, count: guideRows.count)
         fillGuide(around: grid.row, now: grid.now)
-        guideGrid = grid
+        // The rows slide; what they say and the lit plate change at once (GuideRowsWindow).
+        withAnimation(GuideRowsWindow<EmptyView>.motion(from: guideGrid?.row ?? grid.row, to: grid.row, reduceMotion: reduceMotion)) { guideGrid = grid }
     }
 
     /// The remote inside the guide: Up and Down the channel, Left and Right along the row, from
@@ -929,7 +934,7 @@ struct TransmissionPlayerView: View {
         default: return
         }
         fillGuide(around: grid.row, now: grid.now)
-        guideGrid = grid
+        withAnimation(GuideRowsWindow<EmptyView>.motion(from: guideGrid?.row ?? grid.row, to: grid.row, reduceMotion: reduceMotion)) { guideGrid = grid }
     }
 
     private func closeGuide() {

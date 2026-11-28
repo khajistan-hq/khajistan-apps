@@ -3,7 +3,7 @@ import XCTest
 /// The Transmission tab plays a channel at once, full screen, with no page of channels first
 /// (owner, 2026-11-28: "transmission should start the stream of channels not showing the page, the
 /// guide will do that work"). The counts sit on the guide's top line, and Back from the player
-/// leaves a plain screen whose focus is the top bar.
+/// leaves a plain screen whose focus is the top bar, where Select on the tab plays again.
 final class TransmissionTitleUITests: XCTestCase {
     private var schedule: String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -72,5 +72,11 @@ final class TransmissionTitleUITests: XCTestCase {
         XCTAssertTrue(kjFocusKey(app).hasPrefix("nav-"), "focus is on the top bar: \(kjFocusKey(app))")
         XCTAssertTrue(app.buttons["transmissionWatch"].exists, "Watch is there to go back to the channel")
         kjScreenshot("transmission-after-back", app: app)
+        // Select on TRANSMISSION in the top bar, the tab already on screen, plays a channel again
+        // (owner, 2026-11-28: "when i hit transmission it should go straight to a channel").
+        XCTAssertEqual(kjFocusKey(app).split(separator: "|").first.map(String.init), "nav-transmission")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(channel.waitForExistence(timeout: 15), "Select on the tab plays a channel, not the page")
+        XCTAssertEqual(channel.label, "5", "the channel left is the one it plays")
     }
 }

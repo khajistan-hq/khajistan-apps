@@ -28,11 +28,6 @@ struct ReceiverGuide: View {
     /// Where the picture window sits: the same place as on Transmission's guide.
     static func pictureRect(in size: CGSize) -> CGRect { TransmissionGuide.pictureRect(in: size) }
 
-    /// Keyed by channel, so a press slides the rows along as a list scrolls.
-    private var keys: [GuideKey] {
-        Self.window(count: list.count, lit: lit, rows: Self.rowCount).map { GuideKey(index: $0, id: list[$0].id) }
-    }
-
     var body: some View {
         // The local times read the clock: drawn again on the minute, as the strip's are.
         TimelineView(.everyMinute) { context in
@@ -54,24 +49,22 @@ struct ReceiverGuide: View {
                 HStack(alignment: .top, spacing: 40) {
                     // The picture's place. The player draws its own layer here.
                     Color.clear.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
-                    panel(now: now)
+                    panel(now: now).transaction { $0.animation = nil }
                 }
                 .frame(height: picture.height)
                 .padding(.bottom, 12)
-                header(width: width)
+                header(width: width).transaction { $0.animation = nil }
                 // Only the rows that fit, around the lit one: a region holds up to ~500 channels,
                 // and drawing them all on every press made the guide slow (owner, 2026-11-04).
                 // The rows' space is always seven rows high, so a region turn into, out of or across
                 // an empty region says Loading or "No …" inside it and nothing jumps.
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(keys, id: \.self) { key in
-                        let channel = list[key.index]
-                        ReceiverGuideRow(number: key.index + 1, channel: channel,
-                                         live: key.id == current.id, lit: key.index == lit,
-                                         channelWidth: width * Self.channelShare, id: key.id, now: now)
-                    }
+                GuideRowsWindow(count: list.count, lit: lit, key: { list[$0].id }) { index in
+                    let channel = list[index]
+                    ReceiverGuideRow(number: index + 1, channel: channel,
+                                     live: channel.id == current.id, lit: index == lit,
+                                     channelWidth: width * Self.channelShare, id: channel.id, now: now)
                 }
-                .frame(width: width, height: CGFloat(Self.rowCount) * TransmissionGuide.rowHeight, alignment: .topLeading)
+                .frame(width: width, alignment: .topLeading)
                 .overlay(alignment: .topLeading) {
                     if loading {
                         Text("Loading").kjSmall().padding(.horizontal, 14).padding(.top, 20)
@@ -80,15 +73,10 @@ struct ReceiverGuide: View {
                             .padding(.horizontal, 14).padding(.top, 20)
                     }
                 }
-                // A region turn empties the list until the next region loads, so it cuts rather
-                // than running the rows out and back (Bugbot on PR 79).
-                .transaction(value: loading) { $0.animation = nil }
             }
             .padding(.horizontal, picture.minX)
             .padding(.top, picture.minY)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
-            .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)
         }
     }
 
@@ -194,6 +182,10 @@ struct TransmissionGuide: View {
     static let gap: CGFloat = 4
     /// The channels on screen at once, under the top band.
     static let rowCount = 7
+    /// Rows drawn past each edge of the seven (GuideRowsWindow), so they slide in; a move of more
+    /// cuts (GuideRowsWindow.motion). Those below run past the screen's bottom, clipped: the
+    /// guide's frame as XCUITest reads it, which ignores the clip, runs past it with them.
+    static let reach = 2
     /// The top band's share of the screen's height: the picture window and the lit cell's words.
     static let bandShare: CGFloat = 0.38
 
@@ -205,10 +197,6 @@ struct TransmissionGuide: View {
         return CGRect(x: KJLayout.inset, y: top, width: height * 16 / 9, height: height)
     }
 
-    private var keys: [GuideKey] {
-        ReceiverGuide.window(count: rows.count, lit: grid.row, rows: Self.rowCount).map { GuideKey(index: $0, id: "ch\(rows[$0].number)") }
-    }
-
     var body: some View {
         GeometryReader { geo in
             let picture = Self.pictureRect(in: geo.size)
@@ -218,20 +206,18 @@ struct TransmissionGuide: View {
                     // The picture's place. The player draws its own layer here, black behind a
                     // picture and the ground behind a dancer or an off-air card.
                     Color.clear.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
-                    panel
+                    panel.transaction { $0.animation = nil }
                 }
                 .frame(height: picture.height)
                 .padding(.bottom, 12)
-                marks(width: width)
-                ForEach(keys, id: \.self) { key in
-                    row(rows[key.index], lit: key.index == grid.row, width: width)
+                marks(width: width).transaction { $0.animation = nil }
+                GuideRowsWindow(count: rows.count, lit: grid.row, key: { "ch\(rows[$0].number)" }) { index in
+                    row(rows[index], lit: index == grid.row, width: width)
                 }
             }
             .padding(.horizontal, picture.minX)
             .padding(.top, picture.minY)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
-            .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: grid)
         }
         .background(palette.ground)
         .ignoresSafeArea()
@@ -350,6 +336,9 @@ struct TransmissionGuide: View {
                     GuideBlock(slot: row.slots[named], more: cell.more(naming: named, in: row.slots),
                                start: cell.start, end: cell.end, lit: lit,
                                windowStart: grid.windowStart, now: grid.now, onNow: row.onNow)
+                        // Only the block's place moves (the window going on past its edge); what
+                        // it says and whether it is lit change at once.
+                        .transaction { $0.animation = nil }
                         .frame(width: max(0, right - left - Self.gap), height: Self.rowHeight - Self.gap, alignment: .leading)
                         .offset(x: left)
                         .accessibilityIdentifier("guide-ch\(row.number)-\(cell.first)")
@@ -537,10 +526,49 @@ private struct ReceiverGuideRow: View {
     }
 }
 
-/// A guide row's identity: the channel, and where it stands in the list.
-struct GuideKey: Hashable {
-    let index: Int
-    let id: String
+/// The guide's rows: the seven on screen around the lit one (ReceiverGuide.window), and `reach`
+/// more drawn just past each edge and clipped, so a press (which moves the guide in
+/// CardMotion.rows) slides the rows along as a list scrolls
+/// and a row comes in from the edge rather than fading up in place. Only the slide is animated:
+/// what a row says and which row is lit change at once, so two plates are never half-lit together
+/// and no text is drawn through other text (owner, 2026-11-28: "glitchy … absolutely smooth").
+/// Keyed by `key`, so a list that changes under the guide (a region turn) cuts, never slides.
+struct GuideRowsWindow<Row: View>: View {
+    let count: Int
+    let lit: Int
+    let key: (Int) -> String
+    @ViewBuilder let row: (Int) -> Row
+
+    /// How a press moving the lit row from `from` to `to` moves the rows: a slide, or a cut when
+    /// it goes further than the rows drawn past the edges (round the end of the list, last to
+    /// first), where rows would otherwise run the length of the list through the others.
+    static func motion(from: Int, to: Int, reduceMotion: Bool) -> Animation? {
+        abs(to - from) > TransmissionGuide.reach ? nil : CardMotion.rows(reduceMotion: reduceMotion)
+    }
+
+    var body: some View {
+        let shown = TransmissionGuide.rowCount, height = TransmissionGuide.rowHeight
+        let start = ReceiverGuide.window(count: count, lit: lit, rows: shown).first ?? 0
+        let drawn = Array(max(0, start - TransmissionGuide.reach)..<min(count, start + shown + TransmissionGuide.reach))
+        ZStack(alignment: .topLeading) {
+            ForEach(drawn, id: \.self) { index in
+                // What the row says and whether it is lit change at once; only its place moves.
+                // The row moves as one block (geometryGroup), so its place takes the press's
+                // animation while what it draws inside takes none: without the group each word and
+                // plate animates its own place, and the opt-out held them still too.
+                row(index)
+                    .transaction { $0.animation = nil }
+                    .geometryGroup()
+                    .offset(y: CGFloat(index - start) * height)
+                    // A row comes and goes without a fade: past the edges it is out of sight, and
+                    // round the end of the list (the last channel to the first) the rows cut.
+                    .transition(.identity)
+                    .id(key(index))
+            }
+        }
+        .frame(height: CGFloat(shown) * height, alignment: .topLeading)
+        .clipped()
+    }
 }
 
 /// One channel in a guide (the Receiver's or Transmission's). The lit row takes the focus plate

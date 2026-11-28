@@ -178,7 +178,9 @@ final class NowNextUITests: XCTestCase {
         kjPause(0.8)
         kjScreenshot("transmission-guide-day", app: app)
         XCTAssertEqual(guide.frame.minY, app.frame.minY, accuracy: 2, "the guide starts at the top of the screen")
-        XCTAssertEqual(guide.frame.height, app.frame.height, accuracy: 2, "the guide is the whole screen high")
+        // At least: the rows drawn under the bottom edge to slide in (TransmissionGuide.reach) are
+        // clipped from sight, and the frame read here ignores the clip.
+        XCTAssertGreaterThanOrEqual(guide.frame.maxY, app.frame.maxY - 2, "the guide is the whole screen high")
         XCTAssertEqual(guide.frame.width, app.frame.width, accuracy: 2, "the guide is the whole screen wide")
         let window = any(app, "guidePictureWindow")
         XCTAssertTrue(window.exists, "the picture has a window in the guide")

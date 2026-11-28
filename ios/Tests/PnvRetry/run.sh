@@ -13,5 +13,5 @@ trap 'rm -rf "$work"' EXIT
 k="$root/ios/Khajistan"
 xcrun --sdk iphonesimulator swiftc -parse-as-library -swift-version 5 -D DEBUG -target arm64-apple-ios17.0-simulator \
   "$here/Harness.swift" "$k"/Core/*.swift "$k/Services/PicsVidsStore.swift" "$k/Services/AuthStore.swift" \
-  "$k/Services/ReceiverStore.swift" "$k/Services/TransmissionStore.swift" "$k/Services/Keychain.swift" "$k/Player/PlayerController.swift" -o "$work/harness"
+  "$k/Services/ReceiverStore.swift" "$k/Services/TransmissionStore.swift" "$k/Services/Keychain.swift" "$k/Player/PlayerController.swift" "$k/App/StoreBuild.swift" -o "$work/harness"
 xcrun simctl spawn "$device" "$work/harness"

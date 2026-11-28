@@ -110,14 +110,9 @@ final class ChannelChangeUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-2026-10.json").path
         let station = XCUIApplication()
         station.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                                   "-kjnow", "2026-10-15T14:10:00+05:00"]
+                                   "-kjnow", "2026-10-15T14:10:00+05:00", "-kj.transmission.lastChannel", "1"]
         kjLaunch(station)
-        let page = station.staticTexts["transmissionState"]
-        XCTAssertTrue(page.waitForExistence(timeout: 30))
-        waitUntil(20) { (page.value as? String) == "Ready" }
-        let card = station.buttons["transmission-channel-1"]
-        XCTAssertTrue(kjFocus(card, app: station), "channel 1's card must take focus")
-        XCUIRemote.shared.press(.select)
+        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
 
         let channel = station.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "Channel 1 opens")

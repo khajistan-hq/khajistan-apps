@@ -50,6 +50,10 @@ struct RootView: View {
                     model.receiverPath = []
                     model.camerasFirst = nil
                 }
+                // Transmission plays a channel on every press, the one on the tab already (after
+                // Back from the player) too, as the station's Top Shelf link does (owner,
+                // 2026-11-28: "when i hit transmission it should go straight to a channel").
+                if section == .transmission, model.section == .transmission { model.link = .transmission }
                 model.section = section
             })
             content

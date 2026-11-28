@@ -189,7 +189,9 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertLessThan(headline.frame.maxY, screen.height * 0.4, "the description sits in the top band, beside the picture's window")
         let strip = app.descendants(matching: .any)["captionsControl"]
         XCTAssertFalse(strip.exists && strip.isHittable, "no strip over the guide")
-        XCTAssertEqual(guide.frame.maxY, screen.maxY, accuracy: 2, "the guide reaches the bottom edge")
+        // At least: the rows drawn under the bottom edge to slide in (TransmissionGuide.reach) are
+        // clipped from sight, and the frame read here ignores the clip.
+        XCTAssertGreaterThanOrEqual(guide.frame.maxY, screen.maxY - 2, "the guide reaches the bottom edge")
         XCTAssertGreaterThan(guide.frame.width, screen.width * 0.9, "the guide spans the screen")
         let live = app.descendants(matching: .any)["guide-\(start)"]
         XCTAssertTrue(live.exists && live.label.contains("Live"), "LIVE marks the channel playing: \(live.label)")

@@ -79,17 +79,9 @@ final class SkinWalkUITests: XCTestCase {
             }
             app.terminate()
 
-            // The station page, a channel card in focus, and the channel's player.
-            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00"])
-            let page = app.staticTexts["transmissionState"]
-            XCTAssertTrue(page.waitForExistence(timeout: 30))
-            wait(upTo: 20) { (page.value as? String) == "Ready" }
-            XCTAssertEqual(page.value as? String, "Ready", "\(skin): the schedule file must load")
-            let card = app.buttons["transmission-channel-1"]
-            // The guide is a list: down from the TRANSMISSION tab lands on its first row, channel 1.
-            XCTAssertTrue(focus(card, by: .down, tries: 4), "\(skin): channel 1's row must take focus")
-            shot("\(skin)-4-transmission", app)
-            XCUIRemote.shared.press(.select)
+            // The station: the tab plays channel 1 at once, and the player.
+            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kj.transmission.lastChannel", "1"])
+            // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
             let upNext = app.descendants(matching: .any)["upNext"]
             XCTAssertTrue(upNext.waitForExistence(timeout: 20), "\(skin): the player must list what is up next")
             Thread.sleep(forTimeInterval: 10)   // the opening ground holds until the signal settles
@@ -113,7 +105,7 @@ final class SkinWalkUITests: XCTestCase {
     /// schedule asks for it without a schedule file), the sign-in sheet, and the atlas switch.
     func testFormsInEverySkin() {
         for skin in skins {
-            var app = launch(["-kjskin", skin, "-kjtab", "transmission"])
+            var app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kj.transmission.lastChannel", "1"])
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))
             wait(upTo: 30) { (page.value as? String) != "Loading" }
@@ -159,12 +151,8 @@ final class SkinWalkUITests: XCTestCase {
     /// goes when the overlay is woken, so the line is never on screen twice. The lead is stretched
     /// to a day so the slot on air is always inside it.
     func testHandoverNoticeOnlyWhileTheOverlayIsHidden() {
-        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjhandoverlead", "86400"])
-        let page = app.staticTexts["transmissionState"]
-        XCTAssertTrue(page.waitForExistence(timeout: 30))
-        wait(upTo: 20) { (page.value as? String) == "Ready" }
-        XCTAssertTrue(focus(app.buttons["transmission-channel-1"], by: .down, tries: 4))
-        XCUIRemote.shared.press(.select)
+        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjhandoverlead", "86400", "-kj.transmission.lastChannel", "1"])
+        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
         let notice = app.descendants(matching: .any)["handoverNotice"]
         XCTAssertTrue(notice.waitForExistence(timeout: 30), "the notice comes up once the overlay hides")
         Thread.sleep(forTimeInterval: 0.5)

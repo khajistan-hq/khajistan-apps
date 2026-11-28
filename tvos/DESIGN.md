@@ -260,20 +260,19 @@ for the tests. The Receiver's first focus on Surf waits for the welcome to close
 
 ## Khajistan Transmission
 
-- **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · 7 scheduled channels · Pakistan
-  time (UTC+5)*, then a TV guide: one row per channel the schedule's `_meta.channels` names, read
-  left to right as a printed guide. The number (48pt), the channel's name without its
-  "Channel N ·" as a kicker (upper case, spaced, the accent colour), so it reads as a label and
-  never as a programme, the hours of what is on (*18:00–18:15*, body, tabular figures) and
-  what is on (name style): the programme by its standardized name, as the player's strip
-  heads it, else the show, and nothing when that only repeats the channel's name. Off air the hours column reads *Off air* and the show column the site's
-  line *Back at 23:00 PKT with The Feature.*, both faint. Nothing about later: no Up next, no
-  Later (owner, 2026-11-19: "removing up next from the cards and making it more like a simple
-  tv guide"). The programme by its standardized name since 2026-11-08 where the schedule gives
-  one, else the show (2026-09-06: "programme titles are file names"). Rows carry no plate at
-  rest; focus gives the band plate, as a house button. Up and down walk the rows; Channel Up and
-  Down on the remote step through them in number order and go round. The rows redraw on the
-  minute. Select tunes. The preview-password and sign-in steps live on this page.
+- **No page: the tab plays** (owner, 2026-11-28: "transmission should start the stream of
+  channels not showing the page, the guide will do that work"; Fable's advice taken whole).
+  Select on TRANSMISSION in the top bar opens a channel full screen: the last one watched
+  (`kj.transmission.lastChannel`, kept on the device), else the lowest-numbered channel on air
+  with a picture (Channel 1, After Hours, is sound only), else the first. The guide (Down) is
+  how a viewer picks another. The station's counts are on the guide's kicker line,
+  *KHAJISTAN TRANSMISSION · 308 PROGRAMMES · 103 HOURS* with the PKT clock at the right; no
+  channel count, since the rows show the channels. Under the player is one plain screen: the
+  title, and then the state that stops a channel playing (loading, the preview password, *The
+  schedule for this month has not been published.*, a load that failed with Try again, or
+  Sign in for a viewer signed out, who is not shown a sign-in sheet unasked), or Watch. Back
+  from the player lands there with focus on the top bar, and the channel does not start again
+  until Watch or the tab is chosen again. A Top Shelf link to a channel opens that channel.
 - **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
   else the show; the line under it starts with the show (left out when the show is the channel,
   as Jordan Television is), then NOW and the slot, then the country. Above them, on the strip's
@@ -325,8 +324,8 @@ for the tests. The Receiver's first focus on Surf waits for the welcome to close
     so by that padding, never by ignoring the safe area: SwiftUI works the safe area out from
     where a view is drawn, and in the small window an ignoring view grew out to the screen's corner.
     A sound-only programme shows its dancer there and an off-air channel its card, since the
-    window is the full screen made small. Beside it: KHAJISTAN TRANSMISSION and the PKT clock on
-    one line; the lit cell's title (52pt); one line of facts (its times, the schedule's kind
+    window is the full screen made small. Beside it: KHAJISTAN TRANSMISSION with its programmes
+    and hours (TransmissionStore.stationLine) and the PKT clock on one line; the lit cell's title (52pt); one line of facts (its times, the schedule's kind
     line such as *Iranian film trailers*, Channel N); then the channel's own line from the
     schedule. A channel's own cell reads *Channel 5 · Mehfil* over that line. Every line in the
     guide is ink at full strength: the faint tier read as grey by day (owner, 2026-11-24).

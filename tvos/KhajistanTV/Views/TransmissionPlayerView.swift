@@ -532,7 +532,9 @@ struct TransmissionPlayerView: View {
     /// The strip's controls, left to right, as the remote walks them.
     /// Owner, 2026-11-25: "cc functions and text should not be there on channel 1". Channel 1 is After Hours,
     /// picture and music: no Subtitles control and no caption text, whatever a programme carries.
-    private var captionsAllowed: Bool { store.channelNumber != 1 }
+    private var captionsAllowed: Bool {
+        store.programming.map { StationClock.carriesCaptions($0, number: store.channelNumber) } ?? true
+    }
 
     private var chips: [Chip] {
         [!captionsAllowed || subtitles.tracks.isEmpty ? nil : .subtitles, visualizerOffered ? .visualizer : nil,

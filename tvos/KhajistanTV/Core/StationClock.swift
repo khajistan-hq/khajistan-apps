@@ -182,6 +182,14 @@ enum StationClock {
         p._meta.channels.first { $0.number == number }?.id
     }
 
+    /// After Hours is picture and music: no Subtitles control and no caption text, whatever a
+    /// programme carries (owner, 2026-11-25: "cc functions and text should not be there on channel
+    /// 1"). Read by the channel's id, not its number, because the numbers move (2026-11-25 put After
+    /// Hours at 1 and moved every other channel down one).
+    static func carriesCaptions(_ p: Programming, number: Int) -> Bool {
+        channelId(p, number: number) != "after-hours"
+    }
+
     /// The channel numbers the schedule names, in the schedule's own order. The schedule is the
     /// only list: since 2026-11-13 it puts C18 Mujra, C1 Bioscope and C12 Raqs first (owner).
     static func channelNumbers(_ p: Programming) -> [Int] {

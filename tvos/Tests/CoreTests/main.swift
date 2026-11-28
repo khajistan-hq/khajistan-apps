@@ -6447,6 +6447,22 @@ func visualizerModesCycle() throws {
     try expectEqual(VisualizerMode.off.next(reverent: true, dancer: false), .nature)
 }
 
+func afterHoursCarriesNoCaptions() throws {
+    let p = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"after-hours","number":1,"name":"Channel 1 · After Hours"},
+                          {"id":"iran-film","number":2,"name":"Channel 2 · Iranian Films"}]},
+     "shows":{},"programme_order":[],"programmes":{},"days":[]}
+    """)
+    try expect(!StationClock.carriesCaptions(p, number: 1), "After Hours carries no captions")
+    try expect(StationClock.carriesCaptions(p, number: 2), "a film channel keeps its captions")
+    // A different channel at number 1 keeps them: the rule follows the id, not the number.
+    let old = try decode(Programming.self, """
+    {"_meta":{"channels":[{"id":"transfers","number":1,"name":"Channel 1"}]},
+     "shows":{},"programme_order":[],"programmes":{},"days":[]}
+    """)
+    try expect(StationClock.carriesCaptions(old, number: 1), "number 1 alone is not After Hours")
+}
+
 let tests: [(String, () throws -> Void)] = [
     ("Pics/Vids held to videos drops every photo", pnvVideosOnlyDropsEveryPhoto),
     ("programmeDecodesRomanTitleAndYear", programmeDecodesRomanTitleAndYear),
@@ -6459,6 +6475,7 @@ let tests: [(String, () throws -> Void)] = [
     ("pipSubtitleStepLoadsAndHandsOff", pipSubtitleStepLoadsAndHandsOff),
     ("pipWindowChoiceMovesOffAStoredFile", pipWindowChoiceMovesOffAStoredFile),
     ("pipCaptionIsSizedForTheWindow", pipCaptionIsSizedForTheWindow),
+    ("After Hours carries no captions; the rule follows the id", afterHoursCarriesNoCaptions),
     ("visualizerPicksByTheHalfHour", visualizerPicksByTheHalfHour),
     ("visualizerShuffleBagShowsEveryPiece", visualizerShuffleBagShowsEveryPiece),
     ("visualizerModesCycle", visualizerModesCycle),

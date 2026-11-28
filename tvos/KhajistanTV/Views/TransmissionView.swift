@@ -19,13 +19,16 @@ struct TransmissionView: View {
     }
 
     private var store: TransmissionStore { model.transmission }
+    private static let pageTop = "transmissionPageTop"
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 40) {
                 Text("Khajistan Transmission")
                     .kjDisplay()
                     .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("transmissionTitle")
                 meta
                 scheduleBlock
             }
@@ -33,6 +36,14 @@ struct TransmissionView: View {
             .kjBody()
             .padding(KJLayout.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .id(Self.pageTop)
+        }
+        // A card taking focus scrolled the page only as far as the card, which put the title
+        // under the top bar (owner, 2026-11-27: "fix the transmission title cut off too"). The
+        // page stays at its top: the row is the only thing to reach below the title.
+        .onChange(of: focusedCard) { _, card in
+            if card != nil { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.pageTop, anchor: .top) } }
+        }
         }
         // Down from the top bar lands on Channel 1, not on whichever card sits under the bar item.
         .defaultFocus($focusedCard, 1, priority: .userInitiated)

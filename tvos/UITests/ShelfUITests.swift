@@ -94,9 +94,12 @@ final class ShelfUITests: XCTestCase {
             XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): down reaches CCTV, got \(focusedID(app))")
             XCTAssertFalse(passed.contains { $0.hasPrefix("film-") || $0.hasPrefix("home-transmission-") },
                            "\(skin): Home carries no Screening Room or Transmission shelf, passed \(passed)")
+            XCTAssertFalse(passed.contains { $0.hasPrefix("liked-") }, "\(skin): Liked is not above CCTV, passed \(passed)")
             shot("\(skin)-2-receiver-cameras-shelf", app)
             press(.down, app: app)
-            XCTAssertTrue(focusedID(app).hasPrefix("cameras-"), "\(skin): nothing sits below CCTV, got \(focusedID(app))")
+            // Liked sits under CCTV for an account with likes; nothing else does.
+            XCTAssertTrue(focusedID(app).hasPrefix("cameras-") || focusedID(app).hasPrefix("liked-"),
+                          "\(skin): only Liked may sit below CCTV, got \(focusedID(app))")
             // Up through the shelves and the Themes row returns to the front at Surf, never the
             // A–Z list or the switch (owner, 2026-11-18: "no way to go to the nav"). The walk stops
             // at anything on the front, so a wrong landing fails below rather than walking on.

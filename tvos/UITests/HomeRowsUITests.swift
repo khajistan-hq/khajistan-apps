@@ -19,7 +19,7 @@ final class HomeRowsUITests: XCTestCase {
     private func shelf(of id: String) -> String? {
         let prefixes: [(String, String)] = [
             ("genre-", "themes"),
-            ("home-door-", "doors"), ("cameras-", "cameras"), ("film-", "films"), ("home-transmission-", "transmission"),
+            ("home-door-", "doors"), ("cameras-", "cameras"), ("liked-", "liked"), ("film-", "films"), ("home-transmission-", "transmission"),
             ("rr-title-", "reading"), ("home-all-the Reading Room", "reading"),
             ("home-pnv-", "picsvids"), ("home-all-Pics/Vids", "picsvids"),
             ("home-post-", "madrassa"), ("home-all-the Madrassa", "madrassa"),
@@ -62,7 +62,11 @@ final class HomeRowsUITests: XCTestCase {
         // No Screening Room or Transmission shelf on Home; CCTV is the foot of the page (owner,
         // 2026-11-19).
         XCTAssertFalse(reached.contains("films") || reached.contains("transmission"), "Home carries no film or Transmission shelf; reached \(reached)")
-        XCTAssertEqual(reached.last, "cameras", "CCTV is the last shelf; reached \(reached)")
+        // Liked sits under CCTV for an account with likes; nothing else does.
+        XCTAssertEqual(reached.filter { $0 != "liked" }.last, "cameras", "CCTV is the last shelf before Liked; reached \(reached)")
+        if let liked = reached.firstIndex(of: "liked") {
+            XCTAssertEqual(liked, reached.count - 1, "Liked is the foot of the page; reached \(reached)")
+        }
         // Off Home since 2026-11-21 (owner): the shelf of every part of Khajistan, and Pics/Vids.
         for gone in ["doors", "picsvids"] {
             XCTAssertFalse(reached.contains(gone), "no \(gone) shelf on Home; reached \(reached)")

@@ -270,17 +270,19 @@ struct ReceiverView: View {
         if !regions.isEmpty {
             Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
                 ForEach(regions) { region in
+                    let still = (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first
                     Button {
                         model.camerasFirst = region.id
                         model.receiverPath.append(region)
                     } label: {
                         // The region's name over a still from one of its cameras, taken on this
                         // device as the region cards' are (owner, 2026-10-29: pictures on them).
-                        PictureCard(title: region.label,
-                                    still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
+                        PictureCard(title: region.label, still: still,
                                     width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
                     }
                     .buttonStyle(HouseCardStyle())
+                    // "live picture" while a still shows, as a channel's card says (cardLabel).
+                    .accessibilityLabel(still == nil ? region.label : "\(region.label), live picture")
                     .accessibilityIdentifier("cameras-\(region.id)")
                 }
             }

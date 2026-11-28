@@ -119,7 +119,7 @@ final class HomeRowsUITests: XCTestCase {
                 XCTFail("the first News cards get live stills from the local test video: pictured \(pictured(newsFirst)) of 4: \(names)")
                 return
             }
-            let elsewhere = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-' AND NOT identifier BEGINSWITH 'genre-news-' AND label CONTAINS 'live picture'"))
+            let elsewhere = app.buttons.matching(NSPredicate(format: "(identifier BEGINSWITH 'cameras-' OR (identifier BEGINSWITH 'genre-' AND NOT identifier BEGINSWITH 'genre-news-')) AND label CONTAINS 'live picture'"))
             let stillsWork = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in elsewhere.count > 0 }, object: nil)], timeout: 60) == .completed
             let others = elsewhere.allElementsBoundByIndex.map(\.identifier)
             print("KJNEWS live, no News picture; pictured elsewhere: \(others)")

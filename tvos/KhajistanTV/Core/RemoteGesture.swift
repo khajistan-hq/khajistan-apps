@@ -40,3 +40,77 @@ enum RemoteGesture {
         return travel < 0 ? -rows : rows
     }
 }
+
+/// What the remote does in the two players (owner, 2026-11-28, on Fable's advice: "use all like
+/// how apple tv usually has so people can use it intuitively"). A direction means one thing,
+/// whether it came from a swipe on the touch surface or a press of an arrow: down opens the
+/// guide and is the only thing that does, up lights the controls, left and right change channel.
+/// A click is the next channel and a double click a random one (owner, the same day: "make a
+/// click change a channel and double click to randomize").
+/// With the guide open the guide reads the remote itself; this map is the picture and the strip.
+enum RemoteMap {
+    enum Input: Equatable { case up, down, left, right, click, doubleClick }
+    enum Context: Equatable {
+        /// The picture, with or without the strip showing, and no control lit.
+        case picture
+        /// A control on the strip is lit.
+        case controls
+    }
+    enum Action: Equatable {
+        case openGuide, lightControls, letGo, previousChannel, nextChannel, randomChannel
+        /// Along the strip's controls: -1 towards the first, 1 towards the last.
+        case walk(Int)
+        /// Works the lit control, at once.
+        case work
+        case none
+    }
+
+    static func action(_ input: Input, in context: Context) -> Action {
+        switch (context, input) {
+        case (.picture, .down): return .openGuide
+        case (.picture, .up): return .lightControls
+        case (.picture, .left): return .previousChannel
+        case (.picture, .right), (.picture, .click): return .nextChannel
+        case (.picture, .doubleClick): return .randomChannel
+        case (.controls, .left): return .walk(-1)
+        case (.controls, .right): return .walk(1)
+        case (.controls, .down): return .letGo
+        case (.controls, .up): return .none
+        // A lit control is worked by every click; there is nothing to wait for.
+        case (.controls, .click), (.controls, .doubleClick): return .work
+        }
+    }
+
+    /// A channel other than the one playing, by a roll in 0..<1; nil when there is no other.
+    static func random<T: Equatable>(from all: [T], not current: T, roll: Double) -> T? {
+        let others = all.filter { $0 != current }
+        guard !others.isEmpty else { return nil }
+        return others[min(others.count - 1, max(0, Int(roll * Double(others.count))))]
+    }
+}
+
+/// Tells a double click from a single one. A click starts a wait of `window`; a second click
+/// inside it is a double click, and a wait that runs out is a single click. The screen keeps the
+/// clock: it calls `click(at:)`, sleeps `window`, then asks `settle(_:)` with the same time.
+struct ClickTally: Equatable {
+    /// Under the pigeon's flight, so the wait is not felt as a slow channel change.
+    static let window: TimeInterval = 0.3
+    enum Outcome: Equatable { case wait, double }
+    private(set) var pending: TimeInterval?
+
+    mutating func click(at time: TimeInterval) -> Outcome {
+        if let first = pending, time - first <= Self.window {
+            pending = nil
+            return .double
+        }
+        pending = time
+        return .wait
+    }
+
+    /// True when the click made at `time` still stands alone: it is a single click, and is spent.
+    mutating func settle(_ time: TimeInterval) -> Bool {
+        guard pending == time else { return false }
+        pending = nil
+        return true
+    }
+}

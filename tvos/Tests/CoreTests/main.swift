@@ -2507,6 +2507,70 @@ func guideGridMoves() throws {
 
 /// A swipe on the touch surface and a press of an arrow reach the screen as the same move command;
 /// the finger's travel tells them apart (RemoteGesture). Both directions, and the near misses.
+/// The players' remote map (owner, 2026-11-28): the whole table, so a change to one cell is seen.
+func remoteMapIsTheOwnersTable() throws {
+    typealias M = RemoteMap
+    try expectEqual(M.action(.down, in: .picture), .openGuide, "down opens the guide")
+    for input in [M.Input.up, .left, .right, .click, .doubleClick] {
+        try expect(M.action(input, in: .picture) != .openGuide, "only down opens the guide, not \(input)")
+    }
+    try expectEqual(M.action(.up, in: .picture), .lightControls)
+    try expectEqual(M.action(.left, in: .picture), .previousChannel)
+    try expectEqual(M.action(.right, in: .picture), .nextChannel)
+    try expectEqual(M.action(.click, in: .picture), .nextChannel, "a click is the next channel")
+    try expectEqual(M.action(.doubleClick, in: .picture), .randomChannel, "a double click is a random channel")
+    try expectEqual(M.action(.left, in: .controls), .walk(-1))
+    try expectEqual(M.action(.right, in: .controls), .walk(1))
+    try expectEqual(M.action(.down, in: .controls), .letGo)
+    try expectEqual(M.action(.up, in: .controls), M.Action.none)
+    try expectEqual(M.action(.click, in: .controls), .work, "a lit control is worked at once")
+    try expectEqual(M.action(.doubleClick, in: .controls), .work)
+    // With a control lit, no input changes channel or opens the guide.
+    for input in [M.Input.up, .down, .left, .right, .click, .doubleClick] {
+        let action = M.action(input, in: .controls)
+        try expect(![.openGuide, .nextChannel, .previousChannel, .randomChannel].contains(action), "\(input) with a control lit")
+    }
+}
+
+func remoteRandomChannelIsNeverTheOnePlaying() throws {
+    let dial = [1, 2, 3, 4, 5]
+    for step in 0..<100 {
+        let pick = RemoteMap.random(from: dial, not: 3, roll: Double(step) / 100)
+        try expect(pick != nil && pick != 3, "roll \(step) gave \(String(describing: pick))")
+    }
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 0), 1)
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 0.999), 5)
+    try expectEqual(RemoteMap.random(from: dial, not: 3, roll: 1), 5, "a roll of exactly 1 stays in the list")
+    try expect(RemoteMap.random(from: [7], not: 7, roll: 0.5) == nil, "one channel: nowhere to go")
+    try expect(RemoteMap.random(from: [Int](), not: 7, roll: 0.5) == nil)
+}
+
+func clickTallyTellsADoubleFromTwoSingles() throws {
+    var tally = ClickTally()
+    // One click, then the wait runs out: a single click, once.
+    try expectEqual(tally.click(at: 10), .wait)
+    try expect(tally.settle(10), "the lone click stands")
+    try expect(!tally.settle(10), "and is spent")
+    // Two inside the window: a double, and the first click's wait finds nothing.
+    try expectEqual(tally.click(at: 20), .wait)
+    try expectEqual(tally.click(at: 20 + ClickTally.window - 0.01), .double, "just inside the window is a double")
+    try expect(!tally.settle(20), "the first click of a double is not also a single")
+    // Two apart: two singles.
+    try expectEqual(tally.click(at: 30), .wait)
+    try expect(tally.settle(30))
+    try expectEqual(tally.click(at: 30 + ClickTally.window + 0.01), .wait, "just past the window is a new click")
+    try expect(tally.settle(30 + ClickTally.window + 0.01))
+    // A second click before the first settled, but past the window: the first is replaced, not doubled.
+    try expectEqual(tally.click(at: 40), .wait)
+    try expectEqual(tally.click(at: 41), .wait)
+    try expect(!tally.settle(40), "the replaced click does not act")
+    try expect(tally.settle(41))
+    // A triple click: a double, then a fresh click.
+    try expectEqual(tally.click(at: 50), .wait)
+    try expectEqual(tally.click(at: 50.1), .double)
+    try expectEqual(tally.click(at: 50.2), .wait)
+}
+
 func remoteGestureTellsASwipeFromAPress() throws {
     let t = 1000.0
     // The finger travelled and the move came straight after: a swipe, up or down.
@@ -6481,6 +6545,9 @@ let tests: [(String, () throws -> Void)] = [
     ("visualizerModesCycle", visualizerModesCycle),
     ("scheduleCacheKeepsOneMonthWithItsTag", scheduleCacheKeepsOneMonthWithItsTag),
     ("Remote: a swipe is told from a press", remoteGestureTellsASwipeFromAPress),
+    ("Remote map: the whole table", remoteMapIsTheOwnersTable),
+    ("Remote: a random channel is never the one playing", remoteRandomChannelIsNeverTheOnePlaying),
+    ("Remote: a double click is told from two single clicks", clickTallyTellsADoubleFromTwoSingles),
     ("Guide timeline: a run counts its songs", guideRunsCountTheirSongs),
     ("storedSubtitlesAnswer", storedSubtitlesAnswer),
     ("liveChannelsShowTheirLocalTime", liveChannelsShowTheirLocalTime),

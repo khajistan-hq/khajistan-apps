@@ -38,11 +38,15 @@ struct TransmissionView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(Self.pageTop)
         }
-        // A card taking focus scrolled the page only as far as the card, which put the title
-        // under the top bar (owner, 2026-11-27: "fix the transmission title cut off too"). The
-        // page stays at its top: the row is the only thing to reach below the title.
+        // The first row taking focus scrolled the page only as far as the row, which put the
+        // title under the top bar (owner, 2026-11-27: "fix the transmission title cut off too"),
+        // so the first row brings the page back to its top. Only the first: the guide is 31 rows,
+        // and pulling the page up on every row held it on the first screen (owner, 2026-11-28:
+        // "the khajistan transmission on apple tv is not scrolling down on the page").
         .onChange(of: focusedCard) { _, card in
-            if card != nil { withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.pageTop, anchor: .top) } }
+            if let card, card == store.channelNumbers.first {
+                withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(Self.pageTop, anchor: .top) }
+            }
         }
         }
         // Down from the top bar lands on Channel 1, not on whichever card sits under the bar item.

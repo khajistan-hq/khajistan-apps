@@ -62,16 +62,29 @@ fi
 # (2026-11-27: three installs in six hours each removed the nineteen pull requests of the one before).
 # The record is one file on this Mac, outside every checkout. To go back on purpose: KJ_TV_ALLOW_OLDER=1.
 RECORD="${KJ_TV_RECORD:-$HOME/.kj-tv-installed}"
+# Written just before the install and removed once the record is written: if recording fails, the
+# next run still checks against the build that may be on the TV.
+PENDING="$RECORD.pending"
 HEAD_SHA=$(git -C "$ROOT" rev-parse HEAD)
-[ -z "$(git -C "$ROOT" status --porcelain -- .)" ] || { echo "Uncommitted changes under tvos/. Commit first: the record names a commit." >&2; exit 1; }
-if [ -s "$RECORD" ] && [ "${KJ_TV_ALLOW_OLDER:-0}" != 1 ]; then
-  LAST=$(cut -d' ' -f1 "$RECORD")
-  if ! git -C "$ROOT" merge-base --is-ancestor "$LAST" "$HEAD_SHA" 2>/dev/null; then
-    echo "REFUSED: this build ($(git -C "$ROOT" rev-parse --short HEAD)) does not contain the build on the Apple TV:" >&2
-    echo "  $(cat "$RECORD")" >&2
-    echo "Merge that commit into this branch first (git merge $LAST), then install." >&2
-    exit 1
-  fi
+# Untracked files too, whatever status.showUntrackedFiles says.
+[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=all -- .)" ] || { echo "Uncommitted changes under tvos/. Commit first: the record names a commit." >&2; exit 1; }
+# One install at a time, from the record's read to its write: two runs from two worktrees could
+# otherwise both pass the check and the second take the first one's commit off the TV.
+LOCK="$RECORD.lock"
+mkdir "$LOCK" 2>/dev/null || { echo "REFUSED: another install is running (or one stopped without cleaning up: remove $LOCK)." >&2; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+trap 'exit 1' HUP INT TERM
+if [ "${KJ_TV_ALLOW_OLDER:-0}" != 1 ]; then
+  for FILE in "$RECORD" "$PENDING"; do
+    [ -s "$FILE" ] || continue
+    LAST=$(cut -d' ' -f1 "$FILE")
+    if ! git -C "$ROOT" merge-base --is-ancestor "$LAST" "$HEAD_SHA" 2>/dev/null; then
+      echo "REFUSED: this build ($(git -C "$ROOT" rev-parse --short HEAD)) does not contain the build on the Apple TV:" >&2
+      echo "  $(cat "$FILE")" >&2
+      echo "Merge that commit into this branch first (git merge $LAST), then install." >&2
+      exit 1
+    fi
+  done
 fi
 
 # The store's four sections (Receiver, Transmission, Screening Room, Account) unless KJ_FULL=1:
@@ -84,7 +97,12 @@ xcodebuild -project "$ROOT/KhajistanTV.xcodeproj" -scheme KhajistanTV -configura
   -allowProvisioningUpdates DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Automatic \
   SWIFT_ACTIVE_COMPILATION_CONDITIONS="$CONDITIONS" build
 APP="$WORK/DerivedData/Build/Products/Release-appletvos/KhajistanTV.app"
+LINE="$HEAD_SHA $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(date '+%Y-%m-%d %H:%M')"
+echo "$LINE" > "$PENDING"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
-echo "$HEAD_SHA $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(date '+%Y-%m-%d %H:%M')" > "$RECORD"
+# Written whole and then moved into place, so a failed write never leaves an empty record.
+echo "$LINE" > "$RECORD.tmp"
+mv "$RECORD.tmp" "$RECORD"
+rm -f "$PENDING"
 xcrun devicectl device process launch --device "$DEVICE" com.khajistan.tv
 echo "Khajistan is on the Apple TV."

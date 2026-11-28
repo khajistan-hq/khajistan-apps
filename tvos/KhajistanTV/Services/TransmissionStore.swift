@@ -152,6 +152,14 @@ final class TransmissionStore {
         programming?.programme_order.count
     }
 
+    /// Whole hours of footage in the month's programmes, from each one's own length (owner,
+    /// 2026-11-27: "why is it not showing hours of footage on the transmission").
+    var programmeHours: Int? {
+        programming.map { p in
+            Int(p.programmes.values.reduce(0) { $0 + ($1.seconds ?? ($1.nominal_minutes ?? 0) * 60) } / 3600)
+        }
+    }
+
     /// What the clock puts on a channel at a moment. Nil when nothing is on it, or no schedule is held.
     func nowOn(channel: Int, at date: Date) -> OnAir? {
         guard let p = programming else { return nil }

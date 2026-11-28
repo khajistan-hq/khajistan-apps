@@ -200,7 +200,7 @@ final class PiPWindowUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         try kjTuneUntilPlaying(app)
         let pip = app.buttons["pipControl"]
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)   // lights the strip's first control
         kjPause(0.6)
         for _ in 0..<6 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP")
@@ -415,7 +415,7 @@ final class PiPWindowUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         try kjTuneUntilPlaying(app)
         let pip = app.buttons["pipControl"]
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)   // lights the strip's first control
         kjPause(0.6)
         for _ in 0..<6 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP")
@@ -466,7 +466,7 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(30)
         kjScreenshot("device-1-full-screen", app: app)
         let pip = app.descendants(matching: .any)["pipControl"]
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)   // lights the strip's first control
         kjPause(0.6)
         for _ in 0..<5 where !pip.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(pip.isSelected, "Right walks the strip to PiP (it is offered only while the channel plays)")

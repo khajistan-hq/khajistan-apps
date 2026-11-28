@@ -70,9 +70,10 @@ final class SkinWalkUITests: XCTestCase {
                 XCUIRemote.shared.press(.select)
                 let state = app.staticTexts["playerState"]
                 _ = state.waitForExistence(timeout: 20)
-                // Past the opening flight; then a click wakes the overlay, which hides 2.6 s into play.
+                // Past the opening flight; then Up wakes the overlay, which hides 2.6 s into play,
+                // and lights its first control (a click is the next channel since 2026-11-28).
                 Thread.sleep(forTimeInterval: 8)
-                XCUIRemote.shared.press(.select)
+                XCUIRemote.shared.press(.up)
                 Thread.sleep(forTimeInterval: 0.6)
                 shot("\(skin)-3-receiver-player", app)
             }
@@ -92,7 +93,7 @@ final class SkinWalkUITests: XCTestCase {
             let upNext = app.descendants(matching: .any)["upNext"]
             XCTAssertTrue(upNext.waitForExistence(timeout: 20), "\(skin): the player must list what is up next")
             Thread.sleep(forTimeInterval: 10)   // the opening ground holds until the signal settles
-            XCUIRemote.shared.press(.select)     // wakes the overlay, which hides 2.6 s in
+            XCUIRemote.shared.press(.up)         // wakes the overlay, which hides 2.6 s in
             Thread.sleep(forTimeInterval: 0.6)
             shot("\(skin)-5-transmission-player", app)
             app.terminate()
@@ -168,7 +169,7 @@ final class SkinWalkUITests: XCTestCase {
         XCTAssertTrue(notice.waitForExistence(timeout: 30), "the notice comes up once the overlay hides")
         Thread.sleep(forTimeInterval: 0.5)
         shot("notice-1-overlay-hidden", app)
-        XCUIRemote.shared.press(.select)   // wakes the overlay
+        XCUIRemote.shared.press(.up)   // wakes the overlay (a click is the next channel)
         wait(upTo: 3) { !notice.exists }
         XCTAssertFalse(notice.exists, "the notice is not shown while the overlay says the same thing")
         shot("notice-2-overlay-up", app)

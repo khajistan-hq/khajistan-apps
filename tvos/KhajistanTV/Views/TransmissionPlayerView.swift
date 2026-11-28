@@ -1062,7 +1062,9 @@ struct TransmissionPlayerView: View {
         case .right: input = .right
         @unknown default: return
         }
+        print("KJTRACE transmission move \(input) armed=\(String(describing: armed)) chips=\(chips) failed=\(isFailed)")
         perform(RemoteMap.action(input, in: armed == nil ? .picture : .controls))
+        print("KJTRACE transmission after armed=\(String(describing: armed))")
     }
 
     /// What RemoteMap asked for, done on this screen.

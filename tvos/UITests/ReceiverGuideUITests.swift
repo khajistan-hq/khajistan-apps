@@ -1,8 +1,9 @@
 import XCTest
 
-/// The Receiver's guide and radio's Now Playing, in each skin. A television channel opens; Right
-/// three times lights Guide on the strip (after CC and Like); Select opens the guide with LIVE on
-/// the channel playing; Down and Select tune the next row. Then Menu back to the region, and a radio
+/// The Receiver's guide and radio's Now Playing, in each skin. A television channel opens; Up
+/// lights CC and Right walks to Guide on the strip (after Like); Select opens the guide with LIVE
+/// on the channel playing; Down and Select tune the next row. On the picture Down opens the guide,
+/// and nothing else does (the players' remote map, 2026-11-28). Then Menu back to the region, and a radio
 /// station shows NOW PLAYING with its name.
 final class ReceiverGuideUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -45,10 +46,10 @@ final class ReceiverGuideUITests: XCTestCase {
         let failed = NSPredicate { _, _ in !["", "Playing", "Paused"].contains(state.label) && !state.label.hasPrefix("Connecting") }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: failed, object: nil)], timeout: 20), .completed,
                        "the dead channel fails")
-        // Within the 3 s before the move: Right on a failed picture opens the guide, which holds it.
-        XCUIRemote.shared.press(.right)
+        // Within the 3 s before the move: Down on a failed picture opens the guide, which holds it.
+        XCUIRemote.shared.press(.down)
         let guide = app.descendants(matching: .any)["receiverGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the failed picture opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the failed picture opens the guide")
         let live = app.descendants(matching: .any)["guide-\(start)"]
         XCTAssertTrue(live.waitForExistence(timeout: 5) && live.isSelected, "the guide opens on the dead channel")
         kjPause(5)
@@ -84,11 +85,11 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 15))
         try kjTuneUntilPlaying(app)
-        // Right on the bare picture opens the guide, once the strip has gone.
+        // Down on the bare picture opens the guide, once the strip has gone.
         XCTAssertTrue(app.descendants(matching: .any)["captionsControl"].waitForNonExistence(timeout: 15))
-        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.down)
         let guide = app.descendants(matching: .any)["receiverGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         let region = app.staticTexts["guideRegion"]
         XCTAssertTrue(region.waitForExistence(timeout: 5))
         kjPause(1)
@@ -131,7 +132,7 @@ final class ReceiverGuideUITests: XCTestCase {
 
         let current = app.staticTexts["currentChannel"]
         XCTAssertTrue(current.waitForExistence(timeout: 15))
-        // A dead carrier puts its own control on the strip, and Right then falls short of Guide.
+        // A dead carrier's strip cannot be lit, and the walk then falls short of Guide.
         try kjTuneUntilPlaying(app)
         let start = current.label
         let guideControl = app.buttons["guideControl"]
@@ -142,11 +143,11 @@ final class ReceiverGuideUITests: XCTestCase {
         // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
         // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
         kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived
-        // Select lights the strip's first control (CC); right walks to Like, then Guide.
-        XCUIRemote.shared.press(.select)
+        // Up lights the strip's first control (CC); right walks to Like, then Guide.
+        XCUIRemote.shared.press(.up)
         kjPause(0.6)
         for _ in 0..<4 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(guideControl.isSelected, "Select then right lights Guide, after CC and Like")
+        XCTAssertTrue(guideControl.isSelected, "Up then right lights Guide, after CC and Like")
         // Select on the lit Guide control opens the guide; Menu closes it and lets go of the control.
         XCUIRemote.shared.press(.select)
         let guide = app.descendants(matching: .any)["receiverGuide"]
@@ -155,21 +156,26 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
         kjPause(0.6)
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of the control that opened it")
-        // With the strip up, right lights CC and never opens the guide (owner, 2026-11-07).
+        // Up lights CC and never opens the guide. Left on CC, the first control, stays on it
+        // (owner, 2026-11-07); Down lets go of it, and does not open the guide on that press.
         let captions = app.descendants(matching: .any)["captionsControl"]
-        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.up)
         kjPause(0.6)
-        XCTAssertTrue(captions.isSelected, "Right on the strip lights CC")
-        XCTAssertFalse(guide.exists, "Right on the strip does not open the guide")
+        XCTAssertTrue(captions.isSelected, "Up lights CC")
+        XCTAssertFalse(guide.exists, "Up does not open the guide")
         XCUIRemote.shared.press(.left)
         kjPause(0.6)
-        XCUIRemote.shared.press(.left)
+        XCTAssertTrue(captions.isSelected, "Left on the first control stays on it")
+        XCTAssertFalse(guide.exists, "Left on CC does not open the guide")
+        XCTAssertEqual(current.label, start, "walking the strip changes no channel")
+        XCUIRemote.shared.press(.down)
         kjPause(0.6)
-        XCTAssertFalse(guide.exists, "Left past CC stops there")
-        // Right on the bare picture opens the guide (owner, 2026-11-04): wait for the strip to go.
+        XCTAssertFalse(captions.isSelected, "Down lets go of the lit control")
+        XCTAssertFalse(guide.exists, "the Down that lets go does not open the guide")
+        // Down on the bare picture opens the guide (2026-11-28): wait for the strip to go.
         XCTAssertTrue(captions.waitForNonExistence(timeout: 10), "the strip hides over a playing picture")
-        XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         // It rises from the bottom (owner, 2026-11-14): the panel sits low, reaches the bottom
         // edge and spans the screen, with the picture left in view above it.
         kjPause(0.6)
@@ -201,10 +207,9 @@ final class ReceiverGuideUITests: XCTestCase {
 
         // Right in the guide turns to the next region; Menu closes the guide and lets go of its
         // control, so the strip can hide again.
-        // With the strip up, left walks its controls; on the bare picture it opens the guide.
         XCTAssertTrue(captions.waitForNonExistence(timeout: 10), "the strip hides after the tune")
-        XCUIRemote.shared.press(.left)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Left on the bare picture opens the guide")
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide again")
         let region = app.staticTexts["guideRegion"]
         XCTAssertTrue(region.waitForExistence(timeout: 5))
         let home = region.label

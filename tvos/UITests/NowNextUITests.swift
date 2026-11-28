@@ -39,10 +39,11 @@ final class NowNextUITests: XCTestCase {
 
     private func check(channel: Int, name: String, titles: [String], skin: String) {
         let app = open(channel: channel, skin: skin)
-        // The sign-on pigeon flies first; then Select wakes the strip, which hides itself after
-        // 2.6 s (OverlayTiming), so the checks and the photograph come straight after the press.
+        // The sign-on pigeon flies first; then Up wakes the strip and lights its first control
+        // (a click is the next channel since 2026-11-28), so the checks and the photograph come
+        // straight after the press.
         kjPause(12)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)
         kjPause(0.8)
         kjScreenshot("now-next-c\(channel)-\(skin)", app: app)
         let channelLabel = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Channel \(channel) \u{00B7} \(name)")).firstMatch
@@ -78,7 +79,7 @@ final class NowNextUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         kjPause(12)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)   // wakes the strip
         kjPause(0.8)
         kjScreenshot("roman-title-strip-grove", app: app)
         let name = app.staticTexts.matching(identifier: "stripName").firstMatch
@@ -89,11 +90,15 @@ final class NowNextUITests: XCTestCase {
         XCTAssertEqual(latin.label, "Aval Heykal, with Naser Malek-Motiei")
         XCTAssertGreaterThan(latin.frame.minY, name.frame.minY, "it sits under the Persian name")
 
-        // The guide: right on the bare picture opens it; channel 1's line carries both names.
+        // The guide: Down opens it; channel 1's line carries both names. Up above lit a control
+        // when the strip has one, and the first Down then only lets go of it.
         kjPause(4)
-        XCUIRemote.shared.press(.right)
         let guide = app.descendants(matching: .any)["transmissionGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 10), "right opens the guide")
+        for _ in 0..<2 where !guide.exists {
+            XCUIRemote.shared.press(.down)
+            _ = guide.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(guide.exists, "Down opens the guide")
         kjPause(0.8)
         kjScreenshot("roman-title-guide-grove", app: app)
         // Inside the guide, one line carrying both names: the faded strip's own Roman line cannot pass this.
@@ -104,11 +109,11 @@ final class NowNextUITests: XCTestCase {
         // Negative: an English-only programme has no second line.
         XCUIRemote.shared.press(.menu)
         kjPause(1)
-        XCUIRemote.shared.press(.up)   // channel up to 2
+        XCUIRemote.shared.press(.right)   // the next channel, 2
         kjPause(12)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)      // wakes the strip
         kjPause(0.8)
-        XCTAssertEqual(app.descendants(matching: .any)["transmissionChannel"].label, "2", "channel up reaches channel 2")
+        XCTAssertEqual(app.descendants(matching: .any)["transmissionChannel"].label, "2", "Right reaches channel 2")
         let english = app.staticTexts.matching(identifier: "stripName").firstMatch
         XCTAssertTrue(english.exists && english.label.contains("Test Programme 2"), "channel 2's strip is up: \(english.label)")
         XCTAssertFalse(app.staticTexts.matching(identifier: "stripSecondName").firstMatch.exists, "no Roman line under an English name")
@@ -145,29 +150,35 @@ final class NowNextUITests: XCTestCase {
             .matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch\(channel)-' AND selected == true")).firstMatch
     }
 
-    /// Up and Down presses change channel while watching (owner, 2026-11-24: "The up and down
-    /// button should otherwise be treated as changing the channel"); they never open the guide.
-    /// XCUIRemote sends presses only, so the swipe that opens the guide is checked on a device.
-    func testUpAndDownPressesChangeChannel() {
+    /// Right and Left change channel while watching, and never open the guide (the players'
+    /// remote map, owner 2026-11-28). This test proved the 2026-11-24 rule it replaces, that Up
+    /// and Down presses change channel; Down now opens the guide and Up lights the controls.
+    func testLeftAndRightPressesChangeChannel() {
         let app = open(channel: 14, skin: "day")
         kjPause(12)
         let tuned = any(app, "transmissionChannel")
         XCTAssertEqual(tuned.label, "14")
-        XCUIRemote.shared.press(.up)
-        let up = NSPredicate { _, _ in tuned.exists && tuned.label == "15" }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: up, object: nil)], timeout: 30), .completed,
-                       "an Up press tunes the next channel")
-        XCTAssertFalse(any(app, "transmissionGuide").exists, "an Up press does not open the guide")
+        XCUIRemote.shared.press(.right)
+        let next = NSPredicate { _, _ in tuned.exists && tuned.label == "15" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: next, object: nil)], timeout: 30), .completed,
+                       "a Right press tunes the next channel")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "a Right press does not open the guide")
         kjPause(6)
-        XCUIRemote.shared.press(.down)
-        let down = NSPredicate { _, _ in tuned.exists && tuned.label == "14" }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: down, object: nil)], timeout: 30), .completed,
-                       "a Down press tunes the channel before")
-        XCTAssertFalse(any(app, "transmissionGuide").exists, "a Down press does not open the guide")
+        XCUIRemote.shared.press(.left)
+        let before = NSPredicate { _, _ in tuned.exists && tuned.label == "14" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: before, object: nil)], timeout: 30), .completed,
+                       "a Left press tunes the channel before")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "a Left press does not open the guide")
+        // Up lights the controls: no channel change and no guide.
+        kjPause(6)
+        XCUIRemote.shared.press(.up)
+        kjPause(3)
+        XCTAssertEqual(tuned.label, "14", "an Up press changes no channel")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "an Up press does not open the guide")
     }
 
     /// The guide is the whole screen, with the picture in a small window at top left (owner,
-    /// 2026-11-24: "Full screen with smaller video icon"). Left from the programme on now lights
+    /// 2026-11-24: "Full screen with smaller video icon"). Down on the picture opens it. Left from the programme on now lights
     /// the channel's own cell, whose description reads beside the picture; Select there tunes the
     /// window and keeps the guide ("show description of a channel on click"); Select on the
     /// programme on now closes it.
@@ -176,9 +187,9 @@ final class NowNextUITests: XCTestCase {
         kjPause(12)
         let tuned = any(app, "transmissionChannel")
         XCTAssertEqual(tuned.label, "5")
-        XCUIRemote.shared.press(.left)
+        XCUIRemote.shared.press(.down)
         let guide = any(app, "transmissionGuide")
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "left on the picture opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the picture opens the guide")
         kjPause(0.8)
         kjScreenshot("transmission-guide-day", app: app)
         XCTAssertEqual(guide.frame.minY, app.frame.minY, accuracy: 2, "the guide starts at the top of the screen")
@@ -228,10 +239,10 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(waitUntilGone(guide, 5), "Select on the programme on now closes the guide")
         XCTAssertEqual(tuned.label, "8")
         XCTAssertFalse(window.exists, "the picture is full screen again")
-        // Back on the bare picture: right opens the guide too, Back closes it.
-        kjPause(8)   // the strip hides 2.6 s after the tune, so right meets the bare picture
-        XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the bare picture opens the guide")
+        // Back on the bare picture: Down opens the guide again, Back closes it.
+        kjPause(8)   // the strip hides 2.6 s after the tune, so Down meets the bare picture
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
         XCTAssertEqual(tuned.label, "8", "Back keeps the channel the window was showing")
@@ -244,9 +255,9 @@ final class NowNextUITests: XCTestCase {
     func testGuideIsATimeGridAndOpensOffAir() {
         let app = open(channel: 5, skin: "day")
         kjPause(12)
-        XCUIRemote.shared.press(.left)
+        XCUIRemote.shared.press(.down)
         let guide = any(app, "transmissionGuide")
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "left on the picture opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the picture opens the guide")
         kjPause(0.8)
         kjScreenshot("guide-grid-open", app: app)
         let lit = litBlock(app, channel: 5)
@@ -296,9 +307,9 @@ final class NowNextUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
         kjPause(8)
-        // The off-air card: Right still opens the guide, so the viewer can go somewhere on.
-        XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the off-air card opens the guide")
+        // The off-air card: Down still opens the guide, so the viewer can go somewhere on.
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the off-air card opens the guide")
         kjPause(0.8)
         kjScreenshot("guide-grid-over-off-air", app: app)
         XCTAssertTrue(litBlock(app, channel: 6).exists, "the guide opens lit on the channel tuned, off air")
@@ -328,8 +339,8 @@ final class NowNextUITests: XCTestCase {
             XCUIRemote.shared.press(.select)
             XCTAssertTrue(any(app, "transmissionChannel").waitForExistence(timeout: 30), "\(skin): channel 1 is on air")
             kjPause(12)
-            XCUIRemote.shared.press(.left)
-            XCTAssertTrue(any(app, "transmissionGuide").waitForExistence(timeout: 5), "\(skin): the guide opens")
+            XCUIRemote.shared.press(.down)
+            XCTAssertTrue(any(app, "transmissionGuide").waitForExistence(timeout: 5), "\(skin): Down opens the guide")
             kjPause(1.5)
             kjScreenshot("tv-guide-\(skin)-programme", app: app)
             let window = any(app, "guidePictureWindow")
@@ -364,9 +375,9 @@ final class NowNextUITests: XCTestCase {
         let offAir = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch
         XCTAssertTrue(offAir.waitForExistence(timeout: 30), "channel 1 opens on its off-air card")
         kjPause(8)
-        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.down)
         let guide = any(app, "transmissionGuide")
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right opens the guide on channel 1, off air in the fixture")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down opens the guide on channel 1, off air in the fixture")
         kjPause(0.8)
         kjScreenshot("guide-grid-first-channel", app: app)
         for number in 1...7 {
@@ -407,10 +418,10 @@ final class NowNextUITests: XCTestCase {
             kjScreenshot("channel-number-c5-\(skin)", app: app)
             let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !osd.exists }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 6), .completed, "and goes by itself")
-            XCUIRemote.shared.press(.up)
+            XCUIRemote.shared.press(.right)
             let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'channelNumberOSD' AND label != 'Channel 5'")).firstMatch
-            XCTAssertTrue(next.waitForExistence(timeout: 30), "Channel Up shows the next number")
-            kjScreenshot("channel-number-up-\(skin)", app: app)
+            XCTAssertTrue(next.waitForExistence(timeout: 30), "Right, the next channel, shows the next number")
+            kjScreenshot("channel-number-next-\(skin)", app: app)
             app.terminate()
         }
     }
@@ -425,14 +436,14 @@ final class NowNextUITests: XCTestCase {
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 30), "the sound-only programme is on")
         XCTAssertFalse(osd.waitForExistence(timeout: 8), "no number over a sound-only programme")
-        XCUIRemote.shared.press(.up)
+        XCUIRemote.shared.press(.right)   // the next channel, 6
         XCTAssertTrue(app.staticTexts["Off air"].waitForExistence(timeout: 30), "channel 6 is off air")
         XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
         XCTAssertEqual(osd.label, "Channel 6")
         kjScreenshot("channel-number-off-air", app: app)
         // Back to 5 by a channel change, the path that just showed 6: no sign-on cover or first
         // flight is left to hold the number, so its absence here is the sound-only rule.
-        XCUIRemote.shared.press(.down)
+        XCUIRemote.shared.press(.left)   // the channel before, 5
         let tuned = app.descendants(matching: .any)["transmissionChannel"]
         let backOnFive = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in tuned.exists && tuned.label == "5" }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [backOnFive], timeout: 30), .completed, "channel 5 is tuned again")

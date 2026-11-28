@@ -168,16 +168,29 @@ final class RROfflinePackageStore: @unchecked Sendable {
             var held = try header(handle.id)
             guard held.operation == handle.operation else { throw RRPackageError.staleOperation }
             if !held.removing { held.removing = true; try saveHeader(held, id: handle.id, reserve: false) }
-            try interrupt?(.afterRemovalMarker)
-            try safe(folder(handle.id))
-            if FileManager.default.fileExists(atPath: folder(handle.id).path) {
-                try FileManager.default.removeItem(at: folder(handle.id))
-            }
-            try interrupt?(.afterPageDirectoryRemoval)
-            // Deletion intent lives OUTSIDE the page folder and is removed last. If recursive
-            // cleanup stops halfway, the same operation can safely retry after app restart.
-            try FileManager.default.removeItem(at: index(handle.id))
+            try finishRemoval(handle.id)
         }
+    }
+
+    /// Restart recovery with only the ID: completes a removal whose tombstone is already
+    /// committed on disk. Refuses a live package, so it can never start a removal on its own.
+    func resumeRemoval(id: UUID) throws {
+        try transaction {
+            guard try header(id).removing else { throw RRPackageError.staleOperation }
+            try finishRemoval(id)
+        }
+    }
+
+    private func finishRemoval(_ id: UUID) throws {
+        try interrupt?(.afterRemovalMarker)
+        try safe(folder(id))
+        if FileManager.default.fileExists(atPath: folder(id).path) {
+            try FileManager.default.removeItem(at: folder(id))
+        }
+        try interrupt?(.afterPageDirectoryRemoval)
+        // Deletion intent lives OUTSIDE the page folder and is removed last. If recursive
+        // cleanup stops halfway, it can safely retry after app restart via resumeRemoval(id:).
+        try FileManager.default.removeItem(at: index(id))
     }
 
     private func transaction<T>(_ body: () throws -> T) throws -> T {

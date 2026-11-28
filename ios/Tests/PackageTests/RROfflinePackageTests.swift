@@ -209,5 +209,20 @@ final class RROfflinePackageTests: XCTestCase {
             XCTAssertThrowsError(try reopened.remove(handle))
         }
     }
+    func testRemovalResumesAfterRestartWithOnlyThePackageID() throws {
+        let root = try root(), good = try store(root), id = UUID()
+        let handle = try good.begin(id: id, manifest: manifest())
+        for index in pages.indices { try good.stage(pages[index], page: index, in: handle) }
+        let broken = try RROfflinePackageStore(root: root, account: "fixture account", device: device,
+            key: key, session: RRPackageSession(), interrupt: { if $0 == .afterRemovalMarker { throw RRPackageError.storage } })
+        XCTAssertThrowsError(try broken.remove(handle))
+        let other = UUID(), live = try good.begin(id: other, manifest: manifest())
+        // Restart: the Handle is gone, only the ID is known. A live package is never removed by ID.
+        let reopened = try store(root)
+        XCTAssertThrowsError(try reopened.resumeRemoval(id: other)) { XCTAssertEqual($0 as? RRPackageError, .staleOperation) }
+        XCTAssertEqual(try reopened.status(id: other).handle, live)
+        try reopened.resumeRemoval(id: id)
+        XCTAssertNotEqual(try reopened.begin(id: id, manifest: manifest()).operation, handle.operation)
+    }
 
 }

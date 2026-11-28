@@ -281,7 +281,7 @@ enum SupabaseRoute {
         // `-kjfixturesonly YES`: the route is not asked of the network. A runner whose network
         // blinked left Pics/Vids on "can't reach its archive", with no adult notice (CI 2026-11-28,
         // run 46121055992), and every recorded chat answer refused with it. Pics/Vids still reads
-        // its roster live; that has a retry, the probe had none.
+        // its roster live, with one retry of its own.
         let result: Path = KJFixtureProtocol.only ? .direct : await probeBoth()
         #else
         let result = await probeBoth()

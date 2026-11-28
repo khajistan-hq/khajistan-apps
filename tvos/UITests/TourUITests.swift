@@ -17,12 +17,15 @@ final class TourUITests: XCTestCase {
         kjScreenshot("tour-06-select", app: app)
         XCUIRemote.shared.press(.select); kjPause(10)
         kjScreenshot("tour-07-select-again", app: app)
+        // In the player Down opens the guide (2026-11-28; it was the next channel), so one more
+        // Back is needed to leave: the guide, the strip, then the player.
         XCUIRemote.shared.press(.down); kjPause(1.5)
         kjScreenshot("tour-08-player-down", app: app)
         XCUIRemote.shared.press(.menu); kjPause(3)
         kjScreenshot("tour-09-back", app: app)
         XCUIRemote.shared.press(.menu); kjPause(3)
         kjScreenshot("tour-10-back-again", app: app)
+        if app.staticTexts["currentChannel"].exists { XCUIRemote.shared.press(.menu); kjPause(3) }
         // Each section of the top bar, as a first-time visitor opens it.
         app.activate(); kjPause(4)
         for (step, id) in ["nav-transmission", "nav-rooms", "nav-account"].enumerated() {

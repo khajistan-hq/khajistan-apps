@@ -1,7 +1,8 @@
 import XCTest
 
-/// The account's liked channels are the first shelf under the map (owner, 2026-11-08: "add liked
-/// channels on homepage for an account so they are easily accessible"). A Debug build takes the
+/// The account's liked channels are a shelf on Home (owner, 2026-11-08: "add liked channels on
+/// homepage for an account so they are easily accessible"), the last one on the page since
+/// 2026-11-21 (owner: "put liked video at the botton of the page"). A Debug build takes the
 /// likes from `-kjlikedrefs`, so no account is signed in here.
 final class LikedShelfUITests: XCTestCase {
     /// Newest first. The last ref names no channel and must not be drawn.
@@ -18,7 +19,7 @@ final class LikedShelfUITests: XCTestCase {
         return element.exists ? element.identifier : "(none)"
     }
 
-    func testLikedShelfIsOnePressDownFromTheMap() {
+    func testLikedShelfIsTheLastOnHome() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES", "-kjlikedrefs", Self.refs, "-kjfixturesonly", "YES"]
         kjLaunch(app)
@@ -32,10 +33,14 @@ final class LikedShelfUITests: XCTestCase {
         XCTAssertTrue(cards.element(boundBy: 0).label.hasPrefix("Al Arabiya"), "newest like first, got \(cards.element(boundBy: 0).label)")
         XCTAssertFalse(cards.element(boundBy: 0).label.contains("Liked"), "no second 'Liked' on a card of the Liked shelf")
 
-        XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front")
+        XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch")
         XCUIRemote.shared.press(.down)
-        kjPause(6)   // stills arrive one at a time
-        XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "one press down from the front lands on Liked, got \(focusedID(app))")
+        kjPause(1)
+        XCTAssertFalse(focusedID(app).hasPrefix("liked-"), "Liked is not the first shelf under the front, got \(focusedID(app))")
+        XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches the Liked shelf")
+        XCUIRemote.shared.press(.down)
+        kjPause(1)
+        XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "nothing under Liked: down stays on it, got \(focusedID(app))")
         kjScreenshot("liked-shelf-focused", app: app)
 
         let firstId = String(focusedID(app).dropFirst("liked-".count))
@@ -49,13 +54,13 @@ final class LikedShelfUITests: XCTestCase {
         kjScreenshot("liked-player", app: app)
     }
 
-    /// Signed out and with no likes there is no shelf, and down from the front goes to the genres.
+    /// Signed out and with no likes there is no shelf, and down from the front goes to the themes.
     func testNoLikesNoShelf() {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "receiver", "-kjnoautoplay", "YES"]
         kjLaunch(app)
         let news = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'genre-'"))
-        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front's genre shelves load")
+        XCTAssertTrue(news.firstMatch.waitForExistence(timeout: 90), "the front's themes load")
         XCTAssertFalse(app.descendants(matching: .any)["shelf-liked"].exists, "no Liked shelf without likes")
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'")).count, 0)
     }
@@ -68,14 +73,16 @@ final class LikedShelfUITests: XCTestCase {
             kjLaunch(app)
             let cards = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-'"))
             XCTAssertTrue(cards.firstMatch.waitForExistence(timeout: 90), "Liked shows in \(skin)")
-            XCTAssertTrue(kjFocusFrontFoot(app), "focus reaches the foot of the front in \(skin)")
-            XCUIRemote.shared.press(.down)
-            kjPause(6)   // stills arrive one at a time
-            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "down lands on Liked in \(skin), got \(focusedID(app))")
+            XCTAssertTrue(kjFocusAtlasSwitch(app), "focus reaches the atlas switch in \(skin)")
+            // Liked is the last shelf (Themes, the home rows, CCTV, Liked), so the walk goes down to it.
+            XCTAssertTrue(kjFocus(cards.firstMatch, app: app, limit: 80), "focus reaches Liked in \(skin)")
+            XCTAssertTrue(focusedID(app).hasPrefix("liked-"), "focus is on Liked in \(skin), got \(focusedID(app))")
+            // Names only, as the Themes row (owner, 2026-11-21): a plate two lines of text high,
+            // never a picture card (236 or more), and no "live picture" on any of them.
+            let first = cards.firstMatch
+            XCTAssertLessThan(first.frame.height, 160, "a liked channel is a name, with no picture; height \(first.frame.height)")
             let pictured = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'liked-' AND label CONTAINS 'live picture'"))
-            let one = NSPredicate { _, _ in pictured.count >= 1 }
-            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: one, object: nil)], timeout: 60), .completed,
-                           "a liked television card gets a live still in \(skin)")
+            XCTAssertEqual(pictured.count, 0, "no liked channel carries a picture in \(skin)")
             kjScreenshot("liked-shelf-\(skin)", app: app)
             app.terminate()
         }

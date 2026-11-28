@@ -10,9 +10,6 @@ struct ReceiverView: View {
     @Environment(\.palette) private var palette
     @State private var composed: ComposedMap?
     @State private var mapError: String?
-    /// Each camera region's cameras to take a still from, and the ones asked for now.
-    @State private var cameraPicks: [String: [Channel]] = [:]
-    @State private var cameraWanted: [Channel] = []
     @State private var shuffled: ShufflePick?
     @State private var shuffling = false
     @State private var surfTask: Task<Void, Never>?
@@ -21,8 +18,11 @@ struct ReceiverView: View {
     @State private var surfNote: String?
     /// The front opens with Surf focused: one press to a picture (owner, 2026-10-08).
     @FocusState private var surfFocused: Bool
-    /// The switch at the foot of the sidebar, where Up from the first shelf lands.
+    /// The switch over the map, where Up from the first shelf lands.
     @FocusState private var switchFocused: Bool
+    /// Focus is on the All · TV · Radio row. Set only as focus enters or leaves the row (ChipRow),
+    /// so a step along it does not re-run the front.
+    @State private var chipsFocused = false
 
     var body: some View {
         @Bindable var model = model
@@ -37,7 +37,7 @@ struct ReceiverView: View {
         }
         // The stack clips to the safe area too, so it runs to the edge with the front's scroll view.
         .ignoresSafeArea(.container, edges: .bottom)
-        .fullScreenCover(item: $shuffled) { pick in
+        .kjFullScreenCover(item: $shuffled) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, surfChoice: pick.surfChoice)
         }
         .onDisappear { cancelSurf() }
@@ -72,9 +72,13 @@ struct ReceiverView: View {
         switch link {
         case .receiver:
             model.receiverPath = []
+            // The front opens at its top, not on the CCTV name that opened the region.
+            model.camerasFirst = nil
             model.link = nil
         case .region(let id):
             guard let index = model.receiver.index else { return }
+            // A linked region opens on its television, and Back from it is not a CCTV return.
+            model.camerasFirst = nil
             model.receiverPath = index.regions.first(where: { $0.id == id }).map { [$0] } ?? []
             model.link = nil
         default:
@@ -95,19 +99,33 @@ struct ReceiverView: View {
                     VStack(alignment: .leading, spacing: 0) {
                     AtlasPanel(composed: composed, mapError: mapError, failure: { AnyView(failure($0)) }, open: open,
                                leading: AnyView(sidebar(index)),
+                               aboveMap: AnyView(atlasSwitch),
                                // Focus in the list: the page back at its top, so the map the list
                                // lights is whole, never a sliver under the top bar.
                                listFocused: { toTop(proxy) })
+                        // Up from a shelf lands on Surf, whichever column it came from, so one
+                        // more Up reaches the top bar. From the right-hand shelves it entered the
+                        // A–Z list at Turkistan and walked all twelve rows first, which read on
+                        // the Apple TV as Up never reaching the bar (owner, 2026-11-18: "no way
+                        // to go to the nav"). Down from the bar lands on Surf as before.
+                        .focusSection()
+                        .defaultFocus($surfFocused, true, priority: .userInitiated)
                         .padding(.bottom, 12)
-                    // In a stack of their own with no spacing: a front with no likes has no gap
-                    // where the shelf would be. The shelf brings its own 12 points above it.
-                    LikedShelf()
                     }
-                    GenreShelves()
-                    HomeSections()
-                    camerasRow(index)
-                    filmsRow
+                    ThemeRow()
+                    // Transmission and the Screening Room are not shelves here: each has its own
+                    // door in the top bar (owner, 2026-11-19: "remov khajistan transmission and
+                    // screening room from the home page of the apple tv").
                     HomeRows()
+                    // Shelves above it arrive on their own fetches after it is drawn, so a name
+                    // focused early is kept on screen as they push it down.
+                    CCTVRow(index: index) {
+                        withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(CCTVRow.anchor, anchor: .bottom) }
+                    }
+                    // Last on the page (owner, 2026-11-21: "put liked video at the botton of the
+                    // page"). No likes, no shelf; its 12 points on top of the stack's 12 are kept
+                    // off with -12, so it sits as any other shelf does.
+                    LikedShelf().padding(.top, -12)
                 }
                 .padding(.horizontal, KJLayout.inset)
                 .padding(.top, 32)
@@ -115,19 +133,27 @@ struct ReceiverView: View {
                 // On the page's whole content, padding included: scrolled to, the page sits
                 // exactly as it opened, with no step of the top padding.
                 .id(AtlasPanel.topAnchor)
+                .environment(\.shelfRaise) { anchor in
+                    withAnimation(.easeOut(duration: 0.25)) { proxy.scrollTo(anchor, anchor: .top) }
+                }
             }
             // The page runs to the screen's edge, so the first shelf peeks under the front
             // instead of being cut flat at the safe-area line.
             .ignoresSafeArea(.container, edges: .bottom)
-            // Up from the first shelf lands on the switch, and Back lands on Surf: the page back
-            // at its top for either, as for the list, so the front is never left half under the bar.
-            .onChange(of: surfFocused || switchFocused) { _, onFront in if onFront { toTop(proxy) } }
+            // Up from the first shelf and Back both land on Surf (owner, 2026-11-18), and Down from
+            // Surf reaches the switch over the map: the page back at its top for any of them, and
+            // for the sidebar's chips, so the front is never left half under the bar.
+            .onChange(of: surfFocused || switchFocused || chipsFocused) { _, onFront in if onFront { toTop(proxy) } }
             }
             .kjTopFade()
+            // Launch focus. The front's own default (above) is for focus coming back in from the
+            // shelves; this one places the first focus of the screen.
             .defaultFocus($surfFocused, true)
             // Back from deep in the front (a shelf, the list) goes to Surf first; Back from
-            // Surf leaves the app, as tvOS does from a root screen.
-            .onExitCommand(perform: surfFocused ? nil : { surfFocused = true })
+            // Surf leaves the app, as tvOS does from a root screen. With the PiP window up, Back
+            // goes on to the bar (PiPBarHost): this handler only hears Back while focus is on the
+            // front, so the bar is not lit then.
+            .onExitCommand(perform: surfFocused || model.activePiP != nil ? nil : { surfFocused = true })
         } else if let message = model.receiver.indexError {
             failure(message)
         } else {
@@ -140,7 +166,7 @@ struct ReceiverView: View {
     private func sidebar(_ index: ReceiverIndex) -> some View {
         VStack(alignment: .leading, spacing: 28) {
             // Less to read (owner, 2026-10-29: "simplified its too much text", and 2026-11-17):
-            // Surf, one count and the switch. The top bar already names the Receiver.
+            // Surf and one count; the switch is over the map. The top bar already names the Receiver.
             surf
             Figure(label: "Live now", value: figure(index.totals.live))
                 .accessibilityElement(children: .combine)
@@ -149,14 +175,20 @@ struct ReceiverView: View {
                 Text(note).kjBody()
                     .accessibilityIdentifier("receiverSignInNote")
             }
-            HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
-                .focused($switchFocused)
-                .accessibilityIdentifier("beyondTheAtlas")
-                // The plate's padding is pulled back so the switch sits on the page margin.
-                .padding(.leading, -26)
         }
         .frame(width: 520, alignment: .leading)
         .focusSection()
+    }
+
+    /// Above the map it widens (owner, 2026-11-20: "make the beyond the atlas above the map"), as
+    /// the website's switch sits above its atlas. It was at the foot of the sidebar until then.
+    private var atlasSwitch: some View {
+        HouseSwitch(title: "Beyond the atlas", detail: nil, isOn: extendedBinding)
+            .focused($switchFocused)
+            .accessibilityIdentifier("beyondTheAtlas")
+            // The plate's padding is pulled back so the switch lines up with the map's edge.
+            .padding(.leading, -26)
+            .frame(height: AtlasPanel.switchRow, alignment: .topLeading)
     }
 
     private func toTop(_ proxy: ScrollViewProxy) {
@@ -193,9 +225,10 @@ struct ReceiverView: View {
             }
             .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 14, leading: 26, bottom: 14, trailing: 26)))
             .focused($surfFocused)
-            // The top bar and the list each claim the first focus; this one is placed last.
-            .task {
-                guard !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
+            // The top bar and the list each claim the first focus; this one is placed last. Not
+            // under the welcome: it waits for the welcome to close, or focus is lost under it.
+            .task(id: model.welcomeOnScreen) {
+                guard !model.welcomeOnScreen, !model.surfFocusedOnce, model.receiverPath.isEmpty else { return }
                 model.surfFocusedOnce = true
                 try? await Task.sleep(for: .milliseconds(300))
                 surfFocused = true
@@ -230,17 +263,7 @@ struct ReceiverView: View {
     private var scope: ShuffleScope { model.extendedAtlas ? .everywhere : .main }
 
     private func chips(_ items: [(String, String)], current: String, id: String, set: @escaping (String) -> Void) -> some View {
-        HStack(spacing: 4) {
-            ForEach(items, id: \.0) { item in
-                Button {
-                    set(item.0)
-                } label: { Text(item.1).kjKicker() }
-                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
-                    .accessibilityIdentifier("\(id)-\(item.0)")
-            }
-        }
-        // The tabs' plate padding is pulled back so their text sits on the page margin.
-        .padding(.leading, -22)
+        ChipRow(items: items, current: current, id: id, set: set) { chipsFocused = $0 }
     }
 
     private func shuffle() async {
@@ -270,73 +293,6 @@ struct ReceiverView: View {
         surfTask?.cancel()
         surfTask = nil
         shuffling = false
-    }
-
-    // MARK: - Cameras
-
-    /// Every region with public cameras, main atlas first, each opening its page on its cameras
-    /// (owner, 2026-10-07: "make cctv show up in the reciever").
-    @ViewBuilder
-    private func camerasRow(_ index: ReceiverIndex) -> some View {
-        let regions = CameraRegions.ordered(index)
-        if !regions.isEmpty {
-            Shelf("Street cameras", count: "\(CameraRegions.total(index).formatted()) live, by region") {
-                ForEach(regions) { region in
-                    Button {
-                        model.camerasFirst = region.id
-                        model.receiverPath.append(region)
-                    } label: {
-                        // The region's name over a still from one of its cameras, taken on this
-                        // device as the region cards' are (owner, 2026-10-29: pictures on them).
-                        PictureCard(title: region.label,
-                                    still: (cameraPicks[region.id] ?? []).lazy.compactMap { model.stills.image(for: $0.id) }.first,
-                                    width: ChannelCard.width, height: ChannelCard.height, symbol: "video")
-                    }
-                    .buttonStyle(HouseCardStyle())
-                    .accessibilityIdentifier("cameras-\(region.id)")
-                }
-            }
-            .accessibilityIdentifier("shelf-cameras")
-            .task(id: regions.map(\.id)) { await pickCameras(regions) }
-            // Back from a region page: the stills store forgot the list when the page went.
-            .onAppear { model.stills.wantToo(cameraWanted) }
-        }
-    }
-
-    /// Up to three cameras per region, and the stills for them: the first of each, then a spare
-    /// only where the card is still a plate (a black frame or a dead stream).
-    private func pickCameras(_ regions: [ReceiverIndex.Region]) async {
-        for region in regions where cameraPicks[region.id] == nil {
-            guard !Task.isCancelled else { return }
-            let cameras = (try? await model.receiver.channels(regionId: region.id, cameras: true)) ?? []
-            cameraPicks[region.id] = Array(cameras.prefix(3))
-        }
-        for rank in 0..<3 {
-            guard !Task.isCancelled else { return }
-            let lacking = regions.filter { region in
-                !(cameraPicks[region.id] ?? []).contains { model.stills.image(for: $0.id) != nil }
-            }
-            cameraWanted = lacking.compactMap { cameraPicks[$0.id]?.dropFirst(rank).first }
-            if cameraWanted.isEmpty { return }
-            model.stills.wantToo(cameraWanted)
-            try? await Task.sleep(for: .seconds(Double(cameraWanted.count) * 4))
-        }
-    }
-
-    // MARK: - The Screening Room
-
-    /// The Screening Room, every film as the site's On Demand carries them, on a shelf of posters.
-    @ViewBuilder
-    private var filmsRow: some View {
-        let films = model.films.films
-        if !films.isEmpty {
-            FilmShelf(
-                title: "The Screening Room",
-                count: "\(films.count) \(films.count == 1 ? "film" : "films") on demand",
-                films: films
-            )
-            .accessibilityIdentifier("screeningRoom")
-        }
     }
 
     private func failure(_ message: String) -> some View {
@@ -411,6 +367,8 @@ private struct AtlasPanel: View {
     let open: (MapRegion) -> Void
     /// The sidebar, beside the map.
     let leading: AnyView
+    /// Over the map, in its column: the Beyond the atlas switch.
+    var aboveMap: AnyView? = nil
     /// Called as focus comes into the region list from elsewhere.
     var listFocused: () -> Void = {}
     static let topAnchor = "atlasTop"
@@ -421,19 +379,29 @@ private struct AtlasPanel: View {
     var body: some View {
         Group {
             if let mapError {
-                HStack(alignment: .center, spacing: 40) { leading; failure(mapError) }
+                // The switch stays: a wider map that failed is put back by turning it off.
+                HStack(alignment: .center, spacing: 40) {
+                    leading
+                    VStack(alignment: .leading, spacing: 24) {
+                        if let aboveMap { aboveMap.focusSection() }
+                        failure(mapError)
+                    }
+                }
             } else if let composed {
                 // One top line: Surf level with the list's heading, the map's band beside them.
                 HStack(alignment: .top, spacing: 40) {
                     leading
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let aboveMap { aboveMap.focusSection() }
                     RegionMapView(map: composed, highlighted: listedRegion)
                         .frame(maxWidth: .infinity)
-                        .frame(height: Self.mapHeight)
+                        .frame(height: aboveMap == nil ? Self.mapHeight : Self.mapHeight - Self.switchRow)
                         // For the UI tests: the region the map lights, read as the map's value.
                         .accessibilityElement()
                         .accessibilityLabel("Map")
                         .accessibilityValue(composed.regions.first { $0.id == listedRegion }?.label ?? "")
                         .accessibilityIdentifier("atlasMap")
+                    }
                     regionList(composed)
                 }
                 // Room for a focused plate's lift at the top edge.
@@ -441,8 +409,11 @@ private struct AtlasPanel: View {
             } else {
                 HStack(alignment: .center, spacing: 40) {
                     leading
-                    TuningLoader("Loading the receiver\u{2026}")
-                        .frame(maxWidth: .infinity, minHeight: Self.mapHeight)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let aboveMap { aboveMap.focusSection() }
+                        TuningLoader("Loading the receiver\u{2026}")
+                            .frame(maxWidth: .infinity, minHeight: aboveMap == nil ? Self.mapHeight : Self.mapHeight - Self.switchRow)
+                    }
                 }
             }
         }
@@ -502,9 +473,10 @@ private struct AtlasPanel: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        // 50 points a row: the atlas's twelve regions fit the map's band whole,
-                        // with no last row cut flat at its foot (2026-11-17).
-                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)))
+                        // 44 points a row: the atlas's twelve regions fit the map's band whole,
+                        // with no last row cut flat at its foot (2026-11-17; rows 50 → 44 when the
+                        // band went 640 → 580, 2026-11-20).
+                        .buttonStyle(HouseButtonStyle(padding: EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16)))
                         .focused($listedRegion, equals: region.id)
                         .accessibilityIdentifier("region-\(region.id)")
                         .accessibilityLabel(region.label)
@@ -523,14 +495,18 @@ private struct AtlasPanel: View {
     }
 
     static let listWidth: CGFloat = 320
-    static let mapHeight: CGFloat = 640
+    static let mapHeight: CGFloat = 580
+    /// The switch's row over the map: the map gives up this much, so the front keeps its height.
+    static let switchRow: CGFloat = 80
 }
 
-/// Live channels by kind across the atlas, one shelf per kind, as a live TV app rows them (owner,
-/// 2026-11-04: news was not on the front as a category). The kinds are the region lists' own
-/// `genres`; a channel sits on every shelf it is tagged for. The shelves follow the Beyond the
-/// atlas switch, and up and down in the player surf the shelf the channel came from.
-private struct GenreShelves: View {
+/// Live channels by theme across the atlas, as one row of names with no pictures (owner,
+/// 2026-11-18: the News-to-Children carousels "should be shown as not carousels but simpler way no
+/// thumbnails more like themes that people can click and all channels with those themes play").
+/// Select on a theme plays one of its channels at random, so a stream that is down is never the
+/// only way in; up and down in the player surf every channel of that theme. The themes are the region lists' own `genres`; a channel sits under every theme it
+/// is tagged for. The row follows the Beyond the atlas switch.
+private struct ThemeRow: View {
     private struct Kind: Identifiable {
         let id: String
         let label: String
@@ -560,49 +536,82 @@ private struct GenreShelves: View {
         Kind(id: "sport", label: "Sport", tags: ["sport"]),
         Kind(id: "children", label: "Children", tags: ["children"]),
     ]
-    /// A kind with fewer channels than this is not a shelf yet.
+    /// A theme with fewer channels than this is not shown yet.
     private static let fewest = 3
-    /// The shelves whose first cards get live stills, and how many each. Liked takes its share
-    /// first; 24 a visit in all (StillPlan).
-    private static let pictured: [String] = ["news", "music"]
-    private static let picturedCards = 4
 
     @Environment(AppModel.self) private var model
+    /// The All / TV / Radio chips under Surf. A theme holds only what they let through (owner,
+    /// 2026-11-25: "when only tv is selected surf and themes when clicked should only show tv,
+    /// same for radio").
+    @AppStorage(ShuffleMedium.key) private var mediumRaw = ShuffleMedium.all.rawValue
     @State private var rows: [Row] = []
     @State private var playing: Pick?
+    /// Focus coming into the row lands on the theme last focused (Back from the player: the one
+    /// pressed), or on News the first time, not on whichever sits under the control it came from.
+    /// tvOS did not do either reliably by itself (HomeRowsUITests, 2026-11-18: the full build
+    /// lost the theme pressed, the store build came up from CCTV onto another theme).
+    @FocusState private var focused: String?
+    @State private var lastFocused: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(rows) { row in
-                Shelf(row.kind.label, count: "\(row.channels.count) live") {
-                    ForEach(row.channels) { channel in
-                        let liked = model.saves.isSaved(channel)
-                        let still = model.stills.image(for: channel.id)
+        // A stack, not a Group: with no rows yet there would be no child to carry the task.
+        VStack(alignment: .leading, spacing: 8) {
+            if !rows.isEmpty {
+                Text("Themes").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                // Scrolls sideways if the themes ever outgrow the screen; today they fit.
+                ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 8) {
+                    ForEach(rows) { row in
                         Button {
-                            playing = Pick(channel: channel, list: row.channels, title: row.kind.label)
+                            play(row)
                         } label: {
-                            PictureCard(channel: channel, still: still, liked: liked)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.kind.label).kjName(30).lineLimit(1)
+                                Text("\(row.channels.count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                            }
                         }
-                        .buttonStyle(HouseCardStyle())
-                        // Play/Pause on a card plays it, as on Apple's TV app.
-                        .onPlayPauseCommand { playing = Pick(channel: channel, list: row.channels, title: row.kind.label) }
-                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: liked))
-                        .accessibilityIdentifier("genre-\(row.id)-\(channel.id)")
+                        .buttonStyle(HouseButtonStyle())
+                        // Play/Pause plays it too, as on Apple's TV app.
+                        .onPlayPauseCommand { play(row) }
+                        .focused($focused, equals: row.id)
+                        .accessibilityLabel("\(row.kind.label), \(row.channels.count.formatted()) live")
+                        .accessibilityIdentifier("genre-\(row.id)")
                     }
                 }
-                .accessibilityIdentifier("genre-\(row.id)")
+                // Room over and under the row for a focused plate's lift.
+                .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+                .padding(.bottom, 14)
             }
         }
-        .task(id: model.extendedAtlas) { await load() }
-        // Back from a player: the visit ended, and with it the wanted lists.
-        .onAppear { wantStills() }
-        .fullScreenCover(item: $playing) { pick in
+        .focusSection()
+        // The priority makes tvOS apply the default to a move the remote makes: without it, Down
+        // from the atlas switch (over the map since 2026-11-20) landed on Culture, the theme under
+        // it. News the first time, then the theme last focused.
+        .defaultFocus($focused, rows.contains { $0.id == lastFocused } ? lastFocused : rows.first?.id,
+                      priority: .userInitiated)
+        .onChange(of: focused) { _, now in if let now { lastFocused = now } }
+        .task(id: "\(model.extendedAtlas) \(mediumRaw)") { await load() }
+        .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: pick.title)
         }
     }
 
+    private func play(_ row: Row) {
+        // The rows on screen may still be the last medium's while the new one loads: only the
+        // medium picked now is played (TV picked, no radio).
+        let medium = ShuffleMedium.stored(mediumRaw)
+        let list = row.channels.filter { medium.includes($0.mediaType) }
+        guard let channel = list.randomElement() else { return }
+        playing = Pick(channel: channel, list: list, title: row.kind.label)
+    }
+
     /// Every region list in the atlas shown, read together (each is cached after its first read),
-    /// then sorted into the kinds in region order, each channel once per shelf.
+    /// then sorted into the themes in region order, each channel once per theme.
     private func load() async {
         guard let index = model.receiver.index else { return }
         let scope: ShuffleScope = model.extendedAtlas ? .everywhere : .main
@@ -617,7 +626,8 @@ private struct GenreShelves: View {
             for await (id, list) in group { lists[id] = list }
         }
         guard !Task.isCancelled else { return }
-        let channels = ids.flatMap { lists[$0] ?? [] }.filter { $0.mediaType != "camera" }
+        let medium = ShuffleMedium.stored(mediumRaw)
+        let channels = ids.flatMap { lists[$0] ?? [] }.filter { medium.includes($0.mediaType) }
         rows = Self.kinds.compactMap { kind in
             var seen = Set<String>()
             let shelf = channels.filter { channel in
@@ -626,19 +636,11 @@ private struct GenreShelves: View {
             }
             return shelf.count >= Self.fewest ? Row(kind: kind, channels: shelf) : nil
         }
-        wantStills()
-    }
-
-    private func wantStills() {
-        let first = Self.pictured.flatMap { id in
-            rows.first { $0.id == id }.map { Array($0.channels.prefix(Self.picturedCards)) } ?? []
-        }
-        if !first.isEmpty { model.stills.wantNext(first, place: 1) }
     }
 }
 
-/// The channels the account liked, newest first, the first shelf under the map, so a liked channel
-/// is one press down and one Select from the front (owner, 2026-11-08: "add liked channels on
+/// The channels the account liked, newest first, the last shelf on Home (owner, 2026-11-21: "put
+/// liked video at the botton of the page"; it was the first under the map until then) (owner, 2026-11-08: "add liked channels on
 /// homepage for an account so they are easily accessible"). The likes are the account's
 /// `passport_saves`, the same the website's heart and the player's Like write, so a like made on
 /// any device is here. Signed out, or with nothing liked, there is no shelf. Up and down in the
@@ -689,8 +691,6 @@ private struct LikedShelf: View {
         missingStore = (kept + refs.map { "\(Int(now)) \($0)" }).joined(separator: "\n")
     }
     @State private var playing: Pick?
-    /// Cards that get a live still, from the front.
-    private static let pictured = 4
 
     /// The account's likes, newest first. A Debug build takes `-kjlikedrefs channel:a,channel:b`
     /// in their place, so the shelf can be seen and tested with no account signed in.
@@ -716,28 +716,44 @@ private struct LikedShelf: View {
         // there is no child, so the task that reads the likes would never run.
         VStack(alignment: .leading, spacing: 0) {
             if !list.isEmpty {
-                Shelf("Liked", count: "\(list.count) live") {
-                    // No heart on these cards: the shelf's name already says they are liked.
-                    ForEach(list) { channel in
-                        let still = channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
-                        Button {
-                            playing = Pick(channel: channel, list: list)
-                        } label: {
-                            if channel.mediaType == "radio" {
-                                RadioCard(channel: channel)
-                            } else {
-                                PictureCard(channel: channel, still: still)
-                            }
-                        }
-                        .buttonStyle(HouseCardStyle())
-                        .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
-                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: false))
-                        .accessibilityIdentifier("liked-\(channel.id)")
-                    }
+                // Names only, as the Themes row is (owner, 2026-11-21: "the liked channels should
+                // also be text only like themes"): a plate a channel, its name and its place, no
+                // picture. No heart: the row's name already says they are liked.
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text("Liked").kjName(38)
+                    Text("\(list.count) live").kjSmall(faint: true)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("shelf-liked")
                 .padding(.top, 12)
-                .onAppear { wantStills(list) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 8) {
+                        ForEach(list) { channel in
+                            Button {
+                                playing = Pick(channel: channel, list: list)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(channel.name).kjName(30).lineLimit(1)
+                                    if !channel.place.isEmpty {
+                                        Text(channel.place).kjSmall(faint: true).lineLimit(1)
+                                    }
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            // Play/Pause plays it too, as on Apple's TV app.
+                            .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
+                            .accessibilityLabel(channel.cardLabel(still: false, liked: false))
+                            .accessibilityIdentifier("liked-\(channel.id)")
+                        }
+                    }
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+                .focusSection()
             }
         }
         // Again each time the app comes forward: a read that failed at launch (an Apple TV waking
@@ -746,7 +762,7 @@ private struct LikedShelf: View {
         // Again when the app comes forward: a list that failed to load at launch is read again
         // (the store caches the ones that loaded, so a walk that found everything costs nothing).
         .task(id: "\(refs.joined(separator: ","))|\(scenePhase)") { await resolve() }
-        .fullScreenCover(item: $playing) { pick in
+        .kjFullScreenCover(item: $playing) { pick in
             ReceiverPlayerView(channel: pick.channel, list: pick.list, listTitle: "Liked")
         }
     }
@@ -767,7 +783,7 @@ private struct LikedShelf: View {
         // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes
         // that arrive next are not taken for new ones.
         // An account that unliked everything has no likes: its next like is new, so it is fresh.
-        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; wantStills([]); return }
+        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; return }
         // A like just made is worth a walk, even of a channel off air a moment ago.
         let fresh = lastRefs.map { wanted.subtracting($0) } ?? []
         lastRefs = wanted
@@ -794,16 +810,132 @@ private struct LikedShelf: View {
                 for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
                 where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
             }
-            // Asked for as soon as a tier lands, so the shelf's stills do not wait on the wider walk.
-            wantStills(channels)
         }
         if complete, !unfound.isEmpty { markMissing(unfound) }
-        wantStills(channels)
     }
 
-    private func wantStills(_ list: [Channel]) {
-        let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
-        // Sent when empty too, so channels no longer liked stop taking stills.
-        model.stills.wantNext(first, place: 0)
+}
+
+/// Every region with public cameras, main atlas first, each opening its page on its cameras
+/// (owner, 2026-10-07: "make cctv show up in the reciever"). Names only, at the foot of the page
+/// (owner, 2026-11-19: "cctv should go at the bottom of the main page" and "need no cards just
+/// names is wnough that can be clicked"), set as the Themes row is: focus comes in on the first
+/// name, then on the one last focused, and Back from a region returns to the name pressed.
+private struct CCTVRow: View {
+    static let anchor = "shelf-cameras"
+    let index: ReceiverIndex
+    /// Scrolls the page so the row is on screen.
+    let keepVisible: () -> Void
+    @Environment(AppModel.self) private var model
+    @FocusState private var focused: String?
+    @State private var lastFocused: String?
+    /// The name whose region page is open, focused again when the page comes back.
+    @State private var pressed: String?
+    /// Where the row last sat on screen, to tell a push down from a scroll.
+    @State private var lastY: CGFloat?
+
+    var body: some View {
+        let regions = CameraRegions.ordered(index)
+        if !regions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("CCTV").kjName(38)
+                    .accessibilityAddTraits(.isHeader)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(regions) { region in
+                            let count = index.regionCounts[region.id]?.byMedium["camera"] ?? 0
+                            Button {
+                                pressed = region.id
+                                model.camerasFirst = region.id
+                                model.receiverPath.append(region)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(region.label).kjName(30).lineLimit(1)
+                                    // A count the index does not carry is left out, never "0 live".
+                                    if count > 0 {
+                                        Text("\(count.formatted()) live").kjSmall(faint: true).monospacedDigit()
+                                    }
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            .focused($focused, equals: region.id)
+                            .accessibilityLabel(count > 0
+                                ? "\(region.label) cameras, \(count.formatted()) live"
+                                : "\(region.label) cameras")
+                            .accessibilityIdentifier("cameras-\(region.id)")
+                        }
+                    }
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+            }
+            .focusSection()
+            // Entering the row, focus goes to the first name, then to the one last focused. tvOS
+            // gives the name under the card it came from and does not honour defaultFocus here
+            // (UI test, 2026-11-19), so the row moves it itself.
+            .onChange(of: focused) { old, now in
+                guard let now else { return }
+                let home = regions.contains { $0.id == lastFocused } ? lastFocused : regions.first?.id
+                if old == nil, let home, now != home {
+                    focused = home
+                } else {
+                    lastFocused = now
+                }
+            }
+            // Shelves loading above push the row down; a focused name stays on screen. Only a push
+            // down acts: the focus engine's scroll and this one move the row up. Not reproduced
+            // on the simulator, where the shelves land before a walk reaches the foot; aimed at
+            // the slower Apple TV HD.
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { y in
+                defer { lastY = y }
+                if focused != nil, let lastY, y > lastY + 1 { keepVisible() }
+            }
+            // Back from the region page: the name pressed takes focus again, and a later visit to
+            // the same region from the list opens on its television, not its cameras.
+            .onAppear {
+                guard let id = pressed else { return }
+                pressed = nil
+                // Back from the region leaves camerasFirst set; a link that opened the front
+                // cleared it, and then the front opens at its top.
+                guard model.camerasFirst == id else { return }
+                model.camerasFirst = nil
+                Task { @MainActor in
+                    focused = id
+                    keepVisible()
+                }
+            }
+            .id(Self.anchor)
+            .accessibilityIdentifier(Self.anchor)
+        }
+    }
+}
+
+/// The front's All · TV · Radio row, with its own focus, so a step along it is the row's business
+/// and only entering or leaving it reaches the front (`onFocus`).
+private struct ChipRow: View {
+    let items: [(String, String)]
+    let current: String
+    let id: String
+    let set: (String) -> Void
+    let onFocus: (Bool) -> Void
+    @FocusState private var focused: String?
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ForEach(items, id: \.0) { item in
+                Button {
+                    set(item.0)
+                } label: { Text(item.1).kjKicker() }
+                    .buttonStyle(HouseTabStyle(isCurrent: item.0 == current))
+                    .focused($focused, equals: item.0)
+                    .accessibilityIdentifier("\(id)-\(item.0)")
+            }
+        }
+        // The tabs' plate padding is pulled back so their text sits on the page margin.
+        .padding(.leading, -22)
+        .onChange(of: focused != nil) { _, on in onFocus(on) }
     }
 }

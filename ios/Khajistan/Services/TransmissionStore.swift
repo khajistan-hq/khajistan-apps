@@ -88,9 +88,16 @@ final class TransmissionStore {
         case .onAir, .tuning: break
         default: return
         }
+        // A paused programme stays paused: only Play starts it again, never a sign-in.
+        if player.state == .paused { return }
         let channel = channelNumber
         stop()
-        Task { await tune(channel: channel) }
+        // A Stop, a Pause or another channel between now and the task's turn calls the retune off.
+        let stopped = generation
+        Task { [weak self] in
+            guard let self, self.generation == stopped else { return }
+            await self.tune(channel: channel)
+        }
     }
 
     // MARK: - What the schedule says
@@ -118,6 +125,13 @@ final class TransmissionStore {
 
     var programmeCount: Int? {
         programming?.programme_order.count
+    }
+
+    /// Whole hours of programming the station clock plays on its own, from every programme's
+    /// measured length (owner, 2026-11-19: "total automatic hours of programming"). The website's
+    /// landing page reads the same sum out of transmission-summary.json.
+    var programmeHours: Int? {
+        programming.map { Int($0.programmes.values.reduce(0) { $0 + ($1.seconds ?? 0) } / 3600) }
     }
 
     /// What the clock puts on a channel at a moment. Nil when nothing is on it, or no schedule is held.
@@ -441,11 +455,18 @@ final class TransmissionStore {
         return url
     }
 
+    /// The reverent rule for a house channel, read from the show's name, as the Apple TV app reads
+    /// it: a reverent programme plays nature visualizers only.
+    static func isReverent(_ air: OnAir, channel: Int) -> Bool {
+        let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
+        return Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
+    }
+
     /// Five vinyl transfers carry no title; the show name stands in for it.
     private func nowPlayingTitle(_ air: OnAir) -> String {
         let title = air.programme?.title ?? ""
         if !title.isEmpty { return title }
-        return air.show?.name ?? "Khajistan TV"
+        return air.show?.name ?? "Khajistan Transmission"
     }
 }
 

@@ -57,10 +57,29 @@ PY
 fi
 [ -n "$DEVICE" ] || { echo "No paired Apple TV. Pair it in Xcode > Window > Devices and Simulators." >&2; exit 1; }
 
+# One TV, many branches: an install replaces whatever was there. This refuses a build that does not
+# contain the last build installed, so a branch cut from main cannot take features off the TV
+# (2026-11-27: three installs in six hours each removed the nineteen pull requests of the one before).
+# The record is one file on this Mac, outside every checkout. To go back on purpose: KJ_TV_ALLOW_OLDER=1.
+RECORD="${KJ_TV_RECORD:-$HOME/.kj-tv-installed}"
+HEAD_SHA=$(git -C "$ROOT" rev-parse HEAD)
+[ -z "$(git -C "$ROOT" status --porcelain -- .)" ] || { echo "Uncommitted changes under tvos/. Commit first: the record names a commit." >&2; exit 1; }
+if [ -s "$RECORD" ] && [ "${KJ_TV_ALLOW_OLDER:-0}" != 1 ]; then
+  LAST=$(cut -d' ' -f1 "$RECORD")
+  if ! git -C "$ROOT" merge-base --is-ancestor "$LAST" "$HEAD_SHA" 2>/dev/null; then
+    echo "REFUSED: this build ($(git -C "$ROOT" rev-parse --short HEAD)) does not contain the build on the Apple TV:" >&2
+    echo "  $(cat "$RECORD")" >&2
+    echo "Merge that commit into this branch first (git merge $LAST), then install." >&2
+    exit 1
+  fi
+fi
+
 # The store's four sections (Receiver, Transmission, Screening Room, Account) unless KJ_FULL=1:
 # the owner's Apple TV carries what the store build carries (owner, 2026-11-04).
 CONDITIONS='$(inherited) KJ_APP_STORE'
 [ "${KJ_FULL:-0}" = 1 ] && CONDITIONS='$(inherited)'
+# KJ_FRIENDS=1: the store build plus Pics/Vids, as the Friends TestFlight build (owner, 2026-11-19).
+[ "${KJ_FRIENDS:-0}" = 1 ] && [ "${KJ_FULL:-0}" != 1 ] && CONDITIONS="$CONDITIONS KJ_FRIENDS"
 echo "Team $TEAM, Apple TV $DEVICE, conditions: $CONDITIONS"
 xcodebuild -project "$ROOT/KhajistanTV.xcodeproj" -scheme KhajistanTV -configuration Release \
   -destination "platform=tvOS,id=$DEVICE" -derivedDataPath "$WORK/DerivedData" \
@@ -68,5 +87,6 @@ xcodebuild -project "$ROOT/KhajistanTV.xcodeproj" -scheme KhajistanTV -configura
   SWIFT_ACTIVE_COMPILATION_CONDITIONS="$CONDITIONS" build
 APP="$WORK/DerivedData/Build/Products/Release-appletvos/KhajistanTV.app"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
+echo "$HEAD_SHA $(git -C "$ROOT" rev-parse --abbrev-ref HEAD) $(date '+%Y-%m-%d %H:%M')" > "$RECORD"
 xcrun devicectl device process launch --device "$DEVICE" com.khajistan.tv
 echo "Khajistan is on the Apple TV."

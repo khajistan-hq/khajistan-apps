@@ -29,6 +29,8 @@ final class AuthStore {
     }
     private(set) var previewPassword: String?
     @ObservationIgnored var onPreviewPasswordChange: (() -> Void)?
+    /// Called whenever a session ends: Sign out, or a refresh the server refused.
+    @ObservationIgnored var onSessionEnd: (() -> Void)?
 
     private let urlSession: URLSession
 
@@ -129,22 +131,34 @@ final class AuthStore {
         await lookUpFactor(fresh)
     }
 
-    /// Signs out here first, then tells the server. A failed request changes nothing for the viewer.
+    /// Signs out here first, then tells the server in the background. A failed request changes
+    /// nothing for the viewer. An expired token is refreshed first: the server refuses a logout with an expired token, and
+    /// the session would stay alive there. The refreshed session is never kept.
     /// The preview password goes too: an Apple TV is shared, so the next viewer starts with nothing
     /// saved (owner, 2026-11-14). A refused refresh keeps it; only a chosen sign-out clears it.
     func signOut() async {
-        let token = session?.accessToken
+        let current = session
         clearSession()
         clearPreviewPassword()
-        guard let token else { return }
-        _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
+        guard let current else { return }
+        let urlSession = urlSession
+        Task {
+            var token = current.accessToken
+            if current.isExpired(at: Date()),
+               let (data, response) = try? await urlSession.data(for: AuthAPI.refreshRequest(refreshToken: current.refreshToken)),
+               (response as? HTTPURLResponse)?.statusCode == 200,
+               let fresh = try? AuthAPI.session(from: data, now: Date()) {
+                token = fresh.accessToken
+            }
+            _ = try? await urlSession.data(for: AuthAPI.logoutRequest(accessToken: token))
+        }
     }
 
     /// A token that is good now: the stored one, or a refreshed one. When the refresh fails
     /// the session is dropped, because a refresh token is not worth keeping once refused.
     func validAccessToken() async throws -> String {
         guard let current = session else {
-            throw AuthError.server("Sign in to watch Khajistan TV.")
+            throw AuthError.server("Sign in to watch Khajistan Transmission.")
         }
         if !current.isExpired(at: Date()) { return current.accessToken }
         // One refresh at a time: every caller waits on the same request. Parallel refreshes sent
@@ -217,5 +231,6 @@ final class AuthStore {
         session = nil
         pendingFactorId = nil
         Keychain.delete(Account.session)
+        onSessionEnd?()
     }
 }

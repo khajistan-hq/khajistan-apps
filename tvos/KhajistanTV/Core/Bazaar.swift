@@ -187,12 +187,17 @@ enum Bazaar {
 // MARK: - The shop's Storefront API
 
 /// A variant as the Storefront API answers for it: its id, its options' title, whether it can be
-/// bought now, and its price.
+/// bought now, its price, and its own picture when the shop links one (a frame or colour mockup).
 struct StorefrontVariant: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let availableForSale: Bool
     let price: StorefrontMoney
+    var image: StorefrontImage? = nil
+}
+
+struct StorefrontImage: Decodable, Hashable, Sendable {
+    let url: URL
 }
 
 struct StorefrontMoney: Decodable, Hashable, Sendable {
@@ -228,7 +233,7 @@ enum ShopStorefront {
     static func productRequest(handle: String) -> URLRequest {
         request(query: """
         query($h:String!){product(handle:$h){title descriptionHtml images(first:12){nodes{url}}\
-         variants(first:50){nodes{id title availableForSale price{amount currencyCode}}}}}
+         variants(first:50){nodes{id title availableForSale price{amount currencyCode} image{url}}}}}
         """, variables: ["h": handle])
     }
 

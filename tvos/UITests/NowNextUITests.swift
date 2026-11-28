@@ -15,23 +15,26 @@ final class NowNextUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
     }
 
-    private func open(channel: Int, skin: String) -> XCUIApplication {
+    private func open(channel: Int, skin: String, now: String = "2026-11-08T12:10:00+05:00") -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", now]
         kjLaunch(app)
         let page = app.staticTexts["transmissionState"]
         XCTAssertTrue(page.waitForExistence(timeout: 30))
-        // The cards sit in a lazy row: the later ones exist once the remote walks to them.
+        // The guide's rows sit in a lazy list: the later ones exist once the remote walks to them.
         let first = app.buttons["transmission-channel-1"]
         XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
         XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        for _ in 1..<channel {
-            XCUIRemote.shared.press(.right)
-            kjPause(0.4)
-        }
+        // Each Down waits for focus to move: a fixed 0.4 s pause lost presses on the way to
+        // channels 14 and 15 (simulator, 2026-11-28), and the walk stopped short.
         let card = app.buttons["transmission-channel-\(channel)"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10) && card.hasFocus, "focus walks right to channel \(channel)")
+        var trail: [String] = []
+        for _ in 0..<(channel + 15) where !(card.exists && card.hasFocus) {
+            kjPress(.down, app: app)
+            trail.append(kjFocusKey(app).components(separatedBy: "|").first ?? "")
+        }
+        XCTAssertTrue(card.exists && card.hasFocus, "focus walks down to channel \(channel): \(trail)")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         return app
@@ -39,10 +42,11 @@ final class NowNextUITests: XCTestCase {
 
     private func check(channel: Int, name: String, titles: [String], skin: String) {
         let app = open(channel: channel, skin: skin)
-        // The sign-on pigeon flies first; then Select wakes the strip, which hides itself after
-        // 2.6 s (OverlayTiming), so the checks and the photograph come straight after the press.
+        // The sign-on pigeon flies first; then Up wakes the strip and lights its first control
+        // (a click is the next channel since 2026-11-28), so the checks and the photograph come
+        // straight after the press.
         kjPause(12)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)
         kjPause(0.8)
         kjScreenshot("now-next-c\(channel)-\(skin)", app: app)
         let channelLabel = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Channel \(channel) \u{00B7} \(name)")).firstMatch
@@ -60,6 +64,66 @@ final class NowNextUITests: XCTestCase {
         let next = app.descendants(matching: .any).matching(identifier: "upNext").firstMatch
         XCTAssertTrue(next.exists && app.frame.intersects(next.frame), "Up next is on the strip")
         if let shown { XCTAssertFalse(next.label.contains(shown), "Up next repeats the headline: \(next.label)") }
+    }
+
+    /// A Persian title carries its Roman form on a line of its own, on the strip and in the guide
+    /// (owner, 2026-11-17: "name of film should also be in roman"). Fixture: a real Channel 1
+    /// record (programming-2026-11.json, tv-liked-yt--6jom-bc-ga) and an English-only channel 2.
+    func testPersianTitleCarriesItsRomanForm() {
+        let app = XCUIApplication()
+        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-roman-title.json").path
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-04T12:00:00+05:00"]
+        kjLaunch(app)
+        let first = app.buttons["transmission-channel-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
+        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
+        kjPause(12)
+        XCUIRemote.shared.press(.up)   // wakes the strip
+        kjPause(0.8)
+        kjScreenshot("roman-title-strip-grove", app: app)
+        let name = app.staticTexts.matching(identifier: "stripName").firstMatch
+        XCTAssertTrue(name.exists, "the strip carries the name")
+        XCTAssertTrue(name.label.contains("اول هیکل"), name.label)
+        let latin = app.staticTexts.matching(identifier: "stripSecondName").firstMatch
+        XCTAssertTrue(latin.exists && app.frame.intersects(latin.frame), "the Roman form is on the strip")
+        XCTAssertEqual(latin.label, "Aval Heykal, with Naser Malek-Motiei")
+        XCTAssertGreaterThan(latin.frame.minY, name.frame.minY, "it sits under the Persian name")
+
+        // The guide: Down opens it; channel 1's line carries both names. Up above lit a control
+        // when the strip has one, and the first Down then only lets go of it.
+        kjPause(4)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        for _ in 0..<2 where !guide.exists {
+            XCUIRemote.shared.press(.down)
+            _ = guide.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(guide.exists, "Down opens the guide")
+        kjPause(0.8)
+        kjScreenshot("roman-title-guide-grove", app: app)
+        // Inside the guide, one line carrying both names: the faded strip's own Roman line cannot pass this.
+        let pair = guide.descendants(matching: .staticText)
+            .containing(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "اول هیکل", "Aval Heykal")).firstMatch
+        XCTAssertTrue(pair.exists, "the guide's line for channel 1 carries both names")
+
+        // Negative: an English-only programme has no second line.
+        XCUIRemote.shared.press(.menu)
+        kjPause(1)
+        XCUIRemote.shared.press(.right)   // the next channel, 2
+        kjPause(12)
+        XCUIRemote.shared.press(.up)      // wakes the strip
+        kjPause(0.8)
+        XCTAssertEqual(app.descendants(matching: .any)["transmissionChannel"].label, "2", "Right reaches channel 2")
+        let english = app.staticTexts.matching(identifier: "stripName").firstMatch
+        XCTAssertTrue(english.exists && english.label.contains("Test Programme 2"), "channel 2's strip is up: \(english.label)")
+        XCTAssertFalse(app.staticTexts.matching(identifier: "stripSecondName").firstMatch.exists, "no Roman line under an English name")
+        // The year the record carries is on the detail line (owner, 2026-11-15: country, then year).
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "1965")).firstMatch.exists,
+                      "the strip shows the programme's year")
+        kjScreenshot("roman-title-english-no-second-line", app: app)
     }
 
     func testMehfilNamesTheChannelAndTheProgramme() {
@@ -81,40 +145,315 @@ final class NowNextUITests: XCTestCase {
               titles: ["Kessar's Birthday", "Kotmoman 01", "Kotmoman 02", "Kotmoman 03"], skin: "smut")
     }
 
-    /// The guide on Transmission rises from the bottom, as the Receiver's does (owner, 2026-11-15:
-    /// "guide not showing from bottom up in transmission"): left on the bare picture opens it over
-    /// the lower part of the screen with the tuned channel lit, down lights the next, Select tunes it.
-    func testGuideRisesFromTheBottomAndTunes() {
+    private func any(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.descendants(matching: .any)[id] }
+
+    /// The lit programme block on a channel's row, if one is lit.
+    private func litBlock(_ app: XCUIApplication, channel: Int) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch\(channel)-' AND selected == true")).firstMatch
+    }
+
+    /// Right and Left change channel while watching, and never open the guide (the players'
+    /// remote map, owner 2026-11-28). This test proved the 2026-11-24 rule it replaces, that Up
+    /// and Down presses change channel; Down now opens the guide and Up lights the controls.
+    func testLeftAndRightPressesChangeChannel() {
+        let app = open(channel: 14, skin: "day")
+        kjPause(12)
+        let tuned = any(app, "transmissionChannel")
+        XCTAssertEqual(tuned.label, "14")
+        XCUIRemote.shared.press(.right)
+        let next = NSPredicate { _, _ in tuned.exists && tuned.label == "15" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: next, object: nil)], timeout: 30), .completed,
+                       "a Right press tunes the next channel")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "a Right press does not open the guide")
+        kjPause(6)
+        XCUIRemote.shared.press(.left)
+        let before = NSPredicate { _, _ in tuned.exists && tuned.label == "14" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: before, object: nil)], timeout: 30), .completed,
+                       "a Left press tunes the channel before")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "a Left press does not open the guide")
+        // Up lights the controls: no channel change and no guide.
+        kjPause(6)
+        XCUIRemote.shared.press(.up)
+        kjPause(3)
+        XCTAssertEqual(tuned.label, "14", "an Up press changes no channel")
+        XCTAssertFalse(any(app, "transmissionGuide").exists, "an Up press does not open the guide")
+    }
+
+    /// The guide is the whole screen, with the picture in a small window at top left (owner,
+    /// 2026-11-24: "Full screen with smaller video icon"). Down on the picture opens it. Left from the programme on now lights
+    /// the channel's own cell, whose description reads beside the picture; Select there tunes the
+    /// window and keeps the guide ("show description of a channel on click"); Select on the
+    /// programme on now closes it.
+    func testGuideIsFullScreenWithThePictureWindow() {
         let app = open(channel: 5, skin: "day")
         kjPause(12)
-        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        let tuned = any(app, "transmissionChannel")
         XCTAssertEqual(tuned.label, "5")
-        XCUIRemote.shared.press(.left)
-        let guide = app.descendants(matching: .any)["transmissionGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "left on the picture opens the guide")
-        kjPause(0.6)
+        XCUIRemote.shared.press(.down)
+        let guide = any(app, "transmissionGuide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the picture opens the guide")
+        kjPause(0.8)
         kjScreenshot("transmission-guide-day", app: app)
-        XCTAssertGreaterThan(guide.frame.minY, app.frame.height / 3, "the guide sits over the bottom of the picture")
-        XCTAssertEqual(guide.frame.maxY, app.frame.maxY, accuracy: 2, "the guide reaches the foot of the screen")
-        XCTAssertTrue(app.descendants(matching: .any)["guide-ch5"].isSelected, "the tuned channel is lit")
+        XCTAssertEqual(guide.frame.minY, app.frame.minY, accuracy: 2, "the guide starts at the top of the screen")
+        XCTAssertEqual(guide.frame.height, app.frame.height, accuracy: 2, "the guide is the whole screen high")
+        XCTAssertEqual(guide.frame.width, app.frame.width, accuracy: 2, "the guide is the whole screen wide")
+        let window = any(app, "guidePictureWindow")
+        XCTAssertTrue(window.exists, "the picture has a window in the guide")
+        XCTAssertLessThan(window.frame.width, app.frame.width * 0.45, "the picture window is small: \(window.frame)")
+        XCTAssertLessThan(window.frame.maxY, app.frame.height * 0.45, "the picture window is in the top band: \(window.frame)")
+        XCTAssertLessThan(window.frame.maxX, app.frame.width * 0.5, "the picture window is at the left: \(window.frame)")
+        XCTAssertGreaterThan(window.frame.width, app.frame.width * 0.25, "the picture window is large enough to watch: \(window.frame)")
+        XCTAssertTrue(litBlock(app, channel: 5).exists, "the programme on now on the tuned channel is lit")
+        XCTAssertTrue(any(app, "guideChannelLine").label.contains("Qawwali"), "the lit channel's own line reads beside the picture")
+        // Left: the channel's own cell, and the panel names the channel.
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertTrue(any(app, "guide-ch5").isSelected, "Left from the programme on now lights the channel's cell")
+        XCTAssertFalse(litBlock(app, channel: 5).exists, "no programme is lit while the channel's cell is")
+        XCTAssertTrue(any(app, "guideHeadline").label.hasPrefix("Channel 5 \u{00B7} Mehfil"), "the panel names the lit channel: \(any(app, "guideHeadline").label)")
+        kjScreenshot("transmission-guide-channel-cell", app: app)
         // Channel 8 is the next one the fixture programmes; 6 and 7 are off air in it.
         for _ in 0..<3 { XCUIRemote.shared.press(.down); kjPause(0.4) }
-        XCTAssertTrue(app.descendants(matching: .any)["guide-ch8"].isSelected, "three downs light channel 8")
+        XCTAssertTrue(any(app, "guide-ch8").isSelected, "three downs light channel 8's cell")
+        XCTAssertTrue(any(app, "guideChannelLine").label.contains("NIRT"), "the panel describes channel 8: \(any(app, "guideChannelLine").label)")
+        XCTAssertEqual(tuned.label, "5", "lighting a channel does not tune it")
+        // Select on the channel's cell: the window tunes, the guide stays.
         XCUIRemote.shared.press(.select)
-        XCTAssertTrue(waitUntilGone(guide, 5), "Select closes the guide")
         let moved = NSPredicate { _, _ in tuned.exists && tuned.label == "8" }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 30), .completed,
-                       "Select tunes the lit channel")
-        // Back on the bare picture: right opens the guide too, Back closes it.
-        kjPause(8)   // the strip hides 2.6 s after the tune, so right meets the bare picture
+                       "Select on a channel's cell tunes the window to it")
+        kjPause(1.5)
+        XCTAssertTrue(guide.exists, "Select on a channel's cell keeps the guide open")
+        XCTAssertTrue(window.exists && window.frame.width < app.frame.width * 0.45, "the picture stays in its window")
+        // Channel 8 is "National Iranian Radio and Television", tuned and on air: its name reads
+        // whole beside LIVE, never cut (Fable, round 9).
+        let longName = any(app, "guide-ch8")
+        XCTAssertTrue(longName.label.contains("National Iranian Radio and Television") && longName.label.contains("Live"),
+                      "channel 8 is the long name, tuned: \(longName.label)")
+        // The combined cell joins its children's values ("cut, cut"), so look for the word.
+        XCTAssertFalse((longName.value as? String ?? "").contains("cut"), "channel 8's name is cut: \(String(describing: longName.value))")
+        kjScreenshot("guide-long-name-live", app: app)
+        // Right: the programme on now. Select there closes the guide on the channel tuned.
         XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the bare picture opens the guide")
+        kjPause(0.6)
+        XCTAssertTrue(litBlock(app, channel: 8).exists, "Right from the channel's cell lights the programme on now")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Select on the programme on now closes the guide")
+        XCTAssertEqual(tuned.label, "8")
+        XCTAssertFalse(window.exists, "the picture is full screen again")
+        // Back on the bare picture: Down opens the guide again, Back closes it.
+        kjPause(8)   // the strip hides 2.6 s after the tune, so Down meets the bare picture
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+        XCTAssertEqual(tuned.label, "8", "Back keeps the channel the window was showing")
+    }
+
+    /// The guide is a time grid (owner, 2026-11-17: "it needs to be showing schedule on an hourly
+    /// basis"): each channel's programmes as blocks along its row, the one on now lit. Right lights
+    /// the next programme, Left goes back, never before now. Select on a later programme, or on a
+    /// stretch off air, tunes nothing. The guide opens over the off-air card too.
+    func testGuideIsATimeGridAndOpensOffAir() {
+        let app = open(channel: 5, skin: "day")
+        kjPause(12)
+        XCUIRemote.shared.press(.down)
+        let guide = any(app, "transmissionGuide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the picture opens the guide")
+        kjPause(0.8)
+        kjScreenshot("guide-grid-open", app: app)
+        let lit = litBlock(app, channel: 5)
+        XCTAssertTrue(lit.exists, "a programme on channel 5 is lit")
+        let first = lit.label
+        // The lit block is the programme on air (12:10 PKT in the fixture), and the panel beside
+        // the picture reads the same title in full.
+        let headline = any(app, "guideHeadline")
+        XCTAssertTrue(headline.exists, "the guide reads the lit programme beside the picture")
+        let title = String(first.split(separator: ",").first ?? "")
+        XCTAssertFalse(title.isEmpty)
+        XCTAssertTrue(headline.label.hasPrefix(title), "the panel names the lit block: \(headline.label) / \(first)")
+        XCTAssertTrue(headline.label.contains("Channel 5"), "the panel's facts carry the channel number: \(headline.label)")
+        XCTAssertTrue(first.contains("12:"), "the block on air at 12:10 has a 12 o'clock time: \(first)")
+        let blocks = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch5-'"))
+        XCTAssertGreaterThan(blocks.count, 1, "channel 5's row carries more than the programme on now")
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(lit.exists, "a programme stays lit after Right")
+        XCTAssertNotEqual(lit.label, first, "Right lights the next programme")
+        kjScreenshot("guide-grid-right", app: app)
+        // Select on a later programme tunes nothing and keeps the guide.
+        let tuned = any(app, "transmissionChannel")
+        XCUIRemote.shared.press(.select)
+        kjPause(1.5)
+        XCTAssertTrue(guide.exists && tuned.label == "5", "Select on a later programme changes nothing")
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertEqual(lit.label, first, "Left comes back to the programme on now")
+        // Channel 6 is off air in the fixture: Down lights its stretch, and Select there does nothing.
+        XCUIRemote.shared.press(.down)
+        kjPause(0.6)
+        let dark = litBlock(app, channel: 6)
+        XCTAssertTrue(dark.exists && dark.label.hasPrefix("Off air"), "channel 6's lit block is off air: \(dark.label)")
+        kjScreenshot("guide-grid-off-air-row", app: app)
+        XCUIRemote.shared.press(.select)
+        kjPause(1.5)
+        XCTAssertTrue(guide.exists && tuned.exists && tuned.label == "5", "Select on a stretch off air changes nothing")
+        // Its channel cell tunes it in the window; Back then leaves the viewer on its off-air card.
+        XCUIRemote.shared.press(.left)
+        kjPause(0.6)
+        XCTAssertTrue(any(app, "guide-ch6").isSelected, "Left lights channel 6's cell")
+        XCUIRemote.shared.press(.select)
+        kjPause(3)
+        XCTAssertTrue(guide.exists, "the guide stays while the window tunes an off-air channel")
+        kjScreenshot("guide-window-off-air", app: app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+        kjPause(8)
+        // The off-air card is up first: Down from a screen still tuning would open the guide too.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch.waitForExistence(timeout: 15),
+                      "channel 6 shows its off-air card")
+        // The off-air card: Down still opens the guide, so the viewer can go somewhere on.
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the off-air card opens the guide")
+        kjPause(0.8)
+        kjScreenshot("guide-grid-over-off-air", app: app)
+        XCTAssertTrue(litBlock(app, channel: 6).exists, "the guide opens lit on the channel tuned, off air")
+        XCUIRemote.shared.press(.up)
+        kjPause(0.6)
+        XCTAssertTrue(litBlock(app, channel: 5).exists, "Up lights channel 5 again")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
+    }
+
+    /// The guide in each skin, for the eye: the tokens do the work, so each is photographed with a
+    /// programme lit and with a channel's cell lit. On its own fixture, the lineup of 24 November
+    /// 2026 at 22:10 PKT with all 31 channels on air (scripts/guide-fixture.py cut it from the
+    /// month's file), and with the tests' own video playing as the programme
+    /// (`-kjtransmissionpicture`), so the picture in the window is a moving one.
+    func testGuideInEverySkin() {
+        let current = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/programming-2026-11-24.json").path
+        for skin in ["day", "grove", "smut"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", current,
+                                   "-kjnow", "2026-11-24T22:10:00+05:00", "-kjtransmissionpicture", "YES"]
+            kjLaunch(app)
+            let first = app.buttons["transmission-channel-1"]
+            XCTAssertTrue(first.waitForExistence(timeout: 30), "\(skin): channel 1 has a card")
+            XCTAssertTrue(kjFocus(first, app: app), "\(skin): channel 1's card takes focus")
+            XCUIRemote.shared.press(.select)
+            XCTAssertTrue(any(app, "transmissionChannel").waitForExistence(timeout: 30), "\(skin): channel 1 is on air")
+            kjPause(12)
+            XCUIRemote.shared.press(.down)
+            XCTAssertTrue(any(app, "transmissionGuide").waitForExistence(timeout: 5), "\(skin): Down opens the guide")
+            kjPause(1.5)
+            kjScreenshot("tv-guide-\(skin)-programme", app: app)
+            let window = any(app, "guidePictureWindow")
+            XCTAssertTrue(window.exists, "\(skin): the picture window")
+            // One window, where the guide keeps its place: inside the top band, at the left margin.
+            XCTAssertGreaterThanOrEqual(window.frame.minY, 0, "\(skin): nothing of the picture is above the screen: \(window.frame)")
+            XCTAssertLessThan(window.frame.maxY, app.frame.height * 0.45, "\(skin): the picture is in the top band: \(window.frame)")
+            XCTAssertTrue(litBlock(app, channel: 1).exists, "\(skin): the programme on now is lit")
+            XCUIRemote.shared.press(.left)
+            kjPause(0.8)
+            kjScreenshot("tv-guide-\(skin)-channel", app: app)
+            XCTAssertTrue(any(app, "guide-ch1").isSelected, "\(skin): the channel's cell is lit")
+            app.terminate()
+        }
+    }
+
+    /// Opened on the first channel, the guide holds its rows against the top of the list, and every
+    /// row it draws has its schedule (Fable, round 1: the fifth row came up empty). Channel 14, Jordan
+    /// Television, is strips of short items in the fixture: a block per strip named for the show,
+    /// not a row of slivers.
+    func testGuideOnTheFirstChannelFillsEveryRow() {
+        // Channel 1 is off air in the fixture, and the off-air card carries no channel number, so
+        // this opens it by hand rather than through open(channel:).
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
+                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+        kjLaunch(app)
+        let first = app.buttons["transmission-channel-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
+        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
+        XCUIRemote.shared.press(.select)
+        let offAir = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch
+        XCTAssertTrue(offAir.waitForExistence(timeout: 30), "channel 1 opens on its off-air card")
+        kjPause(8)
+        XCUIRemote.shared.press(.down)
+        let guide = any(app, "transmissionGuide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down opens the guide on channel 1, off air in the fixture")
+        kjPause(0.8)
+        kjScreenshot("guide-grid-first-channel", app: app)
+        for number in 1...7 {
+            XCTAssertTrue(any(app, "guide-ch\(number)-0").exists, "channel \(number)'s row has its schedule")
+        }
+        // Up from the first channel goes round to the last; its rows are drawn too.
+        XCUIRemote.shared.press(.up)
+        kjPause(0.8)
+        XCTAssertTrue(litBlock(app, channel: 15).exists, "Up from channel 1 lights the last channel")
+        for number in 9...15 {
+            XCTAssertTrue(any(app, "guide-ch\(number)-0").exists, "channel \(number)'s row has its schedule")
+        }
+        // Jordan Television, in view beside the last channel: a strip of short items, in runs named
+        // for its show, each saying how many it holds.
+        let jordan = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'guide-ch14-'"))
+        let names = jordan.allElementsBoundByIndex.map(\.label)
+        kjScreenshot("guide-grid-short-items", app: app)
+        print("KJGUIDE jordan \(names)")
+        XCTAssertLessThanOrEqual(names.count, 8, "Jordan Television's short items are drawn in runs, not one block each: \(names.count)")
+        XCTAssertTrue(names.contains { $0.contains(" programmes") || $0.contains(" songs") }, "a run says how many it holds: \(names)")
+        XCUIRemote.shared.press(.menu)
     }
 
     private func waitUntilGone(_ element: XCUIElement, _ timeout: TimeInterval) -> Bool {
         let gone = NSPredicate(format: "exists == false")
         return XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: gone, object: element)], timeout: timeout) == .completed
+    }
+
+    /// The channel number pops up in the top corner when the channel changes, as on a 1980s set,
+    /// and goes again by itself (owner, 2026-11-15).
+    func testChannelNumberPopsUpOnAChange() {
+        for skin in ["day", "grove", "smut"] {
+            let app = open(channel: 5, skin: skin)
+            let osd = app.descendants(matching: .any)["channelNumberOSD"]
+            XCTAssertTrue(osd.waitForExistence(timeout: 30), "the number shows once the channel is on (\(skin))")
+            XCTAssertEqual(osd.label, "Channel 5")
+            XCTAssertTrue(osd.frame.minY < app.frame.height * 0.25 && osd.frame.minX > app.frame.width * 0.5, "top right: \(osd.frame)")
+            kjScreenshot("channel-number-c5-\(skin)", app: app)
+            let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !osd.exists }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 6), .completed, "and goes by itself")
+            XCUIRemote.shared.press(.right)
+            let next = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'channelNumberOSD' AND label != 'Channel 5'")).firstMatch
+            XCTAssertTrue(next.waitForExistence(timeout: 30), "Right, the next channel, shows the next number")
+            kjScreenshot("channel-number-next-\(skin)", app: app)
+            app.terminate()
+        }
+    }
+
+    /// No number over a sound-only programme, whose title sits in that corner; off air it shows.
+    /// The fixture's channel 5 plays folk-tv, a sound-only tape, at 13:30; channel 6 has no
+    /// strips, so it is off air. The off-air number is the check that the number works here at all,
+    /// and the change back to 5 checks the sound-only rule on that same path.
+    func testNoChannelNumberOverSoundOnlyButOffAir() {
+        let app = open(channel: 5, skin: "day", now: "2026-11-08T13:40:00+05:00")
+        let osd = app.descendants(matching: .any)["channelNumberOSD"]
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "the sound-only programme is on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 8), "no number over a sound-only programme")
+        XCUIRemote.shared.press(.right)   // the next channel, 6
+        XCTAssertTrue(app.staticTexts["Off air"].waitForExistence(timeout: 30), "channel 6 is off air")
+        XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
+        XCTAssertEqual(osd.label, "Channel 6")
+        kjScreenshot("channel-number-off-air", app: app)
+        // Back to 5 by a channel change, the path that just showed 6: no sign-on cover or first
+        // flight is left to hold the number, so its absence here is the sound-only rule.
+        XCUIRemote.shared.press(.left)   // the channel before, 5
+        let tuned = app.descendants(matching: .any)["transmissionChannel"]
+        let backOnFive = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in tuned.exists && tuned.label == "5" }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [backOnFive], timeout: 30), .completed, "channel 5 is tuned again")
+        XCTAssertTrue(state.waitForExistence(timeout: 30), "channel 5 is back on")
+        XCTAssertFalse(osd.waitForExistence(timeout: 12), "no number over a sound-only programme after a change")
     }
 }

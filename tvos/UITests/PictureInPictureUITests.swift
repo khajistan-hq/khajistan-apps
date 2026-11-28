@@ -1,6 +1,6 @@
 import XCTest
 
-/// Picture in picture on the Receiver. A television channel opens; Select lights CC and Right
+/// Picture in picture on the Receiver. A television channel opens; Up lights CC and Right
 /// walks the strip to PiP; Select puts the picture in a corner and the player screen closes on
 /// the region page. Opening another channel closes the window (one signal at a time).
 /// Only a real Apple TV runs it, and there with `TEST_RUNNER_KJ_LIVE_RECEIVER=1`: the local test
@@ -37,8 +37,8 @@ final class PictureInPictureUITests: XCTestCase {
         // the strip leaves PiP out; only a real Apple TV can run the rest.
         guard pipControl.exists else { throw XCTSkip("this device has no picture in picture") }
         kjPause(3)
-        // Select wakes the strip and lights CC; PiP sits at the end of it.
-        XCUIRemote.shared.press(.select)
+        // Up wakes the strip and lights CC; PiP sits at the end of it.
+        XCUIRemote.shared.press(.up)
         kjPause(0.6)
         for _ in 0..<5 where !pipControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(pipControl.isSelected, "Right walks the strip to PiP, after CC, Like and Guide")
@@ -104,7 +104,7 @@ final class PictureInPictureUITests: XCTestCase {
         let pipControl = app.buttons["pipControl"]
         guard pipControl.exists else { throw XCTSkip("this device has no picture in picture") }
         kjPause(3)
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)   // lights CC
         kjPause(0.6)
         for _ in 0..<5 where !pipControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
         XCTAssertTrue(pipControl.isSelected, "Right walks the strip to PiP")

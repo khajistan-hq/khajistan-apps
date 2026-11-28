@@ -102,6 +102,11 @@ enum SupabaseRoute {
     /// burst of failures starts.
     nonisolated(unsafe) static var decider: @Sendable () async -> Path = { await decide() }
 
+    /// Which asking a decide() runs for. Only the newest may write the route: an older one that
+    /// finishes late (a probe held past the share window) would put back the answer it replaced.
+    @TaskLocal static var asking = 0
+    nonisolated(unsafe) private static var newestAsking = 0
+
     /// Forgets the asking outright, for a test to start from a known state.
     static func forgetAsking() { lock.withLock { settling = nil; settlingStarted = .distantPast } }
 
@@ -110,7 +115,9 @@ enum SupabaseRoute {
     static func settle() async -> Path {
         let task: Task<Path, Never> = lock.withLock {
             if let settling { return settling }
-            let made = Task.detached(priority: .userInitiated) { await decider() }
+            newestAsking += 1
+            let token = newestAsking
+            let made = Task.detached(priority: .userInitiated) { await $asking.withValue(token) { await decider() } }
             settling = made
             settlingStarted = Date()
             return made
@@ -213,6 +220,48 @@ enum SupabaseRoute {
         url.host == host || url.host == directBase.host || (url.host == proxyBase.host && url.path.hasPrefix(proxyBase.path + "/"))
     }
 
+    /// The network failures a player is retuned once for: a request that ran out of time (-1001),
+    /// a host not reached (-1004), a connection that went away (-1005), no network (-1009), a TLS
+    /// handshake cut off (-1200). Never an answer that came back.
+    static let retunableCodes: Set<Int> = [NSURLErrorTimedOut, NSURLErrorCannotConnectToHost, NSURLErrorNetworkConnectionLost,
+                                           NSURLErrorNotConnectedToInternet, NSURLErrorSecureConnectionFailed]
+    /// A refusal in a player's error log: HTTP 401/403, and CoreMedia's names for them (-12937
+    /// authentication, -12660 forbidden). An account gate stays shut; it is never retuned.
+    static let refusalCodes: Set<Int> = [401, 403, -12937, -12660]
+    /// URL loading's own names for a sign-in that was asked for and not given: refusals too.
+    static let urlRefusalCodes: Set<Int> = [NSURLErrorUserAuthenticationRequired, NSURLErrorUserCancelledAuthentication]
+
+    /// How old the newest error-log entry may be and still say the failure now was the network.
+    static let logRecency: TimeInterval = 60
+
+    /// Whether a player that failed or stalled gets its one retune. `error` is the failure's own
+    /// (its underlying errors are read too); `logged` is the item's error log, newest last, and
+    /// `lastAge` the newest entry's age in seconds (nil when undated). A stall with nothing
+    /// logged is a carrier that stopped sending, which is the network too.
+    static func retunesPlayback(error: Error?, logged: [(domain: String, code: Int)], lastAge: TimeInterval? = nil,
+                                stalled: Bool) -> Bool {
+        if logged.contains(where: { refusalCodes.contains($0.code) }) { return false }
+        var chain: [NSError] = []
+        var next = error.map { $0 as NSError }
+        while let cause = next {
+            chain.append(cause)
+            next = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        // The whole chain is read for a refusal first: a network error wrapping one (-1005 over
+        // CoreMedia's -12660) is still an account gate, never retuned.
+        if chain.contains(where: { refusalCodes.contains($0.code) || ($0.domain == NSURLErrorDomain && urlRefusalCodes.contains($0.code)) }) {
+            return false
+        }
+        if chain.contains(where: { $0.domain == NSURLErrorDomain && retunableCodes.contains($0.code) }) { return true }
+        if let last = logged.last {
+            // A newest entry that is not the network says so, however old. One that is counts
+            // only while recent: a blip recovered from long ago earns a later failure nothing.
+            guard last.domain == NSURLErrorDomain, retunableCodes.contains(last.code) else { return false }
+            if (lastAge ?? 0) <= logRecency { return true }
+        }
+        return stalled
+    }
+
     /// Errors that mean the address could not be reached, as against an answer that came back.
     static func isUnreachable(_ error: Error) -> Bool {
         guard let code = (error as? URLError)?.code else { return false }
@@ -233,7 +282,13 @@ enum SupabaseRoute {
         // Direct wins whenever it answers: the proxy is the way round a blocked host, not a preference.
         let result: Path
         if await direct { result = .direct } else { result = await proxy ? .proxy : .unreachable }
-        lock.withLock { chosen = result; decidedAt = Date() }
+        let newest = lock.withLock { () -> Bool in
+            guard asking == newestAsking else { return false }
+            chosen = result
+            decidedAt = Date()
+            return true
+        }
+        guard newest else { return result }
         // Written on the main thread: a change to the defaults is announced on the thread that made
         // it, and the screens that watch them (and @AppStorage) must hear it there.
         if result != .unreachable { await MainActor.run { UserDefaults.standard.set(result.rawValue, forKey: key) } }

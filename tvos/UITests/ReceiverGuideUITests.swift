@@ -1,8 +1,9 @@
 import XCTest
 
-/// The Receiver's guide and radio's Now Playing, in each skin. A television channel opens; Right
-/// three times lights Guide on the strip (after CC and Like); Select opens the guide with LIVE on
-/// the channel playing; Down and Select tune the next row. Then Menu back to the region, and a radio
+/// The Receiver's guide and radio's Now Playing, in each skin. A television channel opens; Up
+/// lights CC and Right walks to Guide on the strip (after Like); Select opens the guide with LIVE
+/// on the channel playing; Down and Select tune the next row. On the picture Down opens the guide,
+/// and nothing else does (the players' remote map, 2026-11-28). Then Menu back to the region, and a radio
 /// station shows NOW PLAYING with its name.
 final class ReceiverGuideUITests: XCTestCase {
     override func setUpWithError() throws {
@@ -12,6 +13,58 @@ final class ReceiverGuideUITests: XCTestCase {
     func testDay() throws { try walk("day") }
     func testGrove() throws { try walk("grove") }
     func testSmut() throws { try walk("smut") }
+
+    /// A dead channel moves on by itself, an open guide holds that move, and Select on the row
+    /// already on screen closes the guide as Back does, so the move goes ahead (PR 58). Every
+    /// Indus television channel is made to fail (`-kjdeadchannels`, debug builds only).
+    func testSelectOnTheDeadChannelInTheGuideMovesOn() throws {
+        // The failures are injected for the recorded Indus ids; live lists carry other ids.
+        try XCTSkipIf(kjLiveMedia, "needs the recorded Indus list")
+        let shard = URL(fileURLWithPath: kjRecordedFixtures).appendingPathComponent("data/open-frequencies/regions/indus.json")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: shard)) as? [String: Any]
+        let dead = (root?["channels"] as? [[String: Any]] ?? [])
+            .filter { $0["mediaType"] as? String == "tv" }.compactMap { $0["id"] as? String }
+        XCTAssertFalse(dead.isEmpty, "the recorded Indus list has television")
+        let app = XCUIApplication()
+        app.launchArguments += ["-kjskin", "day", "-kjdeadchannels", dead.joined(separator: ",")]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
+        XCUIRemote.shared.press(.select)
+        let tv = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
+        XCTAssertTrue(tv.firstMatch.waitForExistence(timeout: 60))
+        kjPause(2)
+        let focusedChannel = tv.matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        for _ in 0..<8 where !focusedChannel.exists { XCUIRemote.shared.press(.down); kjPause(0.4) }
+        XCTAssertTrue(focusedChannel.exists, "the remote reaches a channel")
+        XCUIRemote.shared.press(.select)
+
+        let current = app.staticTexts["currentChannel"]
+        let state = app.staticTexts["playerState"]
+        XCTAssertTrue(current.waitForExistence(timeout: 15))
+        let start = current.label
+        XCTAssertTrue(dead.contains(start), "a television channel opened: \(start)")
+        let failed = NSPredicate { _, _ in !["", "Playing", "Paused"].contains(state.label) && !state.label.hasPrefix("Connecting") }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: failed, object: nil)], timeout: 20), .completed,
+                       "the dead channel fails")
+        // Within the 3 s before the move: Down on a failed picture opens the guide, which holds it.
+        XCUIRemote.shared.press(.down)
+        let guide = app.descendants(matching: .any)["receiverGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the failed picture opens the guide")
+        let live = app.descendants(matching: .any)["guide-\(start)"]
+        XCTAssertTrue(live.waitForExistence(timeout: 5) && live.isSelected, "the guide opens on the dead channel")
+        kjPause(5)
+        XCTAssertEqual(current.label, start, "no move while the guide is open")
+        kjScreenshot("dead-g1-guide-holds", app: app)
+        // Select on that same row: the guide closes and the move goes ahead.
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Select on the row on screen closes the guide")
+        let moved = NSPredicate { _, _ in current.label != start }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: moved, object: nil)], timeout: 20), .completed,
+                       "Select on the dead channel's row moves on, as Back does")
+        kjScreenshot("dead-g2-moved-on", app: app)
+    }
 
     /// A region with no channel of the medium says so in the guide, inside the rows' space, which
     /// keeps the height the last region's rows had. Dakhan has no television in the recorded list,
@@ -34,11 +87,11 @@ final class ReceiverGuideUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 15))
         try kjTuneUntilPlaying(app)
-        // Right on the bare picture opens the guide, once the strip has gone.
+        // Down on the bare picture opens the guide, once the strip has gone.
         XCTAssertTrue(app.descendants(matching: .any)["captionsControl"].waitForNonExistence(timeout: 15))
-        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.down)
         let guide = app.descendants(matching: .any)["receiverGuide"]
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         let region = app.staticTexts["guideRegion"]
         XCTAssertTrue(region.waitForExistence(timeout: 5))
         kjPause(1)
@@ -81,7 +134,7 @@ final class ReceiverGuideUITests: XCTestCase {
 
         let current = app.staticTexts["currentChannel"]
         XCTAssertTrue(current.waitForExistence(timeout: 15))
-        // A dead carrier puts its own control on the strip, and Right then falls short of Guide.
+        // A dead carrier's strip cannot be lit, and the walk then falls short of Guide.
         try kjTuneUntilPlaying(app)
         let start = current.label
         let guideControl = app.buttons["guideControl"]
@@ -92,11 +145,11 @@ final class ReceiverGuideUITests: XCTestCase {
         // The strip hides after 2.6 s idle, and the first press then only wakes it: on a busy
         // runner the third Right fell one short of Guide (CI 2026-10-29, Grove; locally, Smut).
         kjPause(3)   // the picture comes up first; presses during "Tuning" landed as the strip arrived
-        // Select lights the strip's first control (CC); right walks to Like, then Guide.
-        XCUIRemote.shared.press(.select)
+        // Up lights the strip's first control (CC); right walks to Like, then Guide.
+        XCUIRemote.shared.press(.up)
         kjPause(0.6)
         for _ in 0..<4 where !guideControl.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
-        XCTAssertTrue(guideControl.isSelected, "Select then right lights Guide, after CC and Like")
+        XCTAssertTrue(guideControl.isSelected, "Up then right lights Guide, after CC and Like")
         // Select on the lit Guide control opens the guide; Menu closes it and lets go of the control.
         XCUIRemote.shared.press(.select)
         let guide = app.descendants(matching: .any)["receiverGuide"]
@@ -105,21 +158,26 @@ final class ReceiverGuideUITests: XCTestCase {
         XCTAssertTrue(guide.waitForNonExistence(timeout: 5), "Menu closes the guide")
         kjPause(0.6)
         XCTAssertFalse(guideControl.isSelected, "closing the guide lets go of the control that opened it")
-        // With the strip up, right lights CC and never opens the guide (owner, 2026-11-07).
+        // Up lights CC and never opens the guide. Left on CC, the first control, stays on it
+        // (owner, 2026-11-07); Down lets go of it, and does not open the guide on that press.
         let captions = app.descendants(matching: .any)["captionsControl"]
-        XCUIRemote.shared.press(.right)
+        XCUIRemote.shared.press(.up)
         kjPause(0.6)
-        XCTAssertTrue(captions.isSelected, "Right on the strip lights CC")
-        XCTAssertFalse(guide.exists, "Right on the strip does not open the guide")
+        XCTAssertTrue(captions.isSelected, "Up lights CC")
+        XCTAssertFalse(guide.exists, "Up does not open the guide")
         XCUIRemote.shared.press(.left)
         kjPause(0.6)
-        XCUIRemote.shared.press(.left)
+        XCTAssertTrue(captions.isSelected, "Left on the first control stays on it")
+        XCTAssertFalse(guide.exists, "Left on CC does not open the guide")
+        XCTAssertEqual(current.label, start, "walking the strip changes no channel")
+        XCUIRemote.shared.press(.down)
         kjPause(0.6)
-        XCTAssertFalse(guide.exists, "Left past CC stops there")
-        // Right on the bare picture opens the guide (owner, 2026-11-04): wait for the strip to go.
+        XCTAssertFalse(captions.isSelected, "Down lets go of the lit control")
+        XCTAssertFalse(guide.exists, "the Down that lets go does not open the guide")
+        // Down on the bare picture opens the guide (2026-11-28): wait for the strip to go.
         XCTAssertTrue(captions.waitForNonExistence(timeout: 10), "the strip hides over a playing picture")
-        XCUIRemote.shared.press(.right)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Right on the bare picture opens the guide")
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide")
         // It rises from the bottom (owner, 2026-11-14): the panel sits low, reaches the bottom
         // edge and spans the screen, with the picture left in view above it.
         kjPause(0.6)
@@ -145,10 +203,9 @@ final class ReceiverGuideUITests: XCTestCase {
 
         // Right in the guide turns to the next region; Menu closes the guide and lets go of its
         // control, so the strip can hide again.
-        // With the strip up, left walks its controls; on the bare picture it opens the guide.
         XCTAssertTrue(captions.waitForNonExistence(timeout: 10), "the strip hides after the tune")
-        XCUIRemote.shared.press(.left)
-        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Left on the bare picture opens the guide")
+        XCUIRemote.shared.press(.down)
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down on the bare picture opens the guide again")
         let region = app.staticTexts["guideRegion"]
         XCTAssertTrue(region.waitForExistence(timeout: 5))
         let home = region.label
@@ -210,10 +267,75 @@ final class ReceiverGuideUITests: XCTestCase {
         kjPause(1)
         kjScreenshot("\(skin)-g5-radio-bar", app: app)
         let off = app.buttons["radioBarOff"]
-        XCTAssertTrue(kjFocus(off, app: app), "the remote reaches the bar's Off")
+        // Down into the bar first, then right along it. The region's lowest shelf (Films, under
+        // radio) can sit level with the bar, and kjFocus, steering by height, walked its posters
+        // to the right instead (CI 2026-11-19, run 44633692006).
+        let inBar = app.buttons.matching(NSPredicate(format: "hasFocus == true AND identifier BEGINSWITH 'radioBar'")).firstMatch
+        // Every card Down passes on the way must end above the bar: one that runs under it is
+        // where focus got stuck (2026-11-19: a focused film card under the full hero ran past it).
+        let card = app.buttons.matching(NSPredicate(format: "hasFocus == true AND NOT (identifier BEGINSWITH 'radioBar')")).firstMatch
+        var passedFilm = false
+        for _ in 0..<8 where !inBar.exists {
+            if card.exists {
+                if card.identifier.hasPrefix("film-") { passedFilm = true }
+                XCTAssertLessThanOrEqual(card.frame.maxY, bar.frame.minY, "\(card.identifier) ends above the bar")
+            }
+            XCUIRemote.shared.press(.down); kjPause(0.6)
+        }
+        // Indus's films come from the live On Demand list; without them this walk proves less.
+        if !passedFilm { print("KJGUIDE Down passed no film card: the region has no On Demand shelf today") }
+        let held = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        XCTAssertTrue(inBar.exists, "Down reaches the small player; focus held on "
+                      + (held.exists ? "\(held.identifier) at \(held.frame)" : "nothing") + ", bar at \(bar.frame)")
+        for _ in 0..<3 where !off.hasFocus { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(off.hasFocus, "the remote reaches the bar's Off")
         XCTAssertTrue(awakeIs("on"), "the station playing on in the small player still holds it awake")
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(bar.waitForNonExistence(timeout: 5), "Off turns the radio off and the bar goes")
         XCTAssertTrue(awakeIs("off"), "with nothing playing the Apple TV may sleep again")
+    }
+
+    /// A film opened from a shelf under the radio bar stops the radio, so the bar goes and the
+    /// shelf's cards grow back behind the player. Closing the film must find focus on it again
+    /// (2026-11-20: posters shrunk under the bar narrowed every card, the shelf slid sideways, and
+    /// focus was lost; Menu then left the region).
+    func testAFilmOpenedUnderTheRadioBarGetsFocusBack() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-kjskin", "day"]
+        kjLaunch(app)
+        let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
+        XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(kjFocusRegion(app, "indus"), "focus must reach indus in the region list")
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["shelf-radio"].waitForExistence(timeout: 60), "Indus has a radio shelf")
+        // The films are the site's live On Demand list: no shelf today, nothing to test.
+        try XCTSkipUnless(app.descendants(matching: .any)["shelf-vod"].waitForExistence(timeout: 20),
+                          "Indus has no On Demand shelf today")
+        kjPause(2)
+        let focus = app.descendants(matching: .any).matching(NSPredicate(format: "hasFocus == true")).firstMatch
+        // Television is the first shelf and radio the next.
+        for _ in 0..<8 where !(focus.exists && focus.identifier.hasPrefix("channel-")) { XCUIRemote.shared.press(.down); kjPause(0.5) }
+        XCUIRemote.shared.press(.down)
+        kjPause(1)
+        XCUIRemote.shared.press(.select)
+        try kjTuneUntilPlaying(app)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(app.descendants(matching: .any)["radioBar"].waitForExistence(timeout: 10), "the radio plays on in the small player")
+        kjPause(1)
+        for _ in 0..<4 where !(focus.exists && focus.identifier.hasPrefix("film-")) { XCUIRemote.shared.press(.down); kjPause(0.7) }
+        XCTAssertTrue(focus.exists && focus.identifier.hasPrefix("film-"), "Down reaches the films")
+        // Well along the shelf, where a sideways slide would carry the card off screen.
+        for _ in 0..<7 { XCUIRemote.shared.press(.right); kjPause(0.5) }
+        let chosen = focus.identifier
+        XCUIRemote.shared.press(.select)
+        XCTAssertTrue(app.descendants(matching: .any)["radioBar"].waitForNonExistence(timeout: 15), "the film stops the radio")
+        kjPause(4)
+        XCUIRemote.shared.press(.menu)
+        let back = NSPredicate { _, _ in focus.exists && focus.identifier == chosen }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: back, object: nil)], timeout: 8), .completed,
+                       "focus comes back to the film just closed, \(chosen); it is on \(focus.exists ? focus.identifier : "nothing")")
+        // The page keeps the bar's shape until the viewer leaves it: the card stays on screen.
+        kjPause(2)
+        XCTAssertTrue(focus.exists && app.frame.contains(focus.frame), "the film card is on screen after the film closes: \(focus.frame)")
     }
 }

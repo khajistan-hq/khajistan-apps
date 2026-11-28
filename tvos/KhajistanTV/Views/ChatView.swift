@@ -41,7 +41,7 @@ struct ChatView: View {
         .task { await store.start() }
         .task(id: model.auth.session?.userId) { await store.loadAccount() }
         .task(id: room?.slug) { await follow(room) }
-        .fullScreenCover(item: $viewing) { row in
+        .kjFullScreenCover(item: $viewing) { row in
             PnvViewerView(row: row, region: PicsVidsStore.allRegions)
         }
     }
@@ -263,8 +263,6 @@ struct ChatView: View {
                 }
                 .disabled(sending)
                 .accessibilityIdentifier("chatWrite")
-                Text("Hold the microphone button on the remote to speak instead of typing.")
-                    .kjSmall(faint: true)
             }
         }
     }

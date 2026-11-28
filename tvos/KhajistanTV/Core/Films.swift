@@ -168,10 +168,10 @@ enum Films {
     // MARK: - What the receiver says
 
     /// The SKUs that can charge a price, keyed by price: open-frequencies.js VARIANTS, which
-    /// mirrors screening-room.html and film.html. No SKU at a price, no "Rent it here". A core
+    /// mirrors screening-room.html and film.html. No SKU at a price, no "Rent it at". A core
     /// test reads the site's own table and fails when this copy falls out of step.
     static let variants: [String: [Int: String]] = [
-        "rent": [6: "50071506125014"],
+        "rent": [6: "50071506125014", 3: "68066719662294"],
         "buy": [20: "50071508844758", 14: "50074714013910"],
     ]
 
@@ -188,8 +188,8 @@ enum Films {
         case 401:
             return "Sign in to the Khajistan account that holds this film, then press Watch the full film again."
         case 403:
-            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it here, then press Watch the full film again." }
-            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it here, then press Watch the full film again." }
+            if variant("rent", film.rent) != nil { return "This film is not on your Khajistan account yet. Rent it at screening.khajistan.com, then press Watch the full film again." }
+            if variant("buy", film.buy) != nil { return "This film is not on your Khajistan account yet. Buy it at screening.khajistan.com, then press Watch the full film again." }
             if film.licence_price != nil { return "This film is licensed rather than sold. Screening and institutional terms are by inquiry." }
             return "This film is not on your Khajistan account yet."
         default:
@@ -230,5 +230,83 @@ enum Films {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fractional.date(from: text)
+    }
+}
+
+/// How the full film moves under the remote, as Apple's player moves it (owner, 2026-11-17:
+/// "all controls should work like apple tv player"): a click left or right skips ten seconds, a
+/// held arrow scans faster the longer it is held, and a swipe across the touch surface scrubs.
+enum FilmTransport {
+    /// The full film's control row, left to right as Down then left and right walk it (owner,
+    /// 2026-11-18: "when you touch down on the apple tv remote it should go to subtitles,
+    /// stop/play and pip"). PiP is offered paused as well as playing; choosing it plays the film.
+    enum Control: Equatable { case subtitles, playPause, pip, stop }
+
+    static func controls(hasSubtitles: Bool, pipOffered: Bool) -> [Control] {
+        // Play/Pause and PiP stay through a reconnect, so a lit one is not lost while the film tunes.
+        [hasSubtitles ? .subtitles : nil, .playPause, pipOffered ? .pip : nil, .stop].compactMap { $0 }
+    }
+
+    /// Reads a pan on the touch surface step by step, from each change since the last rather
+    /// than the total since the thumb went down: a thumb that scrubs across and then slides down
+    /// without lifting turns vertical the moment it turns (Fable, PR 104 round 2).
+    struct PanReader {
+        private var last = (x: 0.0, y: 0.0)
+        private var down = 0.0
+        private var vertical = false
+        private var fired = false
+
+        /// How far a slide runs down, from where it turned, to leave the track bar.
+        static let slideDown = 60.0
+
+        /// Each `.changed` with the pan's total translation. `vertical`: this step runs more up or
+        /// down than across, so it is not a scrub. `slideDown`: the slide down has gone far enough,
+        /// answered once a pan.
+        mutating func read(x: Double, y: Double) -> (vertical: Bool, slideDown: Bool) {
+            let dx = x - last.x, dy = y - last.y
+            last = (x, y)
+            guard dx != 0 || dy != 0 else { return (vertical, false) }
+            vertical = abs(dy) >= abs(dx)
+            if vertical {
+                down = max(0, down + dy)
+            } else if abs(dx) > 2 * abs(dy) {
+                down = 0              // plainly across again: the slide starts over
+            }
+            guard vertical, down > Self.slideDown, !fired else { return (vertical, false) }
+            fired = true
+            return (true, true)
+        }
+    }
+
+    static let skip: Double = 10
+    /// How often a held arrow moves the film.
+    static let scanTick: Double = 0.25
+
+    /// The scan speed for an arrow held `seconds`: 8×, then 24× after two seconds, 64× after five.
+    /// ponytail: fixed steps, tune them on the TV if they feel slow or fast.
+    static func scanSpeed(heldFor seconds: Double) -> Int {
+        seconds < 2 ? 8 : seconds < 5 ? 24 : 64
+    }
+
+    /// Seconds of film one scan tick moves.
+    static func scanStep(heldFor seconds: Double) -> Double {
+        Double(scanSpeed(heldFor: seconds)) * scanTick
+    }
+
+    /// A swipe's travel in remote points as seconds of film: about 1,000 points, one long swipe,
+    /// moves a tenth of the film, and never less than a minute. ponytail: tune on the TV.
+    static func scrubSeconds(points: Double, duration: Double?) -> Double {
+        points / 1000 * max((duration ?? 0) / 10, 60)
+    }
+
+    /// A place kept inside the film: not before its start, not past its last second.
+    static func clamp(_ seconds: Double, duration: Double?) -> Double {
+        let upper = duration.map { max($0 - 1, 0) } ?? .greatestFiniteMagnitude
+        return min(max(seconds, 0), upper)
+    }
+
+    /// What is left, as Apple's bar shows it: "-1:02:03".
+    static func remaining(_ position: Double, of duration: Double) -> String {
+        "-" + Mixes.clock(max(duration - position, 0))
     }
 }

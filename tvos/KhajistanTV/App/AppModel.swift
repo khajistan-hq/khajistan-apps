@@ -41,14 +41,48 @@ final class AppModel {
     /// A radio channel left playing when its player closed: Sonos's small player, under every
     /// screen, until it is turned off or another signal starts.
     var radioAway: RadioAway?
+    /// The small player shows under the sections (in picture-in-picture it has its own window).
+    /// Pages shrink their tallest parts while it does, so Down can still reach its Off.
+    var radioBarUp: Bool { radioAway.map { $0.pip == nil } ?? false }
+    /// Moves when a page asks the small radio bar to take focus: Down from a shelf whose cards are
+    /// taller than the room left above the bar finds nothing below them on its own.
+    var radioBarFocusRequests = 0
     /// Surf has taken the first focus once this launch. Kept here, not on the Receiver page,
     /// which is rebuilt on every return: as page state it moved focus to Surf on each arrival.
     var surfFocusedOnce = false
+    /// The welcome is asked for (Welcome.due at launch); false once it is closed.
+    var welcoming = Welcome.due
+    /// The welcome is still on screen: true until its cover has finished going (onDismiss), which
+    /// is later than `welcoming` turning false. Whatever presents a cover of its own (a channel's
+    /// player from a Top Shelf link) or takes the first focus waits for this, or it is presented
+    /// under the closing welcome and dropped (round-3 review; testAChannelLinkOverTheWelcome…).
+    /// A link that closes the welcome before it ever appeared also clears it 1.5 s on, as no
+    /// dismissal may come for a cover never shown.
+    var welcomeOnScreen = Welcome.due
+    /// The welcome's page has appeared (WelcomeView.onAppear): from then on only its dismissal
+    /// clears `welcomeOnScreen`.
+    var welcomeAppeared = false
     /// A channel the picture-in-picture window asked to see full screen again. RootView opens it.
     var restoring: RadioAway?
     /// A Transmission channel playing in the picture-in-picture window. The store keeps the
     /// channel running (handovers included) while the player screen is closed.
     var transmissionPiP: PictureInPicture?
+    /// A Screening Room film playing in the picture-in-picture window, its player screen closed.
+    var filmPiP: FilmAway?
+    /// Bumped to send focus to the top bar's current tab (TopBar). Up from the first shelf of the
+    /// store build's Screening Room asks for it: a poster taller than the page left by the PiP bar is scrolled up under the top bar,
+    /// and tvOS then finds nothing wholly above it to move to (owner, 2026-11-18: "no way to go to
+    /// the nav").
+    var topBarCall = 0
+    /// The corner window that is up, whichever player put it there, for the PiP bar.
+    var activePiP: PictureInPicture? {
+        [radioAway?.pip, transmissionPiP, filmPiP?.pip].compactMap { $0 }.first { $0.isActive }
+    }
+    /// A Transmission channel the picture-in-picture window asked to see full screen again.
+    /// RootView opens it over whatever is on top; the player takes the playing channel over.
+    var restoringTransmission: Int?
+    /// A film the picture-in-picture window asked to see full screen again. RootView opens it.
+    var restoringFilm: Film?
     /// The Screening Room's films, read from vod.json with the preview password.
     let films: FilmStore
     /// ROOMS: the Bazaar's shelf, the Madrassa's sources and the research databases, read from
@@ -159,15 +193,29 @@ final class AppModel {
         case "account": self.section = .account
         default: self.section = .receiver
         }
+        // No page a signed-in reader opened stays on the device once the session ends.
+        auth.onSessionEnd = { Task.detached(priority: .utility) { RRPageDisk.purge() } }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.reading.previewCredentialDidChange()
             // The dial changes with the password: a region page open on the old one goes too.
             self?.receiverPath = []
-            self?.receiver.credentialDidChange()
+            // A radio left playing from the whole dial may be one the public dial does not
+            // carry, so it is turned off, as on the iPhone.
+            if self?.receiver.credentialDidChange() == true, let away = self?.radioAway {
+                self?.radioAway = nil
+                away.pip?.stop()
+                away.controller.stop()
+            }
             self?.invalidateTransmissionAccess()
         }
         observeTransmissionAccess()
         watchTheSky()
+        #if DEBUG
+        // `-kjopenurlearly YES` with `-kjopenurl`: the link is in before the first frame, as a cold
+        // Top Shelf launch can be, so the welcome never appears and has nothing to dismiss.
+        if UserDefaults.standard.bool(forKey: "kjopenurlearly"),
+           let text = UserDefaults.standard.string(forKey: "kjopenurl"), let url = URL(string: text) { open(url) }
+        #endif
         // Which way the database answers, decided while the first screen draws.
         Task.detached(priority: .userInitiated) { await SupabaseRoute.settle() }
     }
@@ -183,6 +231,13 @@ final class AppModel {
             transmissionPiP = nil
             pip.stop()
             transmission.stop()
+        }
+        if let film = filmPiP {
+            filmPiP = nil
+            // Kept first, so the film opened again from the window resumes where it had got to.
+            film.recordPlace()
+            film.pip.stop()
+            film.controller.stop()
         }
     }
 

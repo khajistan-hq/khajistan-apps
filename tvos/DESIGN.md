@@ -77,7 +77,7 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   damping .74); a press settles it to 1.03. A soft shadow (30pt blur, 20pt down, the band colour
   at 55%, so it stays in the palette) opens under the card's picture or plate, never under its
   lettering. System card styles are not used: tvOS draws them as white platters.
-- **Text cards** (the front's camera regions, the Transmission channels) sit on a `CardPlate`:
+- **Text cards** (Rooms, the Madrassa, the home's See all) sit on a `CardPlate`:
   the lift plate at rest, the band plate with onBand text under focus. Square, no border. The
   front's region cards are 420x190. A region page's channel cards are live cards (The Receiver,
   Region): 420x236 for every medium, so a shelf is the same height from its first card to its last.
@@ -91,6 +91,11 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 ## Chrome
 
+- **No remote instructions on screen** (owner, 2026-11-19: "remove subtitles like press to watch
+  full screen, back for the map, they are too AI sounding and unnecessary"). No line tells the
+  viewer which button to press: not under a channel, not in a status band, not after an error,
+  not as a field's placeholder. A control names its action; VoiceOver hints stay, as they are
+  not drawn.
 - **Top bar**, on every root screen: the animated pigeon (72pt) and **KHAJISTAN** (40pt black,
   −0.03 em) with *Media of the Middle World* (small, faint) at left; RECEIVER · TRANSMISSION ·
   READING ROOM · PICS/VIDS · ACCOUNT as kickers at right (READING ROOM and PICS/VIDS are the website's own nav labels). Select moves between sections. No system tab bar: tvOS paints
@@ -102,13 +107,18 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 
 - **Front = the map** (simplified 2026-11-17, owner: "simplify home page", three choices made
   that day). Left: **Surf** (focused at launch), one row of chips **All · TV · Radio**, the
-  **Live now** figure from `receiver-index.json`, and the *Beyond the atlas* switch with no second
-  line. No RECEIVER title: the top bar underlines the section. Middle: the map from
+  **Live now** figure from `receiver-index.json`. No RECEIVER title: the top bar underlines the section. Middle: the map from
   `/data/region-shapes.json` (and `-extended.json` with the switch on), drawn as the website
   draws it — fills from the data (`#050505` → mapTint, `#006F00` → mapDeep), the people's
   regions hatched (9pt stripes at 45°, black at 32%), regions with no channels at 48%, the
-  extensions in mapTint at 50%, labels in yellow with a black halo, the native name beneath,
-  the live count under that. The map is a picture, not a control. Right: **Regions A–Z**, every
+  extensions in mapTint at 50%. **No names on the map at rest** (owner, 2026-11-20: the front was
+  "too busy and visually cluttery"): the list beside it names every region that opens channels, and
+  a region with none opens nothing, so its name is not needed. The map is a picture, not a control. Over the map, in
+  its column, the *Beyond the atlas* switch with no second line (owner, 2026-11-20: "make the beyond
+  the atlas above the map", as the website's switch sits over its atlas; it was at the foot of the
+  sidebar until then); the map gives up the switch's 80pt row. The band
+  is 580 (640 until 2026-11-20, "too much dead space"), and the list's rows are 44pt so the atlas's
+  twelve regions still fit it whole. Right: **Regions A–Z**, every
   region with channels and its live count; the row focused lights its region on the map (a
   3.5pt yellow outline, its label on a yellow plate with black text), and Select opens it. The
   list is the front's one way to a region: the picture strip that ran under the map (2026-10-29)
@@ -116,27 +126,40 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   genre row (2026-11-04) went the same day, because the Music and Film & drama shelves surf
   their genre in the player.
 - **Shelves under the front.** The sidebar, the map and the list are the first screen; the first
-  shelf (Liked, or News) peeks under them with its live pictures, as the TV app lays its rows.
-  In the store build all eleven stay (owner, 2026-11-17): Liked, News, Music, Film & drama,
-  Faith, Culture, Sport, Children, Street cameras, the Screening Room and Transmission (once the
-  schedule loads). The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
-  Bazaar, Chat) after the genre shelves. The Khajistan Radio mixes are
+  row (Liked, or Themes) peeks under them, as the TV app lays its rows.
+  **Themes** (owner, 2026-11-18) is one row of names with no pictures: News, Music, Film & drama,
+  Faith, Culture, Sport, Children, each with its live count. Focus comes into the row on News the first time, and after that on the theme last focused,
+  from above, from below, and back from the player (the shelves take the nearest card instead). Select plays one of the
+  theme's channels at random, radio included, and up and down in the player surf every channel of that theme. Until that day each
+  theme was a carousel of channel cards. The cameras shelf is named **CCTV** (same day; it read
+  "Street cameras"), and since 2026-11-19 it is a row of region names, each with its live count,
+  set as Themes is, at the foot of the page (owner: "cctv should go at the bottom of the main
+  page" and "need no cards just names is wnough that can be clicked"). Select opens the region
+  on its cameras. Khajistan Transmission and the Screening Room have no shelf on Home since the
+  same day (owner: "remov khajistan transmission and screening room from the home page of the
+  apple tv"); each has its door in the top bar. In the store build Home is Liked, Themes and
+  CCTV. The full build adds the parts of Khajistan (Reading Room, Pics/Vids, Madrassa,
+  Bazaar, Chat) after the Themes row. The Khajistan Radio mixes are
   not on the TV (owner, 2026-10-06): they play as programmes on Transmission's channel 2, the
   website's sound channel.
 - **Liked** (owner, 2026-11-08: "add liked channels on homepage for an account so they are easily
-  accessible"): the first shelf under the map, so a liked channel is one press down from the switch at
-  the foot of the sidebar and one Select away. The account's likes from `passport_saves` (`channel:` refs, the ones the
+  accessible"): the first shelf under the map, so a liked channel is one press down from the front and
+  one Select away. Up from the shelf lands on whatever stands straight above the card: the switch
+  over the map, or the list; from the left-most card it can be the sidebar's chips, and the page
+  goes back to its top for them as for Surf and the switch. The account's likes from `passport_saves` (`channel:` refs, the ones the
   player's Like and the website's heart write, read at launch and at sign-in; a like made on this
-  TV shows at once), newest first, as live cards: picture cards for
-  television and cameras, the sound-line card for radio. No heart on these cards; the shelf's name
-  says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
+  TV shows at once), newest first, as **names only**, the way the Themes row is set (owner, 2026-11-21: "the liked
+  channels should also be text only like themes"; on 2026-11-20 the picture cards had read as
+  "cluttery"): the heading **Liked** with its live count, then a row of plates, each the channel's
+  name (30pt black) with its place under it in small faint type, no picture, no mark. A plate is
+  the house button: the ground at rest, the focus plate under focus. Play/Pause plays it as Select
+  does. No heart on these plates; the row's name says it once. Up and down in the player surf the liked channels. Signed out, or with nothing
   liked, there is no shelf. It ignores *Beyond the atlas*: a like is the viewer's, not a region
-  filter. The count says *live*, as the genre shelves do: a liked channel that is off air or gone
+  filter. The count says *live*, as the themes do: a liked channel that is off air or gone
   is not drawn; it is looked for again at the first launch six hours on, or at once when it is
   liked again (the app remembers it on the device, so a stale like costs no walk of every list at
   each launch). Likes are read again when the app comes
-  forward if the first read failed. Stills: 28 a visit on the TV (24 on the phone), so Liked's four
-  do not cost Music its pictures.
+  forward if the first read failed. Liked takes no stills.
 - **Region** (live cards, owner 2026-10-29: "photo forward/visual like on netflix"): a hero
   across the top that stays while the shelves scroll under it. At left the crumb kicker RECEIVER →
   INDUS, the name (headline) and native name, then the channel focus rests on: ● LIVE · TELEVISION
@@ -156,7 +179,12 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   shelf holds its place with the index's count until they land.
 - **Stills** (Services/LiveStillsStore.swift, shared with the phone): taken on the device from the
   carrier the player tunes (the receiver's resolver, the player's User-Agent, no Referer, no proxy),
-  one at a time on a muted player of its own at the stream's lowest picture (at most 480x270), at
+  one at a time on a muted player of its own at the stream's lowest picture (at most 480x270),
+  with any black bars cut away first (`Letterbox`, read off a 96x54 copy's row and column
+  brightness). Bars come in pairs: an axis is cut only when both ends are dark and the two cuts
+  are about the same size, so a night sky at the top or a logo lit in one pillar leaves it whole;
+  a frame that would lose more than 40% of a side is a dark picture and kept whole. (The picture cards fit the
+  cropped still on black.) At
   least 1.5 s apart and twelve a page visit, for the cards nearest focus; the hero's own frame
   becomes its card's still. Never while the hero is starting up, never on an expensive or
   constrained connection. Kept in memory only, about 12 MB at most, oldest out first, retaken after
@@ -169,6 +197,17 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   arrives. Radio shows its Now Playing on the ground: the radio mark large, ● NOW PLAYING · LIVE
   RADIO, the station's name in display type, and its place and broadcaster. A channel change is
   described under Motion.
+- **Local time** (owner, 2026-11-19: "show local time on live channels"): wherever the place is
+  printed for a live channel (the player's strip, the radio screen, a region's hero) the time
+  there follows it: *Iran · Persian · 21:42 local time*, read again on the minute. The zone comes
+  from the channel's country (`Core/LocalTime.swift`). Indonesia runs on three clocks, so there
+  the city in the station's territory or name decides (Ambon on Jayapura time, Bali and Manado on
+  Makassar's, Java and Sumatra on Jakarta's), and Bashkortostan is on Yekaterinburg's. A channel
+  whose clock cannot be told (the diaspora, an Indonesian station that names no city, DR Congo,
+  a country the table does not list) shows no time rather than a guessed one.
+- **Top bar**: Receiver opens the Receiver's home, from a region page or from another section
+  left on one (owner, 2026-11-19: "when reciever is clicked on apple tv it should go to home
+  page"). Back still steps back one page.
 - **Guide** (2026-10-27, after YouTube TV's live guide): Guide is the strip's third control, after
   CC and Like, reached with Right. Select raises it from the bottom over the picture, which plays on above it (owner, 2026-11-14: "make the guide come from bottom up rather than from the left"):
   every channel of the shelf the viewer came from, numbered, each row the medium's mark, the name
@@ -187,35 +226,142 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
 - **Letterbox**: a picture that does not fill the screen sits on **black**, in every skin
   (owner, 2026-10-05: "background should always remain black and not house skin colors").
   It is the one black in the app, and only around a moving picture; radio, the overlay, the
-  tuning ground and every other screen keep the skin.
+  tuning ground and every other screen keep the skin. The other black is an edge, never a
+  ground: the map labels' halo, and the channel number's dot edge over a picture (Transmission).
+
+## Welcome
+
+The first time the app opens (owner, 2026-11-20: "a landing page ... to intro what the app is",
+with the Higgsfield clips), before the Receiver: once per device (`kj.welcomed.v1`), in Release
+builds; a Debug build shows it only with `-kjwelcome YES`, so the other UI tests never meet it
+(`WelcomeUITests` passes the flag). A launch from the Top Shelf goes where its link points: the
+welcome steps aside for it, and is not marked seen, so it comes on the next ordinary launch. A
+link that opens a cover of its own (a channel's player) waits until the welcome has finished going,
+or the player is presented under it and dropped; if the welcome never appeared, the wait also ends 1.5 s
+after the link, a guard for a cover never shown reporting no dismissal (not reproduced: a link set
+before the first frame still gets one); a welcome that did appear is waited for however long it
+takes to go. `-kjopenurl <link>` (Debug) opens a link at launch
+for the tests. The Receiver's first focus on Surf waits for the welcome to close.
+
+- At left, on the skin's ground, inset 80 and 720 wide: **KHAJISTAN** in display type, one body
+  line (live television and radio from the Indus to the Maghreb, and the station), then a row per
+  section this build carries, Account aside: the section's name (name type) and one plain line in
+  small faint type. The Receiver's line carries the live count when the index has loaded. No
+  kicker above the headline. Then **Start**, the one action, a solid plate, focused at once.
+  Menu does what Start does, and does not leave the app.
+- At right, 1040x585 running to the screen's edge, on the page's own ground with no black (owner,
+  2026-11-20: "no black backgroiund"): the pigeon's sign-on ident once (10 s), then the jewelled
+  wordmark on a loop, muted, from one queue so the handover has no blank beat; the wordmark, last in the queue, ends
+  held (`.none`) and is sought back to its start, since an item that ends on `.advance` is dropped
+  and the picture goes blank 18 s in; an ident that fails or stalls hands over at once. Each clip is rendered onto each skin's ground and the file for the
+  skin on screen is played; it follows the skin if Automatic turns it while the page is up. Under Reduce Motion, the wordmark still.
+  Both are house chrome under the Higgsfield rulings of 2026-10-04 (the pigeon) and 2026-11-15
+  (the wordmark loops), never a holding.
 
 ## Khajistan Transmission
 
 - **Page**: KHAJISTAN TRANSMISSION (display), *N programmes · 7 scheduled channels · Pakistan
-  time (UTC+5)*, then one card per channel, as the website's channel card: CHANNEL 1 · ● ON AIR,
-  the channel's own line, the show on now (48pt) with NOW 18:00–18:15 PKT, and UP NEXT: the
-  next three strips, time then show, the first set large. Off air the headline is *Off air*,
-  then the site's line *Back at 23:00 PKT with The Feature.* and LATER. The
-  programme by its standardized name since 2026-11-08 (owner: "add now playing and up next ...
-  names need to be standardized"); where a title cannot be cleaned (`display_title` absent) the
-  show stands in, which was the whole rule from 2026-09-06 ("programme titles are file names"). One card per channel the schedule's `_meta.channels` names (seven since 2026-11-04), text cards 560pt wide (a lift plate, band under focus), 64pt apart for their lift, in one row that scrolls sideways past the third. Channel Up and Down on the remote step through them in number order and go round: up from Channel 7 is Channel 1. The cards redraw on the minute. Select
-  tunes. The preview-password and sign-in steps live on this page.
+  time (UTC+5)*, then a TV guide: one row per channel the schedule's `_meta.channels` names, read
+  left to right as a printed guide. The number (48pt), the channel's name without its
+  "Channel N ·" as a kicker (upper case, spaced, the accent colour), so it reads as a label and
+  never as a programme, the hours of what is on (*18:00–18:15*, body, tabular figures) and
+  what is on (name style): the programme by its standardized name, as the player's strip
+  heads it, else the show, and nothing when that only repeats the channel's name. Off air the hours column reads *Off air* and the show column the site's
+  line *Back at 23:00 PKT with The Feature.*, both faint. Nothing about later: no Up next, no
+  Later (owner, 2026-11-19: "removing up next from the cards and making it more like a simple
+  tv guide"). The programme by its standardized name since 2026-11-08 where the schedule gives
+  one, else the show (2026-09-06: "programme titles are file names"). Rows carry no plate at
+  rest; focus gives the band plate, as a house button. Up and down walk the rows; Channel Up and
+  Down on the remote step through them in number order and go round. The rows redraw on the
+  minute. Select tunes. The preview-password and sign-in steps live on this page.
 - **Player strip** (2026-11-08): the headline is the programme on air by its standardized name,
   else the show; the line under it starts with the show (left out when the show is the channel,
-  as Jordan Television is), then NOW and the slot, then the country. At right, ● CHANNEL 5 ·
-  MEHFIL, the channel's own name, so a show is never read as the channel. UP NEXT is the next
-  programme and when it starts, wrapping to two lines; hidden when it would repeat the headline.
-  A title too long to share its line with the detail takes a line, and up to two, of its own.
+  as Jordan Television is), then NOW and the slot, then the country. Above them, on the strip's
+  top line, ● CHANNEL 5 · MEHFIL, the channel's own name, so a show is never read as the channel,
+  with Subtitles · Guide · PiP at the right end of that line. UP NEXT is the next programme and
+  when it starts, wrapping to two lines; hidden when it would repeat the headline. A title too
+  long to share its line with the detail takes a line, and up to two, of its own.
+- **Channel number** (owner, 2026-11-15: "channel number should pop up on top like it does on
+  old tvs", "should not show title of channel and make it exactly like a 1980s tv channel number
+  animation"): two digits, 05, top right, drawn as a 1980s set's character generator drew them:
+  5x7 square dots, 17pt each, no plate and no name. Over a picture the dots are `#F3FB04` with the
+  generator's black edge; on the ground (off air) they take the ink and no edge. They snap on once
+  the channel changed to is on screen (after the pigeon and the sign-on cover) and off 3 s later,
+  with no fade, as the set had none. Not over a sound-only programme, whose title already sits in
+  that corner with the dancer. A channel change takes the last number off at once.
+  VoiceOver hears "Channel 5".
 - **Player**: once per launch the sign-on: the pigeon flies through and the programme (joined
   where the clock has reached) tunes behind it. Later visits open on the ground with the
-  channel's name. Up and down switch channel as under Motion. The
+  channel's name. A press of Up or Down switches channel as under Motion (Remote, below). The
   status band reads KHAJISTAN TRANSMISSION · CHANNEL 1 with ● ON AIR trailing. The panel's
   left column carries NOW 18:00–18:15 PKT, the show as the headline, the show's line, KIND and
   ORIGIN, and the custodian and transfer credits; its right column is UP NEXT, the next three
   strips. Nothing is said twice. In the last minute of a slot, with the overlay hidden, a band
   plate at bottom right reads UP NEXT 18:15 PKT · VINYL RIPS; it goes when the overlay is woken.
   When the slot ends the channel hands over to the next strip, as the website's tuneToNow
-  does once a minute. Off air is OFF AIR in display type with the return time.
+  does once a minute. A channel joined part-way through is Playing only once its clock has moved
+  0.3 s past where the seek landed, and the black behind a picture shows only once the layer has
+  drawn a frame (`isReadyForDisplay`); until then the tuning ground stays, and a channel change
+  cuts only on a drawn frame (owner, 2026-11-19: Channel 1 "goes black for second" as it starts). Off air is OFF AIR in display type with the return time.
+- **Remote** (owner, 2026-11-24: "Swiping up and down with the trackpad should open the guide …
+  The up and down button should otherwise be treated as changing the channel"). Watching, a
+  swipe up or down on the touch surface opens the guide; a press of Up or Down changes channel.
+  Left and Right walk the strip's controls while the strip is up and open the guide from the bare
+  picture; Select works the lit control; Play/Pause pauses or rejoins live; Menu lets go of a
+  control, hides the strip, then leaves. tvOS sends the same move command for a swipe and a
+  press, so the screen also watches the finger (a pan recogniser on the remote's indirect
+  touches, `RemoteSwipeReader`) and `RemoteGesture.classify` decides: a move within 0.5 s of the
+  finger travelling 120 points or more is a swipe, any other is a press. The numbers are in
+  `Core/RemoteGesture.swift` and are tuned on the device. If the finger is never reported, every
+  move is a press and Up and Down change channel, as before.
+- **Guide: the whole screen** (owner, 2026-11-24: "more like early 2000s TV Guide. Full screen
+  with smaller video icon … in the khajistan palate"; the time grid under it is the owner's
+  choice of 2026-11-17, "it needs to be showing schedule on an hourly basis"). It opens on air,
+  off air and while a channel tunes, lit on the tuned channel's programme on now. It does not
+  open under the sign-on's cover.
+  - **Top band**, 38% of the height. At left the picture plays on in a 16:9 window, 34% of the
+    width: the player's own layer, drawn at the window's size and place (one player, one decode).
+    The layer is the screen's size with the safe area as its own padding, and what fills it does
+    so by that padding, never by ignoring the safe area: SwiftUI works the safe area out from
+    where a view is drawn, and in the small window an ignoring view grew out to the screen's corner.
+    A sound-only programme shows its dancer there and an off-air channel its card, since the
+    window is the full screen made small. Beside it: KHAJISTAN TRANSMISSION and the PKT clock on
+    one line; the lit cell's title (52pt); one line of facts (its times, the schedule's kind
+    line such as *Iranian film trailers*, Channel N); then the channel's own line from the
+    schedule. A channel's own cell reads *Channel 5 · Mehfil* over that line. Every line in the
+    guide is ink at full strength: the faint tier read as grey by day (owner, 2026-11-24).
+  - **Header**: the station day over the channels, then three half hours, each a band plate.
+  - **Rows**, seven at a time: the channel's cell on a band plate (number, mark, name on up to
+    two lines, ● LIVE on the one tuned while something is on it), then a block per programme as
+    long as it airs, on the lift plate, with its title and times. A stretch off air has no plate
+    and reads *back at* its return. Plates are separated by 4pt of ground; nothing is outlined.
+  - **The lit cell** is the focus plate with its text in the plate's colours, no lift and no
+    shadow. A channel's cell lit among band plates takes the focus plate too, except by day,
+    where the focus plate is the band's own green: there it is the ink plate with the ground's
+    yellow as text (`Palette.litAmongBands`).
+  - **Short programmes.** A run of programmes under ten minutes in one strip is one block: the
+    show's name, then *12 songs · now Jugni* (*programmes* where they are not songs; the one on
+    air is kept current every half minute). Anything under a minute is part of the block before
+    it, except a programme after an off-air stretch, which keeps its own block. A block still
+    narrower than a readable cell is folded into its narrower neighbour (owner, 2026-11-18:
+    "words are cutoff and not readable in the guide"); the cell reads *and 1 more* after its
+    title where both fit whole, and the title alone where they do not.
+  - **Moving.** Up and Down change the row and keep the moment; a swipe moves one row at 120
+    points of travel and one more per 200 after, and stops when the finger lifts. Right lights
+    the next programme, as far as twelve hours ahead, and the window follows in half hours. Left
+    lights the one before, never one that has ended; from the programme on now, Left lights the
+    channel's own cell, and Right leaves it.
+  - **Select** on a channel's cell tunes the window to that channel and the guide stays (owner,
+    2026-11-24: "show description of a channel on click"). On the programme on now it tunes the
+    channel and closes the guide. On a later programme or a stretch off air it does nothing.
+    **Menu** closes the guide on the channel the window shows.
+  - **The schedule** is the station clock's own, asked at each programme's start
+    (`StationClock.timeline`), so the grid agrees with what airs to the second. Near a month's
+    end the next month's file is fetched; until it is held a row ends where the month does, and a
+    row with nothing read for the hours on screen says Loading. While the guide is open, now
+    moves on each half minute and the rows are read again when the half hour turns; a refill
+    keeps the blocks on screen until the new reading lands.
+  - No line on screen says how to work the remote.
 
 ## The Screening Room
 
@@ -230,8 +376,30 @@ margin to the screen's edge, and a page scrolled under the top bar fades out the
   here*), the offer line, *A film Khajistan owns and distributes.* and *Watch the full film*. A refusal
   adds the site's sentence under the button and, for a sign-in or a purchase, the film page's QR code
   (ink modules on the ground) with its address. The panel stays while that answer is on screen.
-  A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move thirty
+  A film is chosen, not tuned: up and down do nothing here, as on the site. Left and right move ten
   seconds in the full film.
+- **Controls** (owner, 2026-11-15: "why cant you stop on demand movies", no CC on Razia): the preview
+  panel carries Stop beside Watch the full film. In the full film the picture keeps focus, so the
+  panel's Subtitles · PiP · Stop are lit by the remote as the strip's are: Down lights the first
+  (it carries a ↓ while none is lit), left and right walk them, Select works the lit one, Up or
+  Back lets go, and a lit control lets go 6 s after the panel would have hidden (8.6 s with no
+  press), long enough to read it and press Select. In the full film Back closes the bottom bar, and
+  with the bar closed stops the film (owner, 2026-11-17: "a back button shoud exit the bottom bar");
+  in the preview one Back stops it.
+  Subtitles start in the language chosen for that film, else the device's, else English: a
+  choice made on one film is not carried to another (Persian chosen for an Iranian film opened
+  Razia Phans Gayi in Persian). PiP keeps the full film in the corner while the viewer browses,
+  with its chosen subtitles drawn by AVPlayer in the window; full screen opens it again over
+  whatever is on top, where it had got to.
+- **Moving through the film** (owner, 2026-11-17: "all controls should work like apple tv player",
+  after trying Apple's own player and keeping ours): as Apple's player. A click left or right
+  goes back or forward ten seconds. A press held on the clickpad's edge scans, 8× and then 24×
+  after two seconds and 64× after five, and plays on from where it is let go. A swipe across the
+  touch surface pauses on the place it reaches; Select or Play/Pause plays from there, Back puts
+  the film back. While the panel is up it shows the bar: the time played, a thin bar in ink on a
+  faint track, and the time left (-1:02:03), with the scan speed or the scrub's way out between.
+  tvOS gives SwiftUI an arrow once, when it is let go, so a hold is read through GameController
+  (the clickpad is button A, the thumb's place the dpad) and the release is not also a click.
 
 ## Sign in
 
@@ -378,6 +546,15 @@ off `scripts/kj-browse-archive.js`, `kj-media.js` and `kj-adult-notice.js`.
   again at once. The phone keeps the feed's own order.
 - **Reel is videos only** (owner, 2026-11-14: "reel just needs to be of videos"): its own feed of
   videos, every region, whatever the page's filter says; its Region chip steps regions as before.
+- **The Reel moves as Transmission does and gives the screen to the video** (owner, 2026-11-20):
+  Up is the next video and Down the one before, as Channel Up and Down (Down on the first video of a
+  deal comes round to the last one loaded, and a broken video is skipped in the direction of the press). Right
+  lights Save, Collection, Shuffle and Region; Left walks back and lets go. No status band and no
+  panel: one line, *@account · Region*, on a ground plate that hugs it at the bottom left, with
+  *→ Save* beside it while the controls are down. The controls' strip shows only while one is lit,
+  and always while VoiceOver runs. A lit control holds the Reel on its video (an ending clip loops,
+  a broken one waits) and lets go after 10 s without a press. The phone's Reel carries the same one line, and its Shuffle
+  plate is not lit, since the Reel is always shuffled.
 - **All regions** (same day): the first shelf, every region mixed, its pictures at 460pt, so the page
   opens on pictures. Its viewer walks that mixed stream, pictures and videos both.
 - **Cards**: the object's own shape at a fixed 300pt height (the width follows the row's own
@@ -415,7 +592,8 @@ to be just like how it is on apple tv app"). The numbers are in `CardMotion` (`T
 | Focus on a card, plate, tab, strip chip or band control | one spring, response 0.34, damping 0.74 | 0.12 s ease, no overshoot |
 | Guide, Up and Down | the rows, keyed by channel, scroll one place over 0.3 s with no bounce; the plate fades off one row as the next takes it, lifted to 1.03 | the rows and the plate cut, with no lift; at the list's ends, where the rows stay put, the plate changes over 0.12 s |
 | Guide, Left and Right (a region turn) | a cut; while the next region loads, and on a region with none, the rows keep the height they last had and say Loading or "No …" in it | the same |
-| Guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
+| Receiver guide, open and close | the panel slides up from the bottom, opaque, over 0.4 s with no bounce | it cuts |
+| Transmission guide, open and close | the picture shrinks to its window in one move over 0.4 s with no bounce, the guide fading in under it; it grows back the same way | it cuts |
 
 Picture transitions (tuning, the pigeon, a channel change) are the paragraphs below; nothing here
 touches them.
@@ -457,19 +635,32 @@ programme on a sound-only transmission) moves to the top right, smaller and at f
 and back to the centre when he stops (owner, 2026-10-06).
 
 **The player strip** (owner, 2026-10-05: the bar was "too thick and not smooth"): one slim band
-along the bottom in the band colour, the name (30pt black), the place or the slot beside it,
-on Transmission the show's line under them in small type, the medium at the right, and on
-Transmission UP NEXT with its time and show. It rises 40pt and fades in over 0.35 s, and goes
-the same way 2.6 s into playback. It waits while a signal tunes: the ground says so. The
-Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
+along the bottom in the band colour, in two tiers since 2026-11-15 (one row squeezed the title to
+"Ra n…" beside the channel's name and the controls on the owner's TV). The top line: the medium or
+the channel as a kicker at left, the controls at right. Under it, the full width: the name (30pt
+black), the place or the slot beside it, on Transmission the credit under them in small
+type, and on Transmission UP NEXT with its time and show at the right. It rises 40pt and fades in
+over 0.35 s, and goes the same way 2.6 s into playback. It waits while a signal tunes: the ground
+says so. The Receiver's strip carries no "broadcast by" line: that stays on the website (owner, 2026-11-16:
 "i dont want info like 'regional broadcast by...' the apple tv").
+
+**Subtitles: Plate or Yellow text** (owner, 2026-11-17: "a caption option without the background
+(only yellow text) that one can choose"). Account carries one button, as the colours do. The
+plate below is the default. Yellow text (the website's name for it) is the house yellow `#F3FB04`
+in every skin, with a 2pt black
+edge and a soft shadow and no plate, as the website's Screening Room draws it (archive PR #164).
+The choice reaches every caption drawn over a picture and is kept across launches. Radio and a
+sound-only programme keep the plate whatever the choice: their captions sit on the skin's ground,
+and yellow text on the day ground cannot be read. A scan is silent, as Apple's is.
 
 **Captions** (live, programme and film alike) are one plate, `kj-captions.css`'s: 52pt semibold,
 centred, black on `#F3FB04` by day, `#F3FB04` on `#002800` in grove and on `#6E003F` in smut, no
 outline, no shadow, each line laid out on its own direction. The plate sits 24pt above the strip
 (or the film's panel) while it is up and moves down with it. Its control is the strip's last item,
 a kicker in onBand underlined while on; reached with right, it takes the inverted plate (band text
-on onBand), which reads on the band in every skin.
+on onBand), which reads on the band in every skin. One exception: a film in the picture-in-picture
+window keeps its chosen track, which AVPlayer draws there in the skin's caption colours, bold, at
+the system's size and position, since the house plate stays with the closed screen. Transmission's corner window carries no subtitles.
 
 **Back** (Menu) on any section but the Receiver returns to the atlas; in the Receiver it pops a
 region back to the map, and the map leaves the app as tvOS does.
@@ -548,5 +739,12 @@ the master everywhere). The flights, `flight-<name>-<720|1080|2160>.mov`, are re
 `scripts/flights/render_flight.py` from the Higgsfield masters (owner-local, `output/Higgsfield
 Assets/Khajistan Flights 2026-10-05/`): the backdrop plate per pixel, alpha unmixed against it,
 the generator's colourless shadows and its bright edge halo removed, colour premultiplied. The
-app draws the ground, so one file serves all three skins. The rainbow TV bug is NOT used: it is not on
+app draws the ground, so one file serves all three skins. `welcome-<ident|wordmark>-<skin>.mp4` are the website's `assets/tv/khajistan-signon-ident.mp4`
+and `khajistan-wordmark-jeweled.mp4`, rendered onto each skin's ground by
+`scripts/welcome/render_welcome.py` (opaque H.264, 1280x720, BT.709 matrix, primaries and
+transfer, which the script refuses to write without): the wordmark's grey vignette floored to no
+light and its glow added to the ground, the letters solid, the light fading out toward the clip's
+edges; the bird keyed on brightness, closed, its small enclosed gaps filled, background that
+touches any edge never filled, its edge pulled in two pixels. `--check` proves both ways, including
+a bright corner and a bird that splits the background. The rainbow TV bug is NOT used: it is not on
 the live site and has no ruling for a new surface.

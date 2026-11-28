@@ -40,7 +40,8 @@ struct TransmissionSection: View {
         guard case .ready = store.schedule, let count = store.programmeCount, channels > 0 else {
             return "Scheduled channels \u{00B7} Pakistan time (UTC+5)"
         }
-        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
+        let hours = store.programmeHours.map { "\($0.formatted()) hours \u{00B7} " } ?? ""
+        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(hours)\(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
     }
 
     @ViewBuilder
@@ -170,6 +171,7 @@ private struct ChannelCard: View {
 struct TransmissionPlayerView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var overlay = OverlayClock()
     @State private var showSignIn = false
     /// One retune for a viewer who is signed in but was still shown "Sign in"; after it the button opens the form.
@@ -279,11 +281,14 @@ struct TransmissionPlayerView: View {
     private func onAir(_ air: OnAir, _ palette: Palette) -> some View {
         ZStack {
             if air.programme?.audio_only == true {
-                VStack(spacing: 12) {
-                    Kicker("\(store.channelName(store.channelNumber)) \u{00B7} sound only")
-                    Text(headline(air)).kjDisplay().multilineTextAlignment(.center)
+                // Sound only: the title on the ground, and the visualizer the viewer chose behind it.
+                VisualizerStage(controller: store.player, reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
+                    VStack(spacing: 12) {
+                        Kicker("\(store.channelName(store.channelNumber)) \u{00B7} sound only")
+                        Text(headline(air)).kjDisplay().multilineTextAlignment(.center)
+                    }
+                    .padding(.horizontal, KJLayout.inset)
                 }
-                .padding(.horizontal, KJLayout.inset)
             } else {
                 Color.black.ignoresSafeArea()
                 PlayerLayerView(player: store.player.player, soundCarriesInBackground: true).ignoresSafeArea()
@@ -312,6 +317,11 @@ struct TransmissionPlayerView: View {
             if !model.tuner.song.isEmpty { Text("Now playing: " + model.tuner.song).kjBody().lineLimit(2) }
             if let custodian = nonEmpty(air.programme?.custodian) { Text(custodian).kjSmall(faint: true) }
             if let transfer = nonEmpty(air.programme?.transfer) { Text(transfer).kjSmall(faint: true) }
+            if soundOnly && !reduceMotion {
+                VisualizerButton(reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
+                    overlay.wake(settled: false)
+                }
+            }
             TransportRow(isPlaying: store.player.state == .playing, toggle: playPause)
             Text("Swipe up or down to switch channel.").kjSmall(faint: true)
         }

@@ -66,6 +66,13 @@ enum PnvKind: String, CaseIterable, Sendable {
 
     /// The site's button labels (browse-archive.html: Everything / Pictures / Videos).
     var label: String { self == .image ? "Pictures" : "Videos" }
+
+    /// The rows a page held to one kind may draw: a row of any other kind is dropped, even one the
+    /// server's filter let through. nil keeps every row.
+    static func shown(_ rows: [PnvRow], only kind: PnvKind?) -> [PnvRow] {
+        guard let kind else { return rows }
+        return rows.filter { $0.kind == kind.rawValue }
+    }
 }
 
 // MARK: - URLs (kj-media.js)
@@ -208,6 +215,13 @@ enum PnvRegions {
 // MARK: - The query (kj-browse-archive.js)
 
 enum PnvAPI {
+    /// Which way the Reel skips a broken video: the way the last step went (Down onto one goes on
+    /// back, round to the last loaded from the first). A new deal starts with lastDelta 1, so a
+    /// deal that opens on a broken video skips it forward.
+    static func reelSkipDelta(lastDelta: Int) -> Int {
+        lastDelta >= 0 ? 1 : -1
+    }
+
     static let columns = "media_key,account,account_key,shortcode,child_index,kind,resource_type,media_host,resource_endpoint,width,height,tags,taken_at,corpus,feed_rank,da_id"
     static let pageSize = 60
 

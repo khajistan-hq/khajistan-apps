@@ -30,6 +30,18 @@ final class TransmissionStore {
     private(set) var phase: Phase = .idle
     private(set) var channelNumber = 1
     private(set) var programming: Programming?
+    /// Moves each time a schedule is taken in, so the guide reads its rows again when a refresh
+    /// changes programmes inside the same month (guideMonthsKey moves only with the months).
+    private(set) var scheduleRevision = 0
+    /// The month after the one held, fetched only for the guide when its hours reach past the
+    /// month's end (loadNextMonth); nil otherwise, or when that month is not published yet.
+    private(set) var nextProgramming: Programming?
+    @ObservationIgnored private var nextMonthLoad: (month: String, task: Task<Bool, Never>)?
+    /// When the month after was fetched: it becomes the month held at the turn, and keeps its age.
+    @ObservationIgnored private var nextFetchedAt: TimeInterval?
+    /// Moves when the schedule is dropped: a next-month read begun before the drop does not keep
+    /// its answer, so a month the server refused is not taken at the turn without asking again.
+    @ObservationIgnored private var nextEpoch = 0
     /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
     /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
     /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
@@ -100,6 +112,12 @@ final class TransmissionStore {
     private struct Reply {
         let data: Data
         let status: Int
+        /// The ETag of a body that came from the network, to keep it on the device by.
+        var etag: String? = nil
+        /// The body is the copy kept on the device, answered by a 304.
+        var fromCache = false
+        /// The body was opened by the preview password, so it is kept only while that is held.
+        var authorized = false
     }
 
     init(auth: AuthStore) {
@@ -146,6 +164,14 @@ final class TransmissionStore {
         programming?.programme_order.count
     }
 
+    /// Whole hours of footage in the month's programmes, from each one's own length (owner,
+    /// 2026-11-27: "why is it not showing hours of footage on the transmission").
+    var programmeHours: Int? {
+        programming.map { p in
+            Int(p.programmes.values.reduce(0) { $0 + ($1.seconds ?? ($1.nominal_minutes ?? 0) * 60) } / 3600)
+        }
+    }
+
     /// What the clock puts on a channel at a moment. Nil when nothing is on it, or no schedule is held.
     func nowOn(channel: Int, at date: Date) -> OnAir? {
         guard let p = programming else { return nil }
@@ -156,6 +182,64 @@ final class TransmissionStore {
     func upcoming(channel: Int, at date: Date, count: Int = 3) -> [ScheduleStrip] {
         guard let p = programming, let id = StationClock.channelId(p, number: channel) else { return [] }
         return StationClock.upcoming(p, channelId: id, at: date, count: count)
+    }
+
+    /// What a channel airs from `from` to `to`, programme by programme, for the guide's time grid,
+    /// across the month held and the next one when it is held too. Empty when no schedule is held.
+    func timeline(channel: Int, from: Date, to: Date) -> [GuideSlot] {
+        StationClock.timeline(guideMonths, channel: channel, from: from, to: to)
+    }
+
+    /// Which months the guide reads, by their ends: it changes when a month is brought in or the
+    /// month turns, and the guide reads its rows again.
+    var guideMonthsKey: [Date] { guideMonths.compactMap(StationClock.monthEnd) }
+
+    /// The schedule files the guide reads, in order: the month held, and the next when it is held
+    /// too. Value types, so the guide can read them off the main thread.
+    var guideMonths: [Programming] {
+        guard let p = programming else { return [] }
+        let next = nextProgramming.flatMap { n in StationClock.monthEnd(n) != StationClock.monthEnd(p) ? n : nil }
+        return [p] + (next.map { [$0] } ?? [])
+    }
+
+    /// Fetches the month after the one held when the guide reads to `until` past its end, so the
+    /// hours after midnight on the 1st read what airs; also the month the clock has turned into
+    /// while the month before is still held. One fetch at a time: a second call waits for it. A
+    /// month not published yet, or any failure, leaves nothing, and the guide asks again on its
+    /// next half-minute tick. Returns true when it brought one in.
+    func loadNextMonth(until: Date) async -> Bool {
+        guard let key = StationClock.monthToFetch(held: programming, next: nextProgramming, until: until) else { return false }
+        if let held = nextMonthLoad, held.month == key { return await held.task.value }
+        let task = Task { [self] in await fetchNextMonth(key) }
+        nextMonthLoad = (key, task)
+        let brought = await task.value
+        if nextMonthLoad?.month == key { nextMonthLoad = nil }
+        return brought
+    }
+
+    private func fetchNextMonth(_ key: String) async -> Bool {
+        #if DEBUG
+        if UserDefaults.standard.string(forKey: "kjschedulefile") != nil { return false }
+        #endif
+        let epoch = nextEpoch
+        let url = Transmission.scheduleURL(month: key)
+        guard var reply = try? await send(URLRequest(url: url)) else { return false }
+        if reply.status == 401, let password = auth.previewPassword {
+            var request = URLRequest(url: url)
+            request.setValue(Transmission.basicAuthorization(user: KJConfig.previewUser, password: password),
+                             forHTTPHeaderField: "Authorization")
+            guard let again = try? await send(request) else { return false }
+            reply = again
+        }
+        guard reply.status == 200 else { return false }
+        let body = reply.data
+        guard let decoded = try? await Task.detached(priority: .userInitiated, operation: {
+            try JSONDecoder().decode(Programming.self, from: body)
+        }).value, StationClock.stationMonth(StationClock.monthEnd(decoded)?.addingTimeInterval(-1) ?? .distantPast) == key,
+              epoch == nextEpoch else { return false }
+        nextProgramming = decoded
+        nextFetchedAt = ProcessInfo.processInfo.systemUptime
+        return true
     }
 
     /// When the channel is next on air, for the moment nothing is: "13:03 PKT", with the day once
@@ -184,11 +268,28 @@ final class TransmissionStore {
         // A schedule held for this month is fetched again once it is `scheduleMaxAge` old, so a
         // channel added on the site reaches a set that was never closed (owner, 2026-11-09: "i dont
         // see new channels on my apple tv"). The held one stays on screen while it is fetched.
-        let heldReady = schedule == .ready && month == monthKey
+        var heldReady = schedule == .ready && month == monthKey
         if heldReady, let at = fetchedAt, ProcessInfo.processInfo.systemUptime - at < Self.scheduleMaxAge { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
             return
+        }
+        // The month the clock has turned into was fetched for the guide already: it is taken as the
+        // month held rather than downloaded again.
+        if !heldReady, let next = nextProgramming,
+           StationClock.monthEnd(next).map({ StationClock.stationMonth($0.addingTimeInterval(-1)) }) == monthKey {
+            scheduleGeneration += 1
+            programming = next
+            nextProgramming = nil
+            month = monthKey
+            schedule = .ready
+            // Its own age: fetched up to a day before, it is refreshed as any held month is,
+            // before this load returns, so the first tune after midnight reads today's lineup.
+            // It stays on screen meanwhile, and stays if the refresh fails.
+            fetchedAt = nextFetchedAt ?? 0
+            refreshing = false
+            if ProcessInfo.processInfo.systemUptime - (fetchedAt ?? 0) < Self.scheduleMaxAge { return }
+            heldReady = true
         }
         scheduleGeneration += 1
         let gen = scheduleGeneration
@@ -204,7 +305,7 @@ final class TransmissionStore {
         await task.value
     }
 
-    private func fetchSchedule(month monthKey: String, generation gen: Int) async {
+    private func fetchSchedule(month monthKey: String, generation gen: Int, useKept: Bool = true) async {
         let url = Transmission.scheduleURL(month: monthKey)
         var reply: Reply
         #if DEBUG
@@ -216,18 +317,42 @@ final class TransmissionStore {
             return
         }
         #endif
+        let cache = ScheduleCache.shared
+        let held = useKept ? await Task.detached(priority: .userInitiated) { cache.etag(month: monthKey) }.value : nil
+        func request(authorization: String?, ifNoneMatch: String?) -> URLRequest {
+            var request = URLRequest(url: url)
+            if let ifNoneMatch { request.setValue(ifNoneMatch, forHTTPHeaderField: "If-None-Match") }
+            if let authorization { request.setValue(authorization, forHTTPHeaderField: "Authorization") }
+            return request
+        }
         do {
             // Without the preview password first: after the launch switch the schedule is
             // public, and a stored password that no longer matches must not stand in the way.
-            reply = try await send(URLRequest(url: url))
+            var authorization: String?
+            reply = try await send(request(authorization: nil, ifNoneMatch: held))
             if reply.status == 401, let password = auth.previewPassword {
                 guard gen == scheduleGeneration else { return }
-                var request = URLRequest(url: url)
-                request.setValue(
-                    Transmission.basicAuthorization(user: KJConfig.previewUser, password: password),
-                    forHTTPHeaderField: "Authorization"
-                )
-                reply = try await send(request)
+                authorization = Transmission.basicAuthorization(user: KJConfig.previewUser, password: password)
+                reply = try await send(request(authorization: authorization, ifNoneMatch: held))
+                reply.authorized = true
+            }
+            if reply.status == 304 {
+                guard gen == scheduleGeneration else { return }
+                // Unchanged, and this month's schedule is already on screen: it stays, with no
+                // 8.8 MB read and decode every half hour.
+                if programming != nil, month == monthKey, schedule == .ready {
+                    fetchedAt = ProcessInfo.processInfo.systemUptime
+                    refreshing = false
+                    return
+                }
+                // Unchanged: the copy on the device is the schedule. Purged since? Fetch it whole.
+                if let data = await Task.detached(priority: .userInitiated, operation: { cache.data(month: monthKey) }).value {
+                    reply = Reply(data: data, status: 200, fromCache: true)
+                } else {
+                    guard gen == scheduleGeneration else { return }
+                    reply = try await send(request(authorization: authorization, ifNoneMatch: nil))
+                    reply.authorized = authorization != nil
+                }
             }
         } catch {
             guard gen == scheduleGeneration else { return }
@@ -260,11 +385,35 @@ final class TransmissionStore {
             }.value
         } catch {
             guard gen == scheduleGeneration else { return }
+            if reply.fromCache {
+                // The kept copy will not decode (an older app's file, say): drop it, or every
+                // later load is answered 304 and reads it again. Fetched whole once more, with no
+                // If-None-Match whatever is still on disk, so it cannot come back here.
+                await Task.detached(priority: .userInitiated) { ScheduleCache.shared.clear() }.value
+                guard gen == scheduleGeneration else { return }
+                await fetchSchedule(month: monthKey, generation: gen, useKept: false)
+                return
+            }
             dropSchedule(.failed("The schedule could not be read."))
             return
         }
         guard gen == scheduleGeneration else { return }
+        // Kept only once it has decoded, so a broken file is never the one sent back as current.
+        // A password cleared while this fetch was in flight: its body is not put back on disk.
+        if let etag = reply.etag, !reply.authorized || auth.previewPassword != nil {
+            let revision = accessRevision
+            Task { [weak self] in
+                await Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }.value
+                // The password was cleared while the write ran, and its clear may have gone first.
+                guard let self, self.accessRevision != revision, self.auth.previewPassword == nil else { return }
+                await Task.detached(priority: .utility) { ScheduleCache.shared.clear() }.value
+            }
+        }
         programming = decoded
+        scheduleRevision += 1
+        // The month after, fetched for the guide, is this month now: one copy is held, not two.
+        if let next = nextProgramming, let nextEnd = StationClock.monthEnd(next),
+           let end = StationClock.monthEnd(decoded), nextEnd <= end { nextProgramming = nil }
         month = monthKey
         schedule = .ready
         fetchedAt = ProcessInfo.processInfo.systemUptime
@@ -276,6 +425,10 @@ final class TransmissionStore {
         // A failed refresh keeps the schedule already on screen; it is tried again next time.
         if refreshing, programming != nil { refreshing = false; return }
         programming = nil
+        // The month after goes too: a set the server refused must not take it as the month held at
+        // the turn without asking.
+        nextProgramming = nil
+        nextEpoch += 1
         month = nil
         schedule = state
     }
@@ -386,6 +539,10 @@ final class TransmissionStore {
         accessRevision += 1
         signed.removeAll()
         stop()
+        // A schedule a cleared preview password opened is not kept on the device without it.
+        if auth.previewPassword == nil {
+            Task.detached(priority: .utility) { ScheduleCache.shared.clear() }
+        }
         // A refused refresh clears the session from inside `carrier`, whose answer the
         // generation bump above then drops: say so here, or the screen waits on a loader.
         if watching, auth.session == nil { phase = .needsSignIn }
@@ -416,7 +573,13 @@ final class TransmissionStore {
     private func play(_ air: OnAir, generation gen: Int) async {
         #if DEBUG
         // With a schedule file there is no account: the overlay is drawn over no picture.
+        // `-kjtransmissionpicture YES` plays the UI tests' own video file (Fixtures/recorded/media)
+        // as the programme, so a test can photograph a moving picture, in the guide's window too.
         if isScheduleFile {
+            if UserDefaults.standard.bool(forKey: "kjtransmissionpicture"),
+               let file = try? KJFixtureProtocol.mediaURL(for: "tv") {
+                player.attach(url: file, seekTo: 0, title: nowPlayingTitle(air), subtitle: air.show?.name)
+            }
             phase = .onAir(air)
             watchSlotEnd(air, generation: gen)
             return
@@ -564,7 +727,9 @@ final class TransmissionStore {
 
     private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> Reply {
         let (data, response) = try await SupabaseRoute.data(for: request, session: urlSession, delegate: refusingRedirects ? RefuseRedirects() : nil)
-        return Reply(data: data, status: (response as? HTTPURLResponse)?.statusCode ?? 0)
+        let http = response as? HTTPURLResponse
+        return Reply(data: data, status: http?.statusCode ?? 0,
+                     etag: http?.statusCode == 200 ? http?.value(forHTTPHeaderField: "ETag") : nil)
     }
 
     /// The URL to play for a route, or nil once the phase has been set to say why not. As in the
@@ -682,16 +847,22 @@ final class TransmissionStore {
     /// reverent rule reads. Whether the samples can be read is the carrier's to say: a Supabase
     /// storage file or a Dropbox link can be tapped, a Cloudflare Stream manifest cannot.
     static func dancerMayListen(_ air: OnAir, channel: Int) -> Bool {
-        guard air.programme?.audio_only == true else { return false }
+        air.programme?.audio_only == true && !isReverent(air, channel: channel)
+    }
+
+    /// The reverent rule for a house channel, read from the show's name (the dancer's and the
+    /// visualizer's: a reverent programme plays nature pieces only and never the dancer).
+    static func isReverent(_ air: OnAir, channel: Int) -> Bool {
         let name = air.show?.name ?? "Khajistan Transmission \u{00B7} Channel \(channel)"
-        return !Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
+        return Reverence.isReverent(name: name, nativeName: nil, broadcaster: nil)
     }
 
     /// Five vinyl transfers carry no title; the show name stands in for it.
     private func nowPlayingTitle(_ air: OnAir) -> String {
-        let title = air.programme?.title ?? ""
+        // The standardised name, with its year (owner, 2026-11-20), where the build wrote one.
+        let title = air.programme?.display_title ?? air.programme?.title ?? ""
         if !title.isEmpty { return title }
-        return air.show?.name ?? "Khajistan TV"
+        return air.show?.name ?? "Khajistan Transmission"
     }
 }
 

@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Pics/Vids as reels (owner, 2026-11-08: "they need to be like reels and grid to make the
 /// interaction better"). One object a screen, a swipe up for the next and down for the one
-/// before, as a phone's short-video feed moves. A video plays when its page settles and loops; a
+/// before, as a phone's short-video feed moves. A video plays when its page settles and loops (in the
+/// Reel the next video plays instead, owner 2026-11-19); a
 /// tap pauses it. Save and Collection stay on the right rail, the account and the caption at the
 /// bottom left, so nothing waits behind a tap. A picture is fitted whole, never cropped.
 ///
@@ -12,8 +13,9 @@ import SwiftUI
 /// with shuffle button and all regions or specific region options").
 struct PnvReelsView: View {
     /// Where the pages come from: the live stream under the region filter, which grows as the
-    /// viewer nears its end, or a fixed list (an account's saves).
-    enum Source { case feed, rows([PnvRow]) }
+    /// viewer nears its end; the Reel, the same stream as videos only and always shuffled (owner,
+    /// 2026-11-19: "remove pictures ... only shuffle the reel"); or a fixed list (an account's saves).
+    enum Source { case feed, reel, rows([PnvRow]) }
 
     enum Phase: Equatable { case idle, loading, ready, needsSignIn, failed(String) }
 
@@ -40,6 +42,13 @@ struct PnvReelsView: View {
     /// Shuffle or region change waits for its feed; otherwise the last page known. The scroll view
     /// can set position to nil while the reel is empty, so this, not the tapped object, decides.
     @State private var home: String?
+    /// Broken videos skipped in a row: past two the Reel stops and says so, so a dead network does
+    /// not page through everything loaded every two seconds.
+    @State private var skips = 0
+    /// The page the last skip was for (a dead file can report its failure twice) and its timer,
+    /// which a swipe or a close cancels.
+    @State private var skipped: String?
+    @State private var skipTask: Task<Void, Never>?
 
     let start: PnvRow
     let source: Source
@@ -51,13 +60,26 @@ struct PnvReelsView: View {
         // the scrollTo on arrival corrects a lazy stack that lands a page off.
         _position = State(initialValue: ReelItem.id(lap: 0, start.id))
         if case .rows(let rows) = source { _fixed = State(initialValue: rows) } else { _fixed = State(initialValue: []) }
+        // The Reel opens on its own first video, not on a tapped object: no page is current until
+        // the videos feed has one, and reopenIfLost() then opens on it.
+        if case .reel = source {
+            _position = State(initialValue: "")
+            _home = State(initialValue: "")
+        }
     }
 
     private var store: PicsVidsStore { model.pnv }
 
+    /// The store feed the pages come from: the region's own stream, or its videos-only feed.
+    private var feedKey: String {
+        if case .reel = source { return PicsVidsStore.videosKey(model.pnvRegion) }
+        return model.pnvRegion
+    }
+    private var isReel: Bool { if case .reel = source { return true } else { return false } }
+
     private var items: [PnvRow] {
         switch source {
-        case .feed: return store.feed(model.pnvRegion).items
+        case .feed, .reel: return store.feed(feedKey).items
         case .rows: return fixed
         }
     }
@@ -68,7 +90,7 @@ struct PnvReelsView: View {
         ([items] + laps).enumerated().flatMap { lap, rows in rows.map { ReelItem(lap: lap, row: $0) } }
     }
 
-    private var isStream: Bool { if case .feed = source { return true } else { return false } }
+    private var isStream: Bool { if case .rows = source { return false } else { return true } }
     /// The page on screen. A missing position means `home`, so a re-deal holding the tapped
     /// object still reopens on its own first page.
     private var currentId: String { position ?? home ?? ReelItem.id(lap: 0, start.id) }
@@ -86,7 +108,7 @@ struct PnvReelsView: View {
                 ForEach(reel) { item in
                     let row = item.row
                     PnvReelPage(row: row, isCurrent: item.id == currentId, ownsPlayer: owner == item.id,
-                                controller: controller, phase: phase, insets: insets,
+                                controller: controller, phase: phase, insets: insets, minimal: isReel,
                                 signIn: { showSignIn = true })
                         .containerRelativeFrame([.horizontal, .vertical])
                         // Only the reel on screen is read: a built neighbour's Save is not reachable
@@ -103,7 +125,7 @@ struct PnvReelsView: View {
         .ignoresSafeArea()
         // The seeded position can land a page off in a lazy stack that has not built the tapped
         // page yet; scrolling to it once on arrival puts the reel on the object that was tapped.
-        .onAppear { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) }
+        .onAppear { if !isReel { proxy.scrollTo(ReelItem.id(lap: 0, start.id), anchor: .top) } }
         // A counter, not the id: two regions can open on the same object, and the same id set
         // twice would not change and would not scroll.
         .onChange(of: jump) { if let position { proxy.scrollTo(position, anchor: .top) } }
@@ -123,7 +145,12 @@ struct PnvReelsView: View {
         .environment(\.palette, palette)
         .foregroundStyle(palette.ink)
         .statusBarHidden()
-        .onAppear { activate() }
+        .onAppear {
+            // Each opening of the Reel deals a new hand of its own feed; the grid is untouched.
+            // A hand already on the store (its page still in flight) opens on its first page.
+            if isReel { redeal(); reopenIfLost() }
+            activate()
+        }
         .task { await model.saves.load() }
         .onChange(of: position) {
             // The last page known, so a nil from the scroll view later still names a real page.
@@ -132,12 +159,18 @@ struct PnvReelsView: View {
             activate()
         }
         // A new region or a new deal empties the feed: the reel waits, then opens on its first page.
-        .task(id: "\(model.pnvRegion)|\(store.deal)") {
+        .task(id: "\(feedKey)|\(store.deal)") {
             guard isStream else { return }
-            if store.feed(model.pnvRegion).isUntouched { await store.loadMore(region: model.pnvRegion) }
+            if store.feed(feedKey).isUntouched { await store.loadMore(region: feedKey) }
         }
         .onChange(of: items.first?.id) { reopenIfLost() }
-        .onDisappear { loadTask?.cancel(); controller.stop() }
+        .onDisappear { loadTask?.cancel(); skipTask?.cancel(); controller.stop() }
+        // A video that fails inside the player (a dead file, a start that times out) never ends
+        // either; one that plays resets the count of skips in a row.
+        .onChange(of: controller.state) {
+            if case .failed = controller.state, let owner { skipBroken(owner) }
+            if controller.state == .playing { skips = 0 }
+        }
         .sheet(isPresented: $showSignIn) { SignInView(model: model, onSignedIn: { activate(force: true) }) }
         // A keyboard or a trackpad pages too: a drag does not page a scroll view on the Mac.
         .focusable()
@@ -160,19 +193,21 @@ struct PnvReelsView: View {
                 regionMenu
                 // A tap shuffles, and while on deals again, as the grid's button and the website's
                 // "Shuffle again" do; a long press goes back to the stream's own order.
-                Button { deal(shuffled: true) } label: {
+                Button { if isReel { restart { redeal() } } else { deal(shuffled: true) } } label: {
                     Image(systemName: "shuffle").font(.system(.body, weight: .bold)).frame(width: 44, height: 44)
                 }
-                .buttonStyle(ReelRailStyle(isOn: store.shuffled))
+                // In the Reel it is always on, so it is not lit: a lit plate only pulls the eye.
+                .buttonStyle(ReelRailStyle(isOn: !isReel && store.shuffled))
                 .accessibilityLabel("Shuffle")
-                .accessibilityValue(store.shuffled ? "On" : "Off")
-                .accessibilityHint(store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
+                .accessibilityValue(isReel || store.shuffled ? "On" : "Off")
+                .accessibilityHint(isReel ? "Deals the reel again." : store.shuffled ? "Deals the reel again. Touch and hold for the stream's own order." : "")
                 .accessibilityActions {
-                    if store.shuffled { Button("Stream order") { deal(shuffled: false) } }
+                    if store.shuffled && !isReel { Button("Stream order") { deal(shuffled: false) } }
                 }
                 .accessibilityIdentifier("pnvReelShuffle")
                 .contextMenu {
-                    if store.shuffled {
+                    // The Reel is only ever shuffled: no way back to the stream's order there.
+                    if store.shuffled && !isReel {
                         Button("Stream order", systemImage: "list.bullet") { deal(shuffled: false) }
                     }
                 }
@@ -208,18 +243,25 @@ struct PnvReelsView: View {
     /// While a new region or deal has nothing yet: the loader, or what went wrong.
     @ViewBuilder
     private var emptyState: some View {
-        let feed = store.feed(model.pnvRegion)
+        let feed = store.feed(feedKey)
         if let error = feed.error {
             VStack(spacing: 12) {
                 Text(error).kjBody()
-                Button(kicker: "Try again") { Task { await store.retry(region: model.pnvRegion) } }
+                Button(kicker: "Try again") { Task { await store.retry(region: feedKey) } }
                     .buttonStyle(HouseButtonStyle(solid: true))
             }
         } else if feed.isDone {
-            Text("Nothing filed under this yet.").kjBody()
+            Text(isReel ? "No videos from here yet." : "Nothing filed under this yet.").kjBody()
         } else {
             TuningLoader("Loading\u{2026}")
         }
+    }
+
+    /// The Reel's own new hand: its videos feed dropped and asked for again (the grid keeps its own).
+    private func redeal() {
+        let key = feedKey
+        store.discard(key)
+        Task { await store.loadMore(region: key) }
     }
 
     private func change(region: String) {
@@ -241,6 +283,8 @@ struct PnvReelsView: View {
         activatedId = nil
         laps = []
         home = ""
+        // A new hand or region starts the count of broken videos skipped in a row again.
+        skips = 0
         change()
         // No page is current until the new feed has one: reopenIfLost() then opens on it, here
         // if the feed is already loaded, or when its first page arrives.
@@ -264,19 +308,21 @@ struct PnvReelsView: View {
         guard force || activatedId != currentId else { return }
         activatedId = currentId
         loadTask?.cancel()
+        skipTask?.cancel()
+        skipped = nil
         controller.stop()
         owner = nil
         guard let row = current else { return }
         let pages = reel
         if isStream, let index = pages.firstIndex(where: { $0.id == currentId }), index >= pages.count - 4 {
-            if store.feed(model.pnvRegion).isDone {
+            if store.feed(feedKey).isDone {
                 // The feed has given everything: deal it again, so the reel never ends.
                 // ponytail: every lap is kept and `reel` is rebuilt per render. A lap starts only
                 // once the whole feed has been shown and is the feed's size, so it costs what the
                 // feed already costs, after as many swipes; cap laps if a big region ever gets there.
                 if !items.isEmpty { laps.append(PnvReel.nextLap(items, after: pages.last?.row.id)) }
             } else {
-                let region = model.pnvRegion
+                let region = feedKey
                 Task {
                     // A page that failed blocks loadMore until it is cleared: ask again, or the
                     // reel stops at its end with nothing said.
@@ -288,7 +334,7 @@ struct PnvReelsView: View {
                     // The last page came back and the feed is done while the end is already on
                     // screen: activate() will not run again for this page, so deal the lap here,
                     // or the reel stops on its last object (a feed whose size is a page multiple).
-                    guard isStream, region == model.pnvRegion, store.feed(region).isDone, !items.isEmpty else { return }
+                    guard isStream, region == feedKey, store.feed(region).isDone, !items.isEmpty else { return }
                     let now = reel
                     guard let at = now.firstIndex(where: { $0.id == currentId }), at >= now.count - 4 else { return }
                     laps.append(PnvReel.nextLap(items, after: now.last?.row.id))
@@ -309,6 +355,10 @@ struct PnvReelsView: View {
                 // Weak: the controller stores this closure, so a strong capture keeps the player.
                 controller.onEnded = { [weak controller] in
                     guard let controller else { return }
+                    // The next page plays by itself, as a short-video feed does (owner, 2026-11-19:
+                    // "reel should auto play the next video"). Only the page that ended moves on, so
+                    // a late notice after a swipe cannot skip a second page.
+                    if isReel, currentId == key, hasNextPage, !assistiveTechRunning { step(1); return }
                     // A Khajistan TV programme ends rather than looping, and says it is stopped.
                     guard !row.isKtv else { controller.pause(); return }
                     // Loops in place: resume() would tune again, flashing the still and fading in.
@@ -326,15 +376,52 @@ struct PnvReelsView: View {
                 if !UIAccessibility.isVideoAutoplayEnabled { controller.pause() }
                 owner = key
                 phase = .ready
+                #if DEBUG
+                // `-kjfakeend N`: the video "ends" N s after it starts, so a test of what an end does
+                // does not wait on a live clip's length (a kabaddi match ran past 180 s). Debug only.
+                if let seconds = Int(UserDefaults.standard.string(forKey: "kjfakeend") ?? "") {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    if !Task.isCancelled, currentId == key { controller.onEnded?() }
+                }
+                #endif
             } catch PnvPlaybackError.needsSignIn {
                 if !Task.isCancelled { phase = .needsSignIn }
             } catch {
-                if !Task.isCancelled { phase = .failed(error.localizedDescription) }
+                guard !Task.isCancelled else { return }
+                phase = .failed(error.localizedDescription)
+                skipBroken(key)
             }
         }
     }
 
-    /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1).
+    /// A video that cannot play never ends: in the Reel it shows its error for a moment, then the
+    /// next page plays. Only while the broken page is still on screen, and not three in a row.
+    private func skipBroken(_ key: String) {
+        guard isReel, !assistiveTechRunning, skips < 2, skipped != key else { return }
+        skips += 1
+        skipped = key
+        skipTask?.cancel()
+        skipTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            // VoiceOver or Switch Control turned on during the wait keeps the page being read.
+            if !Task.isCancelled, currentId == key, hasNextPage, !assistiveTechRunning { step(1) }
+        }
+    }
+
+    /// VoiceOver and Switch Control loop the video instead of moving on, so the page under the
+    /// cursor is not taken away while it is being read.
+    private var assistiveTechRunning: Bool { UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning }
+
+    /// A page after the one on screen: on a stream there always is one in the end (a new lap); a
+    /// fixed list stops at its last object, which then loops.
+    private var hasNextPage: Bool {
+        let pages = reel
+        guard let index = pages.firstIndex(where: { $0.id == currentId }) else { return false }
+        return index + 1 < pages.count
+    }
+
+    /// For VoiceOver and Switch Control, which cannot page by swiping (WCAG 2.5.1), and for the
+    /// next video when one ends.
     private func step(_ delta: Int) {
         let pages = reel
         guard let index = pages.firstIndex(where: { $0.id == currentId }) else { return }
@@ -352,7 +439,7 @@ private struct ReelItem: Identifiable {
     static func id(lap: Int, _ key: String) -> String { "\(lap)|\(key)" }
 }
 
-/// One reel: the object, and over it the rail and the caption. Only the current page holds the
+/// One reel: the object, and over it the rail and the caption (in the Reel, one short line). Only the current page holds the
 /// player; the others show their still, so a page scrolled past costs no decoding.
 private struct PnvReelPage: View {
     let row: PnvRow
@@ -362,6 +449,9 @@ private struct PnvReelPage: View {
     let phase: PnvReelsView.Phase
     /// The screen's safe area, which the full-bleed pager cannot read for itself.
     let insets: EdgeInsets
+    /// The Reel (owner, 2026-11-20: the bars were "taking attention away from the video"): one
+    /// short line for the account and the region, no meta line, no caption.
+    var minimal = false
     let signIn: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var palette
@@ -429,14 +519,36 @@ private struct PnvReelPage: View {
             if !Task.isCancelled { showLoader = true }
         }
         // Only the reel on screen asks for its caption: the stack builds its neighbours too.
-        .task(id: isCurrent ? row.id : "") { if isCurrent, caption == nil { caption = await store.caption(for: row) } }
+        .task(id: isCurrent ? row.id : "") { if isCurrent, !minimal, caption == nil { caption = await store.caption(for: row) } }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("reel-\(row.media_key)")
     }
 
     // MARK: - Bottom left
 
+    @ViewBuilder
     private var details: some View {
+        if minimal { reelLine } else { fullDetails }
+    }
+
+    /// "@account · Region" on a plate that hugs it, and below it only what needs saying now.
+    private var reelLine: some View {
+        let place = store.regionToken(for: row).map(PnvRegions.label)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("@" + store.accountHandle(for: row) + (place.map { " \u{00B7} " + $0 } ?? ""))
+                .kjSmall().lineLimit(1)
+                .accessibilityIdentifier("pnvReelLine")
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(palette.ground.opacity(0.9), in: Capsule())
+            // A state or a sign-in stands on its own plate: nothing else is behind it here.
+            if isCurrent, hasStateLine { stateLine.padding(8).background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous)) }
+            if let note { Text(note).kjSmall().padding(8).background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).accessibilityIdentifier("pnvSaveNote") }
+        }
+        .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private var fullDetails: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("@" + store.accountHandle(for: row)).kjName(.headline).lineLimit(1)
             Text(PnvAPI.metaLine(for: row, regionToken: store.regionToken(for: row), date: Self.dateText, showsSize: false))
@@ -448,6 +560,15 @@ private struct PnvReelPage: View {
         .padding(12)
         .background(palette.ground.opacity(0.9), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxWidth: 520, alignment: .leading)
+    }
+
+    private var hasStateLine: Bool {
+        switch phase {
+        case .needsSignIn, .failed: return true
+        default:
+            if row.isVideo, case .failed = controller.state { return true }
+            return false
+        }
     }
 
     @ViewBuilder

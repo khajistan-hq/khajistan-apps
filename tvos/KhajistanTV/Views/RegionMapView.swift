@@ -3,8 +3,8 @@ import UIKit
 
 /// The receiver's map, drawn as the website draws it at /open-frequencies: the shapes from the
 /// shape files in the two house greens, the people's regions hatched, regions with no channels
-/// dimmed, labels in yellow with a black halo, and the focused region outlined with its label on
-/// a yellow plate. One Canvas draws all of it. The map is a picture, not a control: the remote
+/// dimmed, and the focused region outlined with its label on a yellow plate. No label is drawn at
+/// rest (2026-11-20): the list beside the map names every region. One Canvas draws all of it. The map is a picture, not a control: the remote
 /// walks the strip of regions under it (ReceiverView), because tvOS moves focus only to a target
 /// lying straight along the press, and from most labels on a map there is none. On the owner's
 /// Apple TV focus stuck on one region (2026-10-05).
@@ -247,8 +247,10 @@ private struct RegionMapPainter {
         guard layout.scale > 0 else { return }
         switch mode {
         case .base:
+            // No names at rest (owner, 2026-11-20: the front was "too busy and visually
+            // cluttery"): the list beside the map names every region, so the map is shapes only,
+            // and the one region lit from the list carries its name on the plate.
             paintShapes(context)
-            paintLabels(context)
         case .focus:
             paintOutline(context)
             if let focusedID, let label = layout.labels.first(where: { $0.region.id == focusedID }) {
@@ -361,9 +363,19 @@ private struct RegionMapPainter {
     private func paintLabel(_ label: RegionMapLabel, in context: GraphicsContext) {
         let resolved = context.resolve(label.face.text(label.text))
         if label.region.isPeople {
-            // A people's region is a facet, not a place to tune: its name is dimmed, no halo.
+            // A people's region is a facet, not a place to tune: its name is dimmed and sits on a halo
+            // of the page, the inverse of a place's full yellow on black. The page halo carries it over
+            // the land (yellow on the olive measures 2.8:1 at best), and on Day, whose page is the label
+            // yellow, the name is the band's green. At 95% it clears 4.5:1 against the halo in every skin
+            // (Smut 4.7, Day 5.8, Grove 6.0; at 85% Smut measured 4.0).
+            let onDay = palette.ground == palette.onBand
+            var halo = resolved
+            halo.shading = .color(palette.ground)
+            for offset in Self.haloOffsets {
+                context.draw(halo, at: CGPoint(x: label.center.x + offset.x, y: label.center.y + offset.y), anchor: .center)
+            }
             var dimmed = resolved
-            dimmed.shading = .color(.black.opacity(0.82))
+            dimmed.shading = .color((onDay ? palette.band : palette.onBand).opacity(0.95))
             context.draw(dimmed, at: label.center, anchor: .center)
             return
         }

@@ -57,18 +57,16 @@ final class SubtitlesUITests: XCTestCase {
             let low = caption.frame
             kjScreenshot("subs-\(skin)-1-transmission-strip-down", app: app)
 
-            XCUIRemote.shared.press(.select)   // wakes the strip
+            // Up wakes the strip and lights its first control, Subtitles (the players' remote
+            // map, 2026-11-28; Select woke it and Right lit the control until then).
+            XCUIRemote.shared.press(.up)
             kjPause(0.8)
             kjScreenshot("subs-\(skin)-2-transmission-strip-up", app: app)
             let control = app.buttons["subtitlesControl"]
             XCTAssertTrue(control.exists, "a programme with subtitles carries the control")
             XCTAssertEqual(control.label, "Subtitles · English")
             XCTAssertLessThan(caption.frame.maxY, low.maxY - 40, "\(skin): the subtitle rises above the strip")
-
-            XCUIRemote.shared.press(.right)    // to the control
-            kjPause(0.6)
-            kjScreenshot("subs-\(skin)-2b-transmission-control-focused", app: app)
-            XCTAssertTrue(control.isSelected, "right lights the Subtitles control")
+            XCTAssertTrue(control.isSelected, "Up lights the Subtitles control, the strip's first")
             XCUIRemote.shared.press(.select)   // off
             kjPause(0.6)
             XCTAssertEqual(control.label, "Subtitles · Off")
@@ -77,21 +75,25 @@ final class SubtitlesUITests: XCTestCase {
             XCUIRemote.shared.press(.select)   // on again
             kjPause(0.6)
             XCTAssertTrue(caption.waitForExistence(timeout: 3))
+            // Left on the first control stays on it; Down lets go.
             XCUIRemote.shared.press(.left)
             kjPause(0.6)
-            XCTAssertFalse(control.hasFocus, "left leaves the control")
+            XCTAssertTrue(control.isSelected, "Left on the first control stays on it")
+            XCUIRemote.shared.press(.down)
+            kjPause(0.6)
+            XCTAssertFalse(control.isSelected, "Down lets go of the control")
             app.terminate()
         }
     }
 
-    /// Lights the strip's Captions control the way the remote does since 2026-11-04: right on the
-    /// bare picture opens the guide, so Select lights it. A first Select only wakes the strip when
-    /// it had hidden; a second then lights Captions. Never a third, which would work the control.
+    /// Lights the strip's Captions control the way the remote does since 2026-11-28: Up on the
+    /// picture wakes the strip and lights its first control. A second Up is pressed only when the
+    /// first did not light it; Up on a lit control does nothing.
     private func lightCaptions(_ control: XCUIElement) {
-        XCUIRemote.shared.press(.select)
+        XCUIRemote.shared.press(.up)
         kjPause(0.8)
         if !(control.exists && control.isSelected) {
-            XCUIRemote.shared.press(.select)
+            XCUIRemote.shared.press(.up)
             kjPause(0.8)
         }
     }
@@ -118,33 +120,34 @@ final class SubtitlesUITests: XCTestCase {
         let state = app.staticTexts["playerState"]
         XCTAssertTrue(state.waitForExistence(timeout: 20))
         // The strip offers its controls over a playing channel: ABN News, or when its carrier does
-        // not reach the runner, the next Pakistani channel down (Urdu by the country rule). DD
+        // not reach the runner, the next Pakistani channel along (Urdu by the country rule). DD
         // Kashir also plays on the runner, and Kashmiri offers no captions (CI on PR 79, 2026-11-16).
         try kjTuneUntilPlaying(app, tries: 10) { $0.hasPrefix("swept-pk-") || $0.hasPrefix("indus-") }
         kjPause(8)
         let control = app.buttons["captionsControl"]
         lightCaptions(control)
         XCTAssertTrue(control.exists, "a live channel in a language the recogniser takes offers captions")
-        XCTAssertTrue(control.isSelected, "Select lights the Captions control")
+        XCTAssertTrue(control.isSelected, "Up lights the Captions control")
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)
-        let sentence = app.staticTexts["Sign in under Account to use live captions."]
+        // The strip line is the channel's country, then the note (owner, 2026-11-27: "the country name should stay").
+        let sentence = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "Sign in under Account to use live captions.")).firstMatch
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "signed out, the site's sentence and no request")
+        XCTAssertFalse(sentence.label.hasPrefix("Sign in"), "the country stays before the note: \(sentence.label)")
         XCTAssertEqual(control.label, "Captions", "signed out, no demand started")
         XCTAssertEqual((control.value as? String)?.uppercased(), "ON", "the requested setting remains On while sign-in is required")
         kjScreenshot("live-2-signed-out-sentence", app: app)
         // Five seconds after the choice the strip hides; captions and the saved setting remain.
         XCTAssertTrue(waitFor(8) { !control.exists }, "hidden controls are also absent from accessibility traversal")
         kjScreenshot("live-2b-strip-hidden", app: app)
-        // Left or right on the bare picture opens the guide (owner, 2026-11-04); Select wakes the
-        // strip and lights CC, and one more Select works it.
+        // Up wakes the strip and lights CC, and Select works it.
         lightCaptions(control)
-        XCTAssertTrue(control.isSelected, "Select lights the Captions control again")
+        XCTAssertTrue(control.isSelected, "Up lights the Captions control again")
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((control.value as? String)?.uppercased(), "OFF", "an unavailable session still lets the viewer save Off")
-        XCUIRemote.shared.press(.left)
+        XCUIRemote.shared.press(.down)   // lets go of the control
         // Back over a playing picture may hide the strip before it leaves: press until the player
         // is gone, never more than twice. (The region page's cards stay in the tree under the
         // player, so they cannot tell.)
@@ -171,11 +174,14 @@ final class SubtitlesUITests: XCTestCase {
         let kashirControl = app.buttons["captionsControl"]
         lightCaptions(kashirControl)
         XCTAssertTrue(kashirControl.exists, "CC remains discoverable for unsupported channels")
-        XCTAssertTrue(kashirControl.isSelected, "Select lights the Captions control")
+        XCTAssertTrue(kashirControl.isSelected, "Up lights the Captions control")
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")
-        XCTAssertTrue(app.staticTexts["No captions: Kashmiri is not on the live recogniser."].exists, "the line says why")
+        // The country stays first on the line; the reason follows it (owner, 2026-11-27).
+        let why = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "\u{00B7} No captions: Kashmiri is not on the live recogniser.")).firstMatch
+        XCTAssertTrue(why.exists, "the line keeps the place and says why")
+        XCTAssertTrue(why.label.hasPrefix("India"), "the country stays first: \(why.label)")
         kjScreenshot("live-3-kashmiri-no-control", app: app)
     }
 
@@ -212,7 +218,10 @@ final class SubtitlesUITests: XCTestCase {
             throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day"]
+        // Off under the old shared key: a film must not read it (the Razia bug read Persian there).
+        // The film's own key is blanked, so a choice an earlier run left on this device is not read.
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kj-of-subtitles", "off",
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", ""]
         kjLaunch(app)
         // Filmfarsi Trailers vol. 1: its public preview announces an English track.
         let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
@@ -230,11 +239,220 @@ final class SubtitlesUITests: XCTestCase {
 
         let control = app.buttons["subtitlesControl"]
         XCTAssertTrue(control.waitForExistence(timeout: 45), "a preview whose manifest carries a track offers the control")
-        XCTAssertEqual(control.label, "Subtitles · English", "English starts on with nothing remembered")
+        XCTAssertEqual(control.label, "Subtitles · English",
+                       "with nothing remembered for this film, English starts on; the shared Off is not read")
         let caption = app.descendants(matching: .any)["caption"]
         XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text must reach the house view")
         kjScreenshot("film-1-subtitle-over-panel", app: app)
         kjPause(4)   // the panel hides
         if caption.exists { kjScreenshot("film-2-subtitle-alone", app: app) }
+    }
+
+    /// "Yellow text" subtitles (owner, 2026-11-17): yellow text with a black edge and no plate, on a
+    /// film's preview. The look is checked on the screenshot.
+    func testYellowTextSubtitlesOnAFilm() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "grove", "-kj-caption-style", "bare",
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "en"]
+        kjLaunch(app)
+        let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCTAssertTrue(film.exists && film.hasFocus, "the film must take focus")
+        XCUIRemote.shared.press(.select)
+        let caption = app.descendants(matching: .any)["caption"]
+        XCTAssertTrue(caption.waitForExistence(timeout: 60), "the track's text reaches the house view")
+        // The caption reports the look it is drawn in: over a film's picture, the viewer's choice.
+        XCTAssertEqual(caption.value as? String, "bare", "Yellow text is drawn over the picture")
+        kjPause(4)   // the panel hides, so the text sits on the picture
+        kjScreenshot("film-subtitles-text-only", app: app)
+    }
+
+    /// The full film's controls, reached with the remote while the picture keeps focus (owner,
+    /// 2026-11-15: no CC on Razia, no way to stop). The preview plays as the full film here.
+    func testFullFilmControlsAreLitWithTheRemote() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        // Off for this film, English under the old shared key: the film's own choice must win.
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjfilmasfull", "YES",
+                               "-kj-of-subtitles.filmfarsi-trailers-vol-1-khajistan", "off", "-kj-of-subtitles", "en"]
+        kjLaunch(app)
+        let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCTAssertTrue(film.exists && film.hasFocus, "the film must take focus")
+        XCUIRemote.shared.press(.select)
+
+        // The preview's panel: Watch the full film is focused, and Stop is offered beside it.
+        let watch = app.buttons["watchFullFilm"]
+        XCTAssertTrue(watch.waitForExistence(timeout: 45), "the offer opens")
+        XCTAssertTrue(app.buttons["stopControl"].exists, "the preview offers Stop")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in watch.hasFocus }, object: nil)], timeout: 30),
+                       .completed, "Watch the full film takes focus")
+        XCUIRemote.shared.press(.select)
+
+        let subtitles = app.descendants(matching: .any)["subtitlesControl"]
+        let stop = app.descendants(matching: .any)["stopControl"]
+        XCTAssertTrue(subtitles.waitForExistence(timeout: 45), "the full film carries its subtitle control")
+        XCTAssertFalse(subtitles.isSelected, "nothing is lit until the remote moves to it")
+        // Read while nothing is lit, when the face carries the ↓ hint: the spoken label must not.
+        XCTAssertEqual(subtitles.label, "Subtitles · Off", "the film's own Off wins over the shared English; no ↓ in the label")
+        XCUIRemote.shared.press(.down)
+        kjPause(0.6)
+        XCTAssertTrue(subtitles.isSelected, "Down lights Subtitles")
+        kjPause(3.5)
+        XCTAssertTrue(subtitles.isSelected, "a lit control stays past the panel's 2.6 s, so Select can still work it")
+        XCUIRemote.shared.press(.select)
+        kjPause(0.8)
+        XCTAssertEqual(subtitles.label, "Subtitles · English", "Select on the lit control moves to the next choice")
+        // Right walks the row: Pause, then PiP, which is offered paused too, then Stop.
+        let playPause = app.descendants(matching: .any)["playPauseControl"]
+        XCUIRemote.shared.press(.right)
+        kjPause(0.6)
+        XCTAssertTrue(playPause.isSelected, "Right lights Pause")
+        XCTAssertEqual(playPause.label, "Pause")
+        XCUIRemote.shared.press(.select)
+        kjPause(1)
+        XCTAssertEqual(playPause.label, "Play", "Select on Pause pauses the film")
+        XCTAssertTrue(playPause.isSelected, "the control stays lit")
+        let pipControl = app.descendants(matching: .any)["pipControl"]
+        if pipControl.exists {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.6)
+            XCTAssertTrue(pipControl.isSelected, "PiP is offered on a paused film, and Right lights it")
+            kjScreenshot("film-full-controls-paused-pip-lit", app: app)
+        }
+        for _ in 0..<3 where !stop.isSelected { XCUIRemote.shared.press(.right); kjPause(0.6) }
+        XCTAssertTrue(stop.isSelected, "Right walks to Stop")
+        kjScreenshot("film-full-controls-stop-lit", app: app)
+
+        // Back closes the bottom bar, letting go of the lit control (owner, 2026-11-17); with the
+        // bar closed, the next Back stops the film and closes the screen.
+        XCUIRemote.shared.press(.menu)
+        kjPause(0.8)
+        XCTAssertFalse(app.staticTexts["playerState"].exists, "the first Back closes the bottom bar")
+        XCTAssertTrue(app.descendants(matching: .any)["filmPicture"].exists, "and the film is still on")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "the next Back stops the film")
+        XCTAssertFalse(app.descendants(matching: .any)["filmPicture"].exists, "the player is gone")
+    }
+
+    /// The full film moves as Apple's player moves it (owner, 2026-11-17: "all controls should work
+    /// like apple tv player"): a click skips ten seconds, a held arrow scans, Play/Pause pauses. A
+    /// swipe cannot be sent from XCUIRemote; the scrub is checked on the Apple TV.
+    func testFullFilmMovesLikeApplesPlayer() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjfilmasfull", "YES"]
+        kjLaunch(app)
+        let film = app.buttons["film-filmfarsi-trailers-vol-1-khajistan"]
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        for _ in 0..<40 where !(film.exists && film.hasFocus) {
+            XCUIRemote.shared.press(.right)
+            kjPause(0.5)
+        }
+        XCTAssertTrue(film.exists && film.hasFocus, "the film must take focus")
+        XCUIRemote.shared.press(.select)
+        let watch = app.buttons["watchFullFilm"]
+        XCTAssertTrue(watch.waitForExistence(timeout: 45), "the offer opens")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in watch.hasFocus }, object: nil)], timeout: 30),
+                       .completed, "Watch the full film takes focus")
+        XCUIRemote.shared.press(.select)
+
+        let state = app.staticTexts["playerState"]
+        let playing = NSPredicate { _, _ in (try? state.snapshot())?.label == "Playing" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 45), .completed, "the film plays")
+
+        // The bar's value is the second the film is at; any press brings the panel and the bar up.
+        let bar = app.descendants(matching: .any)["filmProgress"]
+        func at() -> Int { Int(((try? bar.snapshot())?.value as? String) ?? "") ?? -1 }
+        func waitUntil(_ why: String, timeout: TimeInterval = 10, _ test: @escaping (Int) -> Bool) {
+            let met = NSPredicate { _, _ in test(at()) }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: met, object: nil)], timeout: timeout), .completed,
+                           "\(why) (at \(at()))")
+        }
+        // Paused first, so playback adds nothing and each move must land exactly.
+        XCUIRemote.shared.press(.playPause)
+        let paused = NSPredicate { _, _ in (try? state.snapshot())?.label == "Paused" }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: paused, object: nil)], timeout: 10), .completed, "Play/Pause pauses")
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "the bar shows with the panel")
+        let still = at()
+        kjPause(2)
+        XCTAssertEqual(at(), still, "a paused film stays where it is")
+        XCUIRemote.shared.press(.right)
+        waitUntil("a click right goes forward ten seconds") { $0 == still + 10 }
+        XCUIRemote.shared.press(.left)
+        waitUntil("a click left goes back ten seconds") { $0 == still }
+
+        // A held arrow is read through GameController, which XCUIRemote does not reach, on the
+        // simulator or on the Apple TV (measured 2026-11-17: a 2.5 s hold on the device came in as
+        // one click). Hold-to-scan and swipe-to-scrub are checked by hand with the Siri Remote.
+
+        XCUIRemote.shared.press(.playPause)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: playing, object: nil)], timeout: 10), .completed, "and plays again")
+
+        #if !targetEnvironment(simulator)
+        // Playing, quick clicks add up as Apple's do: the next is not lost while the last buffers.
+        // Device only: on the simulator the stream does not buffer after a seek, so this passed
+        // with the old rule too (measured twice) and could not fail there.
+        let rolling = at()
+        XCTAssertGreaterThanOrEqual(rolling, 0, "the bar reads the film's place")
+        for _ in 0..<3 { XCUIRemote.shared.press(.right) }
+        // Four seconds: two seeks and four seconds of play reach only 24, so a lost click fails.
+        waitUntil("three quick clicks right go thirty seconds on", timeout: 4) { $0 >= rolling + 28 }
+        #endif
+    }
+
+    /// Full screen from the corner window opens the film over whatever is on top: here, over the
+    /// player the shelf opened as a cover, which a SwiftUI cover on the root cannot reach.
+    func testRestoredFilmOpensOverACover() throws {
+        guard let origin = ProcessInfo.processInfo.environment["KJ_FILMS_ORIGIN"], !origin.isEmpty else {
+            throw XCTSkip("vod.json is behind the site password; set TEST_RUNNER_KJ_FILMS_ORIGIN to a local server of the archive tree")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-kjfilms", origin, "-kjskin", "day", "-kjrestoreover", "YES"]
+        kjLaunch(app)
+        let films = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'film-'"))
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 30), "vod.json must load")
+        XCTAssertTrue(kjFocus(films.firstMatch, app: app), "the shelf must take focus")
+        XCUIRemote.shared.press(.select)
+        let watch = app.buttons["watchFullFilm"]
+        XCTAssertTrue(watch.waitForExistence(timeout: 30), "the first player opens as a cover")
+        // The reopened player asks for the full film at once: signed out it says why, which only
+        // the reopened screen does without a press.
+        let note = app.staticTexts["filmNote"]
+        XCTAssertTrue(note.waitForExistence(timeout: 30), "the film reopens over the cover")
+        kjScreenshot("film-restored-over-cover", app: app)
+        // Signed out, the note is up while the screen is still sliding in, and UIKit drops a press
+        // made during the slide (as Apple TV does). Back once the reopened screen holds focus.
+        // Its own Watch button, not the cover's underneath, which keeps focus during the slide.
+        let reopened = app.buttons["watchFullFilmReopened"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in reopened.hasFocus }, object: nil)],
+                                      timeout: 10), .completed, "the reopened screen takes focus")
+        XCUIRemote.shared.press(.menu)
+        kjPause(1.5)
+        XCTAssertFalse(note.exists, "Back closes the reopened screen")
+        XCTAssertTrue(watch.exists, "the cover under it is still there")
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(films.firstMatch.waitForExistence(timeout: 20), "and the next Back reaches the shelf")
     }
 }

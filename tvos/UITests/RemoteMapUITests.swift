@@ -117,20 +117,9 @@ final class RemoteMapUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", "2026-11-08T12:10:00+05:00", "-kj.transmission.lastChannel", "14"]
         kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        // The rows are a lazy list: channel 14's exists once the remote has walked near it.
-        let card = app.buttons["transmission-channel-14"]
-        var trail: [String] = []
-        for _ in 0..<30 where !(card.exists && card.hasFocus) {
-            kjPress(.down, app: app)
-            trail.append(kjFocusKey(app).components(separatedBy: "|").first ?? "")
-        }
-        XCTAssertTrue(card.exists && card.hasFocus, "focus walks down to channel 14: \(trail)")
-        XCUIRemote.shared.press(.select)
+        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
         let tuned = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(tuned.waitForExistence(timeout: 30))
         kjPause(12)   // the sign-on pigeon lands

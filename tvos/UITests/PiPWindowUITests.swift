@@ -454,13 +454,9 @@ final class PiPWindowUITests: XCTestCase {
             throw XCTSkip("the real window needs an Apple TV: set TEST_RUNNER_KJ_DEVICE_PIP to a channel number")
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission"]
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kj.transmission.lastChannel", "\(channel)"]
         kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 60), "the channels load")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        for _ in 1..<channel { XCUIRemote.shared.press(.right); kjPause(0.4) }
-        XCUIRemote.shared.press(.select)
+        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
         let tuned = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(tuned.waitForExistence(timeout: 30), "the player opens")
         // The sign-on and the tune; the strip then hides itself, taking the state line with it.

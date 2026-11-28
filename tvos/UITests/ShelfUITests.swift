@@ -202,14 +202,11 @@ final class ShelfUITests: XCTestCase {
 
     func testTransmissionCards() {
         for skin in skins {
-            let app = launch(skin, tab: "transmission", extra: ["-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00"])
-            let page = app.staticTexts["transmissionState"]
-            XCTAssertTrue(page.waitForExistence(timeout: 30))
-            for _ in 0..<20 where (page.value as? String) != "Ready" { kjPause(1) }
-            XCTAssertEqual(page.value as? String, "Ready")
-            for _ in 0..<4 where !focusedID(app).hasPrefix("transmission-channel-") { press(.down, app: app) }
-            XCTAssertTrue(focusedID(app).hasPrefix("transmission-channel-"), "\(skin): a channel card takes focus")
-            kjPause(1)
+            let app = launch(skin, tab: "transmission", extra: ["-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kj.transmission.lastChannel", "1"])
+            // The tab plays a channel at once (owner, 2026-11-28): no cards, the player.
+            XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30),
+                          "\(skin): the tab plays a channel")
+            kjPause(12)
             shot("\(skin)-7-transmission", app)
             app.terminate()
         }

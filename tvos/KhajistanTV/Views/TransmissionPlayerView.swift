@@ -94,7 +94,8 @@ struct TransmissionPlayerView: View {
             // from it left no way back to it). It lies under the picture, which shrinks to the
             // guide's window and uncovers it.
             if let guideGrid {
-                TransmissionGuide(rows: guideRows, current: store.channelNumber, grid: guideGrid, kind: guideKind(guideGrid))
+                TransmissionGuide(rows: guideRows, current: store.channelNumber, grid: guideGrid, kind: guideKind(guideGrid),
+                                  station: store.stationLine)
                     .transition(.opacity)
             }
             // The whole of what the channel shows (the picture, the dancer, the off-air card) is

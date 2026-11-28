@@ -17,25 +17,10 @@ final class NowNextUITests: XCTestCase {
 
     private func open(channel: Int, skin: String, now: String = "2026-11-08T12:10:00+05:00") -> XCUIApplication {
         let app = XCUIApplication()
+        // The tab plays the last channel watched at once (owner, 2026-11-28): the test names it.
         app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", now]
+                               "-kjnow", now, "-kj.transmission.lastChannel", "\(channel)"]
         kjLaunch(app)
-        let page = app.staticTexts["transmissionState"]
-        XCTAssertTrue(page.waitForExistence(timeout: 30))
-        // The guide's rows sit in a lazy list: the later ones exist once the remote walks to them.
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        // Each Down waits for focus to move: a fixed 0.4 s pause lost presses on the way to
-        // channels 14 and 15 (simulator, 2026-11-28), and the walk stopped short.
-        let card = app.buttons["transmission-channel-\(channel)"]
-        var trail: [String] = []
-        for _ in 0..<(channel + 15) where !(card.exists && card.hasFocus) {
-            kjPress(.down, app: app)
-            trail.append(kjFocusKey(app).components(separatedBy: "|").first ?? "")
-        }
-        XCTAssertTrue(card.exists && card.hasFocus, "focus walks down to channel \(channel): \(trail)")
-        XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         return app
     }
@@ -74,12 +59,9 @@ final class NowNextUITests: XCTestCase {
         let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("Fixtures/programming-roman-title.json").path
         app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-04T12:00:00+05:00"]
+                               "-kjnow", "2026-11-04T12:00:00+05:00", "-kj.transmission.lastChannel", "1"]
         kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        XCUIRemote.shared.press(.select)
+        // The tab plays channel 1 at once (-kj.transmission.lastChannel).
         XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
         kjPause(12)
         XCUIRemote.shared.press(.up)   // wakes the strip
@@ -337,12 +319,9 @@ final class NowNextUITests: XCTestCase {
         for skin in ["day", "grove", "smut"] {
             let app = XCUIApplication()
             app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", current,
-                                   "-kjnow", "2026-11-24T22:10:00+05:00", "-kjtransmissionpicture", "YES"]
+                                   "-kjnow", "2026-11-24T22:10:00+05:00", "-kjtransmissionpicture", "YES", "-kj.transmission.lastChannel", "1"]
             kjLaunch(app)
-            let first = app.buttons["transmission-channel-1"]
-            XCTAssertTrue(first.waitForExistence(timeout: 30), "\(skin): channel 1 has a card")
-            XCTAssertTrue(kjFocus(first, app: app), "\(skin): channel 1's card takes focus")
-            XCUIRemote.shared.press(.select)
+            // The tab plays channel 1 at once (-kj.transmission.lastChannel).
             XCTAssertTrue(any(app, "transmissionChannel").waitForExistence(timeout: 30), "\(skin): channel 1 is on air")
             kjPause(12)
             XCUIRemote.shared.press(.down)
@@ -372,12 +351,9 @@ final class NowNextUITests: XCTestCase {
         // this opens it by hand rather than through open(channel:).
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", "2026-11-08T12:10:00+05:00", "-kj.transmission.lastChannel", "1"]
         kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        XCUIRemote.shared.press(.select)
+        // The tab plays channel 1 at once (-kj.transmission.lastChannel).
         let offAir = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch
         XCTAssertTrue(offAir.waitForExistence(timeout: 30), "channel 1 opens on its off-air card")
         kjPause(8)
@@ -443,7 +419,10 @@ final class NowNextUITests: XCTestCase {
         XCTAssertTrue(state.waitForExistence(timeout: 30), "the sound-only programme is on")
         XCTAssertFalse(osd.waitForExistence(timeout: 8), "no number over a sound-only programme")
         XCUIRemote.shared.press(.right)   // the next channel, 6
-        XCTAssertTrue(app.staticTexts["Off air"].waitForExistence(timeout: 30), "channel 6 is off air")
+        // The player's own off-air card (the page under it, whose rows also read "Off air", is gone).
+        let offAir = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'is off air'")).firstMatch
+        XCTAssertTrue(offAir.waitForExistence(timeout: 30), "channel 6 is off air")
+        XCTAssertTrue(offAir.label.contains("Channel 6"), offAir.label)
         XCTAssertTrue(osd.waitForExistence(timeout: 15), "off air the number shows")
         XCTAssertEqual(osd.label, "Channel 6")
         kjScreenshot("channel-number-off-air", app: app)

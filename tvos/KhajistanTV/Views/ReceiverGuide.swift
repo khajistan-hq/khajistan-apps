@@ -171,6 +171,8 @@ struct TransmissionGuide: View {
     let grid: GuideGrid
     /// The lit programme's kind line from the schedule ("Qawwali · Pakistan · 1984"), if any.
     let kind: String?
+    /// The kicker over the panel: the station and its counts (TransmissionStore.stationLine).
+    var station: String = "Khajistan Transmission"
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -259,7 +261,7 @@ struct TransmissionGuide: View {
         let line = facts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
-                Kicker("Khajistan Transmission")
+                Kicker(station).lineLimit(1).minimumScaleFactor(0.7)
                 Spacer(minLength: 16)
                 Kicker("\(Self.clock(grid.now)) \(StationClock.tzLabel)").monospacedDigit()
             }

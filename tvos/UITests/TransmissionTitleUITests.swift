@@ -1,47 +1,75 @@
 import XCTest
 
-/// The page title stays whole below the top bar when a channel card takes focus (owner,
-/// 2026-11-27: "fix the transmission title cut off too").
+/// The Transmission tab plays a channel at once, full screen, with no page of channels first
+/// (owner, 2026-11-28: "transmission should start the stream of channels not showing the page, the
+/// guide will do that work"). The counts sit on the guide's top line, and Back from the player
+/// leaves a plain screen whose focus is the top bar.
 final class TransmissionTitleUITests: XCTestCase {
-    func testTitleStaysBelowTheBarWithACardFocused() {
-        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+    private var schedule: String {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
-        let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
-        kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        XCUIRemote.shared.press(.right); kjPause(1.5)
-        let title = app.staticTexts["transmissionTitle"]
-        let bar = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'nav-'")).firstMatch
-        XCTAssertTrue(title.exists && bar.exists)
-        kjScreenshot("transmission-card-focused", app: app)
-        XCTAssertGreaterThanOrEqual(title.frame.minY, bar.frame.maxY,
-                                    "the title starts below the bar: title \(title.frame), bar \(bar.frame)")
     }
 
-    /// Down through the guide reaches the last channel and the page follows it (owner, 2026-11-28:
-    /// "not scrolling down on the page"). Each row taking focus pulled the page back to its top.
-    func testTheGuideScrollsDownToTheLastChannel() {
-        let schedule = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/programming-2026-11-08.json").path
+    private func launch(last: Int) -> XCUIApplication {
         let app = XCUIApplication()
+        // 0: no last channel, so the first-channel rule decides.
         app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-08T12:10:00+05:00"]
+                               "-kjnow", "2026-11-08T12:10:00+05:00", "-kj.transmission.lastChannel", "\(last)"]
         kjLaunch(app)
-        let first = app.buttons["transmission-channel-1"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30), "channel 1 has a card")
-        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
-        // The fixture's last channel. The guide is a lazy stack, so counting the rows on screen
-        // would name the last row drawn, not the last channel.
-        let last = app.buttons["transmission-channel-15"]
-        for _ in 0..<16 { XCUIRemote.shared.press(.down); kjPause(0.4) }
-        kjPause(1.0)
-        kjScreenshot("transmission-guide-bottom", app: app)
-        XCTAssertTrue(last.hasFocus, "the last channel takes focus")
-        XCTAssertLessThanOrEqual(last.frame.maxY, app.frame.maxY, "the last channel is on screen: \(last.frame)")
-        XCTAssertGreaterThanOrEqual(last.frame.minY, 0, "the last channel is on screen: \(last.frame)")
+        return app
+    }
+
+    /// With no last channel the tab opens the lowest-numbered channel on air with a picture:
+    /// Channel 1 is off air in the fixture at this hour, so not Channel 1.
+    func testTheTabPlaysAChannelAtOnce() {
+        let app = launch(last: 0)
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30), "the tab plays a channel with no press on a page")
+        XCTAssertNotEqual(channel.label, "1", "Channel 1 is off air at this hour, so it is not the first channel")
+        XCTAssertFalse(app.buttons["transmission-channel-1"].exists, "no page of channel cards")
+        kjScreenshot("transmission-plays-at-once", app: app)
+    }
+
+    /// The last channel watched is the one the tab opens.
+    func testTheTabOpensTheLastChannelWatched() {
+        let app = launch(last: 5)
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30))
+        XCTAssertEqual(channel.label, "5", "the last channel watched opens")
+    }
+
+    /// The station's counts are on the guide's top line; there is no channel count.
+    func testTheGuideCarriesTheCounts() {
+        let app = launch(last: 5)
+        XCTAssertTrue(app.descendants(matching: .any)["transmissionChannel"].waitForExistence(timeout: 30))
+        kjPause(12)
+        XCUIRemote.shared.press(.down)
+        let guide = app.descendants(matching: .any)["transmissionGuide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5), "Down opens the guide")
+        kjPause(1.5)
+        let counts = guide.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Khajistan Transmission' AND label CONTAINS 'programmes' AND label CONTAINS 'hours'")).firstMatch
+        XCTAssertTrue(counts.exists, "the guide's top line carries the programmes and the hours")
+        XCTAssertFalse(counts.label.contains("channels"), "no channel count: the rows show the channels: \(counts.label)")
+        XCTAssertLessThan(counts.frame.maxY, app.frame.height * 0.4, "the counts sit in the guide's top band")
+        kjScreenshot("transmission-guide-counts", app: app)
+    }
+
+    /// Back from the player leaves the plain screen under it, with focus on the top bar, and does
+    /// not start the channel again.
+    func testBackLandsOnTheTopBar() {
+        let app = launch(last: 5)
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(channel.waitForExistence(timeout: 30))
+        kjPause(12)
+        XCUIRemote.shared.press(.menu)
+        XCTAssertTrue(channel.waitForNonExistence(timeout: 10), "Back closes the player")
+        let page = app.staticTexts["transmissionState"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertEqual(page.value as? String, "Ready")
+        kjPause(2)
+        XCTAssertFalse(channel.exists, "the channel does not start again by itself")
+        XCTAssertTrue(kjFocusKey(app).hasPrefix("nav-"), "focus is on the top bar: \(kjFocusKey(app))")
+        XCTAssertTrue(app.buttons["transmissionWatch"].exists, "Watch is there to go back to the channel")
+        kjScreenshot("transmission-after-back", app: app)
     }
 }

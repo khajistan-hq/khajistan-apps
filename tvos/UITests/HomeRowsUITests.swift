@@ -120,12 +120,17 @@ final class HomeRowsUITests: XCTestCase {
                 return
             }
             let elsewhere = app.buttons.matching(NSPredicate(format: "(identifier BEGINSWITH 'cameras-' OR (identifier BEGINSWITH 'genre-' AND NOT identifier BEGINSWITH 'genre-news-')) AND label CONTAINS 'live picture'"))
-            let stillsWork = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in elsewhere.count > 0 }, object: nil)], timeout: 60) == .completed
+            // A News still that comes late also shows the stills work: News is read again here.
+            let stillsWork = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in elsewhere.count > 0 || pictured(firstFour()) > 0 }, object: nil)], timeout: 60) == .completed
             let others = elsewhere.allElementsBoundByIndex.map(\.identifier)
-            print("KJNEWS live, no News picture; pictured elsewhere: \(others)")
+            let lateNews = pictured(firstFour())
+            print("KJNEWS live, no News picture in 120 s; late News pictures \(lateNews); pictured elsewhere: \(others)")
             guard stillsWork else {
                 XCTFail("no card on any shelf got a live still: the stills are broken, not News's carriers. News: \(names)")
                 return
+            }
+            if lateNews > 0 {
+                throw XCTSkip("The first News cards gave a frame only after 120 s (\(lateNews) of 4): their carriers are slow, the stills work. News: \(names)")
             }
             throw XCTSkip("None of the first News cards gave a frame in 120 s while \(others.count) cards on other shelves did (\(others.joined(separator: ", "))): \(names)")
         }

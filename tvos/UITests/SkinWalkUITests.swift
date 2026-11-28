@@ -59,8 +59,7 @@ final class SkinWalkUITests: XCTestCase {
             var app = launch(["-kjskin", skin, "-kjtab", "receiver"])
             let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
             XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "\(skin): the receiver must draw its regions")
-            let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
+            XCTAssertTrue(kjFocusRegions(app), "focus must reach the region list")
             shot("\(skin)-1-receiver", app)
             XCUIRemote.shared.press(.select)
             let channels = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'channel-'"))
@@ -71,30 +70,22 @@ final class SkinWalkUITests: XCTestCase {
                 XCUIRemote.shared.press(.select)
                 let state = app.staticTexts["playerState"]
                 _ = state.waitForExistence(timeout: 20)
-                // Past the opening flight; then a click wakes the overlay, which hides 2.6 s into play.
+                // Past the opening flight; then Up wakes the overlay, which hides 2.6 s into play,
+                // and lights its first control (a click is the next channel since 2026-11-28).
                 Thread.sleep(forTimeInterval: 8)
-                XCUIRemote.shared.press(.select)
+                XCUIRemote.shared.press(.up)
                 Thread.sleep(forTimeInterval: 0.6)
                 shot("\(skin)-3-receiver-player", app)
             }
             app.terminate()
 
-            // The station page, a channel card in focus, and the channel's player.
-            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00"])
-            let page = app.staticTexts["transmissionState"]
-            XCTAssertTrue(page.waitForExistence(timeout: 30))
-            wait(upTo: 20) { (page.value as? String) == "Ready" }
-            XCTAssertEqual(page.value as? String, "Ready", "\(skin): the schedule file must load")
-            let card = app.buttons["transmission-channel-1"]
-            // Down from the TRANSMISSION tab lands on the card under it, channel 2.
-            focus(app.buttons["transmission-channel-2"], by: .down, tries: 4)
-            XCTAssertTrue(focus(card, by: .left, tries: 3), "\(skin): channel 1's card must take focus")
-            shot("\(skin)-4-transmission", app)
-            XCUIRemote.shared.press(.select)
+            // The station: the tab plays channel 1 at once, and the player.
+            app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kj.transmission.lastChannel", "1"])
+            // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
             let upNext = app.descendants(matching: .any)["upNext"]
             XCTAssertTrue(upNext.waitForExistence(timeout: 20), "\(skin): the player must list what is up next")
             Thread.sleep(forTimeInterval: 10)   // the opening ground holds until the signal settles
-            XCUIRemote.shared.press(.select)     // wakes the overlay, which hides 2.6 s in
+            XCUIRemote.shared.press(.up)         // wakes the overlay, which hides 2.6 s in
             Thread.sleep(forTimeInterval: 0.6)
             shot("\(skin)-5-transmission-player", app)
             app.terminate()
@@ -114,7 +105,7 @@ final class SkinWalkUITests: XCTestCase {
     /// schedule asks for it without a schedule file), the sign-in sheet, and the atlas switch.
     func testFormsInEverySkin() {
         for skin in skins {
-            var app = launch(["-kjskin", skin, "-kjtab", "transmission"])
+            var app = launch(["-kjskin", skin, "-kjtab", "transmission", "-kj.transmission.lastChannel", "1"])
             let page = app.staticTexts["transmissionState"]
             XCTAssertTrue(page.waitForExistence(timeout: 30))
             wait(upTo: 30) { (page.value as? String) != "Loading" }
@@ -148,12 +139,8 @@ final class SkinWalkUITests: XCTestCase {
             app = launch(["-kjskin", skin, "-kjtab", "receiver"])
             let toggle = app.buttons["beyondTheAtlas"]
             XCTAssertTrue(toggle.waitForExistence(timeout: 60))
-            // Down into the region strip, then Up to the switch, which sits at the foot of the
-            // sidebar right above it since the front became two bands.
-            let regions = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'region-'"))
-            let focusedRegion = regions.matching(NSPredicate(format: "hasFocus == true")).firstMatch
-            XCTAssertTrue(kjFocusStrip(app), "focus must reach the region strip")
-            for _ in 0..<6 where !toggle.hasFocus { XCUIRemote.shared.press(.up); kjPause(0.35) }
+            // The switch sits over the map.
+            kjFocusAtlasSwitch(app)
             XCTAssertTrue(toggle.hasFocus, "\(skin): the atlas switch must take focus")
             shot("\(skin)-9-atlas-switch-focused", app)
             app.terminate()
@@ -164,18 +151,13 @@ final class SkinWalkUITests: XCTestCase {
     /// goes when the overlay is woken, so the line is never on screen twice. The lead is stretched
     /// to a day so the slot on air is always inside it.
     func testHandoverNoticeOnlyWhileTheOverlayIsHidden() {
-        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjhandoverlead", "86400"])
-        let page = app.staticTexts["transmissionState"]
-        XCTAssertTrue(page.waitForExistence(timeout: 30))
-        wait(upTo: 20) { (page.value as? String) == "Ready" }
-        focus(app.buttons["transmission-channel-2"], by: .down, tries: 4)
-        XCTAssertTrue(focus(app.buttons["transmission-channel-1"], by: .left, tries: 3))
-        XCUIRemote.shared.press(.select)
+        let app = launch(["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjhandoverlead", "86400", "-kj.transmission.lastChannel", "1"])
+        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
         let notice = app.descendants(matching: .any)["handoverNotice"]
         XCTAssertTrue(notice.waitForExistence(timeout: 30), "the notice comes up once the overlay hides")
         Thread.sleep(forTimeInterval: 0.5)
         shot("notice-1-overlay-hidden", app)
-        XCUIRemote.shared.press(.select)   // wakes the overlay
+        XCUIRemote.shared.press(.up)   // wakes the overlay (a click is the next channel)
         wait(upTo: 3) { !notice.exists }
         XCTAssertFalse(notice.exists, "the notice is not shown while the overlay says the same thing")
         shot("notice-2-overlay-up", app)
@@ -202,5 +184,43 @@ final class SkinWalkUITests: XCTestCase {
         app = launch(["-kjtab", "account"])
         XCTAssertTrue(app.buttons["skin-toggle"].waitForExistence(timeout: 20))
         XCTAssertEqual(skinState(app), "smut", "the choice is kept across a launch")
+    }
+
+    /// The subtitle look (owner, 2026-11-17): the plate until chosen, "Yellow text" one press away,
+    /// and the choice kept across a launch.
+    func testChoosingYellowTextSubtitlesPersists() {
+        // No launch argument for the setting: it would outrank what the button saves.
+        var app = launch(["-kjskin", "day", "-kjtab", "account"])
+        let toggle = app.buttons["caption-style-toggle"]
+        func style() -> String { (app.staticTexts["captionStyleState"].value as? String) ?? "?" }
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
+        let before = style()
+        XCTAssertTrue(["plate", "bare"].contains(before), "the subtitle look reads \(before)")
+        // Put it back even if a check below fails, so the next run starts where this one did.
+        addTeardownBlock {
+            let again = XCUIApplication()
+            again.launchArguments = ["-kjskin", "day", "-kjtab", "account"]
+            self.kjLaunch(again)
+            let button = again.buttons["caption-style-toggle"]
+            guard button.waitForExistence(timeout: 20),
+                  (again.staticTexts["captionStyleState"].value as? String) != before else { return }
+            // Select only with the button focused: otherwise it would work another control.
+            guard self.focus(button, by: .down) else { return XCTFail("teardown: the subtitle button did not take focus") }
+            XCUIRemote.shared.press(.select)
+            self.wait(upTo: 3) { (again.staticTexts["captionStyleState"].value as? String) == before }
+            if (again.staticTexts["captionStyleState"].value as? String) != before { XCTFail("teardown: the subtitle look was not put back") }
+        }
+        let after = before == "plate" ? "bare" : "plate"
+        XCTAssertTrue(focus(toggle, by: .down), "the subtitle button must take focus")
+        XCUIRemote.shared.press(.select)
+        wait(upTo: 3) { style() == after }
+        XCTAssertEqual(style(), after, "one press moves to the other look")
+        // The kicker style sets the label in capitals, so case is not compared.
+        XCTAssertEqual(toggle.label.lowercased(), after == "bare" ? "subtitles: yellow text. switch to plate." : "subtitles: plate. switch to yellow text.")
+        app.terminate()
+
+        app = launch(["-kjskin", "day", "-kjtab", "account"])
+        XCTAssertTrue(app.buttons["caption-style-toggle"].waitForExistence(timeout: 20))
+        XCTAssertEqual(style(), after, "the choice is kept across a launch")
     }
 }

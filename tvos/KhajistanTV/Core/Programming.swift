@@ -53,6 +53,25 @@ struct Programming: Decodable, Sendable {
         var display_title: String? = nil
         /// The year the record carries; shown after the country on the strip (owner, 2026-11-15).
         var year: Int? = nil
+        /// "Part 4 of 5": the tape or part number, moved off the title (owner, 2026-11-16).
+        var part: String? = nil
+        /// The checked English or Roman form of a name in Arabic, Persian or Urdu script, shown on
+        /// a line of its own under it, as the Receiver does (owner, 2026-11-08: "original and
+        /// translation"; 2026-11-17 on the Apple TV: "name of film should also be in roman"). On a
+        /// handful of records it runs the other way (a Latin name, its Urdu form); the site prints
+        /// those too, so this does.
+        var display_title_en: String? = nil
+
+        /// The second line under the name, only where the name is the programme's own title and
+        /// the two differ.
+        var secondTitle: String? {
+            guard let shown = display_title?.trimmingCharacters(in: .whitespacesAndNewlines), !shown.isEmpty,
+                  let en = display_title_en?.trimmingCharacters(in: .whitespacesAndNewlines), !en.isEmpty, en != shown else { return nil }
+            return en
+        }
+        /// What kind of thing the programme is, in the schedule's own words ("Afghan news
+        /// footage"); the guide's facts line carries it.
+        var kind_line: String? = nil
     }
 
     struct Slot: Decodable, Hashable, Sendable {
@@ -98,7 +117,7 @@ extension Programming.Programme {
     private enum CodingKeys: String, CodingKey {
         case id, title, seconds, nominal_minutes, clean_start, clean_end, show, channel
         case play_url, audio_only, custodian, transfer, work_kind, country, description, subtitle_url
-        case display_title
+        case display_title, display_title_en, year, part, kind_line
     }
 
     init(from decoder: Decoder) throws {
@@ -120,5 +139,41 @@ extension Programming.Programme {
         description = try values.decodeIfPresent(String.self, forKey: .description)
         subtitle_url = try values.decodeIfPresent(String.self, forKey: .subtitle_url)
         display_title = try values.decodeIfPresent(String.self, forKey: .display_title)
+        // Read leniently: a field the strip only decorates with must never fail the month.
+        display_title_en = (try? values.decodeIfPresent(String.self, forKey: .display_title_en)) ?? nil
+        year = (try? values.decodeIfPresent(Int.self, forKey: .year)) ?? nil
+        part = (try? values.decodeIfPresent(String.self, forKey: .part)) ?? nil
+        kind_line = (try? values.decodeIfPresent(String.self, forKey: .kind_line)) ?? nil
+    }
+}
+
+// The strip's and the guide's naming rules, here rather than in the view so the core tests reach them.
+extension OnAir {
+    private static func trimmed(_ text: String?) -> String? {
+        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// The headline's second line (Programme.secondTitle), only while the headline is the
+    /// programme's own name and not the show standing in for it.
+    var secondTitle: String? {
+        // Both sides trimmed: a display_title with a stray space is still the headline.
+        guard let now = Self.trimmed(nowName), now == Self.trimmed(programme?.display_title) else { return nil }
+        return programme?.secondTitle
+    }
+
+    /// The guide's one line for a channel: what is on, with its second name after it. The name is
+    /// isolated (U+2068 … U+2069) so a Persian title keeps the Roman form on its own side.
+    var guideLine: String {
+        let name = nowName ?? show?.name ?? ""
+        guard let second = secondTitle else { return name }
+        return "\u{2068}" + name + "\u{2069} \u{00B7} " + second
+    }
+
+    /// The year for the detail line, unless a name on the strip already carries it ("Abadan
+    /// (1971)"): open-frequencies.js gives a title that contains its year no second one.
+    func shownYear(headline: String) -> String? {
+        guard let year = programme?.year.map(String.init) else { return nil }
+        return [headline, secondTitle ?? ""].contains { $0.contains(year) } ? nil : year
     }
 }

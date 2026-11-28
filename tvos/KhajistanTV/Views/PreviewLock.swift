@@ -17,11 +17,11 @@ struct PreviewLock: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 28) {
             Text(about).kjBody()
-            Text("It opens to everyone when Khajistan launches. Testers: type the preview password, then press Open.")
+            Text("It opens to everyone when Khajistan launches.")
                 .kjBody()
                 .fixedSize(horizontal: false, vertical: true)
             if let message { Text(message).kjBody() }
-            HouseInputField("Preview password", text: password, secure: true, hint: "Press to type") {
+            HouseInputField("Preview password", text: password, secure: true) {
                 SecureField("", text: $password)
                     .focused($fieldFocused)
                     .onSubmit(open)

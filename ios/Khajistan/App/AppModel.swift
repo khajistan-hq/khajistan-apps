@@ -116,7 +116,7 @@ final class AppModel {
     /// The website's skin keys as last read, for a browser made after them.
     @ObservationIgnored private var skinScript: String?
     let auth: AuthStore
-    let receiver = ReceiverStore()
+    let receiver: ReceiverStore
     /// The Receiver list's thumbnails: stills this device takes from the live streams, in memory only.
     let stills: LiveStills
     let transmission: TransmissionStore
@@ -155,6 +155,7 @@ final class AppModel {
     init() {
         let auth = AuthStore()
         self.auth = auth
+        self.receiver = ReceiverStore { [weak auth] in auth?.previewPassword }
         transmission = TransmissionStore(auth: auth)
         // The station clock's server reading starts now, alongside everything else launch fetches.
         Task { await ServerClock.sync(clockFile: TransmissionStore.clockFile) }
@@ -195,9 +196,16 @@ final class AppModel {
         libraryFile = LibraryFile(url: support.appendingPathComponent("Khajistan/library.json"))
         do { library = try libraryFile.read(); libraryReadable = true }
         catch { message = "Your saved pages could not be read. The existing file has been kept. \(error.localizedDescription)" }
+        // No page a signed-in reader opened stays on the device once the session ends.
+        auth.onSessionEnd = { Task.detached(priority: .utility) { RRPageDisk.purge() } }
         auth.onPreviewPasswordChange = { [weak self] in
             self?.browser.clearPreviewSession()
             self?.reading.previewCredentialDidChange()
+            // The Receiver's dial changes with the password. A channel playing from the whole dial
+            // may be one the public dial does not carry, so it is turned off; one from the public
+            // dial plays on.
+            guard let self else { return }
+            if self.receiver.credentialDidChange(), case .live = self.tuner.source { self.tuner.stop() }
         }
         refreshSkin()
         // WebKit's page process starts once the first screen is up, so the first page opened still
@@ -255,6 +263,8 @@ final class AppModel {
         skinPick = Sky.isHonoured(chosen: chosen, band: band, at: now, timeZone: zone) ? resolved : nil
         if resolved != skin { skin = resolved }
         let script = Sky.webScript(chosen: chosen, band: band, at: now, timeZone: zone)
+        // The watcher runs every minute; the web view's scripts are replaced only on a change.
+        guard script != skinScript else { return }
         skinScript = script
         madeBrowser?.applySkin(script: script)
     }

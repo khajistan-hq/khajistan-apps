@@ -1,41 +1,5 @@
 import SwiftUI
 
-/// The strips after now on one channel, as the website's console bar and channel cards write
-/// them: the start in Pakistan time, then the show. The first is the one up next and reads
-/// larger, unless the list is what follows a strip named elsewhere. A strip whose show the schedule has lost keeps its
-/// time, as on the site.
-struct UpNextList: View {
-    let title: String
-    let strips: [ScheduleStrip]
-    var emphasizesFirst = true
-
-    var body: some View {
-        if !strips.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Kicker(title)
-                ForEach(Array(strips.enumerated()), id: \.offset) { item in
-                    row(item.element, first: emphasizesFirst && item.offset == 0)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityIdentifier("upNext")
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ strip: ScheduleStrip, first: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
-            if first {
-                Text(strip.startLabel).kjName().monospacedDigit()
-                Text(strip.show?.name ?? "").kjName().lineLimit(1)
-            } else {
-                Text(strip.startLabel).kjBody().monospacedDigit()
-                Text(strip.show?.name ?? "").kjBody().lineLimit(1)
-            }
-        }
-    }
-}
-
 /// A band plate in the corner of the picture for the last minute of a slot, while the overlay is
 /// hidden: what the channel turns to, and when. The overlay carries the same line when it is up,
 /// so the two are never on screen together.

@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Khajistan Transmission, the station page. It names the channels and what is on each, and
-/// opens one of them full screen. A channel is tuned and the clock says what is on it: there is
-/// no list of programmes to choose from and no scrub bar.
+/// Khajistan Transmission. Selecting the tab plays a channel at once, full screen: the guide in the
+/// player is how a viewer picks another (owner, 2026-11-28: "transmission should start the stream
+/// of channels not showing the page, the guide will do that work"). The first channel is the last
+/// one watched, else the lowest-numbered channel on air with a picture. What is left here is the
+/// screen under the player: loading, the preview password, a schedule not published or not loaded,
+/// sign-in, and a Watch button for a viewer who came back from the player.
 struct TransmissionView: View {
     @Environment(AppModel.self) private var model
     @State private var showSignIn = false
@@ -11,7 +14,13 @@ struct TransmissionView: View {
     @State private var chosen: Int?
     @State private var openAfterSignIn: Int?
     @State private var playing: ChannelChoice?
-    @FocusState private var focusedCard: Int?
+    /// This visit to the tab has started a channel already: Back from the player stays here.
+    @State private var started = false
+    /// Counts the Top Shelf links taken, so a channel link whose schedule load finishes after a
+    /// newer link was taken gives way to it.
+    @State private var linkSerial = 0
+    /// The last channel watched, kept on the device.
+    static let lastChannelKey = "kj.transmission.lastChannel"
 
     private struct ChannelChoice: Identifiable {
         let number: Int
@@ -21,23 +30,20 @@ struct TransmissionView: View {
     private var store: TransmissionStore { model.transmission }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 40) {
-                Text("Khajistan Transmission")
-                    .kjDisplay()
-                    .accessibilityAddTraits(.isHeader)
-                meta
-                scheduleBlock
-            }
-            // Buttons take the platform's text style unless told otherwise; the house scale decides.
-            .kjBody()
-            .padding(KJLayout.inset)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 40) {
+            Text("Khajistan Transmission")
+                .kjDisplay()
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("transmissionTitle")
+            scheduleBlock
         }
-        // Down from the top bar lands on Channel 1, not on whichever card sits under the bar item.
-        .defaultFocus($focusedCard, 1, priority: .userInitiated)
+        // Buttons take the platform's text style unless told otherwise; the house scale decides.
+        .kjBody()
+        .padding(KJLayout.inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .task {
             await store.loadSchedule()
+            startOnce()
             // A page left open as the month turns takes the new month's schedule. A schedule
             // held for the current month answers at once, so this costs nothing most of the time.
             while !Task.isCancelled {
@@ -45,25 +51,44 @@ struct TransmissionView: View {
                 if store.schedule == .ready { await store.loadSchedule() }
             }
         }
+        .onChange(of: store.schedule == .ready) { _, ready in if ready { startOnce() } }
+        // The channel the viewer leaves the player on is the one the tab opens next time.
+        .onChange(of: playing == nil) { _, closed in
+            if closed { UserDefaults.standard.set(store.channelNumber, forKey: Self.lastChannelKey) }
+        }
         // Full screen on the ground, as in Account: a sheet is a shadowed card.
-        .fullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
+        .kjFullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
             SignInView(onSignedIn: { openAfterSignIn = chosen })
         }
-        .fullScreenCover(item: $playing) { choice in
+        .kjFullScreenCover(item: $playing) { choice in
             TransmissionPlayerView(channel: choice.number)
         }
-        // A Top Shelf link: the station page, or one channel tuned from it.
-        .task(id: model.link) {
+        // A Top Shelf link: the station page, or one channel tuned from it. Held while the welcome
+        // is still going, so the player's cover is not presented under it and dropped.
+        .task(id: HeldLink(link: model.link, held: model.welcomeOnScreen)) {
+            guard !model.welcomeOnScreen else { return }
             switch model.link {
             case .transmission:
+                linkSerial += 1
                 model.link = nil
+                // The station link plays, even after Back on this visit. With a channel already on
+                // screen it is there already, and the visit stays started.
+                if playing == nil {
+                    started = false
+                    startOnce()
+                }
             case .channel(let number):
+                linkSerial += 1
+                let serial = linkSerial
+                started = true
                 // Only a channel the schedule names opens; any other number stays on this page.
                 // The link is cleared first, so it cannot replay on a later visit. Clearing it
                 // restarts this task, but the fetch runs in the store's own Task, which that
                 // cancellation does not reach.
                 model.link = nil
                 await store.loadSchedule()
+                // A newer link was taken while the schedule loaded: it decides.
+                guard serial == linkSerial else { return }
                 // Full screen from picture in picture that cannot open the player here (not on
                 // the schedule, or signed out) stops the channel, rather than leave it sounding
                 // under a page with no way to stop it.
@@ -73,31 +98,13 @@ struct TransmissionView: View {
                     choose(number)
                 }
             default:
-                break
+                // The welcome has gone: the tab plays, as a press on it does.
+                startOnce()
             }
         }
     }
 
     // MARK: - The page
-
-    /// The count is known once the schedule is held. In that state this line is the page's state
-    /// line, since a Text inside a card's button label is merged into the button and cannot be
-    /// found as a static text.
-    @ViewBuilder
-    private var meta: some View {
-        if case .ready = store.schedule {
-            Text(metaText)
-                .kjBody()
-                .transmissionState("Ready")
-        }
-    }
-
-    private var metaText: String {
-        let channels = store.channelNumbers.count
-        let tail = "\(channels) scheduled \(channels == 1 ? "channel" : "channels") \u{00B7} Pakistan time (UTC+5)"
-        guard case .ready = store.schedule, let count = store.programmeCount else { return tail }
-        return "\(count.formatted()) \(count == 1 ? "programme" : "programmes") \u{00B7} \(tail)"
-    }
 
     @ViewBuilder
     private var scheduleBlock: some View {
@@ -134,33 +141,29 @@ struct TransmissionView: View {
                 tryAgain
             }
         case .ready:
-            VStack(alignment: .leading, spacing: 48) {
-                // The cards read the clock. Slots start on the minute, so they are drawn again on
-                // every minute and "now" is never the slot that has just ended.
-                // One row of the channels the schedule names, scrolled sideways past the third.
-                TimelineView(.everyMinute) { context in
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 64) {
-                            ForEach(store.channelNumbers, id: \.self) { number in
-                                card(number, at: TransmissionStore.now(context.date))
-                            }
-                        }
-                        // Room for the focused card's lift and shadow.
-                        .padding(.vertical, 40)
-                    }
-                    .scrollClipDisabled()
-                }
+            // Under the player: the counts and the channels are in the player's guide now. One
+            // Watch, which Back from the player does not light: focus goes back to the top bar.
+            VStack(alignment: .leading, spacing: 24) {
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityAddTraits(.isStaticText)
+                    .transmissionState("Ready")
                 if !model.auth.isSignedIn && !store.isScheduleFile {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Text("Sign in to watch Khajistan Transmission.")
-                            .kjBody()
-                        Button("Sign in") {
-                            chosen = nil
-                            showSignIn = true
-                        }
-                        .buttonStyle(HouseButtonStyle())
-                        .padding(.leading, -26)
+                    Text("Sign in to watch Khajistan Transmission.")
+                        .kjBody()
+                    Button("Sign in") {
+                        chosen = nil
+                        showSignIn = true
                     }
+                    .buttonStyle(HouseButtonStyle())
+                    .padding(.leading, -26)
+                } else {
+                    Button("Watch") {
+                        if let number = firstChannel() { choose(number) }
+                    }
+                    .buttonStyle(HouseButtonStyle())
+                    .padding(.leading, -26)
+                    .accessibilityIdentifier("transmissionWatch")
                 }
             }
         }
@@ -174,30 +177,42 @@ struct TransmissionView: View {
         .padding(.leading, -26)
     }
 
-    private func card(_ number: Int, at date: Date) -> some View {
-        Button {
-            choose(number)
-        } label: {
-            ChannelCardLabel(
-                number: number,
-                line: store.channelLine(number),
-                onAir: store.nowOn(channel: number, at: date),
-                upcoming: store.upcoming(channel: number, at: date),
-                returns: store.returnLabel(channel: number, at: date),
-                back: store.returnStrip(channel: number, at: date)
-            )
-        }
-        .onPlayPauseCommand { choose(number) }
-        .buttonStyle(HouseCardStyle())
-        .focused($focusedCard, equals: number)
-        .accessibilityIdentifier("transmission-channel-\(number)")
+    static func shortName(_ name: String, number: Int) -> String {
+        let prefix = "Channel \(number) \u{00B7} "
+        return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name
     }
 
     // MARK: - Choosing
 
+    /// The tab's first press plays a channel, once a visit, when nothing else is opening one.
+    private func startOnce() {
+        // Signed out, the screen's Sign in is the way on; a sign-in sheet is not thrown up unasked.
+        guard !started, case .ready = store.schedule, playing == nil, !showSignIn,
+              model.auth.isSignedIn || store.isScheduleFile,
+              !model.welcomeOnScreen, model.link == nil, let number = firstChannel() else { return }
+        started = true
+        choose(number)
+    }
+
+    /// The last channel watched, if the schedule still has it; else the lowest-numbered channel on
+    /// air now that has a picture (Channel 1, After Hours, is sound only); else the first channel.
+    private func firstChannel() -> Int? {
+        // In number order: the schedule lists its channels in lineup order, not by number.
+        let numbers = store.channelNumbers.sorted()
+        let last = UserDefaults.standard.integer(forKey: Self.lastChannelKey)
+        if numbers.contains(last) { return last }
+        let now = TransmissionStore.now(Date())
+        return numbers.first { number in
+            guard let air = store.nowOn(channel: number, at: now) else { return false }
+            return air.programme?.audio_only != true
+        } ?? numbers.first
+    }
+
     /// A signed-in viewer opens the channel. A signed-out one signs in first, and the channel
     /// opens when the sign-in screen has closed.
     private func choose(_ number: Int) {
+        // Any way in (the tab, Watch, a link) counts as this visit's start.
+        started = true
         if model.auth.isSignedIn || store.isScheduleFile {
             playing = ChannelChoice(number: number)
         } else {
@@ -216,67 +231,6 @@ struct TransmissionView: View {
 
 }
 
-/// One channel's card, as the website's channel card reads: the channel, whether it is on air,
-/// the show on now and its hours, and what is up next. Off air, when it is back and with what.
-/// Show names only: programme titles are file names (owner, 2026-09-06, on the receiver's
-/// channel rows). It sits inside a button's plate, so every colour comes from the palette the
-/// plate sets for it, through the kicker and the inherited ink.
-private struct ChannelCardLabel: View {
-    let number: Int
-    let line: String?
-    let onAir: OnAir?
-    let upcoming: [ScheduleStrip]
-    /// When an off-air channel is back, the clock's label (StationClock.returnLabel), and the strip
-    /// it comes back with. Not `upcoming.first`: that list stops at 24 hours.
-    let returns: String?
-    let back: ScheduleStrip?
-
-    var body: some View {
-        // Three to a screen at the page's inset; the rest are a scroll to the right.
-        CardPlate(width: 560, height: 460) { card }
-    }
-
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 20) {
-                Kicker("Channel \(number)")
-                // Off air is the card's headline, so it is not said here as well.
-                if onAir != nil { Kicker("\u{25CF} On air") }
-            }
-            if let line, !line.isEmpty {
-                Text(line).kjSmall(faint: true).lineLimit(3)
-            }
-            if let air = onAir {
-                Text(air.show?.name ?? "Channel \(number)")
-                    .kjName(48)
-                    .lineLimit(2)
-                    .padding(.top, 10)
-                Kicker("Now \(air.startLabel)\u{2013}\(air.endLabel) \(StationClock.tzLabel)")
-                UpNextList(title: "Up next", strips: upcoming)
-                    .padding(.top, 18)
-            } else {
-                Text("Off air")
-                    .kjName(48)
-                    .padding(.top, 10)
-                if let back, let returns {
-                    Text(backLine(returns, back)).kjBody()
-                    UpNextList(title: "Later", strips: upcoming.filter { $0 != back }, emphasizesFirst: false)
-                        .padding(.top, 18)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-
-    /// The website's off-air line: "Back at 23:00 PKT with The Feature.", with the day once the
-    /// channel is a day or more from coming back.
-    private func backLine(_ returns: String, _ strip: ScheduleStrip) -> String {
-        var text = "Back at \(returns)"
-        if let show = strip.show?.name, !show.isEmpty { text += " with \(show)" }
-        return text + "."
-    }
-}
-
 private extension View {
     /// The page's state, as the accessibility value of its state line. The UI tests read it and it
     /// is never drawn.
@@ -284,4 +238,11 @@ private extension View {
         accessibilityIdentifier("transmissionState")
             .accessibilityValue(marker)
     }
+}
+
+/// A link and whether it must wait (the welcome still on screen), so the link's task runs again
+/// when the welcome has gone.
+private struct HeldLink: Equatable {
+    let link: DeepLink?
+    let held: Bool
 }

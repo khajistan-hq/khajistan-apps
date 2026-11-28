@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs PicsVidsStore against stubbed answers, in a simulator: the region shelf must survive a 500
 # from a busy server and still give up on a refusal, and the shuffle walk must reach every object
-# once from any start. About fifteen seconds.
+# once from any start; the Receiver list gets one second try. Runs offline: every request, the
+# route probe included, is answered by the harness. About a minute.
 #   ios/Tests/PnvRetry/run.sh [SIMULATOR_UDID] [REPO_ROOT]
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -10,7 +11,7 @@ root=${2:-$(cd "$here/../../.." && pwd)}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 k="$root/ios/Khajistan"
-xcrun --sdk iphonesimulator swiftc -parse-as-library -swift-version 5 -target arm64-apple-ios17.0-simulator \
+xcrun --sdk iphonesimulator swiftc -parse-as-library -swift-version 5 -D DEBUG -target arm64-apple-ios17.0-simulator \
   "$here/Harness.swift" "$k"/Core/*.swift "$k/Services/PicsVidsStore.swift" "$k/Services/AuthStore.swift" \
-  "$k/Services/ReceiverStore.swift" "$k/Services/TransmissionStore.swift" "$k/Services/Keychain.swift" "$k/Player/PlayerController.swift" -o "$work/harness"
+  "$k/Services/ReceiverStore.swift" "$k/Services/TransmissionStore.swift" "$k/Services/Keychain.swift" "$k/Player/PlayerController.swift" "$k/App/StoreBuild.swift" -o "$work/harness"
 xcrun simctl spawn "$device" "$work/harness"

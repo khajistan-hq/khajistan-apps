@@ -45,9 +45,26 @@ final class PlayerController {
     @ObservationIgnored private var fadeTask: Task<Void, Never>?
     /// A new signal starts silent and its sound comes up once it is actually playing.
     @ObservationIgnored private var fadeInPending = false
+    /// Where a part-way join's seek landed, until the picture has moved on from it.
+    @ObservationIgnored private var landedAt: Double?
     /// Set while this signal tunes out of sight behind the one on screen: its sound waits for
     /// `releaseSound()`, at the cut, instead of coming up as soon as it plays.
     @ObservationIgnored var holdsSound = false
+    /// What `attach` was last asked to play, and when: a network failure retunes it once.
+    @ObservationIgnored private var tuned: Tuned?
+    /// When the last retune was: a failure within `retuneSpacing` of it is shown, not retuned.
+    @ObservationIgnored private(set) var retunedAt: ContinuousClock.Instant?
+    /// Set during a retune's grace, so the item it replaces cannot fail the signal meanwhile.
+    @ObservationIgnored private var retunePending = false
+    @ObservationIgnored private var retuneToken = 0
+    /// Two failures this close together are "in a row": a carrier that keeps dying is not
+    /// retuned for ever.
+    private static let retuneSpacing: Duration = .seconds(60)
+
+    private struct Tuned {
+        let url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool, listen: Bool, live: Bool
+        let at = ContinuousClock.now
+    }
     /// The address of the last signal started, as its item's asset holds it: tells this
     /// programme's item from the previous one still playing during a handover.
     @ObservationIgnored private(set) var attachedURL: URL?
@@ -71,9 +88,15 @@ final class PlayerController {
     /// LiveRadio, the only way its samples can be read; anything it cannot play comes back here
     /// and plays on AVPlayer, with no dancer.
     func attach(url: URL, seekTo: Double?, title: String, subtitle: String?, isLive: Bool = true, listen: Bool = false, live: Bool = false) {
+        tuned = Tuned(url: url, seekTo: seekTo, title: title, subtitle: subtitle, isLive: isLive, listen: listen, live: live)
+        retunedAt = nil
+        retunePending = false
         // A stored programme or clip on the database's storage plays by the route that answers.
         let url = SupabaseRoute.routed(url)
         attachedURL = url
+        // Muted by the PiP window while paused for a rejoin: a new item (the rejoin, or a handover
+        // that came first) is heard.
+        player.isMuted = false
         generation += 1
         let gen = generation
         #if DEBUG
@@ -81,6 +104,7 @@ final class PlayerController {
         #endif
         state = .tuning
         signal = nil
+        landedAt = nil
         timeoutTask?.cancel()
         removeItemObservers()
         stopLive()
@@ -116,12 +140,13 @@ final class PlayerController {
 
         statusObservation = item.observe(\.status, options: [.new]) { [weak self] observed, _ in
             let status = observed.status
+            let error = observed.error
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
                 switch status {
                 case .failed:
-                    Self.log.error("item failed: \(observed.error?.localizedDescription ?? "no error", privacy: .public)")
-                    self.state = .failed(Self.unreachable)
+                    Self.log.error("item failed: \(error?.localizedDescription ?? "no error", privacy: .public)")
+                    self.fail(error: error)
                 case .readyToPlay: self.begin(at: start, generation: gen)
                 default: break
                 }
@@ -138,11 +163,11 @@ final class PlayerController {
         failObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
         ) { [weak self] notification in
-            let cause = (notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)?.localizedDescription ?? "no error"
+            let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
             Task { @MainActor in
                 guard let self, gen == self.generation else { return }
-                Self.log.error("stopped mid-play: \(cause, privacy: .public)")
-                self.state = .failed(Self.unreachable)
+                Self.log.error("stopped mid-play: \(error?.localizedDescription ?? "no error", privacy: .public)")
+                self.fail(error: error)
             }
         }
 
@@ -176,6 +201,7 @@ final class PlayerController {
         switch event {
         case .started:
             timeoutTask?.cancel()
+            retunePending = false
             state = .playing
             if fadeInPending, !holdsSound {
                 fadeInPending = false
@@ -215,6 +241,27 @@ final class PlayerController {
         fadeInPending = false
         if let liveRadio { liveRadio.pause() } else { player.pause() }
         state = .paused
+    }
+
+    /// Set while the picture-in-picture window carries this player (PictureInPicture).
+    var followsWindow = false
+
+    /// The window's own Play or Pause worked AVPlayer directly: the state follows it, and nothing
+    /// is played, paused or faded again (`resume()` would fade the sound in from 0 and wait for a
+    /// change that never comes, as AVPlayer is already playing).
+    func follow(playing: Bool) {
+        // A failed or stopped signal stays as it is: an end of file or a stall is not a Pause.
+        if case .failed = state { return }
+        guard state != .idle else { return }
+        if !playing {
+            fadeTask?.cancel()
+            fadeInPending = false
+            state = .paused
+            return
+        }
+        guard state == .paused else { return }
+        // The player's own reading decides: playing, or waiting with the stall watch running.
+        syncWithPlayer()
     }
 
     func resume() {
@@ -288,6 +335,8 @@ final class PlayerController {
     }
 
     func stop() {
+        // Muted by the PiP window for a broadcast's rejoin: the next signal is heard.
+        player.isMuted = false
         fadeTask?.cancel()
         fadeInPending = false
         generation += 1
@@ -381,7 +430,8 @@ final class PlayerController {
             guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
             guard let self, gen == self.generation else { return }
             let tap = SignalTap()
-            guard let mix = tap.audioMix(for: track) else { return }
+            // An mp3 tapped after effects played silent on the Apple TV (owner, 2026-11-27, Channel 1).
+            guard let mix = tap.audioMix(for: track, preEffects: asset.url.pathExtension.lowercased() == "mp3") else { return }
             item.audioMix = mix
             self.signal = tap
         }
@@ -404,6 +454,9 @@ final class PlayerController {
                 #if DEBUG
                 print("KJTUNE seeked after=\(ContinuousClock.now - self.attachedAt)")
                 #endif
+                // A time the player cannot read holds nothing: NaN would never compare as moved.
+                let landed = self.player.currentTime().seconds
+                self.landedAt = landed.isFinite ? landed : nil
                 self.player.play()
             }
         }
@@ -413,11 +466,41 @@ final class PlayerController {
     /// that arrives late cannot put back a state the viewer has already left.
     private func syncWithPlayer() {
         guard liveRadio == nil else { return }
+        // The picture-in-picture window's own Play, read here first (the observer runs before the
+        // window's 100 ms reading): a sound left low by a fade that a Pause cut short comes back up
+        // once it plays.
+        // Not while muted: a broadcast paused from the window is muted until its rejoin replaces it.
+        if PiPSound.fadesBack(paused: state == .paused, followsWindow: followsWindow, muted: player.isMuted,
+                              nowPlaying: player.timeControlStatus != .paused, volume: volume, holdsSound: holdsSound) {
+            fadeInPending = true
+        }
         switch player.timeControlStatus {
         case .playing:
-            // A queued ready/seek callback cannot override a newer explicit Pause.
-            guard state != .paused else { player.pause(); return }
+            // A queued ready/seek callback cannot override a newer explicit Pause. In the
+            // picture-in-picture window a Play read here is the window's own control, not a late
+            // callback: followed, not undone.
+            guard state != .paused || followsWindow else { player.pause(); return }
+            // A join part-way through reports Playing as the seek lands, before a frame from the
+            // new place is drawn; the screen then showed the frame it held, often a film's black
+            // head, for a second (owner, 2026-11-19, Channel 1). Playing waits until the clock has
+            // moved on from where the seek landed, so frames from there are coming through. A
+            // signal that never moves stays tuning, and the start-up timeout ends it. Moved either
+            // way: a scrub back during the hold (a film resumed, then rewound) also ends it.
+            if let landed = landedAt {
+                guard abs(player.currentTime().seconds - landed) >= 0.3 else {
+                    let gen = generation
+                    Task { @MainActor [weak self] in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        guard let self, gen == self.generation else { return }
+                        self.syncWithPlayer()
+                    }
+                    return
+                }
+                landedAt = nil
+            }
             timeoutTask?.cancel()
+            // The grace that cancelled task held is over: a failure from here is seen, not dropped.
+            retunePending = false
             #if DEBUG
             if state != .playing { print("KJTUNE playing after=\(ContinuousClock.now - attachedAt)") }
             #endif
@@ -455,8 +538,63 @@ final class PlayerController {
             try? await Task.sleep(for: Self.stallLimit)
             guard let self, !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
             Self.log.error("stalled for 20 s")
-            self.player.pause()
-            self.state = .failed(Self.unreachable)
+            self.fail(error: nil, stalled: true)
+        }
+    }
+
+    /// Every AVPlayer failure after the start-up timeout ends here (that timeout fails at once).
+    /// One the network caused
+    /// (SupabaseRoute.retunesPlayback) is retuned once with a fresh item, at the same live
+    /// position; a refusal, or a second failure within a minute of the retune, is shown.
+    private func fail(error: Error?, stalled: Bool = false) {
+        // A late error from the item a retune is about to replace must not call the retune off.
+        guard !retunePending else { return }
+        // A signal already failed (the 30 s start-up timeout) is finished: a late error from its
+        // still-loading item must not bring "Connecting…" back over the failure.
+        guard !state.isFailed else { return }
+        let events = player.currentItem?.errorLog()?.events ?? []
+        let logged = events.map { (domain: $0.errorDomain, code: $0.errorStatusCode) }
+        let lastAge = events.last?.date.map { -$0.timeIntervalSinceNow }
+        let recent = retunedAt.map { ContinuousClock.now - $0 < Self.retuneSpacing } ?? false
+        // A signal the viewer paused is never brought back by a retune: it fails as it is.
+        guard !recent, state != .paused, let tuned, SupabaseRoute.retunesPlayback(error: error, logged: logged, lastAge: lastAge, stalled: stalled) else {
+            player.pause()
+            state = .failed(Self.unreachable)
+            return
+        }
+        Self.log.error("retuning once")
+        retune(tuned)
+    }
+
+    /// A live signal rejoins where its clock has got to (a live stream at the live edge, a
+    /// transmission at its start plus the time since); a recording carries on where it was.
+    private func retune(_ tuned: Tuned) {
+        let position = player.currentTime().seconds
+        let gen = generation
+        state = .tuning
+        timeoutTask?.cancel()
+        retuneToken += 1
+        let token = retuneToken
+        retunePending = true
+        // Stamped when the retune is decided, not when it attaches: a carrier that plays again
+        // during the grace (which calls the attach off) still counts as retuned once.
+        retunedAt = .now
+        // A second's grace, as SupabaseRoute gives a dropped request, so a connection coming
+        // back has a moment. ponytail: fixed wait, not a network path monitor.
+        timeoutTask = Task { [weak self] in
+            try? await Task.sleep(for: SupabaseRoute.droppedRetryDelay)
+            guard let self else { return }
+            // However the grace ends (a retune, the item playing again, a pause, a new tuning),
+            // the item's own observers are still on it and fail as before.
+            if token == self.retuneToken { self.retunePending = false }
+            guard !Task.isCancelled, gen == self.generation, self.state == .tuning else { return }
+            let elapsed = (ContinuousClock.now - tuned.at) / .seconds(1)
+            let seekTo = tuned.isLive ? tuned.seekTo.map { $0 + elapsed } : (position.isFinite && position > 0 ? position : tuned.seekTo)
+            self.attach(url: tuned.url, seekTo: seekTo, title: tuned.title, subtitle: tuned.subtitle,
+                        isLive: tuned.isLive, listen: tuned.listen, live: tuned.live)
+            self.retunedAt = .now
+            // The clock keeps the first tuning's start, so a later retune lands live too.
+            self.tuned = tuned
         }
     }
 

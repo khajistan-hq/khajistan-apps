@@ -6,5 +6,6 @@
 set -eu
 cd "$(dirname "$0")/.."
 mkdir -p .build
-swiftc -swift-version 5 KhajistanTV/Core/*.swift Tests/CoreTests/main.swift -o .build/core-tests
+# DancerFigure.swift rides along so the dancer poses can be checked by number (it needs only SwiftUI).
+swiftc -swift-version 5 KhajistanTV/Core/*.swift KhajistanTV/Views/DancerFigure.swift Tests/CoreTests/main.swift -o .build/core-tests
 .build/core-tests Tests/Fixtures/station-clock-fixture.json

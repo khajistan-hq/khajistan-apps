@@ -116,8 +116,11 @@ struct ProductPicture: View {
             }
             .accessibilityHidden(true)
             .task(id: url) {
-                guard let url else { return }
-                image = await PnvImages.shared.image([url], maxPixel: 800, authorization: model.siteAuthorization(for: url))
+                // No picture for this choice: the last one's goes, rather than standing for it.
+                guard let url else { image = nil; return }
+                let loaded = await PnvImages.shared.image([url], maxPixel: 800, authorization: model.siteAuthorization(for: url))
+                // A load the next choice replaced does not write over the newer picture.
+                if !Task.isCancelled { image = loaded }
             }
     }
 }
@@ -183,7 +186,10 @@ struct ProductScreen: View {
         .task { await load() }
     }
 
+    /// The chosen option's own picture first (owner 2026-11-27: changing the size or frame shows
+    /// its mockup), then the catalogue's picture.
     private var picture: URL? {
+        if let own = selected?.image?.url { return own }
         if let item { return Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) }
         return live?.images.first
     }

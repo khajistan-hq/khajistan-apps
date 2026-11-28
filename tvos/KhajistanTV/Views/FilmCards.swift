@@ -16,6 +16,10 @@ struct FilmShelf: View {
     /// Set by a screen that holds the film's page itself (the Screening Room): a shelf that
     /// leaves (Up Next empties when a film ends) must not take the open page with it.
     var present: ((Film, _ direct: Bool) -> Void)? = nil
+    /// The first shelf of the store build's Screening Room, the one page that sets it: Up from it
+    /// goes to the top bar (AppModel.topBarCall), whatever the page's scroll has done.
+    var leadsPage = false
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         Shelf(title, count: count) {
@@ -31,14 +35,15 @@ struct FilmShelf: View {
                     onChoose()
                     if let present { present(film, opensPage) } else if opensPage { playingDirect = film } else { playing = film }
                 }
+                .onMoveCommand(perform: leadsPage ? { if $0 == .up { model.topBarCall += 1 } } : nil)
                 .accessibilityIdentifier(showsPlaces ? "upnext-\(film.handle)" : "film-\(film.handle)")
                 .accessibilityLabel([Films.displayTitle(film), Films.offer(film)].compactMap { $0 }.joined(separator: ", "))
             }
         }
-        .fullScreenCover(item: $playing) { film in
+        .kjFullScreenCover(item: $playing) { film in
             if opensPage { TVFilmPage(film: film) } else { FilmPlayerView(film: film) }
         }
-        .fullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
+        .kjFullScreenCover(item: $playingDirect) { film in FilmPlayerView(film: film, startsFull: true) }
     }
 }
 
@@ -49,11 +54,19 @@ struct FilmShelf: View {
 struct FilmCard: View {
     static let posterHeight: CGFloat = 420
     static let textHeight: CGFloat = 210
+    /// While the radio bar shows, the title alone: a focused card (poster, title, lift) then fits
+    /// the shortest page above the bar, the region page under its crumb, so Down can reach the
+    /// bar's Off. The poster keeps its size, so the cards keep their width and place on the shelf
+    /// when the bar comes or goes (a film opened from the shelf stops the radio behind it, and a
+    /// shelf that moved sideways lost focus when the film closed). RootView holds the bar's
+    /// shape until the next page, so nothing regrows under focus either.
+    static let textHeightUnderBar: CGFloat = 90
 
     let film: Film
     /// Seconds in, where this device stopped the full film: a progress line and the time take the
     /// offer line's place.
     var place: Double? = nil
+    @Environment(\.underRadioBar) private var underRadioBar
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -67,20 +80,23 @@ struct FilmCard: View {
                 .kjCardArt()
             // The text takes the poster's width, so a long title wraps under its own poster.
             Color.clear
-                .frame(height: Self.textHeight)
+                .frame(height: underRadioBar ? Self.textHeightUnderBar : Self.textHeight)
                 .overlay(alignment: .topLeading) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(Films.displayTitle(film))
                             .kjName(28)
                             .lineLimit(2)
-                        if let place {
-                            Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
-                        } else if let offer = Films.offer(film) {
-                            Kicker(offer)
-                                .lineLimit(3)
+                        // Under the bar the title alone; the button's label still reads the offer.
+                        if !underRadioBar {
+                            if let place {
+                                Kicker("Stopped at \(Mixes.clock(place))").lineLimit(1)
+                            } else if let offer = Films.offer(film) {
+                                Kicker(offer)
+                                    .lineLimit(3)
+                            }
                         }
                         let detail = Films.detail(film)
-                        if !detail.isEmpty {
+                        if !underRadioBar, !detail.isEmpty {
                             Text(detail)
                                 .kjSmall(faint: true)
                                 .lineLimit(1)

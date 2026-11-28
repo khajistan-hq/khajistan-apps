@@ -503,10 +503,11 @@ final class ReadingStore {
             let session = urlSession
             Task {
                 let image = await Task.detached(priority: .utility) { () -> UIImage? in
+                    let epoch = RRPageDisk.current
                     guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
                           (response as? HTTPURLResponse)?.statusCode == 200,
                           let image = PnvImages.downsample(data, maxPixel: 720) else { return nil }
-                    RRPageDisk.write(data, kept)
+                    RRPageDisk.write(data, kept, since: epoch)
                     return image
                 }.value
                 if let image { show(image, on: state, cover: job.cover) } else if state.image == nil { state.failed = true }
@@ -702,10 +703,11 @@ final class ReadingStore {
         let image: UIImage? = await Task.detached(priority: .utility) {
             let path = url.path
             if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 320) { return image }
+            let epoch = RRPageDisk.current
             guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = PnvImages.downsample(data, maxPixel: 320) else { return nil }
-            RRPageDisk.write(data, path)
+            RRPageDisk.write(data, path, since: epoch)
             return image
         }.value
         if let image { thumbs.setObject(image, forKey: key as NSString) }
@@ -768,10 +770,11 @@ final class ReadingStore {
         let path = url.path
         return await Task.detached(priority: priority) {
             if let held = RRPageDisk.read(path), let image = PnvImages.downsample(held, maxPixel: 4096) { return image }
+            let epoch = RRPageDisk.current
             guard let (data, response) = try? await SupabaseRoute.data(for: URLRequest(url: url), session: session),
                   (response as? HTTPURLResponse)?.statusCode == 200,
                   let image = PnvImages.downsample(data, maxPixel: 4096) else { return nil }
-            RRPageDisk.write(data, path)
+            RRPageDisk.write(data, path, since: epoch)
             return image
         }.value
     }
@@ -848,6 +851,22 @@ enum RRPageDisk {
 
     static func remove(_ path: String) { try? FileManager.default.removeItem(at: file(path)) }
 
+    /// Moves on every purge. A download takes it before it asks the network and hands it to
+    /// `write`, so a page fetched under a session that has since ended is not written back after
+    /// the purge. The lock orders a write and a purge.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var epoch = 0
+    static var current: Int { lock.withLock { epoch } }
+
+    /// Sign-out: no page a signed-in reader opened stays on the device.
+    static func purge() {
+        lock.withLock {
+            epoch += 1
+            try? FileManager.default.removeItem(at: folder)
+            RRPrivateFiles.prepare(folder)
+        }
+    }
+
     static func read(_ path: String) -> Data? {
         let url = file(path)
         guard let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
@@ -855,8 +874,11 @@ enum RRPageDisk {
         return try? Data(contentsOf: url)
     }
 
-    static func write(_ data: Data, _ path: String) {
-        RRPrivateFiles.write(data, to: file(path))
+    static func write(_ data: Data, _ path: String, since started: Int) {
+        lock.withLock {
+            guard started == epoch else { return }
+            RRPrivateFiles.write(data, to: file(path))
+        }
     }
 
     /// Drops what is past its days, then the oldest until the folder fits the budget.

@@ -34,9 +34,8 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(regions.firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
         screenshot("01-receiver-map", app: app)
 
-        // Down onto the front, then right onto the strip: straight down from the sidebar now
-        // runs into the Surf settings and the Cameras shelf under them.
-        XCTAssertTrue(kjFocusStrip(app), "A region on the map must take focus")
+        // Right from the sidebar onto the A–Z list beside the map.
+        XCTAssertTrue(kjFocusRegions(app), "A region in the list must take focus")
         screenshot("02-map-focused", app: app)
         XCUIRemote.shared.press(.select)
 
@@ -73,11 +72,7 @@ final class KhajistanTVUITests: XCTestCase {
         XCTAssertTrue(regionButtons(app).firstMatch.waitForExistence(timeout: 60), "The receiver must draw a map with regions to open")
 
         let toggle = app.buttons["beyondTheAtlas"]
-        for _ in 0..<12 {
-            if toggle.exists && toggle.hasFocus { break }
-            XCUIRemote.shared.press(.left)
-            XCUIRemote.shared.press(.down)
-        }
+        kjFocusAtlasSwitch(app)
         // The switch is kept on the device, so it is read rather than assumed: on for the
         // picture, and off again at the end so later tests see the core map.
         if toggle.exists && toggle.hasFocus {
@@ -96,11 +91,14 @@ final class KhajistanTVUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "transmission"]
         kjLaunch(app)
 
-        // The phase is the sentence's accessibility value, so the screen carries no marker word.
+        // The phase is the screen's accessibility value, so the screen carries no marker word. A
+        // schedule that loads plays a channel at once (owner, 2026-11-28): that is the outcome too.
         let state = app.staticTexts["transmissionState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 60), "Khajistan TV must show a state")
-        wait(upTo: 40) { state.exists && (state.value as? String) != "Loading" }
-        let outcome = (state.value as? String) ?? "unknown"
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        wait(upTo: 60) { channel.exists || (state.exists && (state.value as? String) != "Loading") }
+        XCTAssertTrue(channel.exists || (state.exists && (state.value as? String) != "Loading"),
+                      "Khajistan TV must play or show a state past Loading")
+        let outcome = channel.exists ? "playing" : ((state.value as? String) ?? "unknown")
         screenshot("04-khajistan-tv-\(outcome)", app: app)
     }
 

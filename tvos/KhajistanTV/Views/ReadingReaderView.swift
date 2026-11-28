@@ -28,8 +28,6 @@ struct ReadingReaderView: View {
     @State private var shown: UIImage?
     @State private var phase: Phase = .loading
     @State private var zoom: CGFloat = 1
-    /// Set by the first zoom; the band stops saying "Select to zoom" after it.
-    @AppStorage("kj.rr.zoomUsed") private var zoomUsed = false
     @State private var pan: CGSize = .zero
     @State private var screen: CGSize = CGSize(width: 1920, height: 1080)
     @State private var flags: [String: [String]] = [:]
@@ -168,7 +166,7 @@ struct ReadingReaderView: View {
         .onChange(of: phase == .page ? position : 0) { _, shown in
             if shown > 0 { ReadingPlaces.record(title: title.slug, name: title.name, issue: issue, page: shown) }
         }
-        .fullScreenCover(isPresented: $showSignIn) {
+        .kjFullScreenCover(isPresented: $showSignIn) {
             SignInView(onSignedIn: { retryAfterSignIn() })
         }
     }
@@ -326,7 +324,7 @@ struct ReadingReaderView: View {
     private var overlay: some View {
         VStack(spacing: 0) {
             // Select zooms, and nothing said so: the cue rides the band until the first zoom.
-            StatusBand(leading: bandLeading, trailing: chrome ? [] : (phase == .page && !zoomed && !zoomUsed ? ["Select to zoom"] : []) + [pageLabel])
+            StatusBand(leading: bandLeading, trailing: chrome ? [] : [pageLabel])
                 .opacity(overlayVisible || chrome ? 1 : 0)
                 .animation(.easeOut(duration: 0.25), value: overlayVisible || chrome)
                 .allowsHitTesting(false)
@@ -557,7 +555,6 @@ struct ReadingReaderView: View {
     private func setZoom(_ next: CGFloat) {
         let ratio = next / zoom
         zoom = next
-        if next > 1 { zoomUsed = true }
         let limit = panLimit
         pan = CGSize(width: min(max(pan.width * ratio, -limit.width), limit.width),
                      height: min(max(pan.height * ratio, -limit.height), limit.height))

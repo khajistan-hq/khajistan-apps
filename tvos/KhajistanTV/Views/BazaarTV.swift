@@ -41,8 +41,8 @@ struct TVBazaar: View {
             await model.bazaar.load()
             await model.bazaarSwap.load()
         }
-        .fullScreenCover(item: $showing) { item in TVProductScreen(item: item) }
-        .fullScreenCover(isPresented: $showBag) { TVBagScreen() }
+        .kjFullScreenCover(item: $showing) { item in TVProductScreen(item: item) }
+        .kjFullScreenCover(isPresented: $showBag) { TVBagScreen() }
     }
 }
 
@@ -90,7 +90,7 @@ struct TVProductScreen: View {
             HStack(alignment: .top, spacing: 80) {
                 ZStack {
                     palette.lift
-                    if let url = Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) {
+                    if let url = chosenPicture ?? Bazaar.picture(item.product, swap: model.bazaarSwap.value ?? [:], width: 800) {
                         TVPicture(url: url, maxPixel: 1200).padding(40)
                     }
                 }
@@ -127,6 +127,14 @@ struct TVProductScreen: View {
                 live = .unreadable
             }
         }
+    }
+
+    /// The chosen option's own picture, when the shop links one (owner 2026-11-27).
+    private var chosenPicture: URL? {
+        // The same choice the price and Add to bag read: the first on sale when none is picked.
+        guard case .found(let product) = live else { return nil }
+        let chosen = product.variants.first { $0.id == option } ?? product.variants.first { $0.availableForSale }
+        return chosen?.image?.url
     }
 
     /// The price first, as Etsy sets it, then the options as chips; the chosen one's price shows.

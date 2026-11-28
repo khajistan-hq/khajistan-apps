@@ -707,8 +707,14 @@ enum StationClock {
     /// The programme on air on a channel at a moment, by its Now name, from the months held: the
     /// month that holds the moment, so after midnight on the 1st it is the second file.
     static func nowName(_ months: [Programming], channel number: Int, at date: Date) -> String? {
+        onAir(months, channel: number, at: date)?.nowName
+    }
+
+    /// `onAir` from the months held: the month that holds the moment, as `nowName` reads it. Nil when
+    /// no month held reaches the moment.
+    static func onAir(_ months: [Programming], channel number: Int, at date: Date) -> OnAir? {
         guard let p = months.first(where: { monthEnd($0).map { date < $0 } ?? false }) else { return nil }
-        return onAir(p, channel: number, at: date)?.nowName
+        return onAir(p, channel: number, at: date)
     }
 
     /// The station month the guide needs fetched, "yyyy-MM", when it reads to `until` past the month

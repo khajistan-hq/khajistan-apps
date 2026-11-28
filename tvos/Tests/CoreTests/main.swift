@@ -2333,6 +2333,30 @@ func guideTimelineDarkAcrossTheMonthsEnd() throws {
     try expectEqual(open?.back(now: read), "13:00 PKT on Wednesday 18 November")
 }
 
+/// The guide's kind line reads the programme from the month that holds the cell (PR 133 review: "Kind
+/// line misses next-month programmes"): past midnight on the 1st the month held alone says nothing.
+func guideOnAirReadsTheMonthThatHoldsTheMoment() throws {
+    func month(_ day: String, kind: String) throws -> Programming {
+        try decode(Programming.self, """
+        {"_meta":{"channels":[{"id":"c","number":1,"name":"Channel 1 · Test"}]},
+         "shows":{"s1":{"slug":"s1","name":"Show One"}},
+         "programme_order":["L"],
+         "programmes":{"L":{"id":"L","title":"l","display_title":"Long","seconds":7200,"kind_line":"\(kind)"}},
+         "days":[{"date":"\(day)","channels":{"c":[
+           {"start":"00:00","start_minute":0,"minutes":120,"show":"s1","programmes":[0]}]}}]}
+        """)
+    }
+    let nov = try month("2026-11-30", kind: "Film \u{00B7} November")
+    let dec = try month("2026-12-01", kind: "Film \u{00B7} December")
+    let past = pkt(2026, 12, 1, 0, 30), before = pkt(2026, 11, 30, 0, 30)
+    try expectEqual(StationClock.onAir([nov, dec], channel: 1, at: past)?.programme?.kind_line, "Film \u{00B7} December")
+    try expectEqual(StationClock.onAir([nov, dec], channel: 1, at: before)?.programme?.kind_line, "Film \u{00B7} November")
+    // The month held alone, as the kind line read it before: nothing past its end.
+    try expect(StationClock.onAir(nov, channel: 1, at: past)?.programme?.kind_line != "Film \u{00B7} December")
+    try expect(StationClock.onAir([nov], channel: 1, at: past) == nil, "a month not held is not read as another month")
+    try expect(StationClock.onAir([nov, dec], channel: 9, at: past) == nil, "a channel the schedule lacks")
+}
+
 /// The programme on air by its Now name, from the month that holds the moment: after midnight on
 /// the 1st that is the second file.
 func guideNowNameAcrossTheMonth() throws {
@@ -2588,6 +2612,14 @@ func clickTallyTellsADoubleFromTwoSingles() throws {
     try expectEqual(tally.click(at: 50), .wait)
     try expectEqual(tally.click(at: 50.1), .double)
     try expectEqual(tally.click(at: 50.2), .wait)
+    // The viewer leaves inside the wait (PR 133 review: "Deferred Up/Down can restart after leaving"):
+    // the click settles nothing, and the next click starts a wait of its own.
+    try expect(tally.settle(50.2))
+    try expectEqual(tally.click(at: 60), .wait)
+    tally.cancel()
+    try expect(!tally.settle(60), "a click cancelled by leaving still changed channel")
+    try expectEqual(tally.click(at: 60.1), .wait, "a cancelled click is not half of a double click")
+    try expect(tally.settle(60.1))
 }
 
 func remoteGestureTellsASwipeFromAPress() throws {
@@ -6646,6 +6678,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide timeline: off air never covers what follows it", guideTimelineKeepsWhatFollowsOffAir),
     ("Guide timeline: off air at the end of the months held", guideTimelineOffAirAtTheEndOfTheMonthsHeld),
     ("Guide timeline: dark across the month's end says when it is back", guideTimelineDarkAcrossTheMonthsEnd),
+    ("Guide: the kind line reads the month that holds the cell", guideOnAirReadsTheMonthThatHoldsTheMoment),
     ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),

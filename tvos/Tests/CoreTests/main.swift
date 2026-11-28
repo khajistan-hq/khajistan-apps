@@ -2446,6 +2446,21 @@ func guideTimelineAcrossTheMonth() throws {
     try expect(past > 50, "only \(past) December programmes on the rows")
 }
 
+/// CodeRabbit, PR 147/98: a November programme running past midnight hid a December programme
+/// at 00:00 that the clock (which reads December from midnight) has on.
+func guideTimelineHandsOverAtMidnight() throws {
+    func month(_ day: String, _ slot: String) -> String {
+        #"{"_meta":{"channels":[{"id":"c","number":1,"name":"C"}]},"shows":{"s":{"slug":"s","name":"S"}},"programme_order":["a","b"],"programmes":{"a":{"id":"a","title":"A","seconds":4800},"b":{"id":"b","title":"B","seconds":600}},"days":[{"date":"\#(day)","channels":{"c":[\#(slot)]}}]}"#
+    }
+    let nov = try decode(Programming.self, month("2026-11-30", #"{"start":"23:00","start_minute":1380,"minutes":80,"show":"s","programmes":[0]}"#))
+    let dec = try decode(Programming.self, month("2026-12-01", #"{"start":"00:00","start_minute":0,"minutes":10,"show":"s","programmes":[1]}"#))
+    try expect(StationClock.onAir(dec, channel: 1, at: pkt(2026, 12, 1, 0, 5)) != nil, "the fixture has B on at 00:05")
+    _ = try timelineAgreesWithTheClock([nov, dec], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0), every: 60)
+    // November alone still draws its programme to its own end.
+    let alone = StationClock.timeline([nov], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0))
+    try expect(alone.contains { !$0.isOffAir && $0.end > pkt(2026, 12, 1, 0, 0) }, "November alone cut its carryover at midnight")
+}
+
 func guideGridMoves() throws {
     let s: [GuideSlot] = [
         GuideSlot(start: pkt(2026, 11, 17, 11, 0), end: pkt(2026, 11, 17, 12, 20), title: "A"),
@@ -6548,6 +6563,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
+    ("Guide timeline: the month after takes over at midnight", guideTimelineHandsOverAtMidnight),
     ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),
     ("Guide grid: a programme too short to read is folded into a neighbour", guideCellsFold),
     ("Guide grid: no cell too narrow to read, every day of a real month", guideCellsReadableRealMonth),

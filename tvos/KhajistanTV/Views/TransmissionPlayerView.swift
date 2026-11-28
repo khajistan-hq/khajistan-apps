@@ -210,6 +210,7 @@ struct TransmissionPlayerView: View {
         .task(id: guideGrid == nil) { if guideGrid != nil { await keepGuideCurrent() } }
         // A month brought in, or the month turned: the guide reads its rows again.
         .onChange(of: store.guideMonthsKey) { if guideGrid != nil { refillGuide() } }
+        .onChange(of: store.scheduleRevision) { if guideGrid != nil { refillGuide() } }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .kjFullScreenCover(isPresented: $showSignIn) {

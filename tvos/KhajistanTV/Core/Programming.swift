@@ -143,7 +143,7 @@ extension Programming.Programme {
         display_title_en = (try? values.decodeIfPresent(String.self, forKey: .display_title_en)) ?? nil
         year = (try? values.decodeIfPresent(Int.self, forKey: .year)) ?? nil
         part = (try? values.decodeIfPresent(String.self, forKey: .part)) ?? nil
-        kind_line = try values.decodeIfPresent(String.self, forKey: .kind_line)
+        kind_line = (try? values.decodeIfPresent(String.self, forKey: .kind_line)) ?? nil
     }
 }
 

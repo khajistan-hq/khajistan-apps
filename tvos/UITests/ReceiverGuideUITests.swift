@@ -174,7 +174,13 @@ final class ReceiverGuideUITests: XCTestCase {
         // edge and spans the screen, with the picture left in view above it.
         kjPause(0.6)
         let screen = app.frame
-        XCTAssertGreaterThan(guide.frame.minY, screen.height * 0.25, "the guide leaves the picture above it")
+        // Full screen, as Transmission's guide (owner, 2026-11-28): the picture plays on in its window.
+        XCTAssertEqual(guide.frame.minY, screen.minY, accuracy: 2, "the guide fills the screen from the top")
+        let headline = app.descendants(matching: .any)["guideHeadline"]
+        XCTAssertTrue(headline.exists && headline.label.contains(start), "the lit channel is described beside the picture: \(headline.label)")
+        XCTAssertLessThan(headline.frame.maxY, screen.height * 0.4, "the description sits in the top band, beside the picture's window")
+        let strip = app.descendants(matching: .any)["captionsControl"]
+        XCTAssertFalse(strip.exists && strip.isHittable, "no strip over the guide")
         XCTAssertEqual(guide.frame.maxY, screen.maxY, accuracy: 2, "the guide reaches the bottom edge")
         XCTAssertGreaterThan(guide.frame.width, screen.width * 0.9, "the guide spans the screen")
         let live = app.descendants(matching: .any)["guide-\(start)"]

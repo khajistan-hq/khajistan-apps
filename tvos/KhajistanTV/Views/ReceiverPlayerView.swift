@@ -115,23 +115,41 @@ struct ReceiverPlayerView: View {
         // the full-screen cover, which is a hosting controller of its own.
         let palette = Palette(model.skin)
         ZStack {
-            // A picture that does not fill the screen sits on black, whatever the skin (owner,
-            // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
-            (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
-            PlayerLayerView(player: playerA.player, onLayer: pip.bind)
-                .ignoresSafeArea()
-                .opacity(aIsFront ? 1 : 0)
-            PlayerLayerView(player: playerB.player, onLayer: pip.bind)
-                .ignoresSafeArea()
-                .opacity(aIsFront ? 0 : 1)
-            // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
-            // front of the channel's name, or the visualizer the viewer chose (SoundStage). The
-            // band says live radio; the centre carries the name.
-            SoundStage(controller: controller, eligible: current.mediaType == "radio", reverent: current.isReverent) {
-                if current.mediaType == "radio" && controller.state == .playing {
-                    RadioNowPlaying(channel: current, song: song)
+            // The guide lies under the picture and fills the screen; the picture shrinks to the
+            // guide's window and uncovers it, as on Transmission (owner, 2026-11-28).
+            if let guideRow {
+                ReceiverGuide(list: guideList, current: current, lit: guideRow,
+                              medium: (destination ?? current).mediaType, title: guideTitle,
+                              turns: guideRegions.count > 1, loading: guideLoading)
+                    .transition(.opacity)
+            }
+            // What the channel shows (its black, both players, the radio's stage) is one layer laid
+            // out at the screen's size; with the guide open only its transform changes, onto the
+            // guide's window. The same players and the same decode: nothing restarts.
+            ZStack {
+                // A picture that does not fill the screen sits on black, whatever the skin (owner,
+                // 2026-10-05). Radio, which has no picture, keeps the skin's ground.
+                (showsPicture ? Color.black : palette.ground).ignoresSafeArea()
+                PlayerLayerView(player: playerA.player, onLayer: pip.bind)
+                    .ignoresSafeArea()
+                    .opacity(aIsFront ? 1 : 0)
+                PlayerLayerView(player: playerB.player, onLayer: pip.bind)
+                    .ignoresSafeArea()
+                    .opacity(aIsFront ? 0 : 1)
+                // Radio: the dancer, when the carrier can be read and the stream carries a beat, in
+                // front of the channel's name, or the visualizer the viewer chose (SoundStage). The
+                // band says live radio; the centre carries the name.
+                SoundStage(controller: controller, eligible: current.mediaType == "radio", reverent: current.isReverent) {
+                    if current.mediaType == "radio" && controller.state == .playing {
+                        RadioNowPlaying(channel: current, song: song)
+                    }
                 }
             }
+            .frame(width: UIScreen.main.bounds.width, height: UIScreen.main.bounds.height)
+            .scaleEffect(guideRow == nil ? 1 : pictureWindow.scale, anchor: .topLeading)
+            .offset(guideRow == nil ? .zero : pictureWindow.offset)
+            .ignoresSafeArea()
+            .accessibilityHidden(guideRow != nil)
             // The focus target. It draws nothing; its job is to hold focus so the remote's
             // presses reach the handlers below. A click works the Captions control when the viewer
             // has moved to it, and otherwise wakes the overlay. Focus never leaves it: moving
@@ -154,16 +172,12 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
             .accessibilityAction(named: "Picture in picture") { startPictureInPicture() }
+            // Under the full-screen guide the strip would sit over its rows: the guide says it all.
             overlay(palette)
-            if let guideRow {
-                ReceiverGuide(list: guideList, current: current, lit: guideRow,
-                              medium: (destination ?? current).mediaType, title: guideTitle,
-                              turns: guideRegions.count > 1, loading: guideLoading)
-                    .transition(.move(edge: .bottom))
-            }
+                .opacity(guideRow == nil ? 1 : 0)
             CaptionLayer(text: model.captions.text, skin: model.skin, status: model.captions.sentenceStatus,
                          overPicture: showsPicture, lift: stripShown ? stripHeight : 0)
-                // Not over the guide's rows: the guide covers the lower part of the picture.
+                // Not over the guide: the picture is in the guide's small window.
                 .opacity(guideRow == nil ? 1 : 0)
             StationClipLayer(clips: model.clips)
         }
@@ -535,6 +549,14 @@ struct ReceiverPlayerView: View {
             .accessibilityIdentifier("guideControl")
             .accessibilityAction { openGuide() }
             .accessibilityAddTraits(armed == .guide ? .isSelected : [])
+    }
+
+    /// Where the picture sits while the guide is open: the scale and offset that carry the full
+    /// screen onto ReceiverGuide.pictureRect, scaled about the screen's top left corner.
+    private var pictureWindow: (scale: CGFloat, offset: CGSize) {
+        let screen = UIScreen.main.bounds.size
+        let rect = ReceiverGuide.pictureRect(in: screen)
+        return (rect.width / max(1, screen.width), CGSize(width: rect.minX, height: rect.minY))
     }
 
     private func openGuide() {

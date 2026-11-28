@@ -213,6 +213,20 @@ struct PnvRetryHarness {
         await shuffled(room: nil, "shuffle walk when the size probe fails (starts at 1, no wrap)")
         print(failures == 0 ? "PASS shuffle walk: 41 walks, every object once, in key order from its start" : "")
         Stub.shuffleKeys = nil
+
+        // `-kjfixturesonly YES`: the route is direct with no probe sent, so a runner whose network
+        // blinks cannot leave a page on "unreachable" (CI 2026-11-28, run 46121055992). The other
+        // way round, a probe going out without the switch, is the "answered by the stub" check above.
+        do {
+            UserDefaults.standard.set(true, forKey: "kjfixturesonly")
+            SupabaseRoute.forgetAsking()
+            let before = Stub.probeRequests
+            let path = await SupabaseRoute.settle()
+            let ok = path == .direct && Stub.probeRequests == before
+            print((ok ? "PASS " : "FAIL ") + "fixtures-only: the route is direct with no probe (\(path), \(Stub.probeRequests - before) probes)")
+            if !ok { failures += 1 }
+            UserDefaults.standard.removeObject(forKey: "kjfixturesonly")
+        }
         exit(failures == 0 ? 0 : 1)
     }
 }

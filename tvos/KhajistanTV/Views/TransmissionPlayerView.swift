@@ -553,16 +553,20 @@ struct TransmissionPlayerView: View {
                     .accessibilityAction { cycleVisualizer() }
                     .accessibilityAddTraits(armed == .visualizer ? .isSelected : [])
             }
-            if guideOffered {
+            // Guide and PiP keep their places through a channel change and are dim until they can act,
+            // so the row does not re-flow (owner, 2026-11-28).
+            if guideShown {
                 StripChipStyle.face(Text("Guide"), isOn: guideGrid != nil, selected: armed == .guide)
+                    .opacity(guideOffered ? 1 : 0.4)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Guide")
                     .accessibilityIdentifier("guideControl")
                     .accessibilityAction { openGuide() }
                     .accessibilityAddTraits(armed == .guide ? .isSelected : [])
             }
-            if pipOffered {
+            if pipShown {
                 StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+                    .opacity(pipOffered ? 1 : 0.4)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Picture in picture")
                     .accessibilityIdentifier("pipControl")
@@ -617,9 +621,10 @@ struct TransmissionPlayerView: View {
     /// Offered on air, off air and while a signal tunes, so a viewer can always find a channel
     /// that is on; not while a change is under way, which would tune under the guide, and not
     /// under the sign-on's cover, which is drawn over the guide and would hide it.
-    private var guideOffered: Bool {
-        store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
-    }
+    private var guideOffered: Bool { guideShown && !switching && model.clips.coverage == 0 }
+
+    /// Whether the station has a guide at all: more than one channel.
+    private var guideShown: Bool { store.channelNumbers.count > 1 }
 
     /// Select in the guide. On a channel's own cell the window tunes to that channel and the
     /// guide stays, so the viewer sees it beside its description (owner, 2026-11-24: "show
@@ -854,9 +859,11 @@ struct TransmissionPlayerView: View {
 
     /// Picture in picture: a picture playing, with no change under way. A sound-only programme
     /// has no picture to put in the corner.
-    private var pipOffered: Bool {
-        guard PictureInPicture.isSupported, !switching, store.player.state == .playing,
-              case .onAir(let air) = store.phase else { return false }
+    private var pipOffered: Bool { pipShown && !switching && store.player.state == .playing }
+
+    /// Whether what is on air has a picture to put in a window: a fact of the programme.
+    private var pipShown: Bool {
+        guard PictureInPicture.isSupported, case .onAir(let air) = store.phase else { return false }
         return air.programme?.audio_only != true
     }
 

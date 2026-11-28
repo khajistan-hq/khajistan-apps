@@ -372,11 +372,15 @@ struct ReceiverPlayerView: View {
     /// What follows the name: a failure's reason, Paused, the captions' note, or the place.
     private var stripDetail: String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
+        // The place leads in every state (owner, 2026-11-28: "showing the main metadata like country
+        // always"); what the moment has to say follows it.
+        let place = current.placeAndTime()
+        func afterPlace(_ note: String) -> String { place.isEmpty ? note : place + " \u{00B7} " + note }
         switch controller.state {
-        case .failed(let message): return moveOnNote ?? likeNote ?? message
-        case .paused: return "Paused"
+        case .failed(let message): return afterPlace(moveOnNote ?? likeNote ?? message)
+        case .paused: return afterPlace("Paused")
         default:
-            if let likeNote { return likeNote }
+            if let likeNote { return afterPlace(likeNote) }
             // Radio prints its song on the ground; television carries it after the place.
             let tvSong = current.mediaType == "tv" ? NowPlaying.caption(song: song, mediaType: "tv") : nil
             // A captions note hides the song only while captions are on. With them off, tuning
@@ -385,7 +389,6 @@ struct ReceiverPlayerView: View {
             // The place stays first; the captions note follows it (owner, 2026-11-27: "the country
             // name should stay right now the captions message takes place for it").
             let note = !model.captions.note.isEmpty && (tvSong == nil || model.captions.isEnabled) ? model.captions.note : nil
-            let place = current.placeAndTime()
             let line = [place.isEmpty ? nil : place, note ?? tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }
@@ -417,15 +420,19 @@ struct ReceiverPlayerView: View {
             likeControl
             if visualizerOffered { visualizerControl }
             if guideOffered { guideControl }
-            if pipOffered { pipControl }
+            // The button keeps its place for the whole channel and is dim until it can act: drawn only
+            // while playing, it made the row re-flow at every tune (owner, 2026-11-28: "shows buttons
+            // then moves them its so glitchy").
+            if pipShown { pipControl.opacity(pipOffered ? 1 : 0.4) }
         }
     }
 
     /// Picture in picture: a picture playing on AVPlayer, with no change under way. Radio has no
     /// picture, and keeps playing in the small player when its screen closes.
-    private var pipOffered: Bool {
-        PictureInPicture.isSupported && current.mediaType != "radio" && destination == nil && controller.state == .playing
-    }
+    private var pipOffered: Bool { pipShown && destination == nil && controller.state == .playing }
+
+    /// Whether the channel has a PiP button at all: a fact of the channel, not of the moment.
+    private var pipShown: Bool { PictureInPicture.isSupported && current.mediaType != "radio" }
 
     private var pipControl: some View {
         StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)

@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// The Receiver's guide, as a live TV app lays one (YouTube TV's guide): every channel of the shelf
-/// the viewer came from as a row, its number, its medium's mark on a plate, the name and the place,
-/// and LIVE on the one playing. It rises from the bottom over the picture, which plays on above it
-/// (owner, 2026-11-14: "make the guide come from bottom up rather than from the left").
+/// The Receiver's guide, laid out as Transmission's is (owner, 2026-11-28: "design it the same
+/// way as transmission"): the whole screen in the house palette, the picture playing on in a small
+/// window at top left (the player's own picture, moved there by ReceiverPlayerView: this view only
+/// keeps its place), the lit channel described beside it, and under them a row of plates per
+/// channel of the shelf the viewer came from. A live channel has no schedule, so where Transmission
+/// has its time grid each row carries the channel's place and language.
 /// The remote lights a row (the player's surface keeps focus, as it does for Captions and Like);
-/// Select tunes it behind the pigeon.
+/// Select tunes it behind the pigeon; Left and Right turn the region.
 struct ReceiverGuide: View {
     let list: [Channel]
     let current: Channel
@@ -17,73 +19,121 @@ struct ReceiverGuide: View {
     let loading: Bool
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// The rows' height when last drawn with a list, held while the next region loads.
-    @State private var rowsHeight: CGFloat = 0
+
+    /// The channels on screen at once, as on Transmission's guide.
+    static let rowCount = TransmissionGuide.rowCount
+    /// The channel's plate, wider than Transmission's: the row has no time grid to make room for.
+    static let channelShare: CGFloat = 0.55
+
+    /// Where the picture window sits: the same place as on Transmission's guide.
+    static func pictureRect(in size: CGSize) -> CGRect { TransmissionGuide.pictureRect(in: size) }
 
     /// Keyed by channel, so a press slides the rows along as a list scrolls.
     private var keys: [GuideKey] {
-        Self.window(count: list.count, lit: lit).map { GuideKey(index: $0, id: list[$0].id) }
+        Self.window(count: list.count, lit: lit, rows: Self.rowCount).map { GuideKey(index: $0, id: list[$0].id) }
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: 16) {
-                Kicker("Guide \u{00B7} " + ReceiverRules.mediumLabel(medium))
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    Text(turns ? "\u{2039} " + title + " \u{203A}" : title).kjName(38)
-                        .lineLimit(1)
-                        .accessibilityIdentifier("guideRegion")
-                    if !loading { Text("\(list.count)").kjSmall(faint: true) }
+        GeometryReader { geo in
+            let picture = Self.pictureRect(in: geo.size)
+            let width = max(1, geo.size.width - 2 * picture.minX)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .top, spacing: 40) {
+                    // The picture's place. The player draws its own layer here.
+                    Color.clear.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
+                    panel
                 }
+                .frame(height: picture.height)
+                .padding(.bottom, 12)
+                header(width: width)
                 // Only the rows that fit, around the lit one: a region holds up to ~500 channels,
                 // and drawing them all on every press made the guide slow (owner, 2026-11-04).
-                // The rows' space keeps the height it last had with rows in it while a region turn
-                // loads, and on a region with none, and says Loading or "No …" inside it. So a
-                // turn into, out of or across an empty region does not drop the panel to its
-                // header and jump back.
+                // The rows' space is always seven rows high, so a region turn into, out of or across
+                // an empty region says Loading or "No …" inside it and nothing jumps.
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(keys, id: \.self) { key in
-                        VStack(alignment: .leading, spacing: 0) {
-                            GuideRow(number: key.index + 1, name: list[key.index].name, place: list[key.index].place,
-                                     medium: list[key.index].mediaType, id: key.id,
-                                     live: key.id == current.id, lit: key.index == lit)
-                            Hairline()
-                        }
+                        let channel = list[key.index]
+                        ReceiverGuideRow(number: key.index + 1, channel: channel,
+                                         live: key.id == current.id, lit: key.index == lit,
+                                         channelWidth: width * Self.channelShare, id: key.id)
                     }
                 }
-                // Full width, or an empty slot is 0 wide and its line is laid out in no width (Fable,
-                // round 5 on PR 88). At least a line high, for a guide that opens on an empty region.
-                .frame(maxWidth: .infinity, minHeight: loading || list.isEmpty ? max(rowsHeight, 44) : nil, alignment: .topLeading)
+                .frame(width: width, height: CGFloat(Self.rowCount) * TransmissionGuide.rowHeight, alignment: .topLeading)
                 .overlay(alignment: .topLeading) {
                     if loading {
-                        Text("Loading").kjSmall(faint: true)
+                        Text("Loading").kjSmall().padding(.horizontal, 14).padding(.top, 20)
                     } else if list.isEmpty {
-                        Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall(faint: true)
+                        Text("No \(ReceiverRules.mediumLabel(medium).lowercased()) in \(title).").kjSmall()
+                            .padding(.horizontal, 14).padding(.top, 20)
                     }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                    if !loading, !list.isEmpty { rowsHeight = height }
-                }
-                .padding(.vertical, 8)
+                // A region turn empties the list until the next region loads, so it cuts rather
+                // than running the rows out and back (Bugbot on PR 79).
+                .transaction(value: loading) { $0.animation = nil }
             }
-            .padding(.horizontal, KJLayout.inset)
-            .padding(.top, 40)
-            .padding(.bottom, 48)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.ground, ignoresSafeAreaEdges: .all)
-            // A region turn empties the list until the next region loads, so it cuts rather
-            // than running the rows out to an empty panel and back (Bugbot on PR 79). Inner to
-            // the animations below, so it wins when `loading` changes.
-            .transaction(value: loading) { $0.animation = nil }
-            // On the whole panel, so its ground grows and shrinks with the rows it holds.
+            .padding(.horizontal, picture.minX)
+            .padding(.top, picture.minY)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)
-            // The panel itself carries the name, so a test can read where it sits.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("receiverGuide")
         }
+        .background(palette.ground)
+        .ignoresSafeArea()
+        // The guide itself carries the name, so a test can read where it sits.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("receiverGuide")
         .allowsHitTesting(false)
+    }
+
+    /// Beside the picture: the Receiver and the medium, then the lit channel's name, its number,
+    /// place and language, and its description.
+    private var panel: some View {
+        let channel = list.indices.contains(lit) && !loading ? list[lit] : nil
+        let facts = channel.map { c in
+            ["Channel \(lit + 1)", c.placeAndTime(), c.genres?.first, c.id == current.id ? "\u{25CF} Live" : nil]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        } ?? ""
+        return VStack(alignment: .leading, spacing: 14) {
+            Kicker("Khajistan Receiver \u{00B7} " + ReceiverRules.mediumLabel(medium))
+            VStack(alignment: .leading, spacing: 8) {
+                Text(channel?.name ?? (loading ? "Loading" : title)).kjName(52).lineLimit(2).minimumScaleFactor(0.7)
+                if !facts.isEmpty { Text(facts).kjSmall().lineLimit(2) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("guideHeadline")
+            if let about = channel?.description, !about.isEmpty {
+                Text(about).kjBody().lineLimit(4)
+                    .accessibilityIdentifier("guideChannelLine")
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The band over the rows: the region (with its turn marks) and its count, then what the
+    /// rows' second plate carries.
+    private func header(width: CGFloat) -> some View {
+        let look = palette.onBandPlate
+        let gap = TransmissionGuide.gap
+        return HStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(turns ? "\u{2039} " + title + " \u{203A}" : title).kjKicker(look.ink).lineLimit(1)
+                    .accessibilityIdentifier("guideRegion")
+                if !loading { Text("\(list.count)").kjKicker(look.ink).monospacedDigit() }
+            }
+            .padding(.horizontal, 14)
+            .frame(width: width * Self.channelShare - gap, height: TransmissionGuide.markHeight - gap, alignment: .leading)
+            .background(palette.band, ignoresSafeAreaEdges: [])
+            .padding(.trailing, gap)
+            Text("Place \u{00B7} Language").kjKicker(look.ink).lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(width: width * (1 - Self.channelShare) - gap, height: TransmissionGuide.markHeight - gap, alignment: .leading)
+                .background(palette.band, ignoresSafeAreaEdges: [])
+                .padding(.trailing, gap)
+        }
+        .environment(\.palette, look)
+        .foregroundStyle(look.ink)
+        .frame(height: TransmissionGuide.markHeight, alignment: .top)
     }
 
     /// The rows on screen: `rows` of them with the lit one in the middle, held against the ends.
@@ -424,6 +474,54 @@ private struct GuideBlock: View {
         .accessibilityLabel((slot.isOffAir ? (times.isEmpty ? "Off air" : "Off air, \(times)") : "\(slot.title ?? ""), \(times) \(StationClock.tzLabel)")
                             + (run.map { _ in ", \(under)" } ?? "")
                             + (more > 0 ? ", and \(more) more" : ""))
+        .accessibilityAddTraits(lit ? .isSelected : [])
+    }
+}
+
+/// One channel in the Receiver's guide: its own plate (number, mark, name, LIVE on the one
+/// playing) and a plate with its place and language, as Transmission's rows are plates with a gap
+/// round them. The lit row takes the lit plate on its channel and the focus plate beside it.
+private struct ReceiverGuideRow: View {
+    let number: Int
+    let channel: Channel
+    let live: Bool
+    let lit: Bool
+    let channelWidth: CGFloat
+    let id: String
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let gap = TransmissionGuide.gap
+        let height = TransmissionGuide.rowHeight - gap
+        let cell = lit ? palette.litAmongBands : palette.onBandPlate
+        let side = lit ? palette.onFocusPlate : palette
+        // The place, its language and the time there (Channel.placeAndTime), as the strip reads it.
+        let where_ = channel.placeAndTime()
+        HStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Text("\(number)").kjKicker().monospacedDigit().frame(width: 52, alignment: .trailing)
+                MediumMark(medium: channel.mediaType, size: 40)
+                Text(channel.name).kjName(26).lineLimit(1).minimumScaleFactor(0.7)
+                Spacer(minLength: 8)
+                if live { Kicker("\u{25CF} Live").fixedSize() }
+            }
+            .padding(.horizontal, 12)
+            .frame(width: channelWidth - gap, height: height, alignment: .leading)
+            .environment(\.palette, cell)
+            .foregroundStyle(cell.ink)
+            .background(cell.ground, ignoresSafeAreaEdges: [])
+            .padding(.trailing, gap)
+            Text(where_).kjSmall().lineLimit(1).minimumScaleFactor(0.75)
+                .padding(.horizontal, 14)
+                .frame(maxWidth: .infinity, maxHeight: height, alignment: .leading)
+                .environment(\.palette, side)
+                .foregroundStyle(side.ink)
+                .background(lit ? palette.focusPlate : palette.lift, ignoresSafeAreaEdges: [])
+                .padding(.trailing, gap)
+        }
+        .frame(height: TransmissionGuide.rowHeight, alignment: .top)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("guide-\(id)")
         .accessibilityAddTraits(lit ? .isSelected : [])
     }
 }

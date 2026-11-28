@@ -277,11 +277,14 @@ enum SupabaseRoute {
     }
 
     private static func decide() async -> Path {
-        async let direct = probe(viaProxy: false)
-        async let proxy = probe(viaProxy: true)
-        // Direct wins whenever it answers: the proxy is the way round a blocked host, not a preference.
-        let result: Path
-        if await direct { result = .direct } else { result = await proxy ? .proxy : .unreachable }
+        #if DEBUG
+        // `-kjfixturesonly YES` answers every request from the recording, so the route is not asked
+        // of the network: a runner whose network blinked left Pics/Vids on "unreachable", with no
+        // notice, though nothing it reads comes from the network (CI 2026-11-28, run 46121055992).
+        let result: Path = KJFixtureProtocol.only ? .direct : await probeBoth()
+        #else
+        let result = await probeBoth()
+        #endif
         let newest = lock.withLock { () -> Bool in
             guard asking == newestAsking else { return false }
             chosen = result
@@ -293,6 +296,15 @@ enum SupabaseRoute {
         // it, and the screens that watch them (and @AppStorage) must hear it there.
         if result != .unreachable { await MainActor.run { UserDefaults.standard.set(result.rawValue, forKey: key) } }
         return result
+    }
+
+    /// Both ways at once. Direct wins whenever it answers: the proxy is the way round a blocked
+    /// host, not a preference.
+    private static func probeBoth() async -> Path {
+        async let direct = probe(viaProxy: false)
+        async let proxy = probe(viaProxy: true)
+        if await direct { return .direct }
+        return await proxy ? .proxy : .unreachable
     }
 
     #if DEBUG

@@ -17,6 +17,8 @@ final class ReceiverGuideUITests: XCTestCase {
     /// already on screen closes the guide as Back does, so the move goes ahead (PR 58). Every
     /// Indus television channel is made to fail (`-kjdeadchannels`, debug builds only).
     func testSelectOnTheDeadChannelInTheGuideMovesOn() throws {
+        // The failures are injected for the recorded Indus ids; live lists carry other ids.
+        try XCTSkipIf(kjLiveMedia, "needs the recorded Indus list")
         let shard = URL(fileURLWithPath: kjRecordedFixtures).appendingPathComponent("data/open-frequencies/regions/indus.json")
         let root = try JSONSerialization.jsonObject(with: Data(contentsOf: shard)) as? [String: Any]
         let dead = (root?["channels"] as? [[String: Any]] ?? [])

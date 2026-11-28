@@ -2125,6 +2125,8 @@ func timelineAgreesWithTheClock(_ months: [Programming], channel: Int, from: Dat
         if let air {
             let expected = block.grouped ? (air.show?.name ?? air.nowName ?? "") : (air.nowName ?? air.show?.name ?? "")
             try expect(block.title == expected || joined, "channel \(channel) at \(moment): the grid says \(block.title ?? "off air"), the clock \(expected)")
+            // Off air never covers something on, joined seam or not (StationClock.group).
+            try expect(!block.isOffAir, "channel \(channel) at \(moment): the grid says off air, the clock \(expected)")
             if block.grouped, !joined {
                 try expect(StationClock.runSeconds(air.programme) < StationClock.shortProgramme,
                            "channel \(channel) at \(moment): a \(Int(StationClock.runSeconds(air.programme))) s programme inside the run \(block.title ?? "")")
@@ -2435,7 +2437,9 @@ func guideTimelineAcrossTheMonth() throws {
         var probe = end
         while probe < end.addingTimeInterval(6 * 3600) {
             if StationClock.onAir(dec, channel: channel, at: probe) != nil {
-                try expect(!(early.first { $0.contains(probe) }?.isOffAir ?? false), "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
+                // A block must be there: a row with none at an on-air moment is a failure, not a pass.
+                let block = try require(early.first { $0.contains(probe) }, "channel \(channel) at \(probe): no block while December's clock has a programme")
+                try expect(!block.isOffAir, "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
             }
             probe = probe.addingTimeInterval(97)
         }

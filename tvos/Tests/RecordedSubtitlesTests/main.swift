@@ -107,6 +107,9 @@ struct Main {
                 try expect(subs.isHandedOff, "AVPlayer draws now")
                 try expect(subs.current != nil && subs.current != "ur", "a manifest language it can draw, not the Urdu file: \(String(describing: subs.current))")
                 try expect(UserDefaults.standard.string(forKey: SubtitleChoice.storeKey) == "ur", "the viewer's own choice is not overwritten")
+                // From English, whatever the device's own languages put first: the walk then ends on
+                // Persian, a live track, so the reclaim below has a selection to switch off.
+                for _ in 0..<8 where subs.current != "en" { subs.cycle() }
                 var seen: [String?] = []
                 for _ in 0..<(subs.tracks.count + 1) { subs.cycle(); seen.append(subs.current) }
                 try expect(!seen.contains("ur"), "while handed off, the control skips the file: \(seen)")

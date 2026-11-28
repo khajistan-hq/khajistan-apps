@@ -215,8 +215,11 @@ final class SkinWalkUITests: XCTestCase {
             let button = again.buttons["caption-style-toggle"]
             guard button.waitForExistence(timeout: 20),
                   (again.staticTexts["captionStyleState"].value as? String) != before else { return }
-            _ = self.focus(button, by: .down)
+            // Select only with the button focused: otherwise it would work another control.
+            guard self.focus(button, by: .down) else { return XCTFail("teardown: the subtitle button did not take focus") }
             XCUIRemote.shared.press(.select)
+            self.wait(upTo: 3) { (again.staticTexts["captionStyleState"].value as? String) == before }
+            if (again.staticTexts["captionStyleState"].value as? String) != before { XCTFail("teardown: the subtitle look was not put back") }
         }
         let after = before == "plate" ? "bare" : "plate"
         XCTAssertTrue(focus(toggle, by: .down), "the subtitle button must take focus")

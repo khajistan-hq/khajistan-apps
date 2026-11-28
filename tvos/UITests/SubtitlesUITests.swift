@@ -414,8 +414,10 @@ final class SubtitlesUITests: XCTestCase {
         // Device only: on the simulator the stream does not buffer after a seek, so this passed
         // with the old rule too (measured twice) and could not fail there.
         let rolling = at()
+        XCTAssertGreaterThanOrEqual(rolling, 0, "the bar reads the film's place")
         for _ in 0..<3 { XCUIRemote.shared.press(.right) }
-        waitUntil("three quick clicks right go thirty seconds on") { $0 >= rolling + 28 }
+        // Four seconds: two seeks and four seconds of play reach only 24, so a lost click fails.
+        waitUntil("three quick clicks right go thirty seconds on", timeout: 4) { $0 >= rolling + 28 }
         #endif
     }
 

@@ -296,6 +296,9 @@ final class NowNextUITests: XCTestCase {
         XCUIRemote.shared.press(.menu)
         XCTAssertTrue(waitUntilGone(guide, 5), "Back closes the guide")
         kjPause(8)
+        // The off-air card is up first: Right from a screen still tuning would open the guide too.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] 'off air'")).firstMatch.waitForExistence(timeout: 15),
+                      "channel 6 shows its off-air card")
         // The off-air card: Right still opens the guide, so the viewer can go somewhere on.
         XCUIRemote.shared.press(.right)
         XCTAssertTrue(guide.waitForExistence(timeout: 5), "right on the off-air card opens the guide")

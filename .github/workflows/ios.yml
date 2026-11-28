@@ -142,7 +142,7 @@ jobs:
         if: always()
         with:
           name: khajistan-ios-simulator
-          retention-days: 14
+          retention-days: 7
           path: |
             ios/.ci/xcodebuild.log
             ios/.ci/screenshots

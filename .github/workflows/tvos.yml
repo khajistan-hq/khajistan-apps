@@ -112,6 +112,7 @@ jobs:
           echo "Selected $udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: Boot simulator
+        timeout-minutes: 10
         run: |
           xcrun simctl boot '${{ steps.simulator.outputs.udid }}' || true
           xcrun simctl bootstatus '${{ steps.simulator.outputs.udid }}' -b
@@ -142,7 +143,7 @@ jobs:
         if: always()
         with:
           name: khajistan-tvos-simulator
-          retention-days: 14
+          retention-days: 7
           path: |
             tvos/.ci/xcodebuild.log
             tvos/.ci/screenshots

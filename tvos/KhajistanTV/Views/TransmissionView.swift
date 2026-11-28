@@ -16,6 +16,9 @@ struct TransmissionView: View {
     @State private var playing: ChannelChoice?
     /// This visit to the tab has started a channel already: Back from the player stays here.
     @State private var started = false
+    /// Counts the Top Shelf links taken, so a channel link whose schedule load finishes after a
+    /// newer link was taken gives way to it.
+    @State private var linkSerial = 0
     /// The last channel watched, kept on the device.
     static let lastChannelKey = "kj.transmission.lastChannel"
 
@@ -66,6 +69,7 @@ struct TransmissionView: View {
             guard !model.welcomeOnScreen else { return }
             switch model.link {
             case .transmission:
+                linkSerial += 1
                 model.link = nil
                 // The station link plays, even after Back on this visit. With a channel already on
                 // screen it is there already, and the visit stays started.
@@ -74,6 +78,8 @@ struct TransmissionView: View {
                     startOnce()
                 }
             case .channel(let number):
+                linkSerial += 1
+                let serial = linkSerial
                 started = true
                 // Only a channel the schedule names opens; any other number stays on this page.
                 // The link is cleared first, so it cannot replay on a later visit. Clearing it
@@ -81,6 +87,8 @@ struct TransmissionView: View {
                 // cancellation does not reach.
                 model.link = nil
                 await store.loadSchedule()
+                // A newer link was taken while the schedule loaded: it decides.
+                guard serial == linkSerial else { return }
                 // Full screen from picture in picture that cannot open the player here (not on
                 // the schedule, or signed out) stops the channel, rather than leave it sounding
                 // under a page with no way to stop it.

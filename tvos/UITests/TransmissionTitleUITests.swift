@@ -31,12 +31,12 @@ final class TransmissionTitleUITests: XCTestCase {
         kjScreenshot("transmission-plays-at-once", app: app)
     }
 
-    /// The last channel watched is the one the tab opens.
+    /// The last channel watched is the one the tab opens: 8, not the 5 the first-channel rule picks.
     func testTheTabOpensTheLastChannelWatched() {
-        let app = launch(last: 5)
+        let app = launch(last: 8)
         let channel = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(channel.waitForExistence(timeout: 30))
-        XCTAssertEqual(channel.label, "5", "the last channel watched opens")
+        XCTAssertEqual(channel.label, "8", "the last channel watched opens, not the first-channel rule's 5")
     }
 
     /// The station's counts are on the guide's top line; there is no channel count.

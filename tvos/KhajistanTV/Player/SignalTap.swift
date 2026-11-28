@@ -76,6 +76,18 @@ final class SignalTap: @unchecked Sendable {
         vDSP_destroy_fftsetup(setup)
     }
 
+    /// The codecs of a track ('.mp3' for an mp3), read from the track itself and never from its address.
+    static func formatIDs(of track: AVAssetTrack) async -> [AudioFormatID] {
+        ((try? await track.load(.formatDescriptions)) ?? []).map { CMFormatDescriptionGetMediaSubType($0) }
+    }
+
+    /// Whether a track is tapped before effects: an mp3, which tapped after effects played silent on the
+    /// Apple TV (owner, 2026-11-27, Channel 1). Known by its codec, so an mp3 behind an address that does
+    /// not end in ".mp3" (a signed link, a redirect) is not missed; the address still counts, as before.
+    static func tapsBeforeEffects(formatIDs: [AudioFormatID], pathExtension: String) -> Bool {
+        formatIDs.contains(kAudioFormatMPEGLayer3) || pathExtension.lowercased() == "mp3"
+    }
+
     /// An audio mix that taps `track`, or nil if the tap could not be made.
     /// `preEffects` for an mp3: tapped after effects, an mp3 played silent on the Apple TV (2026-11-27).
     func audioMix(for track: AVAssetTrack, preEffects: Bool = false) -> AVAudioMix? {

@@ -428,10 +428,13 @@ final class PlayerController {
     private func installTap(on item: AVPlayerItem, asset: AVURLAsset, generation gen: Int) {
         Task { [weak self] in
             guard let tracks = try? await asset.loadTracks(withMediaType: .audio), let track = tracks.first else { return }
+            // An mp3 tapped after effects played silent on the Apple TV (owner, 2026-11-27, Channel 1).
+            let early = SignalTap.tapsBeforeEffects(formatIDs: await SignalTap.formatIDs(of: track),
+                                                    pathExtension: asset.url.pathExtension)
+            // Checked after the last wait: the item may have been replaced while the track was read.
             guard let self, gen == self.generation else { return }
             let tap = SignalTap()
-            // An mp3 tapped after effects played silent on the Apple TV (owner, 2026-11-27, Channel 1).
-            guard let mix = tap.audioMix(for: track, preEffects: asset.url.pathExtension.lowercased() == "mp3") else { return }
+            guard let mix = tap.audioMix(for: track, preEffects: early) else { return }
             item.audioMix = mix
             self.signal = tap
         }

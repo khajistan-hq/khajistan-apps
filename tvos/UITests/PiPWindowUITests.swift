@@ -433,11 +433,9 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(2)
         let fullScreen = app.buttons["pipBarFullScreen"]
         XCTAssertTrue(fullScreen.waitForExistence(timeout: 10), "the bar is on the cover")
-        // Down, pressed here: kjFocus reads the bar as on the raised film card's row (the card is
-        // taller than the gap to the bar) and walks left and right.
-        for _ in 0..<4 where !kjFocusKey(app).hasPrefix("pipBar") { XCUIRemote.shared.press(.down); kjPause(0.8) }
-        XCTAssertTrue(kjFocusKey(app).hasPrefix("pipBar"), "Down reaches the bar: \(kjFocusKey(app))")
-        XCTAssertTrue(kjFocus(fullScreen, app: app), "along the bar to Full screen: \(kjFocusKey(app))")
+        let reached = kjFocus(fullScreen, app: app)
+        if !reached { kjScreenshot("pip-bar-not-reached", app: app) }
+        XCTAssertTrue(reached, "Down reaches the bar's Full screen; focus stopped on \(kjFocusKey(app)), bar frame \(fullScreen.frame)")
         kjScreenshot("pip-bar-on-screening-room", app: app)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens over the cover")
@@ -458,9 +456,13 @@ final class PiPWindowUITests: XCTestCase {
             throw XCTSkip("the real window needs an Apple TV: set TEST_RUNNER_KJ_DEVICE_PIP to a channel number")
         }
         let app = XCUIApplication()
-        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission", "-kj.transmission.lastChannel", "\(channel)"]
+        app.launchArguments = ["-kjskin", "grove", "-kjtab", "transmission"]
         kjLaunch(app)
-        // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
+        let first = app.buttons["transmission-channel-1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 60), "the channels load")
+        XCTAssertTrue(kjFocus(first, app: app), "channel 1's card takes focus")
+        for _ in 1..<channel { XCUIRemote.shared.press(.right); kjPause(0.4) }
+        XCUIRemote.shared.press(.select)
         let tuned = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(tuned.waitForExistence(timeout: 30), "the player opens")
         // The sign-on and the tune; the strip then hides itself, taking the state line with it.

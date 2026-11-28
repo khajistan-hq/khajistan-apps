@@ -129,8 +129,10 @@ final class SubtitlesUITests: XCTestCase {
         XCTAssertTrue(control.label.hasPrefix("Captions"), control.label)
         kjScreenshot("live-1-captions-control-focused", app: app)
         XCUIRemote.shared.press(.select)
-        let sentence = app.staticTexts["Sign in under Account to use live captions."]
+        // The strip line is the channel's country, then the note (owner, 2026-11-27: "the country name should stay").
+        let sentence = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "Sign in under Account to use live captions.")).firstMatch
         XCTAssertTrue(sentence.waitForExistence(timeout: 5), "signed out, the site's sentence and no request")
+        XCTAssertFalse(sentence.label.hasPrefix("Sign in"), "the country stays before the note: \(sentence.label)")
         XCTAssertEqual(control.label, "Captions", "signed out, no demand started")
         XCTAssertEqual((control.value as? String)?.uppercased(), "ON", "the requested setting remains On while sign-in is required")
         kjScreenshot("live-2-signed-out-sentence", app: app)
@@ -175,7 +177,10 @@ final class SubtitlesUITests: XCTestCase {
         XCUIRemote.shared.press(.select)
         kjPause(0.6)
         XCTAssertEqual((app.buttons["captionsControl"].value as? String)?.uppercased(), "OFF", "the house strip exposes its off value in uppercase")
-        XCTAssertTrue(app.staticTexts["No captions: Kashmiri is not on the live recogniser."].exists, "the line says why")
+        // The country stays first on the line; the reason follows it (owner, 2026-11-27).
+        let why = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH %@", "\u{00B7} No captions: Kashmiri is not on the live recogniser.")).firstMatch
+        XCTAssertTrue(why.exists, "the line keeps the place and says why")
+        XCTAssertTrue(why.label.hasPrefix("India"), "the country stays first: \(why.label)")
         kjScreenshot("live-3-kashmiri-no-control", app: app)
     }
 

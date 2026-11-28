@@ -287,16 +287,19 @@ struct ReceiverPlayerView: View {
             // Remove the hidden strip so its controls also leave accessibility traversal.
             // Hiding the container alone leaves its custom accessibility actions exposed on tvOS.
             if stripShown {
+                // The place's own time is read on the minute, so a strip left up keeps it current.
+                TimelineView(.everyMinute) { context in
                 PlayerStrip(
                     // Radio carries its name in display type on the ground; the strip leaves it out.
                     name: destination == nil && current.mediaType == "radio" && controller.state == .playing ? nil : shown.name,
-                    detail: stripDetail,
+                    detail: stripDetail(at: context.date),
                     // No "broadcast by" line on the television: it stays on the website (owner,
                     // 2026-11-16: "i dont want info like 'regional broadcast by...' the apple tv").
                     attribution: nil,
                     trailing: stripTrailing,
                     accessory: AnyView(stripControls)
                 )
+                }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { stripHeight = $0 }
                 .transition(.opacity.combined(with: .offset(y: 40)))
             }
@@ -370,7 +373,7 @@ struct ReceiverPlayerView: View {
     }
 
     /// What follows the name: a failure's reason, Paused, the captions' note, or the place.
-    private var stripDetail: String? {
+    private func stripDetail(at date: Date) -> String? {
         if let destination { return destination.place.isEmpty ? nil : destination.place }
         switch controller.state {
         case .failed(let message): return moveOnNote ?? likeNote ?? message
@@ -385,7 +388,7 @@ struct ReceiverPlayerView: View {
             // The place stays first; the captions note follows it (owner, 2026-11-27: "the country
             // name should stay right now the captions message takes place for it").
             let note = !model.captions.note.isEmpty && (tvSong == nil || model.captions.isEnabled) ? model.captions.note : nil
-            let place = current.placeAndTime()
+            let place = current.placeAndTime(at: date)
             let line = [place.isEmpty ? nil : place, note ?? tvSong].compactMap { $0 }.joined(separator: " \u{00B7} ")
             return line.isEmpty ? nil : line
         }

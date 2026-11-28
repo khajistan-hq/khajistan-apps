@@ -139,7 +139,10 @@ final class FilmsUITests: XCTestCase {
                     if i > 0 { XCTAssertGreaterThanOrEqual(frame.minX, row[i - 1].maxX + 52, "\(skin) \(handle): buttons \(i) and \(i + 1) overlap") }
                 }
                 print("FILMBUTTONS \(skin) \(handle) " + drawn.joined(separator: " | "))
-                XCTAssertGreaterThanOrEqual(drawn.count, 3, "\(skin): Play, Watchlist and Website must draw")
+                // Each by name: a count of three would pass with Preview standing in for a missing one.
+                for id in ["filmPlay", "filmWatchlist", "filmOnWebsite"] {
+                    XCTAssertTrue(app.buttons[id].exists, "\(skin) \(handle): \(id) must draw")
+                }
                 kjScreenshot("film-buttons-\(skin)-\(handle.prefix(14))", app: app)
                 app.terminate()
             }

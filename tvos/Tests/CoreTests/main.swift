@@ -4000,7 +4000,9 @@ func dancerStageEntersDancesAndLeaves() throws {
     _ = run(3000, grooving: true)
     try expect(stage.leave(now: now), "a dancer on stage is owed an exit")
     var frames = 0
-    while stage.stepLeaving(now: now) != .blank { now += 1000.0 / 60; frames += 1 }
+    // Bounded: an exit that never ends fails here rather than hanging the run.
+    while stage.stepLeaving(now: now) != .blank, frames < 60 * 30 { now += 1000.0 / 60; frames += 1 }
+    try expect(frames < 60 * 30, "the exit never reached blank")
     try expect(frames > 60, "the exit plays out (\(frames) frames)")
     try expect(!stage.leave(now: now), "nothing is owed when he is off")
 }
@@ -4037,7 +4039,10 @@ func holdRuns(seed: UInt64) throws -> String {
         now += 1000.0 / 60
         return f
     }
-    while stage.name != .on { _ = frame() }
+    // Bounded: a stage stuck before .on fails with the seed rather than hanging the run.
+    var entering = 0
+    while stage.name != .on, entering < 60 * 30 { _ = frame(); entering += 1 }
+    try expect(stage.name == .on, "the dancer never reached .on (seed \(seed), stage \(stage.name))")
     var moves: [String] = []
     for beat in (count + 1)...(count + 1600) {
         count = beat

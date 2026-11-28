@@ -45,8 +45,9 @@ final class StaffDialUITests: XCTestCase {
         let wholeCount = try liveNow(app, otherThan: publicCount)
         XCTAssertGreaterThan(wholeCount, publicCount, "the password opens the whole dial")
         let wholeRows = regionCounts(app, otherThan: publicRows)
-        // The region the whole dial adds most to: its page is read from its own shard.
-        let region = try XCTUnwrap(wholeRows.max { a, b in
+        // The region the whole dial adds most to: its page is read from its own shard. Only a
+        // region the public dial also lists, so its page still has shelves to count after Clear.
+        let region = try XCTUnwrap(wholeRows.filter { (publicRows[$0.key] ?? 0) > 0 }.max { a, b in
             (a.value - (publicRows[a.key] ?? 0)) < (b.value - (publicRows[b.key] ?? 0))
         }?.key, "the region rows show live counts")
         let wholeShelves = shelfTotal(app, region: region)

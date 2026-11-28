@@ -366,7 +366,8 @@ private struct RegionMapPainter {
             // A people's region is a facet, not a place to tune: its name is dimmed and sits on a halo
             // of the page, the inverse of a place's full yellow on black. The page halo carries it over
             // the land (yellow on the olive measures 2.8:1 at best), and on Day, whose page is the label
-            // yellow, the name is the band's green. At 85% it clears 4:1 against the halo in every skin.
+            // yellow, the name is the band's green. At 95% it clears 4.5:1 against the halo in every skin
+            // (Smut 4.7, Day 5.8, Grove 6.0; at 85% Smut measured 4.0).
             let onDay = palette.ground == palette.onBand
             var halo = resolved
             halo.shading = .color(palette.ground)
@@ -374,7 +375,7 @@ private struct RegionMapPainter {
                 context.draw(halo, at: CGPoint(x: label.center.x + offset.x, y: label.center.y + offset.y), anchor: .center)
             }
             var dimmed = resolved
-            dimmed.shading = .color((onDay ? palette.band : palette.onBand).opacity(0.85))
+            dimmed.shading = .color((onDay ? palette.band : palette.onBand).opacity(0.95))
             context.draw(dimmed, at: label.center, anchor: .center)
             return
         }

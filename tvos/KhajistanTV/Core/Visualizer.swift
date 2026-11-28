@@ -58,6 +58,20 @@ enum VisualizerMode: String, Sendable {
     }
 }
 
+/// How a try at a piece ended (VisualizerPlayer.play).
+enum VisualizerOutcome: Equatable, Sendable {
+    /// On screen.
+    case shown
+    /// The file itself would not play: the bag moves past it.
+    case broken
+    /// Nothing wrong with the piece: no sign-in, a refused link, a timeout, the network.
+    case notNow
+    /// Another run took over; this one counts nothing.
+    case superseded
+
+    var countsAsSeen: Bool { self == .shown || self == .broken }
+}
+
 enum Visualizer {
     static let path = "/data/khajistan-tv/visualizers.json"
     /// One picture per 30 minutes of the wall clock, the site's VIS_BLOCK_MS.
@@ -108,6 +122,26 @@ enum Visualizer {
         let offset = room * min(max(startRoll, 0), 0.999)
         let play = min(block, piece.seconds - offset)
         return (piece, offset, play, bag + [piece.id])
+    }
+
+    /// The bag to store after a try at a piece. Only a piece that played, or whose file is broken, is
+    /// spent; a try that failed for now (no sign-in, a refused link, a timeout, the network) leaves the
+    /// bag as it was. `drawn` is `draw`'s `seen`; `passed` are the pieces skipped for now, which were
+    /// lent to `draw` and are not spent either.
+    static func bag(after outcome: VisualizerOutcome, stored: [String], drawn: [String], passed: [String]) -> [String] {
+        guard outcome.countsAsSeen else { return stored }
+        return drawn.enumerated().filter { $0.offset == drawn.count - 1 || !passed.contains($0.element) }.map(\.element)
+    }
+
+    /// How a file that failed to open is counted: the network, or a refusal, may pass (`notNow`);
+    /// anything else is the file's own fault (`broken`). The underlying errors are read too.
+    static func outcome(ofFailure error: Error?) -> VisualizerOutcome {
+        var next = error.map { $0 as NSError }
+        while let cause = next {
+            if cause.domain == NSURLErrorDomain || SupabaseRoute.refusalCodes.contains(cause.code) { return .notNow }
+            next = cause.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return .broken
     }
 
     /// Where the picture is joined: the clock's seconds, round the piece's length.

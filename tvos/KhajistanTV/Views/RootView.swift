@@ -181,20 +181,7 @@ struct RootView: View {
         // Play/Pause pauses or resumes the radio left playing under the screens, wherever focus
         // is, as Apple TV does with the audio playing. A focused card's own Play comes first.
         // With the corner window up, Play/Pause works the window's picture, wherever focus is.
-        .onPlayPauseCommand(perform: model.activePiP == nil && (model.radioAway == nil || model.radioAway?.pip != nil) ? nil : {
-            if let pip = model.activePiP {
-                pip.setPlaying(!pip.isPlaying)
-                return
-            }
-            guard let away = model.radioAway else { return }
-            if away.controller.state == .playing || away.controller.state == .tuning {
-                away.controller.pause()
-            } else {
-                // Play tunes the station afresh, full screen, as the bar's own Play does.
-                model.silenceRadio()
-                reopened = away
-            }
-        })
+        .onPlayPauseCommand(perform: takesPlayPause ? playPause : nil)
         .modifier(BackToAtlas(active: model.section != .receiver || !model.receiverPath.isEmpty) {
             if model.section == .receiver, !model.receiverPath.isEmpty {
                 model.receiverPath.removeLast()
@@ -203,6 +190,31 @@ struct RootView: View {
                 model.section = visited.popLast() ?? .receiver
             }
         })
+    }
+
+    /// Whether Play/Pause is ours: a corner window is up, or a radio plays on under the screens
+    /// with no window of its own. Otherwise it is left to tvOS and the focused card.
+    private var takesPlayPause: Bool {
+        if model.activePiP != nil { return true }
+        guard let away = model.radioAway else { return false }
+        return away.pip == nil
+    }
+
+    // Named and typed apart from the view body: as one inline closure in a ternary, CI's compiler
+    // gave up type-checking it "in reasonable time".
+    private func playPause() {
+        if let pip = model.activePiP {
+            pip.setPlaying(!pip.isPlaying)
+            return
+        }
+        guard let away = model.radioAway else { return }
+        if away.controller.state == .playing || away.controller.state == .tuning {
+            away.controller.pause()
+        } else {
+            // Play tunes the station afresh, full screen, as the bar's own Play does.
+            model.silenceRadio()
+            reopened = away
+        }
     }
 
     @ViewBuilder

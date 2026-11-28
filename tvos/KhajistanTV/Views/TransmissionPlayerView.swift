@@ -11,9 +11,9 @@ import UIKit
 /// the website, and the strip ends in the Subtitles control: right moves to it, left comes back.
 ///
 /// The strip also carries Guide and PiP, as the Receiver's does. The guide takes the whole screen
-/// and the picture plays on in a small window at its top left (TransmissionGuide); a swipe up or
-/// down on the remote's touch surface opens it, where a press of Up or Down changes channel
-/// (RemoteGesture). Picture in picture keeps the channel playing in a corner while the viewer
+/// and the picture plays on in a small window at its top left (TransmissionGuide). The remote follows RemoteMap: down
+/// opens the guide, up lights the strip's controls, left and right change channel, a click is the
+/// next channel and a double click a random one. Picture in picture keeps the channel playing in a corner while the viewer
 /// browses, handovers included.
 struct TransmissionPlayerView: View {
     /// The channel the viewer chose. The store holds the channel now on air, which Up and Down change.
@@ -74,6 +74,8 @@ struct TransmissionPlayerView: View {
     @State private var plateTask: Task<Void, Never>?
     /// The finger on the remote's touch surface, as RemoteSwipeReader last reported it.
     @State private var swipe = SwipeTrack()
+    /// Clicks on the bare picture, told single from double.
+    @State private var clicks = ClickTally()
     /// The screen's safe area, handed to the picture's layer as padding of its own (see body).
     @State private var safeInsets = EdgeInsets(top: 60, leading: 80, bottom: 60, trailing: 80)
     @FocusState private var focus: PlayerFocus?
@@ -511,6 +513,10 @@ struct TransmissionPlayerView: View {
         .buttonStyle(SurfaceButtonStyle())
         .focused($focus, equals: .surface)
         .accessibilityLabel("Show details")
+        .accessibilityAction(named: "Next channel") { changeChannel(step: 1) }
+        .accessibilityAction(named: "Previous channel") { changeChannel(step: -1) }
+        .accessibilityAction(named: "Random channel") { randomChannel() }
+        .accessibilityAction(named: "Guide") { openGuide() }
     }
 
     /// Right lights it, Select on the picture works it, left lets it go.
@@ -559,6 +565,14 @@ struct TransmissionPlayerView: View {
         store.programming.map { StationClock.carriesCaptions($0, number: store.channelNumber) } ?? true
     }
 
+    /// Whether the programme has a Subtitles control at all: tracks read, or a file the schedule names.
+    private var subtitlesShown: Bool {
+        guard captionsAllowed else { return false }
+        if !subtitles.tracks.isEmpty { return true }
+        guard case .onAir(let air) = store.phase else { return false }
+        return air.programme?.subtitle_url?.isEmpty == false
+    }
+
     private var chips: [Chip] {
         [!captionsAllowed || subtitles.tracks.isEmpty ? nil : .subtitles, visualizerOffered ? .visualizer : nil,
          guideOffered ? .guide : nil, pipOffered ? .pip : nil]
@@ -567,7 +581,9 @@ struct TransmissionPlayerView: View {
 
     private var stripControls: some View {
         HStack(spacing: 14) {
-            if captionsAllowed, !subtitles.tracks.isEmpty { subtitlesControl }
+            // Drawn as soon as the schedule says the programme has a file, dim until its tracks are
+            // read: it is the first control, so its arrival moved every other one (owner, 2026-11-28).
+            if subtitlesShown { subtitlesControl.opacity(subtitles.tracks.isEmpty ? 0.4 : 1) }
             if visualizerOffered {
                 StripChipStyle.face(Text(visualizerMode.label), isOn: visualizerMode != .off, selected: armed == .visualizer)
                     .accessibilityAddTraits(.isButton)
@@ -576,16 +592,20 @@ struct TransmissionPlayerView: View {
                     .accessibilityAction { cycleVisualizer() }
                     .accessibilityAddTraits(armed == .visualizer ? .isSelected : [])
             }
-            if guideOffered {
+            // Guide and PiP keep their places through a channel change and are dim until they can act,
+            // so the row does not re-flow (owner, 2026-11-28).
+            if guideShown {
                 StripChipStyle.face(Text("Guide"), isOn: guideGrid != nil, selected: armed == .guide)
+                    .opacity(guideOffered ? 1 : 0.4)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Guide")
                     .accessibilityIdentifier("guideControl")
                     .accessibilityAction { openGuide() }
                     .accessibilityAddTraits(armed == .guide ? .isSelected : [])
             }
-            if pipOffered {
+            if pipShown {
                 StripChipStyle.face(Text("PiP"), isOn: false, selected: armed == .pip)
+                    .opacity(pipOffered ? 1 : 0.4)
                     .accessibilityAddTraits(.isButton)
                     .accessibilityLabel("Picture in picture")
                     .accessibilityIdentifier("pipControl")
@@ -595,20 +615,37 @@ struct TransmissionPlayerView: View {
         }
     }
 
-    /// Select on the picture: in the guide, the lit cell (selectInGuide); else it works the lit
-    /// control or, with the strip up, lights its first control (the Receiver's rule).
+    /// A click on the touch surface. In the guide it tunes the lit cell and on a lit control it
+    /// works the control, both at once. On the picture one click is the next channel and two a
+    /// random channel, so a lone click waits `ClickTally.window` for a second one.
     private func selectOnSurface() {
         if let guideGrid {
             selectInGuide(guideGrid)
             return
         }
+        if armed != nil {
+            perform(RemoteMap.action(.click, in: .controls))
+            return
+        }
+        let at = ProcessInfo.processInfo.systemUptime
+        switch clicks.click(at: at) {
+        case .double: perform(RemoteMap.action(.doubleClick, in: .picture))
+        case .wait:
+            Task {
+                try? await Task.sleep(for: .milliseconds(Int(ClickTally.window * 1000)))
+                if clicks.settle(at) { perform(RemoteMap.action(.click, in: .picture)) }
+            }
+        }
+    }
+
+    /// Works the lit control. Focus never leaves the surface: see ReceiverPlayerView's surface (2026-10-06).
+    private func workArmed() {
         switch armed {
-        // Focus never leaves the surface: see ReceiverPlayerView's surface (2026-10-06).
         case .subtitles: subtitles.cycle()
         case .visualizer: cycleVisualizer()
         case .guide: return openGuide()
         case .pip: return startPictureInPicture()
-        case nil: if stripShown, !isFailed { armed = chips.first }
+        case nil: break
         }
         wake()
     }
@@ -640,9 +677,10 @@ struct TransmissionPlayerView: View {
     /// Offered on air, off air and while a signal tunes, so a viewer can always find a channel
     /// that is on; not while a change is under way, which would tune under the guide, and not
     /// under the sign-on's cover, which is drawn over the guide and would hide it.
-    private var guideOffered: Bool {
-        store.channelNumbers.count > 1 && !switching && model.clips.coverage == 0
-    }
+    private var guideOffered: Bool { guideShown && !switching && model.clips.coverage == 0 }
+
+    /// Whether the station has a guide at all: more than one channel.
+    private var guideShown: Bool { store.channelNumbers.count > 1 }
 
     /// Select in the guide. On a channel's own cell the window tunes to that channel and the
     /// guide stays, so the viewer sees it beside its description (owner, 2026-11-24: "show
@@ -692,8 +730,7 @@ struct TransmissionPlayerView: View {
         return (rect.width / max(1, screen.width), CGSize(width: rect.minX, height: rect.minY))
     }
 
-    /// The finger on the touch surface (RemoteSwipeReader). Watching, a swipe up or down opens the
-    /// guide. In the guide it moves the lit row by distance (RemoteGesture.rows), and stops when
+    /// The finger on the touch surface (RemoteSwipeReader). In the guide it moves the lit row by distance (RemoteGesture.rows), and stops when
     /// the finger does. The move commands tvOS sends for the same swipe are told apart in `move`.
     private func pan(_ state: UIGestureRecognizer.State, _ travel: CGPoint) {
         if state == .began {
@@ -710,10 +747,8 @@ struct TransmissionPlayerView: View {
             guard !swipe.opened, rows != swipe.rowsMoved else { return }
             moveGuide(rows: rows - swipe.rowsMoved, grid: grid)
             swipe.rowsMoved = rows
-        } else if rows != 0, !swipe.opened {
-            swipe.opened = true
-            openGuide()
         }
+        // The guide is opened by the Down move alone (RemoteMap), never by the finger's travel.
     }
 
     /// Every channel down the side and three half hours across, the tuned channel lit at now.
@@ -766,6 +801,18 @@ struct TransmissionPlayerView: View {
         let from = GuideGrid.halfHour(now), to = Self.guideEnd(now)
         let generation = guideFillGeneration
         Task {
+            // The ninety minutes on screen first, so the rows fill at once; then the whole reach
+            // Right can get to (owner, 2026-11-28: "the guide populates slow"). One batch of both
+            // kept every row on Loading until thirteen and a half hours of each had been read.
+            let onScreen = from.addingTimeInterval(GuideGrid.span)
+            let first = await Task.detached(priority: .userInitiated) {
+                jobs.map { ($0.0, StationClock.timeline(months, channel: $0.1, from: from, to: onScreen)) }
+            }.value
+            guard generation == guideFillGeneration else { return }
+            // Only a row with nothing drawn takes the short reading: a stale row keeps its full one.
+            for (index, slots) in first where guideRows.indices.contains(index) && guideRows[index].slots.isEmpty {
+                guideRows[index].slots = slots
+            }
             let read = await Task.detached(priority: .userInitiated) {
                 jobs.map { ($0.0, StationClock.timeline(months, channel: $0.1, from: from, to: to)) }
             }.value
@@ -889,11 +936,27 @@ struct TransmissionPlayerView: View {
         }
     }
 
+    /// A double click: any channel but this one, behind the pigeon.
+    private func randomChannel() {
+        armed = nil
+        guard holdsFocus, !switching else { return }
+        switching = true
+        Task {
+            await store.loadSchedule()
+            if let target = RemoteMap.random(from: store.channelNumbers, not: store.channelNumber, roll: Double.random(in: 0..<1)) {
+                await switchUnderThePigeon(to: target)
+            }
+            switching = false
+        }
+    }
+
     /// Picture in picture: a picture playing, with no change under way. A sound-only programme
     /// has no picture to put in the corner.
-    private var pipOffered: Bool {
-        guard PictureInPicture.isSupported, !switching, store.player.state == .playing,
-              case .onAir(let air) = store.phase else { return false }
+    private var pipOffered: Bool { pipShown && !switching && store.player.state == .playing }
+
+    /// Whether what is on air has a picture to put in a window: a fact of the programme.
+    private var pipShown: Bool {
+        guard PictureInPicture.isSupported, case .onAir(let air) = store.phase else { return false }
         return air.programme?.audio_only != true
     }
 
@@ -1027,70 +1090,56 @@ struct TransmissionPlayerView: View {
     /// Up and down switch channel behind the pigeon. While a change is under way they skip it; one
     /// made while the sign-on flies switches under that bird.
     private func move(_ direction: MoveCommandDirection) {
-        // Read before wake() shows the strip: right on the bare picture opens the guide, right
-        // with the strip up walks its controls (the Receiver's rule, owner 2026-11-08).
-        let stripWasUp = stripShown
         wake()
         // Inside the guide the remote walks the grid: channels up and down, programmes across.
         if let guideGrid {
             moveInGuide(direction, grid: guideGrid)
             return
         }
+        let input: RemoteMap.Input
         switch direction {
-        case .right:
-            hideTask?.cancel()
-            if let armed, let at = chips.firstIndex(of: armed) {
-                if at + 1 < chips.count { self.armed = chips[at + 1] }
-            } else if stripWasUp, !isFailed, let first = chips.first {
-                armed = first
-            } else {
-                openGuide()
-            }
-            return
-        case .left:
-            if let armed {
-                let at = chips.firstIndex(of: armed) ?? 0
-                self.armed = at > 0 ? chips[at - 1] : nil
-                if self.armed == nil { wake() }
-            } else if !stripWasUp {
-                openGuide()
-            }
-            return
-        default:
-            break
+        case .up: input = .up
+        case .down: input = .down
+        case .left: input = .left
+        case .right: input = .right
+        @unknown default: return
         }
-        guard direction == .up || direction == .down else { return }
-        // A swipe up or down on the touch surface opens the guide; a press of Up or Down changes
-        // channel (owner, 2026-11-24). The swipe itself has usually opened it already (pan).
-        if movedBy == .swipe {
-            // A touch the guide's Back has consumed does not open it again (pan reads the same flag).
-            if !swipe.opened { openGuide() }
-            return
-        }
-        // tvOS can send the move before the finger has travelled far enough to count as a swipe:
-        // the first swipe then changed channel, and the guide refused to open mid-change (owner,
-        // 2026-11-27: "it doesnt show first and then on a second swipe it shows"). While a finger
-        // is still moving, wait a moment and decide again.
-        if swipe.touching, !swipe.opened {
-            Task {
-                try? await Task.sleep(for: .milliseconds(250))
-                // The viewer may have left meanwhile: no channel change after the screen has gone.
-                if left || swipe.opened || guideGrid != nil { return }
-                // A swipe that reached its travel meanwhile has opened the guide itself (pan).
-                if movedBy == .swipe { openGuide() } else { changeChannel(direction) }
-            }
-            return
-        }
-        changeChannel(direction)
+        perform(RemoteMap.action(input, in: armed == nil ? .picture : .controls))
     }
 
-    /// Channel Up or Down, behind the pigeon.
-    private func changeChannel(_ direction: MoveCommandDirection) {
+    /// What RemoteMap asked for, done on this screen.
+    private func perform(_ action: RemoteMap.Action) {
+        switch action {
+        case .openGuide:
+            // The swipe that opens the guide moves nothing in it (pan).
+            swipe.opened = true
+            openGuide()
+        case .lightControls:
+            guard !isFailed, let first = chips.first else { return }
+            hideTask?.cancel()
+            armed = first
+        case .letGo:
+            armed = nil
+            wake()
+        case .previousChannel: changeChannel(step: -1)
+        case .nextChannel: changeChannel(step: 1)
+        case .randomChannel: randomChannel()
+        case .walk(let by):
+            hideTask?.cancel()
+            guard let armed, let at = chips.firstIndex(of: armed), chips.indices.contains(at + by) else { return }
+            // Left on the first control and right on the last stop there (owner, 2026-11-07).
+            self.armed = chips[at + by]
+        case .work: workArmed()
+        case .none: break
+        }
+    }
+
+    /// The next channel number (1) or the one before (-1), behind the pigeon; both go round the dial.
+    /// One swipe can send several moves: a change under way takes no second step.
+    private func changeChannel(step: Int) {
         armed = nil
         guard holdsFocus, !switching else { return }
         switching = true
-        // Up is Channel Up, to the next number; down is Channel Down. Both go round the dial.
-        let step = direction == .up ? 1 : -1
         Task {
             // Resolved after the schedule, from the channel tuned by then (the sign-on may still
             // be setting it at the press).

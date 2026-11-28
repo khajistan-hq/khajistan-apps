@@ -315,7 +315,9 @@ struct FilmPlayerView: View {
         }
         .frame(maxWidth: 1200)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(Mixes.clock(position)) of \(duration.map(Mixes.clock) ?? "unknown")")
+        // The scrub's way out is read with the place: the bar's children are not elements of their own.
+        .accessibilityLabel("\(Mixes.clock(position)) of \(duration.map(Mixes.clock) ?? "unknown")"
+                            + (scrub != nil ? ". Select plays from here \u{00B7} Back returns" : ""))
         .accessibilityValue("\(Int(position))")
         .accessibilityIdentifier("filmProgress")
     }
@@ -402,7 +404,9 @@ struct FilmPlayerView: View {
             withAnimation(.easeOut(duration: 0.25)) { overlayVisible = false }
             return
         }
-        if armed != nil {
+        // With no picture under the bar (connecting, ended, failed) a lit control does not hold
+        // Back: the film stops at once, as the comment above says.
+        if armed != nil, movable {
             armed = nil
             wake()
             return
@@ -467,6 +471,13 @@ struct FilmPlayerView: View {
         // start reads .tuning or .playing as a film to keep. A window that does not open leaves
         // the film paused, where it was.
         let wasPaused = player.state == .paused
+        // Where it was paused: a window that fails to open puts the film back there, not where it
+        // played on to while the window started.
+        let pausedAt = player.player.currentTime()
+        let backToPause = {
+            player.pause()
+            if pausedAt.isNumeric { player.player.seek(to: pausedAt, toleranceBefore: .zero, toleranceAfter: .zero) }
+        }
         if wasPaused { player.resume() }
         // The object, not the screen's state: the window reads it after the screen has closed.
         let subtitles = subtitles
@@ -488,7 +499,7 @@ struct FilmPlayerView: View {
             leave()
         }
         pip.onFail = { line in
-            if wasPaused, model.filmPiP?.controller !== player { player.pause() }
+            if wasPaused, model.filmPiP?.controller !== player { backToPause() }
             say(line)
         }
         pip.onRestore = {
@@ -502,7 +513,7 @@ struct FilmPlayerView: View {
             if model.filmPiP?.controller === player { model.silenceRadio() } else { player.stop() }
         }
         if !pip.start(player.player) {
-            if wasPaused { player.pause() }
+            if wasPaused { backToPause() }
             pip.letGo()
             say("Picture in picture is not ready yet. Try again in a moment.")
         }
@@ -703,7 +714,16 @@ struct FilmPlayerView: View {
             place(to, exact: false)
             return
         }
-        place(position + Double(direction) * FilmTransport.skip, exact: true)
+        place(here + Double(direction) * FilmTransport.skip, exact: true)
+    }
+
+    /// Where the film is: the place a move under way goes to, else the player's own clock, which
+    /// the half-second poll may not have read yet (a film back from the corner window reads 0
+    /// until it does, and a first skip from there went to 0:10).
+    private var here: Double {
+        guard seeksInFlight == 0 else { return position }
+        let now = controller.player.currentTime().seconds
+        return now.isFinite ? now : position
     }
 
     /// A held arrow scans the film, faster the longer it is held; letting go plays from there.
@@ -715,7 +735,8 @@ struct FilmPlayerView: View {
             let scanning = scanTask != nil
             scanTask?.cancel()
             scanTask = nil
-            if scanning {
+            // A film that failed during the scan is left failed, for Play to try again.
+            if scanning, movable {
                 place(position, exact: true)
                 if scanWasPlaying { controller.resume() }
             }
@@ -725,7 +746,7 @@ struct FilmPlayerView: View {
         guard full != nil, armed == nil, scrub == nil, movable else { return false }
         scanTask?.cancel()
         let started = ContinuousClock.now
-        var at = position
+        var at = here
         // Paused, a seek does not make the player wait to play: playing, each step buffered, the
         // film fell out of `movable` and the scan stopped (Fable, 2026-11-17).
         scanWasPlaying = controller.state != .paused

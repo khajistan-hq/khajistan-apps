@@ -30,12 +30,18 @@ final class TransmissionStore {
     private(set) var phase: Phase = .idle
     private(set) var channelNumber = 1
     private(set) var programming: Programming?
+    /// Moves each time a schedule is taken in, so the guide reads its rows again when a refresh
+    /// changes programmes inside the same month (guideMonthsKey moves only with the months).
+    private(set) var scheduleRevision = 0
     /// The month after the one held, fetched only for the guide when its hours reach past the
     /// month's end (loadNextMonth); nil otherwise, or when that month is not published yet.
     private(set) var nextProgramming: Programming?
     @ObservationIgnored private var nextMonthLoad: (month: String, task: Task<Bool, Never>)?
     /// When the month after was fetched: it becomes the month held at the turn, and keeps its age.
     @ObservationIgnored private var nextFetchedAt: TimeInterval?
+    /// Moves when the schedule is dropped: a next-month read begun before the drop does not keep
+    /// its answer, so a month the server refused is not taken at the turn without asking again.
+    @ObservationIgnored private var nextEpoch = 0
     /// The moment the schedule is read at. In DEBUG, `-kjnow <ISO 8601>` pins the station clock to
     /// that moment at launch and lets it run on from there, so the UI tests can carry one month's
     /// schedule as a fixture (UITests/Fixtures) instead of reading the archive's live month file,
@@ -215,6 +221,7 @@ final class TransmissionStore {
         #if DEBUG
         if UserDefaults.standard.string(forKey: "kjschedulefile") != nil { return false }
         #endif
+        let epoch = nextEpoch
         let url = Transmission.scheduleURL(month: key)
         guard var reply = try? await send(URLRequest(url: url)) else { return false }
         if reply.status == 401, let password = auth.previewPassword {
@@ -228,7 +235,8 @@ final class TransmissionStore {
         let body = reply.data
         guard let decoded = try? await Task.detached(priority: .userInitiated, operation: {
             try JSONDecoder().decode(Programming.self, from: body)
-        }).value, StationClock.stationMonth(StationClock.monthEnd(decoded)?.addingTimeInterval(-1) ?? .distantPast) == key else { return false }
+        }).value, StationClock.stationMonth(StationClock.monthEnd(decoded)?.addingTimeInterval(-1) ?? .distantPast) == key,
+              epoch == nextEpoch else { return false }
         nextProgramming = decoded
         nextFetchedAt = ProcessInfo.processInfo.systemUptime
         return true
@@ -260,7 +268,7 @@ final class TransmissionStore {
         // A schedule held for this month is fetched again once it is `scheduleMaxAge` old, so a
         // channel added on the site reaches a set that was never closed (owner, 2026-11-09: "i dont
         // see new channels on my apple tv"). The held one stays on screen while it is fetched.
-        let heldReady = schedule == .ready && month == monthKey
+        var heldReady = schedule == .ready && month == monthKey
         if heldReady, let at = fetchedAt, ProcessInfo.processInfo.systemUptime - at < Self.scheduleMaxAge { return }
         if let held = scheduleLoad, held.month == monthKey {
             await held.task.value
@@ -275,10 +283,13 @@ final class TransmissionStore {
             nextProgramming = nil
             month = monthKey
             schedule = .ready
-            // Its own age: fetched up to a day before, it is refreshed as any held month is.
+            // Its own age: fetched up to a day before, it is refreshed as any held month is,
+            // before this load returns, so the first tune after midnight reads today's lineup.
+            // It stays on screen meanwhile, and stays if the refresh fails.
             fetchedAt = nextFetchedAt ?? 0
             refreshing = false
-            return
+            if ProcessInfo.processInfo.systemUptime - (fetchedAt ?? 0) < Self.scheduleMaxAge { return }
+            heldReady = true
         }
         scheduleGeneration += 1
         let gen = scheduleGeneration
@@ -390,9 +401,16 @@ final class TransmissionStore {
         // Kept only once it has decoded, so a broken file is never the one sent back as current.
         // A password cleared while this fetch was in flight: its body is not put back on disk.
         if let etag = reply.etag, !reply.authorized || auth.previewPassword != nil {
-            Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }
+            let revision = accessRevision
+            Task { [weak self] in
+                await Task.detached(priority: .utility) { ScheduleCache.shared.store(body, etag: etag, month: monthKey) }.value
+                // The password was cleared while the write ran, and its clear may have gone first.
+                guard let self, self.accessRevision != revision, self.auth.previewPassword == nil else { return }
+                await Task.detached(priority: .utility) { ScheduleCache.shared.clear() }.value
+            }
         }
         programming = decoded
+        scheduleRevision += 1
         // The month after, fetched for the guide, is this month now: one copy is held, not two.
         if let next = nextProgramming, let nextEnd = StationClock.monthEnd(next),
            let end = StationClock.monthEnd(decoded), nextEnd <= end { nextProgramming = nil }
@@ -410,6 +428,7 @@ final class TransmissionStore {
         // The month after goes too: a set the server refused must not take it as the month held at
         // the turn without asking.
         nextProgramming = nil
+        nextEpoch += 1
         month = nil
         schedule = state
     }

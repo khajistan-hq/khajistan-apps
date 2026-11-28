@@ -86,7 +86,8 @@ final class ShelfUITests: XCTestCase {
             // CCTV is the foot of the page: down walks every shelf to it. Each id passed on the way
             // is kept: none is a film or a Transmission channel (owner, 2026-11-19).
             kjPause(6)   // the later shelves land
-            var passed: [String] = []
+            // The shelf focus starts on counts too: Liked straight under Themes would be missed.
+            var passed: [String] = [focusedID(app)]
             for _ in 0..<12 where !focusedID(app).hasPrefix("cameras-") {
                 press(.down, app: app)
                 passed.append(focusedID(app))

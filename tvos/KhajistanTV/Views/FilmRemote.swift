@@ -76,6 +76,8 @@ final class RemoteHold {
     private static let after: Duration = .milliseconds(450)
     private var timer: Task<Void, Never>?
     private var holding: Int?
+    /// The remote whose press is pending or held.
+    private var owner: ObjectIdentifier?
     private var ended: (direction: Int, at: ContinuousClock.Instant)?
     private var observer: NSObjectProtocol?
 
@@ -98,6 +100,7 @@ final class RemoteHold {
         }
         timer?.cancel()
         timer = nil
+        owner = nil
         if let held = holding {
             holding = nil
             _ = onHold?(held, false)
@@ -119,16 +122,20 @@ final class RemoteHold {
     private func attach(_ controller: GCController) {
         guard let pad = controller.microGamepad else { return }
         pad.reportsAbsoluteDpadValues = true
+        let source = ObjectIdentifier(controller)
         pad.buttonA.pressedChangedHandler = { [weak self] _, _, pressed in
             let x = pad.dpad.xAxis.value
-            MainActor.assumeIsolated { self?.pressed(pressed, x: x) }
+            MainActor.assumeIsolated { self?.pressed(pressed, x: x, from: source) }
         }
     }
 
-    private func pressed(_ down: Bool, x: Float) {
+    private func pressed(_ down: Bool, x: Float, from source: ObjectIdentifier) {
+        // A second remote's release does not end the hold the first one is making.
+        if !down, let owner, owner != source { return }
         timer?.cancel()
         timer = nil
         guard down else {
+            owner = nil
             if let held = holding {
                 holding = nil
                 ended = (held, .now)
@@ -137,6 +144,7 @@ final class RemoteHold {
             return
         }
         guard abs(x) > 0.5 else { return }
+        owner = source
         let direction = x < 0 ? -1 : 1
         timer = Task { [weak self] in
             try? await Task.sleep(for: Self.after)

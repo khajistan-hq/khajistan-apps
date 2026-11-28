@@ -106,7 +106,8 @@ struct PiPBarHost: ViewModifier {
                     for _ in 0..<6 where held < 2 {
                         try? await Task.sleep(for: .milliseconds(250))
                         guard model.activePiP != nil else { return }
-                        if focus == .fullScreen { held += 1 } else { held = 0; focus = .fullScreen }
+                        // The viewer moved to another control of the bar: that choice stands.
+                        if focus == .fullScreen { held += 1 } else if focus != nil { return } else { held = 0; focus = .fullScreen }
                     }
                 }
             }

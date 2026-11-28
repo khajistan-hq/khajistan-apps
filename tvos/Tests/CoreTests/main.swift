@@ -2125,6 +2125,8 @@ func timelineAgreesWithTheClock(_ months: [Programming], channel: Int, from: Dat
         if let air {
             let expected = block.grouped ? (air.show?.name ?? air.nowName ?? "") : (air.nowName ?? air.show?.name ?? "")
             try expect(block.title == expected || joined, "channel \(channel) at \(moment): the grid says \(block.title ?? "off air"), the clock \(expected)")
+            // Off air never covers something on, joined seam or not (StationClock.group).
+            try expect(!block.isOffAir, "channel \(channel) at \(moment): the grid says off air, the clock \(expected)")
             if block.grouped, !joined {
                 try expect(StationClock.runSeconds(air.programme) < StationClock.shortProgramme,
                            "channel \(channel) at \(moment): a \(Int(StationClock.runSeconds(air.programme))) s programme inside the run \(block.title ?? "")")
@@ -2435,7 +2437,9 @@ func guideTimelineAcrossTheMonth() throws {
         var probe = end
         while probe < end.addingTimeInterval(6 * 3600) {
             if StationClock.onAir(dec, channel: channel, at: probe) != nil {
-                try expect(!(early.first { $0.contains(probe) }?.isOffAir ?? false), "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
+                // A block must be there: a row with none at an on-air moment is a failure, not a pass.
+                let block = try require(early.first { $0.contains(probe) }, "channel \(channel) at \(probe): no block while December's clock has a programme")
+                try expect(!block.isOffAir, "channel \(channel) at \(probe): December alone, read from 23:30, says off air while on")
             }
             probe = probe.addingTimeInterval(97)
         }
@@ -2444,6 +2448,21 @@ func guideTimelineAcrossTheMonth() throws {
         try expect(!alone.contains { $0.start >= end }, "channel \(channel): a block after the month's end with no December held")
     }
     try expect(past > 50, "only \(past) December programmes on the rows")
+}
+
+/// CodeRabbit, PR 147/98: a November programme running past midnight hid a December programme
+/// at 00:00 that the clock (which reads December from midnight) has on.
+func guideTimelineHandsOverAtMidnight() throws {
+    func month(_ day: String, _ slot: String) -> String {
+        #"{"_meta":{"channels":[{"id":"c","number":1,"name":"C"}]},"shows":{"s":{"slug":"s","name":"S"}},"programme_order":["a","b"],"programmes":{"a":{"id":"a","title":"A","seconds":4800},"b":{"id":"b","title":"B","seconds":600}},"days":[{"date":"\#(day)","channels":{"c":[\#(slot)]}}]}"#
+    }
+    let nov = try decode(Programming.self, month("2026-11-30", #"{"start":"23:00","start_minute":1380,"minutes":80,"show":"s","programmes":[0]}"#))
+    let dec = try decode(Programming.self, month("2026-12-01", #"{"start":"00:00","start_minute":0,"minutes":10,"show":"s","programmes":[1]}"#))
+    try expect(StationClock.onAir(dec, channel: 1, at: pkt(2026, 12, 1, 0, 5)) != nil, "the fixture has B on at 00:05")
+    _ = try timelineAgreesWithTheClock([nov, dec], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0), every: 60)
+    // November alone still draws its programme to its own end.
+    let alone = StationClock.timeline([nov], channel: 1, from: pkt(2026, 11, 30, 23, 30), to: pkt(2026, 12, 1, 1, 0))
+    try expect(alone.contains { !$0.isOffAir && $0.end > pkt(2026, 12, 1, 0, 0) }, "November alone cut its carryover at midnight")
 }
 
 func guideGridMoves() throws {
@@ -4049,7 +4068,9 @@ func dancerStageEntersDancesAndLeaves() throws {
     _ = run(3000, grooving: true)
     try expect(stage.leave(now: now), "a dancer on stage is owed an exit")
     var frames = 0
-    while stage.stepLeaving(now: now) != .blank { now += 1000.0 / 60; frames += 1 }
+    // Bounded: an exit that never ends fails here rather than hanging the run.
+    while stage.stepLeaving(now: now) != .blank, frames < 60 * 30 { now += 1000.0 / 60; frames += 1 }
+    try expect(frames < 60 * 30, "the exit never reached blank")
     try expect(frames > 60, "the exit plays out (\(frames) frames)")
     try expect(!stage.leave(now: now), "nothing is owed when he is off")
 }
@@ -4086,7 +4107,10 @@ func holdRuns(seed: UInt64) throws -> String {
         now += 1000.0 / 60
         return f
     }
-    while stage.name != .on { _ = frame() }
+    // Bounded: a stage stuck before .on fails with the seed rather than hanging the run.
+    var entering = 0
+    while stage.name != .on, entering < 60 * 30 { _ = frame(); entering += 1 }
+    try expect(stage.name == .on, "the dancer never reached .on (seed \(seed), stage \(stage.name))")
     var moves: [String] = []
     for beat in (count + 1)...(count + 1600) {
         count = beat
@@ -6027,6 +6051,12 @@ func aPlayerIsRetunedOnlyForTheNetwork() throws {
     try expect(retunes(wrapped), "AVFoundation's error wrapping a dropped connection")
     try expect(!retunes(URLError(.badServerResponse)), "an answer that came back")
     try expect(!retunes(URLError(.userAuthenticationRequired)))
+    // CodeRabbit, PR 131/133: the sign-in refusal stays shut on a stall, and a refusal under a
+    // network error is still a refusal.
+    try expect(!retunes(URLError(.userAuthenticationRequired), stalled: true), "an authentication error on a stall stays shut")
+    let refusalUnderDrop = NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost,
+                                   userInfo: [NSUnderlyingErrorKey: NSError(domain: "CoreMediaErrorDomain", code: -12660)])
+    try expect(!retunes(refusalUnderDrop), "a 403 under a dropped connection stays shut")
     try expect(!retunes(NSError(domain: "CoreMediaErrorDomain", code: -12660)), "a 403 refusal")
     try expect(!retunes(nil), "an item failure with no cause")
     try expect(retunes(nil, stalled: true), "a carrier that stopped sending")
@@ -6452,6 +6482,10 @@ func visualizerShuffleBagShowsEveryPiece() throws {
     try expectEqual(Visualizer.draw(rows, reverent: false, seen: ["p1", "p2", "p3", "p4", "p5"], roll: 0, startRoll: 0)?.piece.id, "n")
     try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
     try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+    // CodeRabbit, PR 135: two rows with one id refill without a crash, repeating the only piece.
+    let twin = [rows[0], rows[0]]
+    try expectEqual(Visualizer.draw(twin, reverent: false, seen: ["p1"], roll: 0.99, startRoll: 0)?.piece.id, "p1")
+    try expect(Visualizer.seenKey(reverent: true) != Visualizer.seenKey(reverent: false), "Nature keeps its own bag")
 }
 
 func visualizerPicksByTheHalfHour() throws {
@@ -6615,6 +6649,7 @@ let tests: [(String, () throws -> Void)] = [
     ("Guide: the programme on now, across the month", guideNowNameAcrossTheMonth),
     ("Guide timeline: every day of a real month", guideTimelineRealMonth),
     ("Guide timeline: across the month's end", guideTimelineAcrossTheMonth),
+    ("Guide timeline: the month after takes over at midnight", guideTimelineHandsOverAtMidnight),
     ("Guide grid: Right, Left, Up, Down and the window", guideGridMoves),
     ("Guide grid: a programme too short to read is folded into a neighbour", guideCellsFold),
     ("Guide grid: no cell too narrow to read, every day of a real month", guideCellsReadableRealMonth),

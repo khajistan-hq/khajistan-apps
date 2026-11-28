@@ -471,12 +471,14 @@ private struct LiveSection: View {
         loading = true
         listError = nil
         await model.receiver.loadIndex()
+        // Another region, or the other dial, since this load began: the newer load owns the screen.
+        guard !Task.isCancelled, region == selected, dial == model.receiver.dialID else { return }
         filter = ""
         camerasLoaded = false
         cameraChannels = []
         do {
             let list = try await model.receiver.channels(regionId: region, cameras: false)
-            guard region == selected else { return }
+            guard !Task.isCancelled, region == selected, dial == model.receiver.dialID else { return }
             channels = list
             if list.contains(where: { $0.mediaType == medium }) && medium != "camera" {
                 // Stay on the medium the reader was on.

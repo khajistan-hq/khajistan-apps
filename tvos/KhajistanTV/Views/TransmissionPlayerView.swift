@@ -33,6 +33,10 @@ struct TransmissionPlayerView: View {
     /// read as a black flash.
     @State private var frameA = false
     @State private var frameB = false
+    /// The front player has played this long with no frame reported: the ground stops waiting,
+    /// so a layer that never says it is ready does not cover a programme heard under it.
+    @State private var frameWaitOver = false
+    private static let frameWait: Duration = .seconds(8)
     @State private var hideTask: Task<Void, Never>?
     @State private var showSignIn = false
     @State private var switching = false
@@ -165,6 +169,15 @@ struct TransmissionPlayerView: View {
             if let close { close() } else { dismiss() }
         }
         .onChange(of: store.phase) { wake() }
+        // A failed tune or a sign-in has its own button under Select: the guide closes, so Select
+        // does not work that button while a channel is lit in the guide.
+        .onChange(of: store.phase) { _, phase in
+            guard guideGrid != nil else { return }
+            switch phase {
+            case .failed, .needsSignIn: closeGuide()
+            default: break
+            }
+        }
         // A control cannot stay lit once it is gone from the strip.
         .onChange(of: pipOffered) { _, offered in if !offered, armed == .pip { armed = nil } }
         .onChange(of: guideOffered) { _, offered in if !offered, armed == .guide { armed = nil } }
@@ -212,6 +225,7 @@ struct TransmissionPlayerView: View {
         .task(id: guideGrid == nil) { if guideGrid != nil { await keepGuideCurrent() } }
         // A month brought in, or the month turned: the guide reads its rows again.
         .onChange(of: store.guideMonthsKey) { if guideGrid != nil { refillGuide() } }
+        .onChange(of: store.scheduleRevision) { if guideGrid != nil { refillGuide() } }
         .task(id: subtitleKey) { await watchSong() }
         .onDisappear { leave() }
         .kjFullScreenCover(isPresented: $showSignIn) {
@@ -272,7 +286,7 @@ struct TransmissionPlayerView: View {
     /// A picture programme playing whose first frame is not drawn yet. A schedule file (DEBUG, UI
     /// tests) plays no picture and never waits.
     private func waitingForFrame(_ air: OnAir) -> Bool {
-        guard air.programme?.audio_only != true, !store.isScheduleFile else { return false }
+        guard air.programme?.audio_only != true, !store.isScheduleFile, !frameWaitOver else { return false }
         return !(store.aIsFront ? frameA : frameB)
     }
 
@@ -283,6 +297,8 @@ struct TransmissionPlayerView: View {
                            reverent: TransmissionStore.isReverent(air, channel: store.channelNumber)) {
                     soundOnly(air)
                 }
+                // The layers go with the picture: a picture that comes back waits for its own frame.
+                .onAppear { frameA = false; frameB = false }
             } else {
                 // A picture that does not fill the screen sits on black (owner, 2026-10-05).
                 Color.black.modifier(fill)
@@ -299,6 +315,13 @@ struct TransmissionPlayerView: View {
                 // sits in the overlay, between the band and the panel.
                 palette.ground.modifier(fill)
             }
+            Color.clear.frame(width: 0, height: 0)
+                .task(id: "\(store.aIsFront) \(store.player.state == .playing) \(air.programme?.id ?? "")") {
+                    frameWaitOver = false
+                    guard store.player.state == .playing else { return }
+                    try? await Task.sleep(for: Self.frameWait)
+                    if !Task.isCancelled { frameWaitOver = true }
+                }
             focusTarget
             overlay(air)
             CaptionLayer(text: captionsAllowed ? subtitles.text : nil, skin: model.skin,
@@ -814,7 +837,21 @@ struct TransmissionPlayerView: View {
 
     /// Reads every row the guide holds again, for a new half hour or a month brought in.
     private func refillGuide() {
-        guard let grid = guideGrid else { return }
+        guard var grid = guideGrid else { return }
+        // A schedule that adds or drops a channel: the rows follow it, the lit one by its number.
+        let numbers = store.channelNumbers
+        if numbers != guideRows.map(\.number) {
+            let lit = guideRows.indices.contains(grid.row) ? guideRows[grid.row].number : store.channelNumber
+            let held = Dictionary(guideRows.map { ($0.number, $0) }, uniquingKeysWith: { first, _ in first })
+            let months = store.guideMonths
+            guideRows = numbers.map { number in
+                held[number] ?? .init(number: number, name: store.channelName(number), line: store.channelLine(number),
+                                      soundOnly: store.nowOn(channel: number, at: grid.now)?.programme?.audio_only == true,
+                                      onNow: StationClock.nowName(months, channel: number, at: grid.now), slots: [])
+            }
+            grid.row = guideRows.firstIndex { $0.number == lit } ?? 0
+            guideGrid = grid
+        }
         guideFillGeneration += 1
         guideFilling = []
         guideStale = Set(guideRows.indices.filter { !guideRows[$0].slots.isEmpty })
@@ -966,7 +1003,12 @@ struct TransmissionPlayerView: View {
             pending.task?.cancel()
             pending.task = nil
             if playing {
-                Task { await store.rejoinLive() }
+                Task {
+                    // Only while this window still carries the channel: a window closed since
+                    // (its onEnd stopped the channel) is not started again by a Play it queued.
+                    guard model.transmissionPiP === pip, store.player === player else { return }
+                    await store.rejoinLive()
+                }
             } else if store.player.state == .playing || store.player.state == .paused {
                 store.player.pause()
             } else {

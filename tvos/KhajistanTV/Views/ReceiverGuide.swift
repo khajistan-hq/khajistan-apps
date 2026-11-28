@@ -34,6 +34,19 @@ struct ReceiverGuide: View {
     }
 
     var body: some View {
+        // The local times read the clock: drawn again on the minute, as the strip's are.
+        TimelineView(.everyMinute) { context in
+            guide(now: context.date)
+        }
+        .background(palette.ground)
+        .ignoresSafeArea()
+        // The guide itself carries the name, so a test can read where it sits.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("receiverGuide")
+        .allowsHitTesting(false)
+    }
+
+    private func guide(now: Date) -> some View {
         GeometryReader { geo in
             let picture = Self.pictureRect(in: geo.size)
             let width = max(1, geo.size.width - 2 * picture.minX)
@@ -41,7 +54,7 @@ struct ReceiverGuide: View {
                 HStack(alignment: .top, spacing: 40) {
                     // The picture's place. The player draws its own layer here.
                     Color.clear.frame(width: picture.width, height: picture.height).accessibilityHidden(true)
-                    panel
+                    panel(now: now)
                 }
                 .frame(height: picture.height)
                 .padding(.bottom, 12)
@@ -55,7 +68,7 @@ struct ReceiverGuide: View {
                         let channel = list[key.index]
                         ReceiverGuideRow(number: key.index + 1, channel: channel,
                                          live: key.id == current.id, lit: key.index == lit,
-                                         channelWidth: width * Self.channelShare, id: key.id)
+                                         channelWidth: width * Self.channelShare, id: key.id, now: now)
                     }
                 }
                 .frame(width: width, height: CGFloat(Self.rowCount) * TransmissionGuide.rowHeight, alignment: .topLeading)
@@ -77,20 +90,14 @@ struct ReceiverGuide: View {
             .animation(CardMotion.rows(reduceMotion: reduceMotion), value: keys)
             .animation(CardMotion.scroll(reduceMotion: reduceMotion), value: lit)
         }
-        .background(palette.ground)
-        .ignoresSafeArea()
-        // The guide itself carries the name, so a test can read where it sits.
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("receiverGuide")
-        .allowsHitTesting(false)
     }
 
     /// Beside the picture: the Receiver and the medium, then the lit channel's name, its number,
     /// place and language, and its description.
-    private var panel: some View {
+    private func panel(now: Date) -> some View {
         let channel = list.indices.contains(lit) && !loading ? list[lit] : nil
         let facts = channel.map { c in
-            ["Channel \(lit + 1)", c.placeAndTime(), c.genres?.first, c.id == current.id ? "\u{25CF} Live" : nil]
+            ["Channel \(lit + 1)", c.placeAndTime(at: now), c.genres?.first, c.id == current.id ? "\u{25CF} Live" : nil]
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
         } ?? ""
         return VStack(alignment: .leading, spacing: 14) {
@@ -490,6 +497,8 @@ private struct ReceiverGuideRow: View {
     let lit: Bool
     let channelWidth: CGFloat
     let id: String
+    /// The minute the guide was drawn for, so the local time moves on with the clock.
+    let now: Date
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -498,7 +507,7 @@ private struct ReceiverGuideRow: View {
         let cell = lit ? palette.litAmongBands : palette.onBandPlate
         let side = lit ? palette.onFocusPlate : palette
         // The place, its language and the time there (Channel.placeAndTime), as the strip reads it.
-        let where_ = channel.placeAndTime()
+        let where_ = channel.placeAndTime(at: now)
         HStack(spacing: 0) {
             HStack(spacing: 16) {
                 Text("\(number)").kjKicker().monospacedDigit().frame(width: 52, alignment: .trailing)

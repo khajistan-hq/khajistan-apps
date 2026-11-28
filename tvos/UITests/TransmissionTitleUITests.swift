@@ -25,7 +25,8 @@ final class TransmissionTitleUITests: XCTestCase {
         let app = launch(last: 0)
         let channel = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "the tab plays a channel with no press on a page")
-        XCTAssertNotEqual(channel.label, "1", "Channel 1 is off air at this hour, so it is not the first channel")
+        // Channels 1 to 4 are off air at 12:10 in the fixture and 5 plays a picture (Saang Mahfil E Milad).
+        XCTAssertEqual(channel.label, "5", "the lowest-numbered channel on air with a picture opens")
         XCTAssertFalse(app.buttons["transmission-channel-1"].exists, "no page of channel cards")
         kjScreenshot("transmission-plays-at-once", app: app)
     }

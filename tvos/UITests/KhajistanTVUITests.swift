@@ -96,7 +96,8 @@ final class KhajistanTVUITests: XCTestCase {
         let state = app.staticTexts["transmissionState"]
         let channel = app.descendants(matching: .any)["transmissionChannel"]
         wait(upTo: 60) { channel.exists || (state.exists && (state.value as? String) != "Loading") }
-        XCTAssertTrue(channel.exists || state.exists, "Khajistan TV must play or show a state")
+        XCTAssertTrue(channel.exists || (state.exists && (state.value as? String) != "Loading"),
+                      "Khajistan TV must play or show a state past Loading")
         let outcome = channel.exists ? "playing" : ((state.value as? String) ?? "unknown")
         screenshot("04-khajistan-tv-\(outcome)", app: app)
     }

@@ -51,7 +51,7 @@ struct TransmissionView: View {
         .onChange(of: store.schedule == .ready) { _, ready in if ready { startOnce() } }
         // The channel the viewer leaves the player on is the one the tab opens next time.
         .onChange(of: playing == nil) { _, closed in
-            if closed, started { UserDefaults.standard.set(store.channelNumber, forKey: Self.lastChannelKey) }
+            if closed { UserDefaults.standard.set(store.channelNumber, forKey: Self.lastChannelKey) }
         }
         // Full screen on the ground, as in Account: a sheet is a shadowed card.
         .kjFullScreenCover(isPresented: $showSignIn, onDismiss: { openChosen() }) {
@@ -67,6 +67,8 @@ struct TransmissionView: View {
             switch model.link {
             case .transmission:
                 model.link = nil
+                // The station link plays, even after Back on this visit.
+                started = false
                 startOnce()
             case .channel(let number):
                 started = true
@@ -184,7 +186,8 @@ struct TransmissionView: View {
     /// The last channel watched, if the schedule still has it; else the lowest-numbered channel on
     /// air now that has a picture (Channel 1, After Hours, is sound only); else the first channel.
     private func firstChannel() -> Int? {
-        let numbers = store.channelNumbers
+        // In number order: the schedule lists its channels in lineup order, not by number.
+        let numbers = store.channelNumbers.sorted()
         let last = UserDefaults.standard.integer(forKey: Self.lastChannelKey)
         if numbers.contains(last) { return last }
         let now = TransmissionStore.now(Date())
@@ -197,6 +200,8 @@ struct TransmissionView: View {
     /// A signed-in viewer opens the channel. A signed-out one signs in first, and the channel
     /// opens when the sign-in screen has closed.
     private func choose(_ number: Int) {
+        // Any way in (the tab, Watch, a link) counts as this visit's start.
+        started = true
         if model.auth.isSignedIn || store.isScheduleFile {
             playing = ChannelChoice(number: number)
         } else {

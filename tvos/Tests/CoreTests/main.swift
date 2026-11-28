@@ -6414,6 +6414,10 @@ func visualizerShuffleBagShowsEveryPiece() throws {
     try expectEqual(Visualizer.draw(rows, reverent: false, seen: ["p1", "p2", "p3", "p4", "p5"], roll: 0, startRoll: 0)?.piece.id, "n")
     try expect(Visualizer.draw(rows.filter { $0.reverent != true }, reverent: true, seen: [], roll: 0, startRoll: 0) == nil)
     try expect(Visualizer.draw([], reverent: false, seen: [], roll: 0, startRoll: 0) == nil)
+    // CodeRabbit, PR 135: two rows with one id refill without a crash, repeating the only piece.
+    let twin = [rows[0], rows[0]]
+    try expectEqual(Visualizer.draw(twin, reverent: false, seen: ["p1"], roll: 0.99, startRoll: 0)?.piece.id, "p1")
+    try expect(Visualizer.seenKey(reverent: true) != Visualizer.seenKey(reverent: false), "Nature keeps its own bag")
 }
 
 func visualizerPicksByTheHalfHour() throws {

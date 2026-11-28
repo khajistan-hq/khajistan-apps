@@ -50,22 +50,27 @@ final class VisualizerPlayer {
         while !Task.isCancelled, gen == generation {
             // A failed step is tried again in a minute rather than waiting for a mode change.
             step = "reading the list of pictures"
-            guard let rows = await Self.load(previewPassword: auth.previewPassword), !rows.isEmpty else {
+            let loaded = await Self.load(previewPassword: auth.previewPassword)
+            // A run superseded while the list loaded sets nothing: the newer run owns the status.
+            guard !Task.isCancelled, gen == generation else { return }
+            guard let rows = loaded, !rows.isEmpty else {
                 problem = "the list of pictures could not be read"
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
-            let seen = UserDefaults.standard.stringArray(forKey: Visualizer.seenKey) ?? []
+            let seen = UserDefaults.standard.stringArray(forKey: Visualizer.seenKey(reverent: reverent)) ?? []
             guard let pick = Visualizer.draw(rows, reverent: reverent, seen: seen,
                                              roll: Double.random(in: 0..<1), startRoll: Double.random(in: 0..<1)) else {
                 problem = "no picture for this kind of channel yet"
+                // Read the list again next time: a piece of this kind may be published meanwhile.
+                Self.rows = nil
                 try? await Task.sleep(for: .seconds(60))
                 continue
             }
             let shown = await play(pick.piece, at: pick.offset, auth: auth, gen: gen)
             // A piece that would not open counts as seen too, so the bag moves past it; a cancelled run counts nothing.
             if !Task.isCancelled, gen == generation {
-                UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey)
+                UserDefaults.standard.set(pick.seen, forKey: Visualizer.seenKey(reverent: reverent))
                 if shown { shownReverent = reverent }
             }
             // The next piece starts loading `lead` seconds before this one ends, so it is up before the end.
@@ -98,9 +103,11 @@ final class VisualizerPlayer {
             try? await Task.sleep(for: .milliseconds(100))
             if Task.isCancelled || gen != generation { return false }
         }
+        let current = { !Task.isCancelled && gen == self.generation }
+        // A superseded run must not clear the slot a newer run is filling.
+        guard current() else { return false }
         let back = ready ? 1 - front : front
         clear(back)
-        let current = { !Task.isCancelled && gen == self.generation }
         func fail(_ why: String) -> Bool {
             if current() { clear(back); if !ready { problem = why } }
             return false
@@ -139,7 +146,8 @@ final class VisualizerPlayer {
         loops[back] = Task { @MainActor [weak self] in
             for await _ in NotificationCenter.default.notifications(named: AVPlayerItem.didPlayToEndTimeNotification, object: item) {
                 guard let self, !Task.isCancelled else { return }
-                guard self.front == back, self.outgoing == nil else { continue }
+                // The piece on screen goes round again, during a fade too: it is already the front.
+                guard self.front == back else { continue }
                 await player.seek(to: .zero)
                 player.play()
             }
@@ -165,8 +173,10 @@ final class VisualizerPlayer {
 
     /// The signed play address, or nil: not signed in, or tv-play said no.
     private static func carrier(for piece: VisualizerPiece, auth: AuthStore) async -> URL? {
-        guard auth.isSignedIn, let token = try? await auth.validAccessToken(),
-              let route = Transmission.route(for: piece.play_url),
+        guard auth.isSignedIn, let route = Transmission.route(for: piece.play_url) else { return nil }
+        // A direct file needs no signing, as the Transmission store plays it.
+        if case .direct(let url) = route { return url }
+        guard let token = try? await auth.validAccessToken(),
               let request = Transmission.request(for: route, accessToken: token),
               let (data, response) = try? await SupabaseRoute.data(for: request, session: .shared, delegate: RefuseRedirects()),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }

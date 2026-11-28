@@ -57,7 +57,8 @@ jobs:
     # ponytail: a longer limit, not a faster suite. When this one is reached, split the UI
     # tests across two jobs (-only-testing the slow classes, -skip-testing them in the other),
     # at the cost of two of the plan's five macOS slots per push.
-    timeout-minutes: 120
+    # 120 ran out on PR 154 (2026-11-28) as the last class finished, every test passed.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:

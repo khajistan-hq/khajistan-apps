@@ -206,8 +206,9 @@ struct ReceiverPlayerView: View {
             if let row = guideRow {
                 let count = guideList.count
                 switch direction {
-                case .up: if count > 0 { guideRow = (row - 1 + count) % count }
-                case .down: if count > 0 { guideRow = (row + 1) % count }
+                // The rows slide; what they say and the lit plate change at once (GuideRowsWindow).
+                case .up: if count > 0 { moveGuideRow(to: (row - 1 + count) % count, from: row) }
+                case .down: if count > 0 { moveGuideRow(to: (row + 1) % count, from: row) }
                 case .left: turnGuide(by: -1)
                 case .right: turnGuide(by: 1)
                 default: break
@@ -396,7 +397,7 @@ struct ReceiverPlayerView: View {
         wake()
         if let row = guideRow {
             let count = guideList.count
-            if count > 0 { guideRow = ((row - steps) % count + count) % count }
+            if count > 0 { moveGuideRow(to: ((row - steps) % count + count) % count, from: row) }
         } else if first {
             perform(RemoteMap.action(.up, in: armed == nil ? .picture : .controls))
         }
@@ -637,6 +638,12 @@ struct ReceiverPlayerView: View {
     private var guideTitle: String {
         guard let guideRegion else { return listTitle ?? "Surf" }
         return guideRegions.first { $0.id == guideRegion }?.label ?? guideRegion
+    }
+
+    /// Up, Down or a swipe in the guide: the rows slide, or cut round the end of the list; what
+    /// they say and the lit plate change at once (GuideRowsWindow).
+    private func moveGuideRow(to row: Int, from: Int) {
+        withAnimation(GuideRowsWindow<EmptyView>.motion(from: from, to: row, reduceMotion: reduceMotion)) { guideRow = row }
     }
 
     /// Left or right in the guide: the neighbouring region's channels of the medium playing. The

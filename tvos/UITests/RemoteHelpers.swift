@@ -185,9 +185,16 @@ extension XCTestCase {
             }
             let target = element.frame, here = focused.frame
             let dx = target.midX - here.midX, dy = target.midY - here.midY
-            // A different row first (up or down), then along the row.
+            // A different row first (up or down), then along the row. A target wholly below or above
+            // is another row whatever the heights: a tall film poster (695 points) with the PiP bar
+            // just under it passed the height rule as "the same row", and the walk pressed Left and
+            // Right for ever without one Down (PiPWindowUITests, 2026-11-28).
             let moved: Bool
-            if abs(dy) > max(here.height, target.height) * 0.6 {
+            if target.minY >= here.maxY {
+                moved = kjPress(.down, app: app)
+            } else if target.maxY <= here.minY {
+                moved = kjPress(.up, app: app)
+            } else if abs(dy) > max(here.height, target.height) * 0.6 {
                 moved = kjPress(dy > 0 ? .down : .up, app: app)
             } else {
                 moved = kjPress(dx > 0 ? .right : .left, app: app)

@@ -40,14 +40,9 @@ final class SubtitlesUITests: XCTestCase {
     func testTransmissionSubtitleOverAndUnderTheStrip() {
         for skin in ["day", "smut"] {
             let app = XCUIApplication()
-            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjsubtitlefile", subtitleFile]
+            app.launchArguments = ["-kjskin", skin, "-kjtab", "transmission", "-kjschedulefile", scheduleFile, "-kjnow", "2026-10-15T14:10:00+05:00", "-kjsubtitlefile", subtitleFile, "-kj.transmission.lastChannel", "1"]
             kjLaunch(app)
-            let page = app.staticTexts["transmissionState"]
-            XCTAssertTrue(page.waitForExistence(timeout: 30))
-            _ = waitFor(20) { (page.value as? String) == "Ready" }
-            let card = app.buttons["transmission-channel-1"]
-            XCTAssertTrue(kjFocus(card, app: app), "channel 1's card must take focus")
-            XCUIRemote.shared.press(.select)
+            // The tab plays the channel at once (-kj.transmission.lastChannel; owner, 2026-11-28).
 
             let caption = app.descendants(matching: .any)["caption"]
             XCTAssertTrue(caption.waitForExistence(timeout: 30), "\(skin): the programme's subtitle must be on screen")

@@ -433,7 +433,9 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(2)
         let fullScreen = app.buttons["pipBarFullScreen"]
         XCTAssertTrue(fullScreen.waitForExistence(timeout: 10), "the bar is on the cover")
-        XCTAssertTrue(kjFocus(fullScreen, app: app), "Down reaches the bar's Full screen")
+        let reached = kjFocus(fullScreen, app: app)
+        if !reached { kjScreenshot("pip-bar-not-reached", app: app) }
+        XCTAssertTrue(reached, "Down reaches the bar's Full screen; focus stopped on \(kjFocusKey(app)), bar frame \(fullScreen.frame)")
         kjScreenshot("pip-bar-on-screening-room", app: app)
         XCUIRemote.shared.press(.select)
         XCTAssertTrue(app.staticTexts["currentChannel"].waitForExistence(timeout: 20), "the channel opens over the cover")

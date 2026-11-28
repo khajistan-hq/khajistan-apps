@@ -160,6 +160,16 @@ final class TransmissionStore {
         #endif
     }
 
+    /// The guide's kicker: "Khajistan Transmission · 1,240 programmes · 610 hours". The station's
+    /// counts moved here from the page the tab no longer shows (owner, 2026-11-28; Fable's advice:
+    /// no channel count, the guide's rows show the channels).
+    var stationLine: String {
+        var parts = ["Khajistan Transmission"]
+        if let count = programmeCount { parts.append("\(count.formatted()) \(count == 1 ? "programme" : "programmes")") }
+        if let hours = programmeHours { parts.append("\(hours.formatted()) \(hours == 1 ? "hour" : "hours")") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
     var programmeCount: Int? {
         programming?.programme_order.count
     }

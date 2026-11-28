@@ -24,8 +24,10 @@ final class DeepLinkUITests: XCTestCase {
         screenshot("link-receiver-indus", app: app)
 
         app.open(try XCTUnwrap(URL(string: "khajistan://transmission")))
+        // The tab plays a channel at once (owner, 2026-11-28), or shows its state under it.
         let state = app.descendants(matching: .any)["transmissionState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 60), "khajistan://transmission must open the station page")
+        let playing = app.descendants(matching: .any)["transmissionChannel"]
+        XCTAssertTrue(playing.waitForExistence(timeout: 60) || state.exists, "khajistan://transmission must open Transmission")
         screenshot("link-transmission", app: app)
 
         // XCUIApplication.open relaunches the app, so each link below lands on a fresh launch, whose
@@ -52,19 +54,9 @@ final class DeepLinkUITests: XCTestCase {
             .appendingPathComponent("Fixtures/programming-seven-channels.json").path
         let app = XCUIApplication()
         app.launchArguments = ["-kjskin", "day", "-kjtab", "transmission", "-kjschedulefile", schedule,
-                               "-kjnow", "2026-11-04T12:00:00+05:00"]
+                               "-kjnow", "2026-11-04T12:00:00+05:00", "-kj.transmission.lastChannel", "7"]
         kjLaunch(app)
-        let page = app.staticTexts["transmissionState"]
-        XCTAssertTrue(page.waitForExistence(timeout: 30))
-        waitUntil(20) { (page.value as? String) == "Ready" }
-        XCTAssertTrue(page.label.contains("7 scheduled channels"), page.label)
-
-        let seventh = app.buttons["transmission-channel-7"]
-        for _ in 0..<4 where !app.buttons["transmission-channel-1"].hasFocus { XCUIRemote.shared.press(.down) }
-        for _ in 0..<10 where !(seventh.exists && seventh.hasFocus) { XCUIRemote.shared.press(.down); kjPause(0.6) }
-        XCTAssertTrue(seventh.exists && seventh.hasFocus, "focus walks down to Channel 7's row")
-        screenshot("seven-1-channel-7-card", app: app)
-        XCUIRemote.shared.press(.select)
+        // The tab plays the last channel watched at once (owner, 2026-11-28): Channel 7 here.
 
         let channel = app.descendants(matching: .any)["transmissionChannel"]
         XCTAssertTrue(channel.waitForExistence(timeout: 30), "Channel 7 opens")

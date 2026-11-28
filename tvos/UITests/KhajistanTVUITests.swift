@@ -91,11 +91,14 @@ final class KhajistanTVUITests: XCTestCase {
         app.launchArguments = ["-kjtab", "transmission"]
         kjLaunch(app)
 
-        // The phase is the sentence's accessibility value, so the screen carries no marker word.
+        // The phase is the screen's accessibility value, so the screen carries no marker word. A
+        // schedule that loads plays a channel at once (owner, 2026-11-28): that is the outcome too.
         let state = app.staticTexts["transmissionState"]
-        XCTAssertTrue(state.waitForExistence(timeout: 60), "Khajistan TV must show a state")
-        wait(upTo: 40) { state.exists && (state.value as? String) != "Loading" }
-        let outcome = (state.value as? String) ?? "unknown"
+        let channel = app.descendants(matching: .any)["transmissionChannel"]
+        wait(upTo: 60) { channel.exists || (state.exists && (state.value as? String) != "Loading") }
+        XCTAssertTrue(channel.exists || (state.exists && (state.value as? String) != "Loading"),
+                      "Khajistan TV must play or show a state past Loading")
+        let outcome = channel.exists ? "playing" : ((state.value as? String) ?? "unknown")
         screenshot("04-khajistan-tv-\(outcome)", app: app)
     }
 

@@ -62,7 +62,8 @@ final class PiPWindowUITests: XCTestCase {
         let app = XCUIApplication()
         try openFullFilm(app, extra: ["-kjscrubopen", "YES"])
         let bar = app.descendants(matching: .any)["filmProgress"]
-        let scrubLine = NSPredicate { _, _ in app.staticTexts["Select plays from here \u{00B7} Back returns"].exists }
+        // The bar is one accessibility element: the scrub's line is read in its label.
+        let scrubLine = NSPredicate { _, _ in bar.exists && bar.label.contains("Select plays from here") }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: scrubLine, object: nil)], timeout: 30), .completed,
                        "the track bar is up")
         let reached = (try? bar.snapshot())?.value as? String
@@ -75,7 +76,7 @@ final class PiPWindowUITests: XCTestCase {
         kjPause(0.8)
         let subtitles = app.descendants(matching: .any)["subtitlesControl"]
         XCTAssertTrue(subtitles.isSelected, "Down from the track bar lights the first control")
-        XCTAssertFalse(app.staticTexts["Select plays from here \u{00B7} Back returns"].exists, "the track bar has let go")
+        XCTAssertFalse(bar.label.contains("Select plays from here"), "the track bar has let go")
         XCTAssertEqual(app.staticTexts["playerState"].label, "Paused", "the film stays paused")
         XCTAssertEqual((try? bar.snapshot())?.value as? String, reached, "where the swipe left it")
         kjScreenshot("film-down-from-track-bar", app: app)

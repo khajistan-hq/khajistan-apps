@@ -247,17 +247,19 @@ final class PictureInPicture: NSObject {
     private func feedWindow() {
         feed?.cancel()
         feed = Task { [weak self] in
-            var styled: (item: AVPlayerItem, skin: Skin)?
+            var styled: (item: AVPlayerItem, skin: Skin, style: CaptionStyle)?
             while !Task.isCancelled {
                 guard let self, let player = self.player else { return }
                 let skin = self.skin?() ?? .day
                 if let item = player.currentItem {
                     if !self.composited.contains(item), self.hasFileCaptions?() == true { self.composite(item) }
                     // tvOS draws a stream's track in the colours set at attach: a skin that turns
-                    // while the window is up (dawn, dusk) turns the window's subtitles with it.
-                    if styled?.item !== item || styled?.skin != skin {
-                        if styled != nil { item.textStyleRules = RecordedSubtitles.styleRules(skin) }
-                        styled = (item, skin)
+                    // while the window is up (dawn, dusk), or a Plate / Yellow text choice made
+                    // since attach, turns the window's subtitles with it, from the first tick.
+                    let style = CaptionStyle.current
+                    if styled?.item !== item || styled?.skin != skin || styled?.style != style {
+                        item.textStyleRules = RecordedSubtitles.styleRules(skin, style: style)
+                        styled = (item, skin, style)
                     }
                 }
                 self.drawsIntoPicture = player.currentItem.map {
@@ -312,7 +314,9 @@ final class PictureInPicture: NSObject {
         composited.add(item)
         compositing?.cancel()
         compositing = Task { [weak self] in
-            guard let track = try? await item.asset.loadTracks(withMediaType: .video).first,
+            // One video track: the compositor copies only the first, so a second would vanish.
+            guard let tracks = try? await item.asset.loadTracks(withMediaType: .video), tracks.count == 1,
+                  let track = tracks.first,
                   let (transform, size) = try? await track.load(.preferredTransform, .naturalSize),
                   transform.isIdentity,
                   let made = try? await AVMutableVideoComposition.videoComposition(withPropertiesOf: item.asset),

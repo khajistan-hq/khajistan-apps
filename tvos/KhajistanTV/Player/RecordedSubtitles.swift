@@ -36,6 +36,8 @@ final class RecordedSubtitles {
     /// Where the choice is remembered while manifest tracks are attached: the film's own key, or
     /// the shared one on Transmission.
     @ObservationIgnored private var choiceKey: String?
+    /// The window opened while `attach` was still reading the tracks: the handover waits for them.
+    @ObservationIgnored private var handOffWaiting = false
 
     /// "Subtitles · English", "Subtitles · Off": the receiver's recorded-subtitle picker, as one control.
     var label: String {
@@ -51,7 +53,13 @@ final class RecordedSubtitles {
     /// True when a track was handed over.
     @discardableResult
     func handOff() -> Bool {
-        guard group != nil else { return false }
+        guard group != nil else {
+            // Still loading: `attach` hands the tracks over when they arrive, instead of putting
+            // on an output that would hide them from the window.
+            handOffWaiting = true
+            return false
+        }
+        handOffWaiting = false
         if let output, let item { item.remove(output) }
         output = nil
         text = nil
@@ -70,6 +78,7 @@ final class RecordedSubtitles {
     /// Nothing is added to the item: the screen attaches with its own output, and a leftover one
     /// would keep suppressing the track the next time the window opens on the same item.
     func reclaim() {
+        handOffWaiting = false
         guard isHandedOff, let group, let item else { return }
         item.select(nil, in: group)
         text = nil
@@ -106,6 +115,7 @@ final class RecordedSubtitles {
 
     func clear() {
         generation += 1
+        handOffWaiting = false
         ticker?.cancel()
         ticker = nil
         // Deselect too: with its suppressing output gone, a selected track would be drawn by the
@@ -207,7 +217,10 @@ final class RecordedSubtitles {
         // The house view draws the text full screen. In the picture-in-picture window AVPlayer
         // draws it (handOff()), and these rules give it the skin's caption plate there.
         item.textStyleRules = Self.styleRules(skin)
-        guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation else { return }
+        // A load cancelled while it waited (the screen shut down for the window) puts nothing on
+        // the item: an output added now would hide the track from the window the next time.
+        guard let found = try? await item.asset.loadMediaSelectionGroup(for: .legible), gen == generation,
+              !Task.isCancelled else { return }
         var byCode: [String: AVMediaSelectionOption] = [:]
         var order: [Track] = []
         for option in found.options {
@@ -235,6 +248,7 @@ final class RecordedSubtitles {
         choiceKey = key
         let stored = UserDefaults.standard.string(forKey: key)
         apply(SubtitleChoice.desired(available: order.map(\.code), stored: stored, preferred: Locale.preferredLanguages))
+        if handOffWaiting { handOff() }
     }
 
     /// The viewer's choice, remembered under `choiceKey` ("off" or the code).

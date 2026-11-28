@@ -47,6 +47,8 @@ struct ReceiverPlayerView: View {
     @State private var armed: Chip?
     /// Clicks on the bare picture, told single from double.
     @State private var clicks = ClickTally()
+    /// The finger's upward travel on the touch surface, for the Up tvOS does not send (see pan).
+    @State private var upSwipe = UpSwipe()
     @State private var likeNote: String?
     /// A dead signal moves on by itself: the channels that failed on this screen (never tried
     /// twice by the move), the pending move, and what the strip says about it.
@@ -154,6 +156,7 @@ struct ReceiverPlayerView: View {
             .accessibilityAction(named: "Like") { like() }
             .accessibilityAction(named: "Guide") { openGuide() }
             .accessibilityAction(named: "Picture in picture") { startPictureInPicture() }
+            RemoteSwipeReader(onPan: pan).frame(width: 0, height: 0).accessibilityHidden(true)
             overlay(palette)
             if let guideRow {
                 ReceiverGuide(list: guideList, current: current, lit: guideRow,
@@ -175,6 +178,11 @@ struct ReceiverPlayerView: View {
             // The screen is closing: a press now must not act on a signal already handed on.
             guard !leaving else { return }
             wake()
+            if direction == .up {
+                // The finger's travel has done this touch's Up already (pan).
+                if upSwipe.touching, upSwipe.rows < 0 { return }
+                upSwipe.byCommand = true
+            }
             if let row = guideRow {
                 let count = guideList.count
                 switch direction {
@@ -343,6 +351,31 @@ struct ReceiverPlayerView: View {
                 try? await Task.sleep(for: .milliseconds(Int(ClickTally.window * 1000)))
                 if clicks.settle(at), !leaving { perform(RemoteMap.action(.click, in: .picture)) }
             }
+        }
+    }
+
+    /// tvOS gives this screen no move for a swipe up on the first Siri Remote (measured on the owner's
+    /// Apple TV HD, 2026-11-28: 28 remote events, down, left, right and clicks, and not one up). So
+    /// Up is read from the finger's travel: on the picture once a touch, in the guide a row per
+    /// `RemoteGesture.rowTravel`. An Up move that does arrive (an arrow press) takes the touch instead.
+    private func pan(_ state: UIGestureRecognizer.State, _ travel: CGPoint) {
+        if state == .began {
+            upSwipe.rows = 0
+            upSwipe.byCommand = false
+        }
+        upSwipe.touching = state == .began || state == .changed
+        guard !leaving, !upSwipe.byCommand, abs(travel.y) > abs(travel.x) else { return }
+        let rows = RemoteGesture.rows(travel: Double(travel.y))
+        guard rows < upSwipe.rows else { return }
+        let steps = upSwipe.rows - rows
+        let first = upSwipe.rows == 0
+        upSwipe.rows = rows
+        wake()
+        if let row = guideRow {
+            let count = guideList.count
+            if count > 0 { guideRow = ((row - steps) % count + count) % count }
+        } else if first {
+            perform(RemoteMap.action(.up, in: armed == nil ? .picture : .controls))
         }
     }
 
@@ -1203,4 +1236,14 @@ private struct OnBandFace<Face: View>: View {
             .scaleEffect(isFocused && !isPressed ? 1.03 : 1)
             .kjFocusMotion(value: isFocused)
     }
+}
+
+/// The upward travel of the touch under way. A class held in state: it changes on every pan report
+/// and must not redraw the screen.
+private final class UpSwipe {
+    /// Rows the touch has earned upwards so far (zero or negative, RemoteGesture.rows).
+    var rows = 0
+    /// An Up move command arrived for this touch: the travel does nothing more.
+    var byCommand = false
+    var touching = false
 }

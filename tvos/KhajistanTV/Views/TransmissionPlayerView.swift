@@ -713,6 +713,7 @@ struct TransmissionPlayerView: View {
         if state == .began {
             swipe.rowsMoved = 0
             swipe.opened = false
+            swipe.upDone = false
         }
         swipe.touching = state == .began || state == .changed
         // Up and down only: a sideways swipe is left to the move commands.
@@ -724,6 +725,13 @@ struct TransmissionPlayerView: View {
             guard !swipe.opened, rows != swipe.rowsMoved else { return }
             moveGuide(rows: rows - swipe.rowsMoved, grid: grid)
             swipe.rowsMoved = rows
+        } else if rows < 0, !swipe.upDone {
+            // tvOS gives this screen no move for a swipe up on the first Siri Remote (measured on the
+            // owner's Apple TV HD, 2026-11-28: 28 remote events, down, left, right and clicks, and
+            // not one up). So Up is read from the finger's travel, once a touch.
+            swipe.upDone = true
+            wake()
+            perform(RemoteMap.action(.up, in: armed == nil ? .picture : .controls))
         }
         // The guide is opened by the Down move alone (RemoteMap), never by the finger's travel.
     }
@@ -1056,7 +1064,10 @@ struct TransmissionPlayerView: View {
         }
         let input: RemoteMap.Input
         switch direction {
-        case .up: input = .up
+        case .up:
+            if swipe.touching, swipe.upDone { return }
+            swipe.upDone = true
+            input = .up
         case .down: input = .down
         case .left: input = .left
         case .right: input = .right
@@ -1262,6 +1273,8 @@ private final class SwipeTrack {
     var rowsMoved = 0
     /// This touch opened the guide: it does nothing more.
     var opened = false
+    /// This touch has already done its Up (from the finger's travel or from a move command).
+    var upDone = false
     /// A finger is moving on the touch surface now (the pan has begun and not ended).
     var touching = false
 }

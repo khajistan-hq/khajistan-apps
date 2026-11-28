@@ -528,6 +528,10 @@ private struct ThemeRow: View {
     ]
     /// A theme with fewer channels than this is not shown yet.
     private static let fewest = 3
+    /// The shelves whose first cards get live stills, and how many each; 24 a visit in all
+    /// (StillPlan). Liked takes none: it is names only (2026-11-21).
+    private static let pictured: [String] = ["news", "music"]
+    private static let picturedCards = 4
 
     @Environment(AppModel.self) private var model
     /// The All / TV / Radio chips under Surf. A theme holds only what they let through (owner,
@@ -677,8 +681,6 @@ private struct LikedShelf: View {
         missingStore = (kept + refs.map { "\(Int(now)) \($0)" }).joined(separator: "\n")
     }
     @State private var playing: Pick?
-    /// Cards that get a live still, from the front.
-    private static let pictured = 4
 
     /// The account's likes, newest first. A Debug build takes `-kjlikedrefs channel:a,channel:b`
     /// in their place, so the shelf can be seen and tested with no account signed in.
@@ -704,24 +706,44 @@ private struct LikedShelf: View {
         // there is no child, so the task that reads the likes would never run.
         VStack(alignment: .leading, spacing: 0) {
             if !list.isEmpty {
-                Shelf("Liked", count: "\(list.count) live") {
-                    // No heart on these cards: the shelf's name already says they are liked.
-                    ForEach(list) { channel in
-                        let still = channel.mediaType == "radio" ? nil : model.stills.image(for: channel.id)
-                        Button {
-                            playing = Pick(channel: channel, list: list)
-                        } label: {
-                            LikedCard(channel: channel, still: still)
-                        }
-                        .buttonStyle(HouseCardStyle())
-                        .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
-                        .accessibilityLabel(channel.cardLabel(still: still != nil, liked: false))
-                        .accessibilityIdentifier("liked-\(channel.id)")
-                    }
+                // Names only, as the Themes row is (owner, 2026-11-21: "the liked channels should
+                // also be text only like themes"): a plate a channel, its name and its place, no
+                // picture. No heart: the row's name already says they are liked.
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    Text("Liked").kjName(38)
+                    Text("\(list.count) live").kjSmall(faint: true)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("shelf-liked")
                 .padding(.top, 12)
-                .onAppear { wantStills(list) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 8) {
+                        ForEach(list) { channel in
+                            Button {
+                                playing = Pick(channel: channel, list: list)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(channel.name).kjName(30).lineLimit(1)
+                                    if !channel.place.isEmpty {
+                                        Text(channel.place).kjSmall(faint: true).lineLimit(1)
+                                    }
+                                }
+                            }
+                            .buttonStyle(HouseButtonStyle())
+                            // Play/Pause plays it too, as on Apple's TV app.
+                            .onPlayPauseCommand { playing = Pick(channel: channel, list: list) }
+                            .accessibilityLabel(channel.cardLabel(still: false, liked: false))
+                            .accessibilityIdentifier("liked-\(channel.id)")
+                        }
+                    }
+                    // Room over and under the row for a focused plate's lift.
+                    .padding(.vertical, 14)
+                }
+                .scrollClipDisabled()
+                // The first plate's padding is pulled back so its text sits on the page margin.
+                .padding(.leading, -26)
+                .focusSection()
             }
         }
         // Again each time the app comes forward: a read that failed at launch (an Apple TV waking
@@ -751,7 +773,7 @@ private struct LikedShelf: View {
         // Nothing to find (signed out, or the likes not read yet): no walk, and the account's likes
         // that arrive next are not taken for new ones.
         // An account that unliked everything has no likes: its next like is new, so it is fresh.
-        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; wantStills([]); return }
+        guard !wanted.isEmpty else { if lastRefs != nil { lastRefs = [] }; return }
         // A like just made is worth a walk, even of a channel off air a moment ago.
         let fresh = lastRefs.map { wanted.subtracting($0) } ?? []
         lastRefs = wanted
@@ -778,18 +800,10 @@ private struct LikedShelf: View {
                 for ref in PassportSaves.channelRefs(slug: channel.slug, id: channel.id, legacyIds: channel.legacyIds)
                 where wanted.contains(ref) && found[ref] == nil { found[ref] = channel }
             }
-            // Asked for as soon as a tier lands, so the shelf's stills do not wait on the wider walk.
-            wantStills(channels)
         }
         if complete, !unfound.isEmpty { markMissing(unfound) }
-        wantStills(channels)
     }
 
-    private func wantStills(_ list: [Channel]) {
-        let first = Array(list.filter { $0.mediaType != "radio" }.prefix(Self.pictured))
-        // Sent when empty too, so channels no longer liked stop taking stills.
-        model.stills.wantNext(first, place: 0)
-    }
 }
 
 /// Every region with public cameras, main atlas first, each opening its page on its cameras
